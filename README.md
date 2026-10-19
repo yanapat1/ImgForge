@@ -17,19 +17,31 @@ cd scripts/image-tools && ../../.venv/bin/python -m dataviz      # same thing, a
 
 Settings live in [`config.yaml`](config.yaml) (command-line flags win).
 
-## Sessions (the first page)
+## Accounts, sessions and sharing
 
-The page opens on **Sessions**: one card per session, and a session is one YOLO dataset (a local
-folder, read in place, or an S3 / RustFS prefix). Click **New session** to add one, click a card to open
-the visualizer on it (`/?session=<id>`); the brand in the visualizer header goes back. Cards show a crop
-mosaic, image / box / class counts and when the session was last opened, all read from the session's
-cached workspace (small `workspace.json` files only, so the page stays instant).
+Everyone signs in (username or email + password; `/login`). Sign-up is open by default; admins can turn it off
+in **Settings › Users**, where they also create accounts, reset passwords, make other people admin, deactivate or
+delete users (handing their sessions to someone else) and read the audit log. The first admin is created on the
+first start from `DATAVIZ_ADMIN_USERNAME / _EMAIL / _PASSWORD` (an empty password is generated and printed once).
 
-Sessions are saved in `<workspace_root>/connections.json` (default `.dataviz_cache/` at the project
-root), **outside this folder and never in git**: a fresh clone starts with 0 sessions. No dataset is
-opened at server start, unless `--dataset PATH` (or `dataset.path` in config.yaml) names one: it is then
-saved as a session (matched by folder, no duplicates) and opened. S3 connections are managed in the
-visualizer's Settings (the **gear** at the bottom of the left icon bar).
+The page opens on **Sessions**: one card per session (a dataset to **visualize** — a local folder, an S3 / RustFS
+prefix or a labeling task — or a **label** session). Every session has an owner and is **private** (only the owner
+and the people they add) or **global** (every user can view it). The owner adds members as **Viewer** (look only)
+or **Labeler** (also label, fix boxes, run curation fixes). Admins can open every session. Cards show the owner's
+avatar and name and the members' avatars; the filter above them shows All · Mine · Shared with me · Global
+(· Everyone's for admins). A visualizer session opens at `s/<id>/`; several sessions are served at once (the
+newest `sessions.max_loaded` stay loaded, shared by everyone viewing them).
+
+Connections (S3, FTP / SFTP, databases, model servers), LLM providers + keys, models and every preference belong
+to the account that made them: nobody else sees them, and a shared session reads its data with its owner's
+connection without revealing it. Secrets are encrypted in the database (`DATAVIZ_SECRET_KEY`). Models that load
+files on the server (weights, adapters) can only be added by admins; everyone can add API models.
+
+**Storage:** PostgreSQL (with pgvector) holds accounts, sessions, sharing, settings, connections, labeling
+annotations (schema `lbl`) and every computed feature vector (schema `vec`); `docker compose up` starts it.
+Image crops, projections and `.npy` features stay in `.dataviz_cache/` as rebuildable caches. On the first start
+the old JSON / SQLite stores (`connections.json`, `llm.json`, `models.json`, `labeling/`) are imported once, owned
+by the first admin and private; the old files are left untouched.
 
 ## Layout
 
@@ -115,11 +127,15 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 ## Testing
 
 ```bash
-cd scripts/image-tools && ../../.venv/bin/python -m pytest -q tests      # ~2.5 min
+cd scripts/image-tools && DATAVIZ_TEST_DATABASE_URL=postgresql://postgres:pw@127.0.0.1:55432/postgres \
+  .venv/bin/python -m pytest -q tests      # ~4 min; without the variable a pgvector container is started via docker
 ```
 
 | Tests | Cover |
 |---|---|
+| `test_auth.py`, `test_admin.py`, `test_sharing.py`, `test_sessions_access.py` | sign-up / login (username or email), lockout per account + address, per-IP limit, cookies, CSRF, logout / password change revoke sessions, admin users + settings + last-admin guard, avatars, sharing + roles |
+| `test_acl.py`, `test_acl_routes.py`, `test_multi_session.py`, `test_security.py` | every `/api` route is guarded; the viewer / labeler / owner matrix; several sessions served at once at `s/<id>/`; open sign-up hardening (no code-running models for non-admins, no SSRF echo, no open redirect) |
+| `test_repos.py`, `test_legacy_import.py`, `test_vectors.py`, `test_db_schema.py` | per-user connections / providers / models (secrets encrypted, never shared), the one-time import of the old files, pgvector store, migrations == schema |
 | `test_curation.py` | every curation rule (incl. `split_leak`), fix / undo byte round-trip, sha1 conflicts, S3 writes (moto), 20k-image scan speed |
 | `test_store.py`, `test_routes.py`, `test_io.py`, `test_formats.py`, `test_colors.py` | labeling: SQLite store, its API routes, upload / local / S3 / FTP / SFTP media and export sinks, YOLO writers, class colours |
 | `test_labeling_source.py` | a labeling task opened live as a visualizer session |
@@ -142,20 +158,26 @@ npx eslint@8 --no-eslintrc --env browser,es2022 --parser-options=ecmaVersion:202
 
 ## Deploy with Docker
 
-**Any server (default, CPU):**
-
 ```bash
-docker compose up -d                                              # http://<host>:19151
+cp .env.example .env      # set POSTGRES_PASSWORD, DATAVIZ_SECRET_KEY, DATAVIZ_ADMIN_PASSWORD
+docker compose up -d                                              # http://<host>:19151  (CPU)
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d   # with NVIDIA GPU
 ```
 
-Optional settings go in `.env` (copy `.env.example`): `DATASET_DIR`, `DATAVIZ_DEVICE`, `HF_TOKEN`.
-`COMPOSE_FILE` in `.env` selects the compose files, so a plain `docker compose up -d` picks up per-server overrides.
+Two containers: `image-tools` and `image-tools-postgres` (pgvector, data in the `pg_data` volume, reachable from
+this host only at `127.0.0.1:${PG_PORT:-15432}`, user / database `dataviz`). Back up the database
+(`docker exec image-tools-postgres pg_dump -U dataviz dataviz > backup.sql`) **together with** `DATAVIZ_SECRET_KEY`:
+without the key the stored passwords and API keys cannot be read. Other settings in `.env`: `DATASET_DIR`,
+`DATAVIZ_DEVICE`, `HF_TOKEN`; `COMPOSE_FILE` selects the compose files.
+
+Without docker: run any PostgreSQL ≥ 14 with the `vector` extension and set `DATABASE_URL` (the schema is created /
+migrated at start-up, `dataviz/db/migrations`).
 
 **The persistent-path server (only `/home/jovyan/work` survives a reset):** `.env` sets
 `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml:docker-compose.server.yml`. `docker-compose.server.yml`
-bind-mounts the caches to `/home/jovyan/work/image-tools-data/`. After a reset run `./server-setup.sh`, which restores
-`/etc/docker/daemon.json` from `/home/jovyan/work/docker-config/` and starts the container.
+bind-mounts the caches and the database to `/home/jovyan/work/image-tools-data/` (`postgres/`, `dataviz_cache/`,
+`hf_cache/`). After a reset run `./server-setup.sh`, which restores `/etc/docker/daemon.json` from
+`/home/jovyan/work/docker-config/`, creates those folders and starts the containers.
 
 ## TypeScript
 
