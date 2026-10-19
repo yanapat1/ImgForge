@@ -15,6 +15,7 @@ from conftest import make_jpeg, wait_job
 from dataviz.labeling import importers as imp
 
 pytest.importorskip('dataviz.labeling.media')
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 TASKS = [{'name': 'Detect', 'task_type': 'object_detection', 'classes': [{'name': 'cat'}]},
          {'name': 'Segment', 'task_type': 'segmentation', 'classes': ['house']},

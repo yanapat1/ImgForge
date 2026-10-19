@@ -14,6 +14,7 @@ from fastapi import FastAPI, File, Header, HTTPException, Query, Request, Upload
 from conftest import make_jpeg, wait_job
 
 pytest.importorskip('dataviz.labeling.media')
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 KEY = 'sekrit-key-123'
 

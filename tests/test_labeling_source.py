@@ -11,6 +11,7 @@ from dataviz.data.labeling_source import LabelConflict, LabelingSource
 from dataviz.labeling import formats
 from dataviz.labeling.projects import ProjectRegistry
 from dataviz.labeling.store import new_id
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 TASKS = [{'name': 'Detect', 'task_type': 'object_detection', 'classes': ['cat', 'dog']},
          {'name': 'Segment', 'task_type': 'segmentation', 'classes': ['house']},
@@ -211,20 +212,21 @@ def test_api_create_open_index(client):
         s = State(src, None, {'none': None}, jobs=ctx.jobs, cfg=ctx.cfg, workspace_root=ctx.datasets.root,
                   dataset_id=d['id'])
         s.index_job = ctx.jobs.submit(f'index:{s.tag}', 'Open', s._index_job, lane='io')
-        ctx.state = s
         return s
 
     ctx.open_dataset = open_dataset
     job = client.post(f'/api/datasets/{ds["id"]}/open').json()['job_id']
     assert wait_job(client, job)['status'] == 'done'
-    s = ctx.state
+    s = ctx.states[ds['id']]                     # loaded on the server, shared by everyone who opens it
     assert len(s.samples) == 3 and s.classes == ['cat', 'dog']
     assert sorted(x['image'] for x in s.samples) == ['a.jpg', 'a.jpg', 'b.jpg']
     a0 = next(x for x in s.samples if x['image'] == 'a.jpg' and x['cls'] == 0)
     assert a0['bbox'] == [6, 5, 19, 19] and (a0['img_w'], a0['img_h']) == (64, 48)
     card = next(d for d in client.get('/api/datasets').json()['datasets'] if d['id'] == ds['id'])
-    assert card['active'] and card['stats']['n_boxes'] == 3 and card['stats']['n_images'] == 2
+    assert card['loaded'] and card['my_role'] == 'owner' and card['opened_at']
+    assert card['stats']['n_boxes'] == 3 and card['stats']['n_images'] == 2
     # the labeling session goes away: the card says so, opening fails cleanly
+    ctx.evict(ds['id'])
     ctx.labeling.delete(pid)
     card = next(d for d in client.get('/api/datasets').json()['datasets'] if d['id'] == ds['id'])
     assert 'deleted' in card['error']

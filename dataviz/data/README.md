@@ -6,7 +6,7 @@
 |---|---|
 | `sources.py` | The **source interface** and its two implementations. `LocalSource(path)` reads a YOLO folder in place. `S3Source(conn, bucket, prefix, mode)` reads an S3 / RustFS / MinIO prefix, in `stream` or `cache` mode. Also `browse()` (buckets / folders with a YOLO flag), `browse_local()`, `make_client()`. |
 | `labeling_source.py` | `LabelingSource(labeling, pid, task_id, only_done)`: a **live** visualizer source over a labeling session's task (`kind='labeling'`, `uri=label://pid/task`). Labels are built in one `iter_task_export` pass cached per `fingerprint()` (changes on any edit), images come from the project's `ImageCache` EXIF-transposed, and `write_label` diffs YOLO text back into the store through `put_annotations` (curation fixes). |
-| `connections.py` | `Registry`: saved S3 connections and datasets (= **sessions**, the cards of the page's first screen) in `<workspace_root>/connections.json` (owner-only, holds secrets), the last opened one, and `source(ds)` → the right source object. There is no built-in dataset: no file means 0 sessions (a fresh clone). `find_local(path)` matches `--dataset` to an existing session. `public_connection()` is the only shape the page ever sees (secret → `has_secret`, access key masked). |
+| `connections.py` | `Registry`, in PostgreSQL: each user's own connections (`app.connections`, secrets Fernet-encrypted; nobody else lists or uses them, admins included) and the visualize sessions (`app.sessions` kind `viz` + `app.viz_sessions`; `datasets(user, scope)` = the cards with owner / members / my role). `source(ds)` builds the right source object **with the session owner's connection** (members never see it); `scoped(owner_id)` is the connection lookup handed to the labeling sources and export sinks. `check_local()` keeps local folders inside `storage.allowed_roots` (symlinks and `..` resolved first). `find_local(path, owner_id)` matches `--dataset` to an existing session. `public_connection()` is the only shape the page ever sees (secret → `has_secret`, access key masked). |
 | `indexer.py` | `build_index(source, cache_dir)`: one record per box (`samples.json`) + a square 224 px crop per box (`crops/000123.jpg`) + brightness / blur metrics. Reused while the fingerprint matches. |
 
 ### The source interface
@@ -25,7 +25,8 @@ A new backend (GCS, HTTP, a zip file) only has to implement this; nothing else c
 
 - Sources never cache dataset content beyond what they need (`S3Source` keeps the bucket listing;
   `LocalSource` the image-name set). Caching is the workspace's job.
-- Secrets: written with `os.open(..., 0o600)` then atomically replaced — the file is never
+- Secrets: Fernet-encrypted in the `secrets` column (db/crypto.py), never in `config`; a dump alone does not leak
+  them. The layout is the one db/legacy.py imports the old connections.json into.
   world-readable, even for a moment. A blank secret in an update means "keep the stored one".
 - The indexer consumes results **in label-file order**, so sample ids are identical on every run and
   every machine (feature / projection caches stay valid).

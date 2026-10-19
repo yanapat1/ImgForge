@@ -8,7 +8,15 @@ job on the 'model' lane, remove model labels), class stats + bulk class delete, 
 
 Everything is keyed by the project id; nothing here uses ctx.state (a labeling session is not a YOLO
 dataset session). Handlers are plain `def` (FastAPI's thread pool) unless they await something; the
-multipart upload awaits the form and writes files through run_io. Slow work (import, export) is a job.
+multipart upload awaits the form and writes files through asyncio.to_thread. Slow work (import, export) is a job.
+
+Access (auth/access.py), checked per route by a deps.require_session guard on the `pid` path parameter:
+viewer reads (project, media, images, annotations, stats), labeler labels (annotations, commit / skip /
+reopen, review, model predict, remove model labels, import annotations, zip export, duplicate: the copy is
+the caller's), owner changes the structure (project, tasks, classes, model links), uploads / imports images,
+exports to a folder or a connection, deletes. A project's image source, export targets and linked models are
+always its OWNER's connections and models (connections.Registry.scoped): members use them server side without
+ever seeing a secret. Local folders must lie inside storage.allowed_roots.
 """
 
 import asyncio
@@ -24,11 +32,12 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 import orjson
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from ...auth import context
+from ...auth import access, context, deps
 from ...core import logging as vlog
+from ...data import connections
 from ...labeling import colors, models
 from ...labeling.export import run_export
 from ...labeling.models import ModelError
@@ -45,6 +54,12 @@ INSERT_BATCH = 500
 PREFETCH_NEXT = 3
 WRITE_EVERY = 50                    # label-all: images per store transaction
 IMG_CACHE = {'Cache-Control': 'private, max-age=86400'}
+_KW = {'param': 'pid', 'kind': 'label', 'what': 'label session'}
+VIEWER = deps.require_session('viewer', **_KW)
+LABELER = deps.require_session('labeler', **_KW)
+OWNER = deps.require_session('owner', **_KW)
+V, L, O = ([Depends(g)] for g in (VIEWER, LABELER, OWNER))
+REMOTE = ('s3', 'ftp', 'sftp')
 
 
 def _json(obj):
@@ -123,12 +138,48 @@ def router(state, ctx):
     s3cfg = (ctx.cfg or {}).get('s3', {})
     sources = {}                    # pid -> (source json, ImageSource, ImageCache)
     sources_lock = threading.Lock()
-    runs = {}                       # run_id -> {pid, kind, job_id, path?}
+    runs = {}                       # run_id -> {pid, kind, job_id, user_id, path?}
     threading.Thread(target=colors.palette, daemon=True, name='label-colors').start()   # ~300 ms, once
+    run_io = asyncio.to_thread      # blocking network / disk work off the event loop (keeps the request context)
 
-    def run_io(fn, *args):
-        """Blocking network / disk work off the event loop."""
-        return asyncio.get_running_loop().run_in_executor(None, fn, *args)
+    def roots():
+        return connections.allowed_roots(ctx.cfg)
+
+    def owners_connections(owner_id):
+        """What media.make_source / sinks.make_sink look connections up in: only the project owner's."""
+        return ctx.datasets.scoped(owner_id)
+
+    def check_source(src, owner_id):
+        """A project source the owner may use: a local folder inside the allowed roots, a connection of theirs.
+        Returns the source with its folder resolved."""
+        src = dict(src or {})
+        kind = src.get('kind') or 'upload'
+        with _errors():
+            if kind == 'local' and str(src.get('path') or '').strip():
+                src['path'] = connections.check_local(src['path'], roots())
+            elif kind in REMOTE and src.get('connection_id'):
+                try:
+                    ctx.datasets.connection(src['connection_id'], owner_id=owner_id)
+                except KeyError:
+                    raise ValueError('pick one of your own connections') from None
+        return src
+
+    def check_export_default(ed, owner_id):
+        """The remembered export target's connection must be the owner's too (a local folder: allowed roots)."""
+        if not isinstance(ed, dict):
+            return ed
+        for t in (ed, ed.get('target') if isinstance(ed.get('target'), dict) else None):
+            if t is None:
+                continue
+            if t.get('connection_id'):
+                try:
+                    ctx.datasets.connection(t['connection_id'], owner_id=owner_id)
+                except KeyError:
+                    raise HTTPException(400, 'pick one of your own connections for the export') from None
+            if (t.get('kind') == 'local') and str(t.get('path') or '').strip():
+                with _errors():
+                    t['path'] = connections.check_local(t['path'], roots())
+        return ed
 
     def need():
         if reg is None:
@@ -146,13 +197,13 @@ def router(state, ctx):
     def source_for(pid):
         """The project's ImageSource + ImageCache, built once per source setting (pooled connections)."""
         entry = need().get(pid)
-        key = json.dumps(entry['source'], sort_keys=True)
+        key = json.dumps([entry['source'], entry['owner_id']], sort_keys=True)      # a new owner: their connections
         with sources_lock:
             hit = sources.get(pid)
             if hit and hit[0] == key:
                 return hit[1], hit[2]
             m = _media()
-            src = m.make_source(entry['source'], reg.project_dir(pid), ctx.datasets, s3cfg)
+            src = m.make_source(entry['source'], reg.project_dir(pid), owners_connections(entry['owner_id']), s3cfg)
             cache = m.ImageCache(reg.project_dir(pid), src)
             sources[pid] = (key, src, cache)
         if hit:
@@ -177,7 +228,7 @@ def router(state, ctx):
 
         def fn(job):
             m = _media()
-            src = m.make_source(source, reg.project_dir(pid), ctx.datasets, s3cfg)
+            src = m.make_source(source, reg.project_dir(pid), owners_connections(entry['owner_id']), s3cfg)
             st = reg.store(pid)
             try:
                 job.progress(stage='listing images')
@@ -217,35 +268,39 @@ def router(state, ctx):
             finally:
                 src.close()
 
-        job = ctx.jobs.submit(f'label-import:{pid}', f'import images · {entry["name"]}', fn, lane='io')
+        job = ctx.jobs.submit(f'label-import:{pid}', f'import images · {entry["name"]}', fn, lane='io', session_id=pid)
         return job.id
 
     # ------------------------------------------------------------ projects
     @r.get('/api/label/projects')
-    def list_projects(scope: str = 'all'):
+    def list_projects(scope: str = 'all', user=Depends(deps.current_user)):
         with _errors():
-            return _json({'projects': need().list(context.user(), scope)})
+            return _json({'projects': need().list(user, scope)})
 
     @r.post('/api/label/projects')
-    def create_project(body: LabelProjectIn):
+    def create_project(body: LabelProjectIn, user=Depends(deps.current_user)):
+        """A new session owned by the caller; its source / export target may only use the caller's connections."""
         data = body.model_dump()
         data['tasks'] = [{**t, 'classes': [c if isinstance(c, str) else {k: v for k, v in c.items() if v is not None}
                                            for c in t['classes']]} for t in data['tasks']]
+        data['source'] = check_source(data.get('source'), user['id'])
+        data['export_default'] = check_export_default(data.get('export_default'), user['id'])
         with _errors():
-            entry = need().create(data, context.user_id())
+            entry = need().create(data, user['id'])
         job_id = None
         if entry['source']['kind'] != 'upload':
             job_id = submit_import(entry['id'], entry['source'])
         return {'project': project(entry['id']), 'job_id': job_id}
 
     @r.get('/api/label/projects/{pid}')
-    def get_project(pid: str):
+    def get_project(pid: str, role=Depends(VIEWER)):
         out = project(pid)
+        out['my_role'] = role
         with active_lock:
             out['model_active'] = sorted(active.get(pid, ()))
         return out
 
-    @r.post('/api/label/projects/{pid}/tasks/{tid}/model/activate')
+    @r.post('/api/label/projects/{pid}/tasks/{tid}/model/activate', dependencies=O)
     def activate_model(pid: str, tid: str, body: ModelActivateIn | None = None):
         """Let the task's linked model label images in this server session (on), or stop it (off). Nothing runs
         a model until this is on: no auto-label on open, no label-all, no single-image run."""
@@ -260,14 +315,17 @@ def router(state, ctx):
             (s.add if on else s.discard)(tid)
         return {'task_id': tid, 'active': on}
 
-    @r.patch('/api/label/projects/{pid}')
+    @r.patch('/api/label/projects/{pid}', dependencies=O)
     def patch_project(pid: str, body: LabelProjectPatch):
         with _errors():
-            need().update(pid, name=body.name, description=body.description, export_default=body.export_default,
+            owner = need().get(pid)['owner_id']
+        ed = check_export_default(body.export_default, owner)
+        with _errors():
+            need().update(pid, name=body.name, description=body.description, export_default=ed,
                           tags=body.tags, review=body.review)
         return project(pid)
 
-    @r.delete('/api/label/projects/{pid}')
+    @r.delete('/api/label/projects/{pid}', dependencies=O)
     def delete_project(pid: str, delete_files: int = 0):
         drop_source(pid)
         with _errors():
@@ -275,7 +333,7 @@ def router(state, ctx):
         return {'ok': True}
 
     # ------------------------------------------------------------ tasks + classes
-    @r.post('/api/label/projects/{pid}/tasks')
+    @r.post('/api/label/projects/{pid}/tasks', dependencies=O)
     def add_task(pid: str, body: LabelTaskIn):
         st = store(pid)
         with _errors():
@@ -284,7 +342,7 @@ def router(state, ctx):
             reg.set_counts(pid)
         return t
 
-    @r.post('/api/label/projects/{pid}/tasks/reorder')
+    @r.post('/api/label/projects/{pid}/tasks/reorder', dependencies=O)
     def reorder_tasks(pid: str, body: LabelIdsIn):
         st = store(pid)
         with _errors():
@@ -292,13 +350,13 @@ def router(state, ctx):
             reg.set_counts(pid)
         return {'ok': True}
 
-    @r.patch('/api/label/projects/{pid}/tasks/{tid}')
+    @r.patch('/api/label/projects/{pid}/tasks/{tid}', dependencies=O)
     def patch_task(pid: str, tid: str, body: LabelTaskPatch):
         st = store(pid)
         with _errors():
             return st.update_task(tid, name=body.name, config=body.config)
 
-    @r.delete('/api/label/projects/{pid}/tasks/{tid}')
+    @r.delete('/api/label/projects/{pid}/tasks/{tid}', dependencies=O)
     def delete_task(pid: str, tid: str):
         st = store(pid)
         with _errors():
@@ -308,7 +366,7 @@ def router(state, ctx):
             reg.set_counts(pid)
         return {'ok': True}
 
-    @r.post('/api/label/projects/{pid}/tasks/{tid}/classes')
+    @r.post('/api/label/projects/{pid}/tasks/{tid}/classes', dependencies=O)
     def add_classes(pid: str, tid: str, body: LabelClassesIn):
         st = store(pid)
         items = list(body.names or []) + [c.model_dump(exclude_none=True) for c in body.classes or []]
@@ -317,7 +375,7 @@ def router(state, ctx):
         with _errors():
             return {'classes': st.add_classes(tid, items)}
 
-    @r.patch('/api/label/projects/{pid}/classes/{cid}')
+    @r.patch('/api/label/projects/{pid}/classes/{cid}', dependencies=O)
     def patch_class(pid: str, cid: str, body: LabelClassPatch):
         st = store(pid)
         kw = {k: getattr(body, k) for k in ('name', 'color', 'position')}
@@ -326,7 +384,7 @@ def router(state, ctx):
         with _errors():
             return st.update_class(cid, **kw)
 
-    @r.delete('/api/label/projects/{pid}/classes/{cid}')
+    @r.delete('/api/label/projects/{pid}/classes/{cid}', dependencies=O)
     def delete_class(pid: str, cid: str, reassign_to: str | None = None, delete_annotations: int = 0):
         st = store(pid)
         with _errors():
@@ -334,7 +392,7 @@ def router(state, ctx):
         return {'ok': True}
 
     # ------------------------------------------------------------ upload + import
-    @r.post('/api/label/projects/{pid}/upload')
+    @r.post('/api/label/projects/{pid}/upload', dependencies=O)
     async def upload(pid: str, request: Request):
         """Multipart: repeated `files` + parallel repeated `rel_paths` (folder drops keep their structure)."""
         need()
@@ -374,7 +432,7 @@ def router(state, ctx):
             await form.close()
         return {'saved': saved, 'skipped': skipped}
 
-    @r.post('/api/label/projects/{pid}/import')
+    @r.post('/api/label/projects/{pid}/import', dependencies=O)
     def start_import(pid: str, body: LabelImportIn | None = None):
         need()
         with _errors():
@@ -382,7 +440,7 @@ def router(state, ctx):
             source = entry['source']
             if body is not None and body.source:
                 from ...labeling.projects import clean_source
-                new = clean_source(body.source)
+                new = clean_source(check_source(body.source, entry['owner_id']))
                 if new != source:
                     if reg.store(pid).media_count():
                         raise HTTPException(409, 'this session already has images from another source; '
@@ -393,7 +451,7 @@ def router(state, ctx):
             return {'job_id': submit_import(pid, source)}
 
     # ------------------------------------------------------------ media
-    @r.get('/api/label/projects/{pid}/media')
+    @r.get('/api/label/projects/{pid}/media', dependencies=V)
     def media_page(pid: str, offset: int = 0, limit: int = 200, task_id: str | None = None,
                    status: str | None = None, q: str | None = None, cls: str | None = None, cls_mode: str = 'any',
                    min_ann: int | None = None, max_ann: int | None = None, review: str | None = None):
@@ -404,7 +462,7 @@ def router(state, ctx):
                                        q=q, cls=[x for x in (cls or '').split(',') if x], cls_mode=cls_mode,
                                        min_ann=min_ann, max_ann=max_ann, review=review or None))
 
-    @r.get('/api/label/projects/{pid}/media-ids')
+    @r.get('/api/label/projects/{pid}/media-ids', dependencies=V)
     def media_ids(pid: str):
         return _json({'ids': store(pid).media_ids()})
 
@@ -419,7 +477,7 @@ def router(state, ctx):
             _log.warning(f'image {vlog.esc(m["uri"])}: {vlog.esc(e)}')
             raise HTTPException(404, 'this image is missing from its source')
 
-    @r.get('/api/label/projects/{pid}/image/{mid}')
+    @r.get('/api/label/projects/{pid}/image/{mid}', dependencies=V)
     def image(pid: str, mid: str, max: int | None = None):
         st, m, cache, path = _media_path(pid, mid, lambda c, m: c.preview(m['uri'], max) if max else c.path(m['uri']))
         ids = st.media_ids()
@@ -431,25 +489,25 @@ def router(state, ctx):
             pass
         return FileResponse(path, media_type=m.get('mime') if not max else None, headers=IMG_CACHE)
 
-    @r.get('/api/label/projects/{pid}/thumb/{mid}')
+    @r.get('/api/label/projects/{pid}/thumb/{mid}', dependencies=V)
     def thumb(pid: str, mid: str):
         _, _, _, path = _media_path(pid, mid, lambda c, m: c.thumb(m['id'], m['uri']))
         return FileResponse(path, media_type='image/jpeg', headers=IMG_CACHE)
 
     # ------------------------------------------------------------ annotations + status
-    @r.get('/api/label/projects/{pid}/annotations/{mid}')
+    @r.get('/api/label/projects/{pid}/annotations/{mid}', dependencies=V)
     def get_annotations(pid: str, mid: str):
         st = store(pid)
         with _errors():
             return _json(st.get_annotations(mid))
 
-    @r.put('/api/label/projects/{pid}/annotations/{mid}')
-    def put_annotations(pid: str, mid: str, body: AnnotationsPut):
+    @r.put('/api/label/projects/{pid}/annotations/{mid}', dependencies=L)
+    def put_annotations(pid: str, mid: str, body: AnnotationsPut, user=Depends(deps.current_user)):
         st = store(pid)
         try:
             with _errors():
                 return st.put_annotations(mid, body.task_id, body.annotations, body.base_version,
-                                          user=context.user_id())
+                                          user=user['id'])
         except HTTPException as e:
             if e.status_code == 409 and isinstance(e.detail, dict):    # contract: {detail, version, annotations}
                 return Response(orjson.dumps(e.detail), status_code=409, media_type='application/json')
@@ -460,19 +518,19 @@ def router(state, ctx):
         with _errors():
             return {'status': st.set_status(mid, body.task_ids, action, user=context.user_id())}
 
-    @r.post('/api/label/projects/{pid}/commit/{mid}')
+    @r.post('/api/label/projects/{pid}/commit/{mid}', dependencies=L)
     def commit(pid: str, mid: str, body: LabelTaskIdsIn):
         return _status(pid, mid, body, 'commit')
 
-    @r.post('/api/label/projects/{pid}/skip/{mid}')
+    @r.post('/api/label/projects/{pid}/skip/{mid}', dependencies=L)
     def skip(pid: str, mid: str, body: LabelTaskIdsIn):
         return _status(pid, mid, body, 'skip')
 
-    @r.post('/api/label/projects/{pid}/reopen/{mid}')
+    @r.post('/api/label/projects/{pid}/reopen/{mid}', dependencies=L)
     def reopen(pid: str, mid: str, body: LabelTaskIdsIn):
         return _status(pid, mid, body, 'reopen')
 
-    @r.post('/api/label/projects/{pid}/review')
+    @r.post('/api/label/projects/{pid}/review', dependencies=L)
     def review(pid: str, body: ReviewIn):
         # the optional review: 'manual' on some images, 'bulk' (Review all) on every done one not reviewed yet,
         # 'clear' to undo. Only done images are ever marked. {changed: {task_id: n}}
@@ -482,21 +540,36 @@ def router(state, ctx):
 
     # ------------------------------------------------------------ export
     @r.post('/api/label/projects/{pid}/export')
-    def export(pid: str, body: ExportIn):
+    def export(pid: str, body: ExportIn, role=Depends(LABELER), user=Depends(deps.current_user)):
+        """Labelers download a zip; only the owner exports to a server folder or a connection (the owner's)."""
         proj = project(pid)
         st = store(pid)
+        owner = need().get(pid)['owner_id']
         target = dict(body.target or {})
         kind = target.get('kind') or 'zip'
         if kind not in ('zip', 'local', 's3', 'ftp', 'sftp', 'db'):
             raise HTTPException(400, f'unknown export target {kind!r}')
+        if kind != 'zip' and role != 'owner':
+            raise HTTPException(403, 'only the owner can export to a connection' if kind != 'local' else
+                                'only the owner can export to a server folder')
+        if kind == 'local' and str(target.get('path') or '').strip():
+            with _errors():
+                target['path'] = connections.check_local(target['path'], roots())
+        if kind in REMOTE and target.get('connection_id'):
+            try:
+                ctx.datasets.connection(target['connection_id'], owner_id=owner)
+            except KeyError:
+                raise HTTPException(400, 'pick one of your own connections for the export') from None
         live = {t['id'] for t in proj['tasks']}
         task_ids = [t for t in (body.task_ids or []) if t in live] or None
         if body.task_ids and not task_ids:
             raise HTTPException(400, 'none of the picked tasks exist any more')
         conn = None
         if kind == 'db':
-            with _errors():
-                conn = ctx.datasets.connection(target.get('connection_id') or '')
+            try:
+                conn = ctx.datasets.connection(target.get('connection_id') or '', owner_id=owner)
+            except KeyError:
+                raise HTTPException(400, 'pick one of your own connections for the export') from None
             if (conn.get('kind') or 's3') not in ('postgres', 'mssql'):
                 raise HTTPException(400, 'pick a PostgreSQL or SQL Server connection')
         elif kind in ('s3', 'ftp', 'sftp') and not target.get('connection_id'):
@@ -510,9 +583,10 @@ def router(state, ctx):
                    'target': {k: v for k, v in target.items() if k != 'conn'}, 'classes': classes}
         # remembered for "Re-export": the target's fields stay at the top level too (older pages read them there)
         tgt = {k: v for k, v in target.items() if k != 'conn'}
-        with _errors():
-            reg.update(pid, export_default={**tgt, 'target': tgt, 'task_ids': task_ids, 'classes': classes,
-                                            'include_images': body.include_images, 'only_done': body.only_done})
+        if role == 'owner':                     # the owner's "Re-export" setting: a labeler's zip leaves it alone
+            with _errors():
+                reg.update(pid, export_default={**tgt, 'target': tgt, 'task_ids': task_ids, 'classes': classes,
+                                                'include_images': body.include_images, 'only_done': body.only_done})
         run_dir = reg.project_dir(pid) / 'exports' / run_id
 
         def image_path(m):
@@ -526,7 +600,7 @@ def router(state, ctx):
             if kind == 'db':
                 tgt = {'kind': 'db', 'conn': conn}
             else:
-                tgt = _sinks().make_sink(target, ctx.datasets, s3cfg, run_dir)
+                tgt = _sinks().make_sink(target, owners_connections(owner), s3cfg, run_dir)
             src, _ = source_for(pid)
             # stat-only existence check for on-disk sources (remote ones would need a download per image)
             exists = (lambda m: (p := src.local_path(m['uri'])) is not None and p.is_file()) \
@@ -536,8 +610,10 @@ def router(state, ctx):
                 runs[run_id]['path'] = res['path']
             return res
 
-        runs[run_id] = {'pid': pid, 'kind': kind, 'job_id': None}       # before submit: the job may finish first
-        job = ctx.jobs.submit(f'label-export:{pid}:{run_id}', f'export {proj["name"]} → {kind}', fn, lane='io')
+        # before submit: the job may finish first
+        runs[run_id] = {'pid': pid, 'kind': kind, 'job_id': None, 'user_id': user['id']}
+        job = ctx.jobs.submit(f'label-export:{pid}:{run_id}', f'export {proj["name"]} → {kind}', fn, lane='io',
+                              session_id=pid)
         runs[run_id]['job_id'] = job.id
         return {'job_id': job.id, 'run_id': run_id}
 
@@ -550,8 +626,23 @@ def router(state, ctx):
                 return p
         return None
 
+    def run_allowed(run_id, user):
+        """Only who started an export, or the project's owner (and admins), sees it; others get 404. After a
+        restart the run is only known by its folder: owners only."""
+        info = runs.get(run_id)
+        if info is not None:
+            pid = info['pid']
+            if info.get('user_id') == user['id']:
+                return
+        else:
+            path = _zip_path(run_id)
+            pid = path.parent.parent.parent.name if path is not None else None
+        if not pid or access.role(user, pid, kind='label') != 'owner':
+            raise HTTPException(404, 'no such export (it may have been from before a restart)')
+
     @r.get('/api/label/exports/{run_id}')
-    def export_status(run_id: str):
+    def export_status(run_id: str, user=Depends(deps.current_user)):
+        run_allowed(run_id, user)
         info = runs.get(run_id)
         path = _zip_path(run_id)
         if info is None:
@@ -569,7 +660,8 @@ def router(state, ctx):
         return out
 
     @r.get('/api/label/exports/{run_id}/download')
-    def export_download(run_id: str):
+    def export_download(run_id: str, user=Depends(deps.current_user)):
+        run_allowed(run_id, user)
         path = _zip_path(run_id)
         if path is None or not path.is_file():
             raise HTTPException(404, 'this export has no zip (not finished, failed, or not a zip export)')
@@ -583,10 +675,10 @@ def router(state, ctx):
         return FileResponse(path, media_type='application/zip', filename=f'{name}-{run_id[:8]}.zip')
 
     # ------------------------------------------------------------ models (v2)
-    def model_conn(cid):
-        """A saved connection of kind 'model' (400 when it is missing or of another kind)."""
+    def model_conn(cid, owner_id):
+        """A saved connection of kind 'model' of owner_id (400 when it is missing, not theirs, or another kind)."""
         try:
-            conn = ctx.datasets.connection(cid or '')
+            conn = ctx.datasets.connection(cid or '', owner_id=owner_id)
         except KeyError:
             raise HTTPException(400, 'the model connection no longer exists; pick another one in Model settings')
         if conn.get('kind') != 'model':
@@ -612,11 +704,12 @@ def router(state, ctx):
             raise HTTPException(409, f'the model of {task["name"]!r} is not active: activate it for this session '
                                      '(model menu › Activate) before it labels anything')
 
-    def registry_model(mid):
+    def registry_model(mid, owner_id):
+        """A Settings › Models model of owner_id (the project owner's, or the caller's for detect)."""
         if getattr(ctx, 'models', None) is None:
             raise HTTPException(400, 'models are not enabled in this server')
         try:
-            return ctx.models.model(mid)
+            return ctx.models.model(mid, owner_id=owner_id)
         except KeyError:
             raise HTTPException(400, 'that model is no longer in Settings › Models; pick another one') from None
 
@@ -624,12 +717,13 @@ def router(state, ctx):
         svc = getattr(ctx, 'model_service', None)
         return svc.workdir if svc is not None else ctx.models.store / '_converted'
 
-    def adapter_for(link):
-        """The adapter of a link: a Settings › Models model (models/hub.py) or a model server connection."""
+    def adapter_for(link, owner_id):
+        """The adapter of a link: the project owner's Settings › Models model (models/hub.py) or model server
+        connection; a member labeling with it never sees its URL or key."""
         from ...models import hub
         if link.get('registry_id'):
-            return hub.adapter(ctx.models, registry_model(link['registry_id']), workdir())
-        return models.adapter(model_conn(link['connection_id']), link['model_id'], link.get('version'))
+            return hub.adapter(ctx.models, registry_model(link['registry_id'], owner_id), workdir())
+        return models.adapter(model_conn(link['connection_id'], owner_id), link['model_id'], link.get('version'))
 
     def map_predictions(task, link, preds):
         """Model class names -> this task's class ids through the link's class_map (same name, case-insensitive,
@@ -646,28 +740,32 @@ def router(state, ctx):
         return out
 
     @r.post('/api/label/models/detect')
-    async def detect_model(body: ModelDetectIn):
+    async def detect_model(body: ModelDetectIn, user=Depends(deps.current_user)):
+        """What a model (one of the caller's) can do; a typed server URL is an outbound connection like any other."""
         need()
         if body.registry_id:
             from ...models import hub
-            m = registry_model(body.registry_id)
+            m = registry_model(body.registry_id, user['id'])
             with _errors():
                 info = await run_io(hub.info, ctx.models, m, workdir())
             return {'protocol': 'registry', 'models': [info]}
         if body.connection_id:
-            conn = model_conn(body.connection_id)
+            conn = model_conn(body.connection_id, user['id'])
         elif body.connection:
+            deps.can_add_connections(user)
             with _errors():
-                conn = ctx.datasets.merged_connection({**body.connection, 'kind': 'model'})
+                conn = ctx.datasets.merged_connection({**body.connection, 'kind': 'model'}, user['id'])
         else:
             raise HTTPException(400, 'give a connection_id or a connection {url}')
         with _errors():
             return await run_io(models.detect, conn, True)
 
-    @r.put('/api/label/projects/{pid}/tasks/{tid}/model')
+    @r.put('/api/label/projects/{pid}/tasks/{tid}/model', dependencies=O)
     def put_task_model(pid: str, tid: str, body: TaskModelIn | None = None):
-        """Link a model to a task (or unlink with a null body). 'new' class_map entries become classes."""
+        """Link a model to a task (or unlink with a null body): one of the project OWNER's models / model
+        connections. 'new' class_map entries become classes."""
         st = store(pid)
+        owner = need().get(pid)['owner_id']
         with _errors():
             task = st.task(tid)
             cfg = dict(task['config'])
@@ -677,9 +775,9 @@ def router(state, ctx):
             else:
                 if body.registry_id:
                     from ...models import hub
-                    m = hub.info(ctx.models, registry_model(body.registry_id), workdir())
+                    m = hub.info(ctx.models, registry_model(body.registry_id, owner), workdir())
                 elif body.connection_id:
-                    _, m = models.find_model(model_conn(body.connection_id), body.model_id, fresh=True)
+                    _, m = models.find_model(model_conn(body.connection_id, owner), body.model_id, fresh=True)
                 else:
                     raise ValueError('pick a model: one of Settings › Models, or a model server connection')
                 if m['task_type'] != task['task_type']:
@@ -715,11 +813,12 @@ def router(state, ctx):
             active.get(pid, set()).discard(tid)
         return out
 
-    @r.post('/api/label/projects/{pid}/predict/{mid}')
+    @r.post('/api/label/projects/{pid}/predict/{mid}', dependencies=L)
     def predict_one(pid: str, mid: str, body: PredictIn):
         """Run the task's model on one image now and store the result (model rows replaced, manual kept)."""
         t0 = time.perf_counter()
         st = store(pid)
+        owner = need().get(pid)['owner_id']
         with _errors():
             task = st.task(body.task_id)
             link = model_link(task)
@@ -733,12 +832,12 @@ def router(state, ctx):
             raise HTTPException(404, 'this image is missing from its source')
         conf = body.conf if body.conf is not None else link.get('conf')
         with _errors():
-            ad = adapter_for(link)
+            ad = adapter_for(link, owner)
             preds = ad.predict(data, conf, (m['width'], m['height']), m['file_name'])
             res = st.apply_predictions(mid, task['id'], map_predictions(task, link, preds))
         return _json({**res, 'ms': round((time.perf_counter() - t0) * 1000, 1)})
 
-    @r.post('/api/label/projects/{pid}/predict-all')
+    @r.post('/api/label/projects/{pid}/predict-all', dependencies=L)
     def predict_all(pid: str, body: PredictAllIn):
         """The label-all job ('model' lane): batches of models.BATCH images, models.IN_FLIGHT calls open,
         a store write every WRITE_EVERY images, cancel checked between batches."""
@@ -749,14 +848,14 @@ def router(state, ctx):
             link = model_link(task)
             need_active(pid, task)
             if not link.get('registry_id'):
-                model_conn(link['connection_id'])        # 400 now, not in the job, when the connection is gone
+                model_conn(link['connection_id'], entry['owner_id'])    # 400 now, not in the job, when it is gone
             if body.scope not in ('unlabeled', 'not_done', 'all'):
                 raise ValueError(f'unknown scope {body.scope!r} (unlabeled, not_done or all)')
         tid, scope = task['id'], body.scope
         conf = body.conf if body.conf is not None else link.get('conf')
 
         def fn(job):
-            ad = adapter_for(link)
+            ad = adapter_for(link, entry['owner_id'])
             _, cache = source_for(pid)
             n, batches = st.predict_targets(tid, scope)
             job.progress(stage=f'{link["model_id"]} · {task["name"]}', done=0, total=n)
@@ -839,34 +938,34 @@ def router(state, ctx):
                     'cancelled': cancelled, 'seconds': round(took, 2)}
 
         job = ctx.jobs.submit(f'label-predict:{pid}:{tid}', f'label all · {entry["name"]} · {task["name"]}', fn,
-                              lane='model', public_result=True)
+                              lane='model', public_result=True, session_id=pid)
         return {'job_id': job.id}
 
-    @r.post('/api/label/projects/{pid}/remove-model-labels')
+    @r.post('/api/label/projects/{pid}/remove-model-labels', dependencies=L)
     def remove_model_labels(pid: str, body: RemoveModelLabelsIn):
         st = store(pid)
         with _errors():
             return st.remove_model_annotations(body.task_id, body.media_ids)
 
     # ------------------------------------------------------------ class stats + bulk delete (v2)
-    @r.get('/api/label/projects/{pid}/class-stats')
+    @r.get('/api/label/projects/{pid}/class-stats', dependencies=V)
     def class_stats(pid: str):
         return _json({'stats': store(pid).class_stats()})
 
-    @r.post('/api/label/projects/{pid}/classes/delete')
+    @r.post('/api/label/projects/{pid}/classes/delete', dependencies=O)
     def delete_classes(pid: str, body: LabelClassIdsIn):
         st = store(pid)
         with _errors():
             return st.delete_classes(body.class_ids)
 
     # ------------------------------------------------------------ duplicate (v2)
-    @r.post('/api/label/projects/{pid}/duplicate')
-    def duplicate(pid: str, body: DuplicateIn | None = None):
+    @r.post('/api/label/projects/{pid}/duplicate', dependencies=L)
+    def duplicate(pid: str, body: DuplicateIn | None = None, user=Depends(deps.current_user)):
         need()
         with _errors():
             entry = reg.get(pid)
         name = ((body.name if body else None) or '').strip() or None
-        owner = context.user_id() or entry['owner_id']     # the copy belongs to the user who duplicated it
+        owner = user['id']                                 # the copy belongs to the user who duplicated it
         if name:
             with _errors():
                 reg.check_name(name, owner)     # a typed name that is taken: 400 now, not a failed job
@@ -882,32 +981,29 @@ def router(state, ctx):
         return {'job_id': job.id}
 
     # ------------------------------------------------------------ colours + settings
-    @r.get('/api/label/colors')
+    @r.get('/api/label/colors', dependencies=[Depends(deps.current_user)])
     def get_colors(n: int = 64):
         n = max(1, min(n, 256))
         de = colors.min_de(n)
         return {'colors': colors.palette(n), 'min_de': [None if d == float('inf') else round(d, 2) for d in de]}
 
-    def settings_path():
-        return need().root.parent / 'label_settings.json'
-
+    # the labeling page settings: the caller's app.user_prefs.data['label'] (= /api/me/prefs key 'label')
     @r.get('/api/label/settings')
-    def get_settings():
-        p = settings_path()
-        try:
-            return json.loads(p.read_text()) if p.is_file() else {}
-        except ValueError:
-            return {}
+    def get_settings(user=Depends(deps.current_user)):
+        from .me import get_prefs
+        v = get_prefs(user['id']).get('label')
+        return v if isinstance(v, dict) else {}
 
     @r.put('/api/label/settings')
-    async def put_settings(request: Request):
+    async def put_settings(request: Request, user=Depends(deps.current_user)):
+        from .me import _put_prefs
         try:
             body = await request.json()
         except ValueError:
             raise HTTPException(400, 'settings must be a JSON object')
         if not isinstance(body, dict):
             raise HTTPException(400, 'settings must be a JSON object')
-        await run_io(_atomic_json, settings_path(), body)
+        await run_io(_put_prefs, user['id'], {'label': body})
         return body
 
     return r
@@ -927,9 +1023,3 @@ def _save_upload(fileobj, dst):
         tmp.unlink(missing_ok=True)
         raise
 
-
-def _atomic_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f'.{uuid.uuid4().hex[:8]}.tmp')
-    tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False))
-    tmp.replace(path)

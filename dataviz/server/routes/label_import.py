@@ -15,7 +15,9 @@ a database connection. Parsing: labeling/importers.py; storing: ProjectStore.imp
 
 source: {kind: upload, upload_id} | {kind: local, path} | {kind: s3, connection_id, bucket, prefix}
       | {kind: ftp|sftp, connection_id, path} | {kind: db, connection_id, mode: dataviz|sql, sql?, task_name?}
-A local path / S3 prefix / remote path may name one file (a COCO .json, a .csv) instead of a folder.
+A local path / S3 prefix / remote path may name one file (a COCO .json, a .csv) instead of a folder. A local
+path must lie inside storage.allowed_roots; a connection must be the caller's own (or, for the project's owner,
+the project owner's). Importing into a session needs the labeler role on it (preview with a project: viewer).
 The import job runs on the 'io' lane after the session's image import (one worker per lane, FIFO), so an import
 started right after a session is created sees its images.
 """
@@ -27,9 +29,11 @@ import uuid
 from collections import Counter
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ...auth import access, deps
 from ...core import logging as vlog
+from ...data import connections
 from ...labeling import importers as imp
 
 _log = vlog.get_logger('label')
@@ -40,6 +44,9 @@ UPLOAD_EXTS = ('.json', '.csv', '.tsv', '.txt', '.zip', '.yaml', '.yml')
 UPLOAD_TTL = 86400                  # s: upload folders older than this are removed on the next upload
 PREVIEW_DB_ROWS = 5000
 BATCH_IMAGES = 2000                 # images per store transaction
+
+
+LABELER = deps.require_session('labeler', param='pid', kind='label', what='label session')
 
 
 def router(state, ctx):
@@ -64,7 +71,14 @@ def router(state, ctx):
         return d
 
     # ------------------------------------------------------------ reading the source
-    def read_files(source, fmt):
+    def conns_for(user, pid=None):
+        """Whose connections a source may use: the caller's; the project owner's when the caller owns it (admins)."""
+        owner = user['id']
+        if pid and access.role(user, pid, kind='label') == 'owner':
+            owner = need().get(pid)['owner_id']
+        return ctx.datasets.scoped(owner)
+
+    def read_files(source, fmt, conns):
         """{rel: bytes} of the label files a source holds (one file when it names a file)."""
         kind = (source or {}).get('kind')
         exts = EXTS.get(fmt, EXTS['auto'])
@@ -84,7 +98,8 @@ def router(state, ctx):
         single = None
         spec = dict(source)
         if kind == 'local':
-            p = Path(str(spec.get('path') or '')).expanduser()
+            p = Path(connections.check_local(spec.get('path'), connections.allowed_roots(ctx.cfg)))
+            spec['path'] = str(p)
             if p.is_file():
                 return {p.name: p.read_bytes()}
             spec['recursive'] = True
@@ -100,7 +115,7 @@ def router(state, ctx):
                 spec['path'] = posixpath.dirname(pth) or '/'
         else:
             raise ValueError(f'unknown source kind {kind!r}')
-        src = media.make_source(spec, reg.root, ctx.datasets, s3cfg)
+        src = media.make_source(spec, reg.root, conns, s3cfg)
         try:
             if single:
                 items = src.list_images(match=lambda n: posixpath.basename(n) == single)
@@ -112,8 +127,8 @@ def router(state, ctx):
         finally:
             src.close()
 
-    def records(body, rep, limit=None):
-        """(format, records, class names | None) of a request body."""
+    def records(body, rep, conns, limit=None):
+        """(format, records, class names | None) of a request body; conns: conns_for()."""
         fmt = body.get('format') or 'auto'
         source = body.get('source') or {}
         task_type = body.get('task_type') or 'object_detection'
@@ -122,7 +137,10 @@ def router(state, ctx):
         if coords not in ('auto', 'norm', 'px'):
             raise ValueError('coords must be auto, norm or px')
         if fmt == 'db' or source.get('kind') == 'db':
-            conn = ctx.datasets.connection(source.get('connection_id') or '')
+            try:
+                conn = conns.connection(source.get('connection_id') or '')
+            except KeyError:
+                raise ValueError('pick one of your own connections') from None
             if conn.get('kind') not in ('postgres', 'mssql'):
                 raise ValueError('pick a PostgreSQL or SQL Server connection')
             recs = imp.database(conn, task_type, rep, source.get('mode') or 'dataviz', source.get('sql'),
@@ -130,7 +148,7 @@ def router(state, ctx):
             return 'db', recs, None
         if fmt not in ('auto',) + imp.FORMATS:
             raise ValueError(f'unknown format {fmt!r}')
-        files = read_files(source, fmt)
+        files = read_files(source, fmt, conns)
         if not files:
             raise ValueError('no label files found there (.txt / .json / .csv)')
         if fmt == 'auto':
@@ -146,7 +164,7 @@ def router(state, ctx):
         return st, t
 
     # ------------------------------------------------------------ routes
-    @r.post('/api/label/annotations/upload')
+    @r.post('/api/label/annotations/upload', dependencies=[Depends(deps.current_user)])
     async def upload(request: Request):
         need()
         root = uploads_root()
@@ -185,16 +203,18 @@ def router(state, ctx):
         return {'upload_id': uid, 'files': n, 'bytes': size}
 
     @r.post('/api/label/annotations/preview')
-    def preview(body: dict):
+    def preview(body: dict, user=Depends(deps.current_user)):
         """Parse (a database: the first rows) and say what an import would do; nothing is written."""
         need()
         rep = imp.Report()
         pid, tid = body.get('project_id'), body.get('task_id')
+        if pid:
+            access.check(user, pid, 'viewer', kind='label', what='label session')
         try:
             if pid and tid:
                 st, task = task_of(pid, tid)
                 body = {**body, 'task_type': task['task_type'], 'n_kpt': len((task.get('config') or {}).get('keypoints') or [])}
-            fmt, recs, names = records(body, rep, limit=PREVIEW_DB_ROWS)
+            fmt, recs, names = records(body, rep, conns_for(user, pid), limit=PREVIEW_DB_ROWS)
             if pid and tid and fmt == 'yolo' and not names:     # no classes.txt: index i is the task's i-th class
                 names = [c['name'] for c in task['classes']] or None
         except (ValueError, KeyError, OSError) as e:
@@ -221,9 +241,10 @@ def router(state, ctx):
                           for n, c in cls.most_common()]
         return out
 
-    @r.post('/api/label/projects/{pid}/import-annotations')
-    def start(pid: str, body: dict):
+    @r.post('/api/label/projects/{pid}/import-annotations', dependencies=[Depends(LABELER)])
+    def start(pid: str, body: dict, user=Depends(deps.current_user)):
         need()
+        conns = conns_for(user, pid)
         try:
             entry = reg.get(pid)
             st, task = task_of(pid, body.get('task_id') or '')
@@ -243,7 +264,7 @@ def router(state, ctx):
         def fn(job):
             rep = imp.Report()
             job.progress(stage='reading the annotations')
-            fmt, recs, names = records(spec, rep)
+            fmt, recs, names = records(spec, rep, conns)
             if fmt == 'yolo' and not names:                       # no classes.txt: index i is the task's i-th class
                 names = [c['name'] for c in reg.store(pid).task(task['id'])['classes']] or None
             job.progress(stage='matching images', extra=f'{len(recs):,} shapes')
@@ -279,7 +300,7 @@ def router(state, ctx):
                     'classes_added': total['classes_added'], 'skipped': dict(total['skipped']), 'errors': rep.errors}
 
         job = ctx.jobs.submit(f'label-ann-import:{pid}:{task["id"]}', f'import annotations · {entry["name"]} · {task["name"]}',
-                              fn, lane='io', public_result=True)
+                              fn, lane='io', public_result=True, session_id=pid)
         return {'job_id': job.id}
 
     return r

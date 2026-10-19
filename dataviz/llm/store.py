@@ -1,17 +1,29 @@
 """
-<workspace_root>/llm.json: the saved LLM providers (one active), the feature switches (all off by default) and the
-token budget. Owner-only like connections.json; API keys are write-only: the page only ever sees `has_key`.
+The saved LLM providers, the feature switches (all off by default) and the token budget, per user, in
+PostgreSQL (the format db/legacy.py imports llm.json into):
+
+    app.llm_providers    one row per provider, private to its owner: config = the provider minus id / name /
+                         kind / api_key (base_url, model, vision, ..., verified_at, verify, last_error),
+                         secrets = Fernet-encrypted {api_key}
+    app.llm_user_config  per user: active_provider_id, features {key: bool}, budget {max_input_tokens}
+
+Every method acts for one user (a user dict; None = the signed-in user, context.user()). API keys are
+write-only: the page only ever sees `has_key`. `api_key: env:NAME` (read the server's environment variable at
+call time) is admin-only, both when saved and when used: a non-admin's provider never resolves an env: key, so
+nobody can make the server send its environment secrets to a URL they control.
 
 A provider is "connected" when it is the active one and its last Test connection passed (`verified_at`); editing its
 kind / URL / model / key clears that, so a changed provider has to be tested again before any LLM UI shows.
 """
 
-import json
 import os
-import threading
 import time
 import uuid
-from pathlib import Path
+
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import JSONB
+
+from .. import db
 
 KINDS = ('openai', 'openai_compat', 'anthropic', 'gemini')
 BOX_FORMATS = ('norm1000_yxyx', 'norm1000_xyxy', 'pixel_xyxy')
@@ -42,34 +54,33 @@ def resolve_key(p):
     return os.environ.get(k[4:].strip(), '') if k.startswith('env:') else k
 
 
+ENV_ADMIN_ONLY = 'only admins can use an env: API key (a server environment variable)'
+_J = {k: bindparam(k, type_=JSONB) for k in ('cfg', 'f', 'b')}
+
+
+def _user(user):
+    if user is None:
+        from ..auth import context
+        user = context.user()
+    return user
+
+
+def _env(p):
+    return (p.get('api_key') or '').strip().startswith('env:')
+
+
+def _prov(r):
+    from ..db import crypto
+    p = dict(r.config or {})
+    if r.secrets:
+        p.update({k: v for k, v in (crypto.decrypt_json(r.secrets) or {}).items() if k == 'api_key'})
+    p.update(id=r.id, name=r.name, kind=r.kind)
+    return p
+
+
 class LLMStore:
-    def __init__(self, root):
-        self.root = Path(root)
-        self.path = self.root / 'llm.json'
-        self._lock = threading.Lock()
-
-    # ------------------------------------------------------------ storage
-    def load(self):
-        try:
-            data = json.loads(self.path.read_text()) if self.path.exists() else {}
-        except ValueError:
-            data = {}
-        data.setdefault('providers', [])
-        data.setdefault('active', None)
-        feats = data.get('features') if isinstance(data.get('features'), dict) else {}
-        data['features'] = {k: bool(feats.get(k, False)) for k in FEATURES}
-        b = data.get('budget') if isinstance(data.get('budget'), dict) else {}
-        data['budget'] = {'max_input_tokens': self._budget(b.get('max_input_tokens'))}
-        return data
-
-    def save(self, data):
-        self.root.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix('.tmp')
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # never world-readable, even briefly
-        with os.fdopen(fd, 'w') as f:
-            json.dump(data, f, indent=1)
-        os.chmod(tmp, 0o600)
-        tmp.replace(self.path)
+    def __init__(self, root=None):
+        self.root = root                     # unused (kept for old callers): everything is in the database
 
     @staticmethod
     def _budget(v):
@@ -78,30 +89,75 @@ class LLMStore:
         except (TypeError, ValueError):
             return MAX_BUDGET
 
+    # ------------------------------------------------------------ storage
+    def load(self, user=None):
+        """{providers, active, features, budget} of one user (no user: nothing saved)."""
+        user = _user(user)
+        data = {'providers': [], 'active': None, 'features': {}, 'budget': {}}
+        if user and user.get('id'):
+            with db.connect() as c:
+                rows = c.execute(text('SELECT * FROM app.llm_providers WHERE owner_id = :o ORDER BY created_at, name'),
+                                 {'o': user['id']}).all()
+                cfg = c.execute(text('SELECT * FROM app.llm_user_config WHERE user_id = :u'), {'u': user['id']}).first()
+            data['providers'] = [_prov(r) for r in rows]
+            if not user.get('is_admin'):             # never resolved for a non-admin (demoted since it was saved)
+                for p in data['providers']:
+                    if _env(p):
+                        p['api_key'] = ''
+            if cfg is not None:
+                data.update(active=cfg.active_provider_id, features=dict(cfg.features or {}), budget=dict(cfg.budget or {}))
+        feats = data['features'] if isinstance(data['features'], dict) else {}
+        data['features'] = {k: bool(feats.get(k, False)) for k in FEATURES}
+        b = data['budget'] if isinstance(data['budget'], dict) else {}
+        data['budget'] = {'max_input_tokens': self._budget(b.get('max_input_tokens'))}
+        if data['active'] and not any(p['id'] == data['active'] for p in data['providers']):
+            data['active'] = None
+        return data
+
+    def _save_config(self, c, uid, data):
+        c.execute(text("""INSERT INTO app.llm_user_config(user_id, active_provider_id, features, budget)
+                          VALUES (:u, :a, :f, :b) ON CONFLICT (user_id) DO UPDATE
+                          SET active_provider_id = EXCLUDED.active_provider_id, features = EXCLUDED.features,
+                              budget = EXCLUDED.budget""").bindparams(_J['f'], _J['b']),
+                  {'u': uid, 'a': data['active'], 'f': data['features'], 'b': data['budget']})
+
+    def _save_provider(self, c, uid, p, new):
+        from ..db import crypto
+        config = {k: v for k, v in p.items() if k not in ('id', 'name', 'kind', 'api_key')}
+        args = {'id': p['id'], 'o': uid, 'n': str(p['name'])[:200], 'k': p['kind'], 'cfg': config,
+                's': crypto.encrypt_json({'api_key': p['api_key']} if p.get('api_key') else None)}
+        if new:
+            c.execute(text("""INSERT INTO app.llm_providers(id, owner_id, name, kind, config, secrets)
+                              VALUES (:id, :o, :n, :k, :cfg, :s)""").bindparams(_J['cfg']), args)
+        else:
+            c.execute(text("""UPDATE app.llm_providers SET name = :n, kind = :k, config = :cfg, secrets = :s,
+                              updated_at = now() WHERE id = :id AND owner_id = :o""").bindparams(_J['cfg']), args)
+
     # ------------------------------------------------------------ providers
-    def provider(self, pid=None, data=None):
-        """A saved provider with its secret (server side only); pid None = the active one. None when missing."""
-        data = data or self.load()
+    def provider(self, pid=None, user=None, data=None):
+        """One of the user's providers with its secret (server side only); pid None = the active one. None when
+        missing (or someone else's)."""
+        data = data or self.load(user)
         pid = pid or data['active']
         return next((p for p in data['providers'] if p['id'] == pid), None)
 
-    def active(self):
-        """The active provider if it is connected (tested OK), else None: what every LLM route runs on."""
-        p = self.provider()
+    def active(self, user=None):
+        """The user's active provider if it is connected (tested OK), else None: what every LLM route runs on."""
+        p = self.provider(user=user)
         return p if p and p.get('verified_at') else None
 
     @staticmethod
     def public(p):
         out = {k: p.get(k) for k in ('id', *_FIELDS, 'verified_at', 'verify', 'last_error')}
         out['has_key'] = bool(p.get('api_key'))
-        out['key_env'] = (p.get('api_key') or '').startswith('env:')
+        out['key_env'] = _env(p)
         out['api_key_masked'] = p.get('api_key') if out['key_env'] else _mask(p.get('api_key'))
         return out
 
     @staticmethod
-    def merged(body, old=None):
+    def merged(body, old=None, admin=False):
         """A provider from a form body over the saved one: blank key = keep, normalised fields, defaults.
-        Raises ValueError with a human message."""
+        Raises ValueError with a human message (an env: key unless admin)."""
         old = dict(old or {})
         out = dict(old)
         for k in (*_FIELDS, 'api_key'):
@@ -111,6 +167,8 @@ class LLMStore:
             if k == 'api_key' and not (v or '').strip():
                 continue
             out[k] = v.strip() if isinstance(v, str) else v
+        if _env(out) and not admin:
+            raise ValueError(ENV_ADMIN_ONLY)
         kind = out.get('kind') or 'openai_compat'
         if kind not in KINDS:
             raise ValueError(f'unknown provider kind {kind!r} ({", ".join(KINDS)})')
@@ -139,61 +197,79 @@ class LLMStore:
         out.setdefault('id', body.get('id') or uuid.uuid4().hex[:10])
         return out
 
-    def upsert(self, body):
-        with self._lock:
-            data = self.load()
-            old = self.provider(body.get('id'), data) if body.get('id') else None
-            p = self.merged(body, old)
-            data['providers'] = [x for x in data['providers'] if x['id'] != p['id']] + [p]
-            if not data['active'] or not self.provider(data['active'], data):
+    def _need(self, user):
+        user = _user(user)
+        if not user or not user.get('id'):
+            raise ValueError('sign in first')
+        return user
+
+    def upsert(self, body, user=None):
+        """Save one of the user's providers (KeyError for an id that is not theirs); the first one becomes active."""
+        user = self._need(user)
+        data = self.load(user)
+        old = None
+        if body.get('id'):
+            old = self.provider(body['id'], data=data)
+            if old is None:
+                raise KeyError(f'no provider {body["id"]!r}')
+        p = self.merged(body, old, admin=bool(user.get('is_admin')))
+        with db.begin() as c:
+            self._save_provider(c, user['id'], p, new=old is None)
+            if not data['active']:
                 data['active'] = p['id']
-            self.save(data)
-            return p
+            self._save_config(c, user['id'], data)
+        return p
 
-    def delete(self, pid):
-        with self._lock:
-            data = self.load()
-            data['providers'] = [p for p in data['providers'] if p['id'] != pid]
-            if data['active'] == pid:
-                data['active'] = data['providers'][0]['id'] if data['providers'] else None
-            self.save(data)
+    def delete(self, pid, user=None):
+        user = self._need(user)
+        data = self.load(user)
+        with db.begin() as c:
+            n = c.execute(text('DELETE FROM app.llm_providers WHERE id = :id AND owner_id = :o'),
+                          {'id': pid, 'o': user['id']}).rowcount
+            if not n:
+                raise KeyError(f'no provider {pid!r}')
+            rest = [p for p in data['providers'] if p['id'] != pid]
+            if data['active'] in (pid, None):
+                data['active'] = rest[0]['id'] if rest else None
+            self._save_config(c, user['id'], data)
 
-    def record_test(self, pid, result):
-        """Store a Test connection result on a saved provider: ok -> verified_at, else last_error."""
-        with self._lock:
-            data = self.load()
-            p = self.provider(pid, data)
-            if p is None:
-                return
-            if result.get('ok'):
-                p['verified_at'] = time.time()
-                p['verify'] = {k: result.get(k) for k in ('ms', 'text_ok', 'vision_ok', 'audio_ok')}
-                p.pop('last_error', None)
-            else:
-                p.pop('verified_at', None)
-                p['last_error'] = str(result.get('error') or 'test failed')[:300]
-            self.save(data)
+    def record_test(self, pid, result, user=None):
+        """Store a Test connection result on one of the user's providers: ok -> verified_at, else last_error."""
+        user = self._need(user)
+        p = self.provider(pid, user)
+        if p is None:
+            return
+        if result.get('ok'):
+            p['verified_at'] = time.time()
+            p['verify'] = {k: result.get(k) for k in ('ms', 'text_ok', 'vision_ok', 'audio_ok')}
+            p.pop('last_error', None)
+        else:
+            p.pop('verified_at', None)
+            p['last_error'] = str(result.get('error') or 'test failed')[:300]
+        with db.begin() as c:
+            self._save_provider(c, user['id'], p, new=False)
 
-    def set_config(self, body):
+    def set_config(self, body, user=None):
         """features / budget / active from the Settings page (unknown keys ignored)."""
-        with self._lock:
-            data = self.load()
-            if isinstance(body.get('features'), dict):
-                for k, v in body['features'].items():
-                    if k in FEATURES:
-                        data['features'][k] = bool(v)
-            if isinstance(body.get('budget'), dict) and 'max_input_tokens' in body['budget']:
-                data['budget']['max_input_tokens'] = self._budget(body['budget']['max_input_tokens'])
-            if body.get('active') and self.provider(body['active'], data):
-                data['active'] = body['active']
-            self.save(data)
-            return data
+        user = self._need(user)
+        data = self.load(user)
+        if isinstance(body.get('features'), dict):
+            for k, v in body['features'].items():
+                if k in FEATURES:
+                    data['features'][k] = bool(v)
+        if isinstance(body.get('budget'), dict) and 'max_input_tokens' in body['budget']:
+            data['budget']['max_input_tokens'] = self._budget(body['budget']['max_input_tokens'])
+        if body.get('active') and self.provider(body['active'], data=data):
+            data['active'] = body['active']
+        with db.begin() as c:
+            self._save_config(c, user['id'], data)
+        return data
 
     # ------------------------------------------------------------ what the page may show
-    def state(self):
+    def state(self, user=None):
         """The page's view: connected?, the active provider (no secrets), effective feature switches
         (switch on AND connected AND the model has the capability), and the budget."""
-        data = self.load()
+        data = self.load(user)
         p = self.provider(data=data)
         connected = bool(p and p.get('verified_at'))
         caps = {None: True, 'vision': bool(p and p.get('vision')), 'audio': bool(p and p.get('audio'))}
@@ -206,11 +282,11 @@ class LLMStore:
             'features': on, 'switches': data['features'], 'budget': data['budget'],
         }
 
-    def on(self, feature):
-        return self.state()['features'].get(feature, False)
+    def on(self, feature, user=None):
+        return self.state(user)['features'].get(feature, False)
 
-    def config(self):
-        data = self.load()
+    def config(self, user=None):
+        data = self.load(user)
         return {'providers': [self.public(p) for p in data['providers']], 'active': data['active'],
                 'features': data['features'], 'budget': data['budget'],
                 'catalog': {k: {'where': w, 'needs': n} for k, (w, n) in FEATURES.items()}}

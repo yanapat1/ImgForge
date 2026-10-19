@@ -9,6 +9,7 @@ from conftest import jpeg_bytes, make_jpeg, wait_job
 
 pytest.importorskip('dataviz.labeling.media')
 pytest.importorskip('dataviz.labeling.sinks')
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 TASKS = [{'name': 'Detect', 'task_type': 'object_detection', 'classes': [{'name': 'cat'}, {'name': 'dog'}]},
          {'name': 'Segment', 'task_type': 'segmentation', 'classes': ['house', 'grass']}]

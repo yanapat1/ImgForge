@@ -6,6 +6,10 @@ dataset (409 then). Every feature route checks its switch (and that the active p
 
 Provider calls block: handlers are plain `def` (FastAPI's thread pool); the chat streams NDJSON from a sync
 generator, and a provider error mid-stream becomes a {"t": "error"} line. Auto-tag is a job ('io' lane).
+
+Everything runs on the CALLER's providers and switches (llm/store.py is per user). The dataset features need
+the visualizer session the request is bound to (/s/<id>/: viewer; auto-tag writes box tags: labeler); the
+label page features need the labeling session (assist: viewer; prelabel / accept: labeler).
 """
 
 import base64
@@ -15,9 +19,11 @@ import threading
 import time
 from contextlib import contextmanager
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from ...auth import access, deps
+from ...auth import context as auth_context
 from ...core import logging as vlog
 from ...llm import budget, context, providers, tasks
 from ...llm.providers import LLMError
@@ -58,8 +64,13 @@ def _wav(b64):
     return data
 
 
+_KW = {'param': 'pid', 'kind': 'label', 'what': 'label session'}
+LABEL_VIEWER = deps.require_session('viewer', **_KW)
+LABEL_LABELER = deps.require_session('labeler', **_KW)
+
+
 def router(state, ctx):
-    r = APIRouter()
+    r = APIRouter(dependencies=[Depends(deps.current_user)])
     sources = {}                    # label pid -> (source json, ImageSource, ImageCache)
     sources_lock = threading.Lock()
 
@@ -69,7 +80,7 @@ def router(state, ctx):
         return ctx.llm
 
     def need(feature):
-        """The connected provider for a feature that is switched on, else 403."""
+        """The caller's connected provider for a feature they switched on, else 403."""
         s = store()
         if not s.on(feature):
             raise HTTPException(403, f'AI feature "{feature}" is off (Settings › AI assistant)')
@@ -78,19 +89,27 @@ def router(state, ctx):
     def limit():
         return store().load()['budget']['max_input_tokens']
 
-    def session():
-        st = ctx.state
-        if st is None:
+    def session(need_role='viewer'):
+        """The State of the visualizer session this request is bound to (/s/<id>/), the caller's role high enough."""
+        b = auth_context.bound()
+        if b is None:
             raise HTTPException(409, 'no session open')
+        if not access.allows(b.role, need_role):
+            raise HTTPException(403, 'you can only view this session')
+        st = b.state
         if st.index is None:
             raise HTTPException(503, 'the dataset is still being indexed')
         return st
+
+    def admin():
+        u = auth_context.user()
+        return bool(u and u.get('is_admin'))
 
     def form_provider(body, need_model=True):
         """{id} -> the saved provider; {form} -> an unsaved one (form.id reuses that provider's stored key)."""
         s = store()
         if body.get('id') and not body.get('form'):
-            p = s.provider(body['id'])
+            p = s.provider(body['id'])                  # the caller's own only
             if p is None:
                 raise HTTPException(404, f'no provider {body["id"]!r}')
             return p
@@ -102,7 +121,7 @@ def router(state, ctx):
         if not need_model and not str(f.get('model') or (old or {}).get('model') or '').strip():
             f['model'] = '-'                    # listing models comes before picking one
         try:
-            return s.merged(f, old)
+            return s.merged(f, old, admin=admin())     # an env: key typed by a non-admin: 400, never resolved
         except ValueError as e:
             raise HTTPException(400, str(e))
 
@@ -119,20 +138,25 @@ def router(state, ctx):
         store().set_config(body)
         return store().config()
 
-    @r.post('/api/llm/providers')
+    @r.post('/api/llm/providers', dependencies=[Depends(deps.can_add_connections)])
     def save_provider(body: dict):
         try:
             p = store().upsert(body)
+        except KeyError:
+            raise HTTPException(404, f'no provider {body.get("id")!r}') from None
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {'provider': store().public(p), **store().config()}
 
     @r.delete('/api/llm/providers/{pid}')
     def delete_provider(pid: str):
-        store().delete(pid)
+        try:
+            store().delete(pid)
+        except KeyError:
+            raise HTTPException(404, f'no provider {pid!r}') from None
         return store().config()
 
-    @r.post('/api/llm/test')
+    @r.post('/api/llm/test', dependencies=[Depends(deps.can_add_connections)])
     def test_provider(body: dict):
         p = form_provider(body)
         res = providers.test(p)
@@ -140,7 +164,7 @@ def router(state, ctx):
             store().record_test(p['id'], res)
         return res
 
-    @r.post('/api/llm/models')
+    @r.post('/api/llm/models', dependencies=[Depends(deps.can_add_connections)])
     def provider_models(body: dict):
         p = form_provider(body, need_model=False)
         with _llm_errors():
@@ -254,7 +278,7 @@ def router(state, ctx):
     @r.post('/api/llm/tag')
     def auto_tag(body: dict):
         p = need('auto_tag')
-        st = session()
+        st = session('labeler')                         # it writes box tags
         scope = body.get('scope') or 'all'
         if scope == 'selection':
             ids = [int(i) for i in body.get('ids') or [] if 0 <= int(i) < len(st.samples)]
@@ -266,7 +290,7 @@ def router(state, ctx):
         else:
             raise HTTPException(400, "scope is 'all' or 'selection'")
         vocab = body.get('vocab') if isinstance(body.get('vocab'), list) else None
-        fn = tasks.auto_tag_job(p, st, names, vocab, limit())
+        fn = tasks.auto_tag_job(p, st, names, vocab, limit())    # p, limit: resolved now (jobs have no user)
         job = ctx.jobs.submit(f'llm-tag:{st.tag}', f'◆ auto-tag {len(names)} images', fn, lane='io', public_result=True)
         return {'job_id': job.id}
 
@@ -295,12 +319,14 @@ def router(state, ctx):
         from ...labeling import media
         reg = ctx.labeling
         entry = reg.get(pid)
-        key = json.dumps(entry['source'], sort_keys=True)
+        key = json.dumps([entry['source'], entry['owner_id']], sort_keys=True)
         with sources_lock:
             hit = sources.get(pid)
             if hit and hit[0] == key:
                 return hit[2]
-            src = media.make_source(entry['source'], reg.project_dir(pid), ctx.datasets, (ctx.cfg or {}).get('s3', {}))
+            # the project owner's connections, like routes/labeling.py source_for
+            src = media.make_source(entry['source'], reg.project_dir(pid), ctx.datasets.scoped(entry['owner_id']),
+                                    (ctx.cfg or {}).get('s3', {}))
             cache = media.ImageCache(reg.project_dir(pid), src)
             sources[pid] = (key, src, cache)
         if hit:
@@ -348,15 +374,15 @@ def router(state, ctx):
             return tasks.label_assist(p, task, image, sheets, question[:2000], limit(), prelabel=prelabel,
                                       existing=existing)
 
-    @r.post('/api/llm/label/{pid}/assist')
+    @r.post('/api/llm/label/{pid}/assist', dependencies=[Depends(LABEL_VIEWER)])
     def label_assist(pid: str, body: dict):
         return assist_run(pid, body, False)
 
-    @r.post('/api/llm/label/{pid}/prelabel')
+    @r.post('/api/llm/label/{pid}/prelabel', dependencies=[Depends(LABEL_LABELER)])
     def label_prelabel(pid: str, body: dict):
         return assist_run(pid, body, True)
 
-    @r.post('/api/llm/label/{pid}/accept')
+    @r.post('/api/llm/label/{pid}/accept', dependencies=[Depends(LABEL_LABELER)])
     def label_accept(pid: str, body: dict):
         s = store()
         if not (s.on('label_assist') or s.on('prelabel')):

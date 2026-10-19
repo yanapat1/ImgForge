@@ -5,6 +5,7 @@ import pytest
 from conftest import wait_job
 
 pytest.importorskip('dataviz.labeling.media')
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 TASKS = [{'name': 'Detect', 'task_type': 'object_detection', 'classes': ['cat']}]
 

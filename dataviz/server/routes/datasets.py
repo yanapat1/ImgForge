@@ -1,22 +1,31 @@
 """
-Sessions (saved datasets: local folders, S3 / RustFS prefixes, a task of a labeling session) and connections: the Sessions home
-cards (with stats and a crop mosaic from the session's workspace), opening one (hot-swaps the served
-dataset), cache-mode sync, connection test / browsing (S3 buckets, FTP / SFTP folders, database SELECT 1)
-and the local folder browser. Network and disk work runs off the event loop (run_io).
+Visualize sessions (saved datasets: local folders, S3 / RustFS prefixes, a task of a labeling session) and the
+caller's own connections: the Sessions home cards (stats and a crop mosaic from the session's workspace, the
+card header: owner, members, visibility, my role, last opened by me, loaded on the server), loading one
+(it is shared by every user who opens it), cache-mode sync, connection test / browsing (S3 buckets, FTP / SFTP
+folders, database SELECT 1) and the local folder browser (storage.allowed_roots only).
+
+Who may do what: auth/access.py (viewer: see the card, open it; owner: tags, delete, re-index, sync; editing
+its source). Connections are private to their owner: every connection route works on the caller's own only,
+and creating / testing / browsing one is subject to the admins' who_can_add_connections switch. Network and
+disk work runs off the event loop (asyncio.to_thread keeps the request's context: the signed-in user).
 """
 
+import asyncio
 import json
 import time
-import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
+from ...auth import access, deps
 from ...core import logging as vlog
-from ...data import sources
-from ...paths import PROJECT_ROOT
+from ...data import connections, sessions, sources
 from ...workspace import find_workspace
+
+VIEWER = deps.require_session('viewer', param='did', kind='viz', what='visualize session')
+OWNER = deps.require_session('owner', param='did', kind='viz', what='visualize session')
 
 
 def router(state, ctx):
@@ -31,13 +40,14 @@ def router(state, ctx):
         if reg is None:
             raise HTTPException(501, 'dataset switching is not enabled in this server')
 
-    def run_io(fn, *args):
-        """Blocking network / disk work off the event loop."""
-        return asyncio.get_running_loop().run_in_executor(None, fn, *args)
+    run_io = asyncio.to_thread              # blocking network / disk work off the event loop, context kept
 
-    def active_id():
-        st = ctx.state
-        return st.dataset_id if st is not None else None
+    def roots():
+        return connections.allowed_roots(ctx.cfg)
+
+    def loaded(did):
+        fn = getattr(ctx, 'loaded', None)
+        return bool(fn(did)) if fn is not None else did in (getattr(ctx, 'states', None) or {})
 
     N_COVER = 4                                  # crops in a card's mosaic
     manifest_memo = {}                           # manifest path -> (mtime_ns, summary): big for large buckets
@@ -76,19 +86,24 @@ def router(state, ctx):
         except KeyError:
             return {'error': 'its labeling session or task was deleted'}
 
-    def dataset_public(d, active=None):
-        out = dict(d)
-        out['active'] = d['id'] == active
+    def dataset_public(d, user=None):
+        out = {k: v for k, v in d.items() if k != 'owner_id'}
+        out['loaded'] = loaded(d['id'])
+        if 'my_role' not in out and user is not None:          # a single card (save / tags): its header too
+            head = sessions.header(user, d['id'])
+            if head is not None:
+                out.update(owner=head['owner'], members=head['members'], my_role=head['my_role'],
+                           opened_at=head['opened_at'])
         if d['kind'] == 's3':
             try:
-                c = reg.connection(d['connection_id'])
+                c = reg.connection(d['connection_id'])          # its owner's (only the name is shown)
                 out['connection'] = c.get('name') or c.get('endpoint')
                 out['uri'] = dataset_uri(d)
                 mirror = (reg.mirror_root() / sources._safe(c.get('id')) / d['bucket'] / d.get('prefix', '')).resolve()
                 summary = mirror_summary(mirror / '.manifest.json')
                 if summary:
                     out['mirror'] = {'path': str(mirror), **summary}
-            except KeyError:
+            except (KeyError, TypeError):
                 out['connection'] = None
                 out['error'] = 'its connection was deleted'
         elif d['kind'] == 'labeling':
@@ -110,16 +125,19 @@ def router(state, ctx):
             out['cover'] = min(N_COVER, meta.get('n_boxes') or 0) if (folder / 'crops').is_dir() else 0
         return out
 
-    def list_public():
-        active = active_id()
-        return {'datasets': [dataset_public(d, active) for d in reg.datasets()], 'active': active}
+    def list_public(user, scope):
+        try:
+            rows = reg.datasets(user, scope)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {'datasets': [dataset_public(d) for d in rows]}
 
     @r.get('/api/datasets')
-    async def list_datasets():
+    async def list_datasets(scope: str = 'all', user=Depends(deps.current_user)):
         need_registry()
-        return await run_io(list_public)            # folder checks on a slow mount never block the server
+        return await run_io(list_public, user, scope)      # folder checks on a slow mount never block the server
 
-    @r.get('/api/cover/{did}/{k}')
+    @r.get('/api/cover/{did}/{k}', dependencies=[Depends(VIEWER)])
     def dataset_cover(did: str, k: int):
         """One crop of the card's mosaic: crops spread evenly over the session's boxes (already 224 px jpgs)."""
         need_registry()
@@ -134,84 +152,107 @@ def router(state, ctx):
         path = ws[0] / 'crops' / f'{(2 * k + 1) * n // (2 * count):06d}.jpg'
         if not path.is_file():
             raise HTTPException(404, 'no cover image')
-        return FileResponse(path, media_type='image/jpeg', headers={'Cache-Control': 'max-age=3600'})
+        return FileResponse(path, media_type='image/jpeg', headers={'Cache-Control': 'private, max-age=3600'})
 
-    def check_labeling(ds):
-        """Before a labeling-backed session is saved: its session + task exist and have boxes; no name given =
-        '<session> · <task>'."""
-        src = reg.source({**ds, 'name': None}, s3cfg, ctx.labeling)      # its own name: '<session> · <task>'
-        src.check()
-        if ds['name'] == 'labeling session':        # upsert_dataset's placeholder for a blank name
-            ds['name'] = src.name
+    def check_labeling(user):
+        def check(ds):
+            """Before a labeling-backed session is saved: the caller owns that labeling session (a visualize
+            session of it can be shared on), its task exists and has boxes; no name given = '<session> · <task>'."""
+            have = access.role(user, ds['project_id'], kind='label')
+            if have != 'owner':
+                raise ValueError('pick one of your own labeling sessions' if have is None else
+                                 'only the owner of that labeling session can open it in the visualizer')
+            src = reg.source({**ds, 'name': None}, s3cfg, ctx.labeling)      # its own name: '<session> · <task>'
+            src.check()
+            if ds['name'] == 'labeling session':        # upsert_dataset's placeholder for a blank name
+                ds['name'] = src.name
+        return check
 
     @r.post('/api/datasets')
-    async def save_dataset(body: dict):
+    async def save_dataset(body: dict, user=Depends(deps.current_user)):
+        """A new session owned by the caller, or (body.id) an edit of the caller's own session's source / name."""
         need_registry()
+        if body.get('id'):
+            have = access.role(user, body['id'], kind='viz')
+            if have is None:                     # unknown / not visible: a new session (the id does not leak)
+                body = {k: v for k, v in body.items() if k != 'id'}
+            elif have != 'owner':
+                raise HTTPException(403, 'only the owner of this session can do that')
         try:
-            if body.get('kind') == 'labeling':
-                ds = await run_io(reg.upsert_dataset, body, check_labeling)
-            else:
-                ds = reg.upsert_dataset(body)
+            check = check_labeling(user) if body.get('kind') == 'labeling' else None
+            ds = await run_io(reg.upsert_dataset, body, user['id'], check, roots())
             if ds['kind'] == 'local':
                 await run_io(sources.LocalSource(ds['path']).check)
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e).strip("'\""))
         ds_log.info(f'saved session [bold]{vlog.esc(ds["name"])}[/] ({ds["kind"]}'
                     + (f', {ds["mode"]}' if ds['kind'] == 's3' else '') + ')')
-        return await run_io(dataset_public, ds, active_id())
+        return await run_io(dataset_public, ds, user)
 
-    @r.put('/api/datasets/{did}/tags')
-    async def set_dataset_tags(did: str, body: dict):
+    @r.put('/api/datasets/{did}/tags', dependencies=[Depends(OWNER)])
+    async def set_dataset_tags(did: str, body: dict, user=Depends(deps.current_user)):
         """The card's own tags (the session forms never send them)."""
         need_registry()
         try:
-            ds = reg.set_dataset_tags(did, body.get('tags'))
+            ds = await run_io(reg.set_dataset_tags, did, body.get('tags'))
         except KeyError as e:
             raise HTTPException(404, str(e).strip("'\""))
         except ValueError as e:
             raise HTTPException(400, str(e))
-        return await run_io(dataset_public, ds, active_id())
+        return await run_io(dataset_public, ds, user)
 
-    @r.delete('/api/datasets/{did}')
+    def unload(did):
+        evict = getattr(ctx, 'evict', None)
+        if evict is not None:
+            evict(did)                           # running jobs keep their own State; the next open builds anew
+
+    @r.delete('/api/datasets/{did}', dependencies=[Depends(OWNER)])
     def delete_dataset(did: str):
         need_registry()
         try:
             reg.delete_dataset(did)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\""))
         except ValueError as e:
             raise HTTPException(400, str(e))
-        if did == active_id():
-            ctx.state = None                     # close it: running jobs keep their own State; routes now answer 409
+        unload(did)
         ds_log.info(f'removed session {did}')
         return {'ok': True}
 
-    @r.post('/api/datasets/{did}/open')
-    def open_dataset(did: str):
-        need_registry()
+    def saved(did):
         try:
-            ds = reg.dataset(did)
+            return reg.dataset(did)
         except KeyError:
             raise HTTPException(404, 'this session no longer exists (removed, or saved on another machine)')
-        try:
-            new = ctx.open_dataset(ds)
-        except (ValueError, KeyError) as e:
-            raise HTTPException(400, str(e))
-        return {'ok': True, 'job_id': new.index_job.id if new.index_job else None}
 
-    @r.post('/api/datasets/{did}/refresh')
+    @r.post('/api/datasets/{did}/open', dependencies=[Depends(VIEWER)])
+    def open_dataset(did: str, user=Depends(deps.current_user)):
+        """Load the session on the server (already loaded: nothing to do) and remember that I opened it."""
+        need_registry()
+        ds = saved(did)
+        try:
+            state_for = getattr(ctx, 'state_for', None)
+            new = state_for(did, user) if state_for is not None else ctx.open_dataset(ds)
+        except (ValueError, KeyError, FileNotFoundError, NotADirectoryError) as e:
+            raise HTTPException(400, str(e).strip("'\""))
+        sessions.mark_opened(user['id'], did)
+        job = getattr(new, 'index_job', None)
+        return {'ok': True, 'job_id': job.id if job is not None else None}
+
+    @r.post('/api/datasets/{did}/refresh', dependencies=[Depends(OWNER)])
     def refresh_dataset(did: str):
         """Re-index a session whose files changed since its cache was built (the page shows the old cache meanwhile)."""
         need_registry()
-        try:
-            ds = reg.dataset(did)
-        except KeyError:
-            raise HTTPException(404, 'this session no longer exists (removed, or saved on another machine)')
+        ds = saved(did)
+        if ctx.open_dataset is None:
+            raise HTTPException(501, 'opening sessions is not enabled in this server')
         try:
             new = ctx.open_dataset(ds, refresh=True)
-        except (ValueError, KeyError) as e:
-            raise HTTPException(400, str(e))
+        except (ValueError, KeyError, FileNotFoundError, NotADirectoryError) as e:
+            raise HTTPException(400, str(e).strip("'\""))
         return {'ok': True, 'job_id': new.index_job.id if new.index_job else None}
 
-    @r.post('/api/datasets/{did}/sync')
+    @r.post('/api/datasets/{did}/sync', dependencies=[Depends(OWNER)])
     def sync_dataset(did: str):
         """Re-sync the local mirror of an S3 dataset (cache mode) in the background."""
         need_registry()
@@ -226,12 +267,12 @@ def router(state, ctx):
         return {'job_id': job.id}
 
     @r.get('/api/connections')
-    def list_connections():
+    def list_connections(user=Depends(deps.current_user)):
         need_registry()
-        return {'connections': [reg.public_connection(c) for c in reg.load()['connections']]}
+        return {'connections': [reg.public_connection(c) for c in reg.connections(user['id'])]}
 
     @r.post('/api/connections')
-    def save_connection(body: dict):
+    def save_connection(body: dict, user=Depends(deps.can_add_connections)):
         need_registry()
         kind = body.get('kind') or 's3'
         if kind == 's3' and not body.get('endpoint'):
@@ -240,8 +281,13 @@ def router(state, ctx):
             raise HTTPException(400, 'the model server URL is required')
         if kind not in ('s3', 'model') and not body.get('host'):
             raise HTTPException(400, 'host is required')
+        if body.get('id'):
+            try:
+                reg.connection(body['id'], owner_id=user['id'])
+            except KeyError:
+                raise HTTPException(404, f'no connection {body["id"]!r}') from None
         try:
-            c = reg.upsert_connection(body)
+            c = reg.upsert_connection(body, user['id'])
         except ValueError as e:
             raise HTTPException(400, str(e))
         if kind == 's3':
@@ -252,10 +298,12 @@ def router(state, ctx):
         return reg.public_connection(c)
 
     @r.delete('/api/connections/{cid}')
-    def delete_connection(cid: str):
+    def delete_connection(cid: str, user=Depends(deps.current_user)):
         need_registry()
         try:
-            reg.delete_connection(cid)
+            reg.delete_connection(cid, user['id'])
+        except KeyError:
+            raise HTTPException(404, f'no connection {cid!r}') from None
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {'ok': True}
@@ -263,9 +311,9 @@ def router(state, ctx):
     def _s3_error(e):
         return HTTPException(400, f'{type(e).__name__}: {e}')
 
-    def merged(body):
+    def merged(body, user):
         try:
-            return reg.merged_connection(body)
+            return reg.merged_connection(body, user['id'])        # a saved secret: only from the caller's own
         except ValueError as e:
             raise HTTPException(400, str(e))
 
@@ -294,10 +342,10 @@ def router(state, ctx):
         return res
 
     @r.post('/api/connections/test')
-    async def test_connection(body: dict):
+    async def test_connection(body: dict, user=Depends(deps.can_add_connections)):
         """Check a connection (saved or typed in the form): S3 lists its buckets, other kinds per test_other."""
         need_registry()
-        conn = merged(body)
+        conn = merged(body, user)
         if (conn.get('kind') or 's3') != 's3':
             return await test_other(conn)
         t0 = time.time()
@@ -311,11 +359,11 @@ def router(state, ctx):
         return {'ok': True, 'buckets': res['buckets'], 'ms': round((time.time() - t0) * 1000)}
 
     @r.post('/api/connections/browse')
-    async def browse_connection(body: dict):
+    async def browse_connection(body: dict, user=Depends(deps.can_add_connections)):
         """S3: folders under bucket/prefix (each flagged when it holds images/ + labels/), plus a summary when it
         does. FTP / SFTP: the folders under `path` with their image counts."""
         need_registry()
-        conn = merged(body.get('connection') or {})
+        conn = merged(body.get('connection') or {}, user)
         if (conn.get('kind') or 's3') in ('ftp', 'sftp'):
             # {connection, path} -> {path, parent, folders:[{name, images}], images}
             from ...labeling import media
@@ -335,11 +383,24 @@ def router(state, ctx):
             raise _s3_error(e)
         return res
 
+    def browse_allowed(path, images):
+        """browse_local inside storage.allowed_roots only: no path = the first root; 'parent' stops at a root and
+        `roots` lists them all (the page offers them as starting points)."""
+        rs = roots()
+        if not rs:
+            raise ValueError(connections.OUTSIDE)
+        where = connections.check_local(path, rs) if path else str(rs[0])
+        out = sources.browse_local(where, images)
+        if out.get('parent') and not connections.inside(out['parent'], rs):
+            out['parent'] = None
+        out['roots'] = [str(x) for x in rs]
+        return out
+
     @r.get('/api/fs/browse')
-    async def browse_folder(path: str = '', images: int = 0):
+    async def browse_folder(path: str = '', images: int = 0, user=Depends(deps.current_user)):
         need_registry()
         try:
-            return await run_io(sources.browse_local, path or str(PROJECT_ROOT), bool(images))
+            return await run_io(browse_allowed, path, bool(images))
         except ValueError as e:
             raise HTTPException(400, str(e))
 

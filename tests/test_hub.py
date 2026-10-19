@@ -12,6 +12,7 @@ from conftest import _TestUserMiddleware, make_jpeg, make_user, wait_job
 from test_models import KEY, servers  # noqa: F401 - the fake model servers (module fixture)
 
 from dataviz.models import hub, runners
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 
 @pytest.fixture

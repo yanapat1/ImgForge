@@ -1,19 +1,18 @@
-"""The ◆ AI assistant: the provider store (0600, masked keys, env: keys, re-test on edit), the three provider APIs
+"""The ◆ AI assistant: the provider store (per user, encrypted + masked keys, env: keys admin-only, re-test on edit), the three provider APIs
 against fake servers over real HTTP (OpenAI-compatible / Anthropic / Gemini: auth headers, SSE streaming, JSON
 answers), the connection test, feature gating (403), the NDJSON chat, token budget trimming, box-format conversion,
 and the structured features on a small generated dataset (label check, NL filter, auto-tag job) and a labeling
 session (assist / prelabel / accept)."""
 
 import json
-import os
-import stat
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from conftest import jpeg_bytes, wait_job
+from conftest import _TestUserMiddleware, jpeg_bytes, make_user, wait_job
 from test_models import _serve
+pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 OPENAI_KEY, ANTHROPIC_KEY, GEMINI_KEY = 'sk-openai-secret-123', 'sk-ant-secret-456', 'AIza-gemini-secret-789'
 REPLY = {'text': 'Hello there, this is the fake model.'}     # what the fake models answer to a non-test prompt
@@ -171,24 +170,29 @@ def test_store_secrets_and_retest(client, monkeypatch):
     p = client.post('/api/llm/providers', json=form('openai', 'http://x')).json()
     pub = p['provider']
     assert pub['has_key'] and OPENAI_KEY not in json.dumps(p) and pub['api_key_masked'].endswith(OPENAI_KEY[-4:])
-    assert stat.S_IMODE(os.stat(s.path).st_mode) == 0o600
+    from sqlalchemy import text
+    from dataviz import db
+    with db.connect() as c:                        # encrypted at rest
+        blob = c.execute(text('SELECT secrets FROM app.llm_providers WHERE id = :i'), {'i': pub['id']}).scalar()
+    assert blob and OPENAI_KEY.encode() not in bytes(blob)
     pid = pub['id']
+    u = client.user
     # blank key keeps the stored one
     client.post('/api/llm/providers', json={**form('openai', 'http://x'), 'id': pid, 'api_key': ''})
-    assert s.provider(pid)['api_key'] == OPENAI_KEY
-    s.record_test(pid, {'ok': True, 'ms': 5})
+    assert s.provider(pid, u)['api_key'] == OPENAI_KEY
+    s.record_test(pid, {'ok': True, 'ms': 5}, u)
     assert client.get('/api/llm/state').json()['connected']
     # a non-retest field keeps verified, a model change clears it
     client.post('/api/llm/providers', json={'id': pid, **form('openai', 'http://x'), 'api_key': '', 'temperature': 0.5})
-    assert s.provider(pid).get('verified_at')
+    assert s.provider(pid, u).get('verified_at')
     client.post('/api/llm/providers', json={'id': pid, **form('openai', 'http://x'), 'api_key': '', 'model': 'other'})
-    assert not s.provider(pid).get('verified_at') and not client.get('/api/llm/state').json()['connected']
+    assert not s.provider(pid, u).get('verified_at') and not client.get('/api/llm/state').json()['connected']
     # env: keys resolve at call time and are shown as their variable name
     monkeypatch.setenv('MY_LLM_KEY', 'from-env')
     from dataviz.llm.store import resolve_key
     p2 = client.post('/api/llm/providers', json=form('gemini', 'http://x', api_key='env:MY_LLM_KEY')).json()['provider']
     assert p2['key_env'] and p2['api_key_masked'] == 'env:MY_LLM_KEY'
-    assert resolve_key(s.provider(p2['id'])) == 'from-env'
+    assert resolve_key(s.provider(p2['id'], u)) == 'from-env'
     assert client.post('/api/llm/providers', json=form('openai', 'ftp://x')).status_code == 400
     cfg = client.get('/api/llm/config').json()
     assert set(cfg['catalog']) >= {'assistant', 'voice'} and not any(cfg['features'].values())
@@ -198,7 +202,7 @@ def test_store_secrets_and_retest(client, monkeypatch):
 @pytest.mark.parametrize('kind', ['openai', 'openai_compat', 'anthropic', 'gemini'])
 def test_connection_test_and_chat_stream(client, fake, kind):
     p = connect(client, kind, fake, features=('assistant',))
-    saved = client.ctx.llm.provider(p['id'])
+    saved = client.ctx.llm.provider(p['id'], client.user)
     assert saved['verify']['text_ok'] and saved['verify']['vision_ok']
     assert saved['verify']['audio_ok'] is (None if kind == 'anthropic' else True)
     st = client.get('/api/llm/state').json()
@@ -228,7 +232,7 @@ def test_wrong_key_fails_without_leaking(client, fake, kind):
     res = client.post('/api/llm/test', json={'id': p['id']}).json()
     assert res['ok'] is False and res['text_ok'] is False and '40' in res['error']
     assert 'wrong-key-abcdef' not in res['error']
-    saved = client.ctx.llm.provider(p['id'])
+    saved = client.ctx.llm.provider(p['id'], client.user)
     assert not saved.get('verified_at') and saved['last_error']
     # an unsaved form is tested but nothing is recorded
     res = client.post('/api/llm/test', json={'form': form(kind, fake)}).json()
@@ -252,12 +256,13 @@ def test_features_gated(client, fake):
     client.put('/api/llm/config', json={'features': {'dataset_qa': True}})
     assert client.post('/api/llm/chat', json={**msg, 'ctx': {'dataset': True}}).status_code == 409   # no session
     for path, body in (('/api/llm/filter', {'text': 'x'}), ('/api/llm/label-check', {'ids': [1]}),
-                       ('/api/llm/tag', {'scope': 'all'}), ('/api/llm/voice', {'wav_b64': 'AAAA', 'screen': 'viz'}),
-                       ('/api/llm/label/p/assist', {}), ('/api/llm/label/p/accept', {})):
+                       ('/api/llm/tag', {'scope': 'all'}), ('/api/llm/voice', {'wav_b64': 'AAAA', 'screen': 'viz'})):
         assert client.post(path, json=body).status_code == 403, path
+    for path in ('/api/llm/label/p/assist', '/api/llm/label/p/accept'):     # no such labeling session first
+        assert client.post(path, json={}).status_code == 404, path
     # voice needs the audio capability too
     p = connect(client, 'anthropic', fake, features=('voice',))
-    assert client.ctx.llm.provider(p['id'])['audio'] is False
+    assert client.ctx.llm.provider(p['id'], client.user)['audio'] is False
     assert client.post('/api/llm/voice', json={'wav_b64': 'AAAA', 'screen': 'viz'}).status_code == 403
 
 
@@ -331,16 +336,18 @@ def test_clean_filter():
 
 # ---------------------------------------------------------------- a dataset session
 @pytest.fixture
-def viz(tmp_path, fake):
+def viz(pg, tmp_path, fake):
     from fastapi.testclient import TestClient
     from test_curation import make_dataset, open_state
     from dataviz.core.jobs import JobManager
     from dataviz.llm.store import LLMStore
     from dataviz.server.app import Ctx, create_app
     st = open_state(make_dataset(tmp_path / 'ds'), tmp_path / 'ws')
-    ctx = Ctx(st, jobs=JobManager(), llm=LLMStore(tmp_path / 'root'))
+    ctx = Ctx(st, jobs=JobManager(), llm=LLMStore())
     ctx.cfg.setdefault('logging', {})['http'] = False
-    with TestClient(create_app(ctx)) as c:
+    app = create_app(ctx)                          # every request bound to `st` (the test-only fixed session)
+    app.add_middleware(_TestUserMiddleware, user=make_user('vizzer'))     # the LLM settings are per user
+    with TestClient(app) as c:
         c.ctx, c.st = ctx, st
         connect(c, 'openai', fake, features=('assistant', 'dataset_qa', 'explain_eval', 'ask_selection', 'label_check',
                                              'nl_filter', 'auto_tag', 'report', 'voice'))
