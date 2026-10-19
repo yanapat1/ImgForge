@@ -8,6 +8,7 @@ import pytest
 from conftest import make_jpeg, wait_job
 
 pytest.importorskip('dataviz.labeling.media')
+pytestmark = pytest.mark.usefixtures('tmp_roots')     # the test images live in tmp_path
 
 
 def hid():

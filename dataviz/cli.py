@@ -130,7 +130,8 @@ def main():
         if w['enabled'] else compute.InlinePools()
     jobs = JobManager()
     model_reg = ModelRegistry(vconfig.resolve(cfg['models']['store_dir']) if cfg['models']['store_dir'] else ws_root,
-                              allowed_roots=[PROJECT_ROOT, *[vconfig.resolve(p) for p in cfg['models']['allowed_roots']]])
+                              allowed_roots=[PROJECT_ROOT, *connections.allowed_roots(cfg),
+                                             *[vconfig.resolve(p) for p in cfg['models']['allowed_roots']]])
     ctx = Ctx(None, registry=registry, datasets=datasets, cfg=cfg, models=model_reg,
               model_service=ModelService(model_reg, cfg), jobs=jobs,
               labeling=ProjectRegistry(ws_root / 'labeling'), llm=LLMStore(ws_root))
@@ -223,26 +224,10 @@ def start_database(cfg, ws_root):
 def start_session(datasets, dataset_dir, admin):
     """--dataset: the first admin's saved local dataset reading `dataset_dir` (matched by folder: restarting with
     the same flag never adds duplicates), created as their visualizer session when new -> the dataset dict."""
-    import inspect
-    from sqlalchemy import text
-    from .data import sessions
-    owner = admin['id'] if admin else None
-
-    def call(fn, *a):                                 # the per-user registry takes owner_id, the JSON one does not
-        return fn(*a, owner_id=owner) if 'owner_id' in inspect.signature(fn).parameters else fn(*a)
-    ds = call(datasets.find_local, dataset_dir) or call(datasets.upsert_dataset, {'kind': 'local', 'path': str(dataset_dir)})
-    if owner is None:
-        vlog.get_logger('sessions').warning('no admin account: --dataset is loaded but not saved as a session')
-        return ds
-    try:
-        with db.begin() as c:
-            if sessions.get(ds['id'], c) is None:       # a registry that does not write app.sessions itself
-                sessions.create('viz', owner, ds['name'], sid=ds['id'], conn=c, auto_name=True)
-                c.execute(text("""INSERT INTO app.viz_sessions(session_id, source_kind, path)
-                                  VALUES (:s, 'local', :p) ON CONFLICT DO NOTHING"""), {'s': ds['id'], 'p': ds['path']})
-    except Exception as e:  # noqa: BLE001 - the dataset is still served (by the admin's URL)
-        vlog.get_logger('sessions').warning(f'--dataset: could not save the session ({type(e).__name__}: {e})')
-    return ds
+    if admin is None:
+        raise ValueError('--dataset needs an admin account (set DATAVIZ_ADMIN_* or create one first)')
+    return (datasets.find_local(dataset_dir, admin['id'])
+            or datasets.upsert_dataset({'kind': 'local', 'path': str(dataset_dir)}, admin['id']))
 
 
 def count_sessions():

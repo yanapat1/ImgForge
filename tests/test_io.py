@@ -250,60 +250,60 @@ def test_sftp_private_key(sftp_server):
 # ---------------------------------------------------------------- connections + routes
 
 def test_connection_kinds(pg, tmp_path):
-    reg = connections.Registry(tmp_path)
-    s3 = reg.upsert_connection({'name': 'old', 'endpoint': 'http://x', 'access_key': 'AKIA123456', 'secret_key': 'sssss'})
-    assert 'kind' not in s3                                       # old-style s3 entries stay as they were
-    assert reg.public_connection(s3)['kind'] == 's3'
-    sf = reg.upsert_connection({'kind': 'sftp', 'name': 'box', 'host': 'h', 'username': 'u', 'secret_key': 'pw',
-                                'private_key': '-----BEGIN KEY-----', 'base_path': '/data'})
-    assert sf['port'] == 22
-    pub = reg.public_connection(sf)
-    assert pub['has_private_key'] and pub['has_secret'] and 'private_key' not in pub and 'secret_key' not in pub
-    again = reg.upsert_connection({'id': sf['id'], 'kind': 'sftp', 'host': 'h2', 'secret_key': '', 'private_key': ''})
-    assert again['secret_key'] == 'pw' and again['private_key'].startswith('-----') and again['host'] == 'h2'
-    db = reg.upsert_connection({'kind': 'postgres', 'host': 'db', 'port': '', 'database': 'd', 'username': 'u',
-                                'secret_key': 'x', 'encrypt': 'true'})
-    assert db['port'] == 5432 and db['table_prefix'] == 'lbl_' and db['encrypt'] is True
-    assert reg.public_connection(db)['table_prefix'] == 'lbl_'
-    with pytest.raises(ValueError):
-        reg.merged_connection({'kind': 'gopher'})
-    assert oct((tmp_path / 'connections.json').stat().st_mode & 0o777) == '0o600'
-    # a labeling session that uses the connection blocks the delete
+    import json
     from sqlalchemy import text
     from conftest import make_user
     from dataviz import db as appdb
     from dataviz.data import sessions
-    owner = make_user('conn')
+    me, other = make_user('conn'), make_user('other')
+    reg = connections.Registry(tmp_path)
+    s3 = reg.upsert_connection({'name': 'old', 'endpoint': 'http://x', 'access_key': 'AKIA123456', 'secret_key': 'sssss'},
+                               me['id'])
+    assert reg.public_connection(s3)['kind'] == 's3'
+    sf = reg.upsert_connection({'kind': 'sftp', 'name': 'box', 'host': 'h', 'username': 'u', 'secret_key': 'pw',
+                                'private_key': '-----BEGIN KEY-----', 'base_path': '/data'}, me['id'])
+    assert sf['port'] == 22
+    pub = reg.public_connection(sf)
+    assert pub['has_private_key'] and pub['has_secret'] and 'private_key' not in pub and 'secret_key' not in pub
+    again = reg.upsert_connection({'id': sf['id'], 'kind': 'sftp', 'host': 'h2', 'secret_key': '', 'private_key': ''},
+                                  me['id'])
+    assert again['secret_key'] == 'pw' and again['private_key'].startswith('-----') and again['host'] == 'h2'
+    dbc = reg.upsert_connection({'kind': 'postgres', 'host': 'db', 'port': '', 'database': 'd', 'username': 'u',
+                                 'secret_key': 'x', 'encrypt': 'true'}, me['id'])
+    assert dbc['port'] == 5432 and dbc['table_prefix'] == 'lbl_' and dbc['encrypt'] is True
+    assert reg.public_connection(dbc)['table_prefix'] == 'lbl_'
+    with pytest.raises(ValueError):
+        reg.merged_connection({'kind': 'gopher'})
+    assert [c['id'] for c in reg.connections(other['id'])] == []       # private to their owner
+    with pytest.raises(KeyError):
+        reg.delete_connection(s3['id'], other['id'])
+    # a labeling session that uses the connection blocks the delete
     for pid, name, src, ed in (('p1', 'Cats', {'kind': 'sftp', 'connection_id': sf['id']}, None),
-                               ('p2', 'Dogs', {'kind': 'upload'}, {'kind': 'db', 'connection_id': db['id']})):
-        sessions.create('label', owner['id'], name, sid=pid)
+                               ('p2', 'Dogs', {'kind': 'upload'}, {'kind': 'db', 'connection_id': dbc['id']})):
+        sessions.create('label', me['id'], name, sid=pid)
         with appdb.begin() as c:
             c.execute(text('INSERT INTO app.label_projects(session_id, source, export_default) '
                            'VALUES (:p, CAST(:s AS jsonb), CAST(:e AS jsonb))'),
                       {'p': pid, 's': json.dumps(src), 'e': json.dumps(ed) if ed else None})
     with pytest.raises(ValueError, match='Cats'):
-        reg.delete_connection(sf['id'])
+        reg.delete_connection(sf['id'], me['id'])
     with pytest.raises(ValueError, match='Dogs'):
-        reg.delete_connection(db['id'])
-    reg.delete_connection(s3['id'])
+        reg.delete_connection(dbc['id'], me['id'])
+    reg.delete_connection(s3['id'], me['id'])
     # an S3 dataset cannot point at an FTP / DB connection
     with pytest.raises(ValueError):
-        reg.upsert_dataset({'kind': 's3', 'connection_id': db['id'], 'bucket': 'b'})
+        reg.upsert_dataset({'kind': 's3', 'connection_id': dbc['id'], 'bucket': 'b'}, me['id'])
 
 
-def test_routes_browse_and_connections(tmp_path, ftp_server, image_tree):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from dataviz.server.routes import datasets
-    reg = connections.Registry(tmp_path / 'ws')
-    app = FastAPI()
-    app.include_router(datasets.router(None, SimpleNamespace(datasets=reg, cfg={}, state=None)))
-    c = TestClient(app)
+def test_routes_browse_and_connections(client_as, tmp_roots, ftp_server, image_tree):
+    from conftest import make_user
+    c = client_as(make_user('browser'))
     root, names = image_tree
     r = c.get('/api/fs/browse', params={'path': str(root), 'images': 1}).json()
     assert r['images'] == N_IMAGES - N_IMAGES // 5 and r['folders'] == [{'name': 'sub', 'yolo': False, 'images': N_IMAGES // 5}]
     r = c.get('/api/fs/browse', params={'path': str(root)}).json()
     assert 'images' not in r and 'images' not in r['folders'][0]               # unchanged without images=1
+    assert c.get('/api/fs/browse', params={'path': '/etc'}).status_code == 400  # outside storage.allowed_roots
     make_image_tree(ftp_server['root'] / 'set1')
     saved = c.post('/api/connections', json={**ftp_server['conn'], 'id': None}).json()
     assert saved['kind'] == 'ftp' and 'secret_key' not in saved and saved['has_secret']

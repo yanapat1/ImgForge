@@ -9,7 +9,6 @@ into the right HTTP status, and a raw-bytes JSON response.
     owned           call a ModelRegistry method as the signed-in user (owner_id=) when it takes one
 """
 
-import inspect
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -21,17 +20,13 @@ def _r(arr, nd=4):
 
 
 def owned(method, *args, **kw):
-    """method(*args, owner_id=<the signed-in user>, **kw) when the method takes owner_id (the per-user model
-    repository), plain otherwise (the shared registry), so the routes work with both."""
+    """method(*args, owner_id=<the signed-in user>, **kw): a per-user repository call scoped to the caller. Never
+    unscoped from a request: owner_id=None means "every owner" to the repositories (internal callers only)."""
     from ..auth import context
     uid = context.user_id()
-    try:
-        takes = 'owner_id' in inspect.signature(method).parameters
-    except (TypeError, ValueError):
-        takes = False
-    if takes and uid is not None:
-        kw['owner_id'] = uid
-    return method(*args, **kw)
+    if uid is None:
+        raise HTTPException(401, 'sign in first')
+    return method(*args, owner_id=uid, **kw)
 
 
 def json_bytes(data):

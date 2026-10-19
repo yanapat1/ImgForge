@@ -1,8 +1,10 @@
-"""End-to-end smoke test of the page: the real app.py on a tiny generated dataset, driven by headless Chromium.
-Opens the session, waits for the plot, scans in Curation and expects the seeded train/val leak. Fails on any page
+"""End-to-end smoke test of the page: the real app.py on a tiny generated dataset (and a fresh PostgreSQL database),
+driven by headless Chromium signed in as the first admin. Opens the session, waits for the plot, scans in Curation and expects the seeded train/val leak. Fails on any page
 error or console error. Skips without playwright (+ `playwright install chromium`)."""
 
+import http.cookiejar
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -12,11 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_jpeg
+from conftest import TEST_SECRET_KEY, make_jpeg
 
 sync_api = pytest.importorskip('playwright.sync_api')
 
 HERE = Path(__file__).resolve().parents[1]
+ADMIN = ('admin', 'smoke-test-password-1')
+_JAR = http.cookiejar.CookieJar()                 # the admin's session cookie, shared by urllib and the browser
+_HTTP = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_JAR))
+_HEADERS = {'Content-Type': 'application/json', 'X-Requested-With': 'dataviz'}
 
 
 def _free_port():
@@ -26,7 +32,13 @@ def _free_port():
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=5) as r:
+    with _HTTP.open(url, timeout=5) as r:
+        return json.loads(r.read())
+
+
+def _send(url, body, method='POST'):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method=method, headers=_HEADERS)
+    with _HTTP.open(req, timeout=10) as r:
         return json.loads(r.read())
 
 
@@ -50,29 +62,34 @@ def _make(tmp):
         'workers': {'enabled': False},
         'models': {'split_source': str(split)},
         'logging': {'http': False},
+        'storage': {'allowed_roots': [str(tmp)]},
     }))
     return ds, cfg
 
 
 @pytest.fixture
-def server(tmp_path):
+def server(pg, tmp_path):
     ds, cfg = _make(tmp_path)
     port = _free_port()
+    env = {**os.environ, 'DATABASE_URL': pg, 'DATAVIZ_SECRET_KEY': TEST_SECRET_KEY,
+           'DATAVIZ_ADMIN_USERNAME': ADMIN[0], 'DATAVIZ_ADMIN_PASSWORD': ADMIN[1]}
     proc = subprocess.Popen([sys.executable, str(HERE / 'app.py'), '--config', str(cfg), '--dataset', str(ds),
                              '--host', '127.0.0.1', '--port', str(port)],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     base = f'http://127.0.0.1:{port}'
     try:
         for _ in range(120):
             if proc.poll() is not None:
                 pytest.fail(f'app.py exited:\n{proc.stdout.read()[-3000:]}')
             try:
-                _get(f'{base}/api/status')
+                _get(f'{base}/api/auth/config')       # public: answers before anyone signs in
                 break
             except OSError:
                 time.sleep(0.5)
         else:
             pytest.fail('app.py did not answer in 60 s')
+        _JAR.clear()
+        _send(f'{base}/api/auth/login', {'login': ADMIN[0], 'password': ADMIN[1]})
         yield base
     finally:
         proc.terminate()
@@ -82,9 +99,27 @@ def server(tmp_path):
             proc.kill()
 
 
+class _SignedIn:
+    """A browser whose every context carries the admin's session cookie."""
+
+    def __init__(self, browser):
+        self.browser = browser
+
+    def new_context(self, **kw):
+        ctx = self.browser.new_context(**kw)
+        ctx.add_cookies([{'name': c.name, 'value': c.value, 'domain': c.domain, 'path': c.path} for c in _JAR])
+        return ctx
+
+    def new_page(self, **kw):
+        return self.new_context(**kw).new_page()
+
+    def close(self):
+        self.browser.close()
+
+
 def _browser(p):
     try:
-        return p.chromium.launch()
+        return _SignedIn(p.chromium.launch())
     except Exception as e:  # noqa: BLE001 - no browser downloaded, or its system libraries missing
         why = next((ln.strip() for ln in str(e).splitlines() if 'shared libraries' in ln), str(e).splitlines()[0])
         pytest.skip(f'chromium cannot start ({why}): `playwright install chromium` (+ `playwright install-deps`)')
@@ -182,9 +217,7 @@ def test_image_browser_viewer_copy_and_edit(server, tmp_path):
 
 
 def _post(url, body):
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    return _send(url, body)
 
 
 def test_label_page_import_and_model_activation(server, tmp_path):
@@ -256,10 +289,7 @@ def test_label_page_import_and_model_activation(server, tmp_path):
 
 
 def _put(url, body):
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method='PUT',
-                                 headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    return _send(url, body, 'PUT')
 
 
 def test_ai_assistant_appears_only_when_connected_and_streams(server):
@@ -397,5 +427,72 @@ def test_review_card_label_page_review_all_and_every_theme(server, tmp_path):
             time.sleep(0.1)
         assert state() == {'p0.jpg': 'bulk', 'p1.jpg': 'manual', 'p2.jpg': 'bulk', 'p3.jpg': ''}
         page.wait_for_function("document.querySelector('.label-card .lp-checklist').innerText.includes('Reviewed 1/1')", timeout=10000)
+        browser.close()
+    assert not errors, '\n'.join(errors)
+
+
+def test_accounts_signup_sharing_owner_card_and_viewer(server):
+    """A new user signs up in the page and sees none of the admin's private sessions; once the admin shares one with
+    them as Viewer, its card shows the owner's name + avatar and the member, the scope filter finds it under
+    "Shared with me" (not "Mine"), and the visualizer opens read-only (server refuses writes too)."""
+    sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new('RGB', (300, 200), (200, 40, 90)).save(buf, 'PNG')
+    boundary = 'smokeboundary'
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.png"\r\n'
+            f'Content-Type: image/png\r\n\r\n').encode() + buf.getvalue() + f'\r\n--{boundary}--\r\n'.encode()
+    req = urllib.request.Request(f'{server}/api/me/avatar', data=body, method='PUT',
+                                 headers={'Content-Type': f'multipart/form-data; boundary={boundary}',
+                                          'X-Requested-With': 'dataviz'})
+    with _HTTP.open(req, timeout=10) as r:
+        assert json.loads(r.read())['user']['avatar_ver'] == 1
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p).browser                       # NOT signed in: this is the new user's browser
+        page = browser.new_page(viewport={'width': 1300, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and not ('401' in m.text or '403' in m.text)
+                and errors.append(f'console: {m.text}'))
+        refused = []                                        # requests the page itself sends that the server refuses
+        page.on('response', lambda r: r.status == 403 and refused.append(f'{r.request.method} {r.url}'))
+        page.goto(f'{server}/')
+        page.wait_for_url('**/login?next=*')
+        page.click('#lg-tab-up')
+        page.fill('#lg-user', 'bob')
+        page.fill('#lg-name', 'Bob Viewer')
+        page.fill('#lg-email', 'bob@example.test')
+        page.fill('#lg-up input[autocomplete="new-password"] >> nth=0', 'bob-password-123')
+        pw2 = page.locator('#lg-up input[autocomplete="new-password"]')
+        if pw2.count() > 1:
+            pw2.nth(1).fill('bob-password-123')
+        page.click('#lg-up-go')
+        page.wait_for_url(lambda u: '/login' not in u, timeout=20000)
+        page.wait_for_selector('#home', timeout=20000)
+        page.wait_for_load_state('networkidle')
+        assert page.locator(f'.session-card[data-id="{sid}"]').count() == 0        # private: invisible to bob
+        bob = page.evaluate("fetch('api/auth/me').then(r => r.json())")['user']
+        _put(f'{server}/api/sessions/{sid}/sharing', {'visibility': 'private',
+                                                      'members': [{'user_id': bob['id'], 'role': 'viewer'}]})
+        page.reload()
+        card = page.locator(f'.session-card[data-id="{sid}"]')
+        card.wait_for(timeout=20000)
+        assert card.get_attribute('data-role') == 'viewer'
+        assert 'Admin' in card.locator('.owner-chip').inner_text()
+        assert card.locator('.owner-chip img').count() == 1                     # the uploaded avatar
+        page.click('#home-scope [data-scope="mine"]')
+        page.wait_for_function(f'!document.querySelector(\'.session-card[data-id="{sid}"]\')', timeout=10000)
+        page.click('#home-scope [data-scope="shared"]')
+        page.wait_for_selector(f'.session-card[data-id="{sid}"]', timeout=10000)
+        page.goto(f'{server}/s/{sid}/')
+        page.wait_for_function("document.documentElement.dataset.role === 'viewer'", timeout=30000)
+        st = page.evaluate("fetch('api/status').then(r => r.json())")
+        assert st['my_role'] == 'viewer'
+        assert not refused, refused                         # the viewer's page never tries what it may not do
+        code = page.evaluate("fetch('api/tags', {method: 'POST', headers: {'Content-Type': 'application/json', "
+                             "'X-Requested-With': 'dataviz'}, body: JSON.stringify({tag: 'x', ids: [0]})})"
+                             ".then(r => r.status)")
+        assert code == 403
         browser.close()
     assert not errors, '\n'.join(errors)
