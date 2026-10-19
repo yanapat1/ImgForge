@@ -11,14 +11,15 @@ from collections import OrderedDict
 
 import numpy as np
 from PIL import Image, ImageDraw
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
 
 from ...data import sources
 from ...data.curation import parse_label
 
+from ...auth import deps
 from ...ml import analysis
-from ..deps import guards, _r
+from ..deps import guards, owned, _r
 from ..models import IdsRequest, DistancesRequest, TagRequest, TextSearchRequest
 
 
@@ -80,7 +81,7 @@ def image_boxes_px(state, name, w, h):
 
 
 def router(state, ctx):
-    r = APIRouter()
+    r = APIRouter(dependencies=[Depends(deps.require_bound('viewer'))])     # every route: the open session
     g = guards(state)
     need_index, sample_or_404, feature_or_400, scores_or_409 = g.need_index, g.sample_or_404, g.feature_or_400, g.scores_or_409
 
@@ -110,7 +111,7 @@ def router(state, ctx):
         m = None
         if model and ctx.models is not None:
             try:
-                m = ctx.models.model(model)
+                m = owned(ctx.models.model, model)
             except KeyError:
                 raise HTTPException(404, f'no model {model!r}')
         ckey = (state.tag, sid, max_w, all_boxes, model, round(conf, 3) if model else None)
@@ -318,23 +319,14 @@ def router(state, ctx):
     def get_tags():
         return state.load_tags()
 
-    @r.post('/api/tags')
+    @r.post('/api/tags', dependencies=[Depends(deps.require_bound('labeler'))])
     def set_tags(req: TagRequest):
         tag = req.tag.strip()
         if not tag:
             raise HTTPException(400, 'empty tag')
         for sid in req.ids:
             sample_or_404(sid)
-        with state.tags_lock:
-            tags = state.load_tags()
-            cur = set(tags.get(tag, []))
-            cur = cur - set(req.ids) if req.remove else cur | set(req.ids)
-            if cur:
-                tags[tag] = sorted(cur)
-            else:
-                tags.pop(tag, None)
-            state.save_tags(tags)
-        return tags
+        return state.update_tag(tag, req.ids, req.remove)
 
     # ------------------------------------------------------------ distances between picked boxes
     @r.post('/api/distances')

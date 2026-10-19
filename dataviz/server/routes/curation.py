@@ -20,29 +20,46 @@ The image editor (viewer in the Explore view) goes through the same backup / und
     GET  /api/edits/status         {pending_new, moved, images}: what a re-index would place in the plot
 
 Every handler is a plain `def`: FastAPI runs it on its thread pool, the event loop never waits on disk.
+Viewers read; fix / undo / ignore / edits need labeler. The ignore list is shared by the session
+(State.update_ignored). Per-State caches (scans, thumbnails, image name sets) are kept for every loaded session,
+bounded, and dropped when the session is unloaded (Ctx.close_hooks).
 """
 
 import threading
 from collections import OrderedDict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
+from ...auth import deps
 from ...core import config as vconfig
 from ...data import curation as cur
 from ...data.sources import Conflict
 from ...models.splits import load_splits
-from ..deps import guards
+from ..deps import guards, owned
 
 IGNORE_KEY = 'curation_ignored'
 
 
 def router(state, ctx):
-    r = APIRouter()
+    r = APIRouter(dependencies=[Depends(deps.require_bound('viewer'))])     # every route: the open session
+    labeler = [Depends(deps.require_bound('labeler'))]
     need_index = guards(state).need_index
-    stores = {}                     # State.tag -> Curation (only the open session's is kept)
+    stores = OrderedDict()          # State.tag -> Curation, one per loaded session
     lock = threading.Lock()
-    thumbs = OrderedDict()
+    thumbs = OrderedDict()          # (tag, name, max_w) -> jpeg bytes
+    image_sets = OrderedDict()      # tag -> set of image names
+
+    def keep():                     # a few more than the loaded sessions: an evicted one may come back
+        return ctx.max_loaded + 2
+
+    def forget(tag):
+        with lock:
+            stores.pop(tag, None)
+            image_sets.pop(tag, None)
+            for k in [k for k in thumbs if k[0] == tag]:
+                del thumbs[k]
+    ctx.close_hooks.append(forget)
 
     def scanned(st):
         c = stores.get(st.tag)
@@ -55,15 +72,16 @@ def router(state, ctx):
         with lock:
             c = stores.get(st.tag)
             if c is None:
-                stores.clear()
-                thumbs.clear()
                 c = stores[st.tag] = cur.Curation(st, (st.cfg or {}).get('curation'))
+                while len(stores) > keep():
+                    stores.popitem(last=False)
+            stores.move_to_end(st.tag)
         if not c.ready and not c.scanning:
             c.load_cached()
         return c
 
     def ignored_ids():
-        return state.load_settings().get(IGNORE_KEY, [])
+        return state.ignored_ids()
 
     def summary_payload(c):
         return {'ready': c.ready, 'scanning': c.scanning, 'scanned_at': c.scanned_at, 'scan_s': c.scan_s,
@@ -93,7 +111,7 @@ def router(state, ctx):
         mid = body.get('model')
         if mid and ctx.models is not None and ctx.model_service is not None:
             try:
-                model = ctx.models.model(mid)
+                model = owned(ctx.models.model, mid)
             except KeyError:
                 raise HTTPException(404, f'no model {mid!r}')
         st = ctx.current()
@@ -110,7 +128,7 @@ def router(state, ctx):
             res = c.scan(job.progress, feature=body.get('feature'), model=raw, splits=split_map(st))
             return {'n': sum(v['n'] for v in res.values())}
 
-        job = st.jobs.submit(f'curation:{st.tag}', f'Curation scan · {st.source.name}', run, lane='io')
+        job = st.submit(f'curation:{st.tag}', f'Curation scan · {st.source.name}', run, lane='io')
         return {'ready': False, 'job_id': job.id}
 
     @r.get('/api/curation/summary')
@@ -136,7 +154,7 @@ def router(state, ctx):
             return {'images': [], 'boxes': []}
         return c.ids_for([t for t in types.split(',') if t], ignored_ids())
 
-    @r.post('/api/curation/fix')
+    @r.post('/api/curation/fix', dependencies=labeler)
     def fix(body: dict):
         c = store()
         if not c.ready:
@@ -164,7 +182,7 @@ def router(state, ctx):
             raise HTTPException(400, str(e))
         return {**res, 'summary': c.summary(ignored_ids()), 'n_fixes': c.n_fixes()}
 
-    @r.post('/api/curation/undo')
+    @r.post('/api/curation/undo', dependencies=labeler)
     def undo(body: dict):
         c = store()
         try:
@@ -177,23 +195,11 @@ def router(state, ctx):
             raise HTTPException(400, f'cannot undo: {e}')
         return {**res, 'summary': c.summary(ignored_ids()) if c.ready else {}, 'n_fixes': c.n_fixes()}
 
-    @r.post('/api/curation/ignore')
+    @r.post('/api/curation/ignore', dependencies=labeler)
     def ignore(body: dict):
         need_index()
         ids_ = [str(i) for i in body.get('ids') or []]
-        st = ctx.current()
-        with st.tags_lock:                     # settings are read-modify-written: one writer at a time
-            settings = st.load_settings()
-            cur_ids = list(dict.fromkeys(settings.get(IGNORE_KEY, [])))
-            if body.get('ignore', True):
-                have = set(cur_ids)
-                cur_ids += [i for i in ids_ if i not in have]
-            else:
-                drop = set(ids_)
-                cur_ids = [i for i in cur_ids if i not in drop]
-            settings[IGNORE_KEY] = cur_ids
-            st.save_settings(settings)
-        return {'ignored': cur_ids}
+        return {'ignored': ctx.current().update_ignored(ids_, bool(body.get('ignore', True)))}
 
     @r.get('/api/curation/patch')
     def patch():
@@ -252,7 +258,7 @@ def router(state, ctx):
             raise HTTPException(404, f'no image {name!r}')
         return boxes_payload(c, st, name)
 
-    @r.post('/api/edits')
+    @r.post('/api/edits', dependencies=labeler)
     def edits(body: dict):
         c = store()
         st = ctx.current()
@@ -287,13 +293,15 @@ def router(state, ctx):
     def edits_status():
         return store().edit_status()
 
-    image_sets = {}
-
     def set_of_images(st):
-        s = image_sets.get(st.tag)
+        with lock:
+            s = image_sets.get(st.tag)
         if s is None:
-            image_sets.clear()
-            s = image_sets[st.tag] = set(st.source.list_images())
+            s = set(st.source.list_images())
+            with lock:
+                image_sets[st.tag] = s
+                while len(image_sets) > keep():
+                    image_sets.popitem(last=False)
         return s
 
     return r

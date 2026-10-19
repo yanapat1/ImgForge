@@ -573,3 +573,72 @@ def is_cached(features_dir, key, fingerprint, n):
         return False
     m = json.loads(meta.read_text())
     return m.get('fingerprint') == fingerprint and m.get('n') == n
+
+
+# ------------------------------------------------------------ pgvector copy (ml/vectors.py)
+# The .npy above stays the fast cache; PostgreSQL keeps the durable copy so a lost / pruned workspace folder
+# is rebuilt without the GPU. Every call is best effort: no database, pgvector missing, a broken connection
+# only costs a warning, never the feature job.
+_backfilling = set()
+_backfill_lock = threading.Lock()
+
+
+def _vectors_on(cfg):
+    if not ((cfg or {}).get('vectors') or {}).get('enabled', True):
+        return False
+    try:
+        from .. import db
+        db.engine()
+    except RuntimeError:                               # no database configured (scripts, the file-only tests)
+        return False
+    return True
+
+
+def vectors_store(fingerprint, key, emb, cfg):
+    """Save a freshly computed feature matrix to pgvector."""
+    if not _vectors_on(cfg) or getattr(emb, 'ndim', 0) != 2 or not emb.shape[1]:
+        return
+    try:
+        from . import vectors
+        vectors.save(fingerprint, key, np.asarray(emb), hnsw_min_rows=int((cfg.get('vectors') or {}).get('hnsw_min_rows', 50_000)))
+    except Exception as e:  # noqa: BLE001 - the .npy is written; the database copy is a backup
+        lg.warning(f'{key}: could not store the vectors in PostgreSQL ({type(e).__name__}: {e})')
+
+
+def vectors_restore(features_dir, key, fingerprint, n, cfg):
+    """The .npy is missing: rebuild it from pgvector (returns the memmap) instead of recomputing; None if not stored."""
+    if not _vectors_on(cfg):
+        return None
+    try:
+        from . import vectors
+        if not vectors.exists(fingerprint, key):
+            return None
+        X = vectors.load(fingerprint, key)
+    except Exception as e:  # noqa: BLE001
+        lg.warning(f'{key}: could not read the vectors from PostgreSQL ({type(e).__name__}: {e})')
+        return None
+    if X is None or len(X) != n:
+        return None
+    save_cached(features_dir, key, fingerprint, X)
+    lg.info(f'{key}: {n:,} vectors restored from PostgreSQL')
+    return load_cached(features_dir, key, fingerprint, n)
+
+
+def vectors_backfill(fingerprint, key, emb, cfg):
+    """The .npy exists but PostgreSQL has no copy (computed before it was there): store it in the background."""
+    if not _vectors_on(cfg) or getattr(emb, 'ndim', 0) != 2 or not emb.shape[1]:
+        return
+    k = (fingerprint, key)
+    with _backfill_lock:
+        if k in _backfilling:
+            return
+        _backfilling.add(k)
+
+    def run():
+        try:
+            from . import vectors
+            if not vectors.exists(fingerprint, key):
+                vectors_store(fingerprint, key, emb, cfg)
+        except Exception as e:  # noqa: BLE001
+            lg.debug(f'{key}: vectors backfill skipped ({e})')
+    threading.Thread(target=run, daemon=True, name=f'vectors-{key}').start()

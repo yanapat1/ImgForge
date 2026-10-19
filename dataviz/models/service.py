@@ -45,6 +45,14 @@ class ModelService:
                 self._splits[state.tag] = load_splits(state.dataset_dir, vconfig.resolve(src) if src else None)
             return self._splits[state.tag]
 
+    def drop_state(self, tag):
+        """A State was unloaded (server/app.py Ctx.close_state): forget what is kept per its tag."""
+        with self._lock:
+            self._splits.pop(tag, None)
+            for cache in (self._preds, self._ap):
+                for k in [k for k in cache if k[0] == tag]:
+                    del cache[k]
+
     def is_predicted(self, state, m):
         if not state.ready or state.cache_dir is None:
             return False

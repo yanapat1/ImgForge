@@ -4,6 +4,12 @@ State: everything the server knows about the dataset it is serving right now.
 The dataset index plus lazily computed feature spaces, k-NN scores, projections and group bubbles,
 each cached in memory (small LRUs) and in the workspace folder on disk. Slow work is queued on the
 JobManager; CPU-heavy pieces run in the worker processes (core.workers).
+
+One State per loaded visualizer session (server/app.py Ctx.states, shared by every user who opens it). What
+belongs to a person or to the session lives in PostgreSQL when there is a database and a session id: the UI
+settings + filter per user (app.user_session_prefs), the curation ignore list per session (app.dataset_state),
+box tags per dataset version (app.box_tags). Without one (scripts, the file-only tests) the old JSON files in the
+workspace folder are used.
 """
 
 import os
@@ -135,13 +141,38 @@ class State:
     def start(self, precompute=(), auto_compute=False):
         """Queue the index build; with auto_compute also the one startup projection; precomputed feature spaces always."""
         # the io lane: an S3 sync / listing never waits behind a long UMAP of the previous dataset
-        self.index_job = self.jobs.submit(f'index:{self.tag}', f'Open dataset · {self.source.name}', self._index_job,
-                                          lane='io')
+        self.index_job = self.submit(f'index:{self.tag}', f'Open dataset · {self.source.name}', self._index_job,
+                                     lane='io')
         if auto_compute:
             self.request_projection(self.default_feature, self.startup_method, {}, None)
         for key in precompute:             # an explicit --precompute is a request, so it runs either way
             if key in self.registry:
                 self.request_features(key)
+
+    def submit(self, key, label, fn, **kw):
+        """JobManager.submit, the job tied to this session (its owner: the user of the request, when there is one)."""
+        return self.jobs.submit(key, label, fn, session_id=kw.pop('session_id', None) or self.dataset_id, **kw)
+
+    def busy(self):
+        """True while a job of this State is queued or running (it must not be unloaded)."""
+        return self.jobs.busy(self.tag)
+
+    def close(self):
+        """Unloaded from the server (LRU eviction, session deleted / re-indexed): free what outlives a reference —
+        the S3 source's thread pool; memory caches go with the object. Ctx.close_state also drops the caches
+        other modules keep per State.tag (models/service.py splits, curation stores)."""
+        for src in (self.source, getattr(self.source, 'local', None)):
+            pool = getattr(src, 'pool', None)
+            if pool is not None:
+                try:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                except Exception:  # noqa: BLE001 - closing must never fail
+                    pass
+        self.features.clear()
+        self.scores.clear()
+        self.projections.clear()
+        self.groups_cache.clear()
+        self.payloads.clear()
 
     def embedding_cached(self):
         """True when the startup view (default params, all classes) and its k-NN scores are already on disk."""
@@ -255,6 +286,10 @@ class State:
             emb = None
             if not (self.rebuild and key not in self._rebuilt):
                 emb = feats.load_cached(self.features_dir, key, self.fingerprint, len(self.samples))
+                if emb is not None:
+                    feats.vectors_backfill(self.fingerprint, key, emb, self.cfg)     # computed before PostgreSQL
+                else:
+                    emb = feats.vectors_restore(self.features_dir, key, self.fingerprint, len(self.samples), self.cfg)
                 if emb is None:
                     emb = self._legacy_embeddings(key)
             if emb is None:
@@ -265,6 +300,7 @@ class State:
                 vlog.get_logger('features').info(f'{key}: {emb.shape[0]:,} × {emb.shape[1] if emb.ndim == 2 else 0} '
                                                  f'in {time.time() - t0:.1f}s')
                 feats.save_cached(self.features_dir, key, self.fingerprint, emb)
+                feats.vectors_store(self.fingerprint, key, emb, self.cfg)
                 self._rebuilt.add(key)
             self.features[key] = emb
             return emb
@@ -285,7 +321,7 @@ class State:
 
     def request_features(self, key):
         spec = self.registry[key]
-        return self.jobs.submit(f'features:{self.tag}:{key}', f'Features · {spec.label}',
+        return self.submit(f'features:{self.tag}:{key}', f'Features · {spec.label}',
                                 lambda job: self.get_features(key, job).shape)
 
     # ------------------------------------------------------------ text search
@@ -314,7 +350,7 @@ class State:
 
     def request_text_search(self, key, query, k):
         spec = self.registry[key]
-        return self.jobs.submit(f'text:{self.tag}:{key}:{query}', f'Text search · {spec.label}',
+        return self.submit(f'text:{self.tag}:{key}:{query}', f'Text search · {spec.label}',
                                 lambda job: bool(self.text_search(key, query, k, job)))
 
     def _scores_file(self, key):
@@ -343,7 +379,7 @@ class State:
 
     def request_scores(self, key):
         spec = self.registry[key]
-        return self.jobs.submit(f'scores:{self.tag}:{key}', f'Scores · {spec.label}', lambda job: bool(self.get_scores(key, job)))
+        return self.submit(f'scores:{self.tag}:{key}', f'Scores · {spec.label}', lambda job: bool(self.get_scores(key, job)))
 
     def _projection_file(self, key):
         h = hashlib.sha1(f'{key}|{self.fingerprint}'.encode()).hexdigest()[:16]
@@ -439,7 +475,7 @@ class State:
             self._index_update(key, n=int(len(ids)), compute_s=round(time.time() - t0, 1), last_used=_now())
             return key
 
-        return None, key, self.jobs.submit(f'proj:{self.tag}:{key}', label, run)
+        return None, key, self.submit(f'proj:{self.tag}:{key}', label, run)
 
     def _groups_store(self, gkey, res):
         with self.groups_lock:
@@ -530,7 +566,8 @@ class State:
     def persist_dir(self):
         """Per saved dataset (<workspace root>/curation/<dataset id>/), not per index version like cache_dir:
         a curation fix changes the fingerprint, so after a re-index the workspace folder is a new one. Curation
-        backups, the ignore list and the filter / presets live here. Without a dataset id: the workspace folder."""
+        backups (and, without a database, the ignore list and the filter / presets) live here. Without a dataset
+        id: the workspace folder."""
         if self.workspace_root is not None and self.dataset_id:
             return self.workspace_root / 'curation' / re.sub(r'[^\w.-]', '_', str(self.dataset_id))
         return self.cache_dir
@@ -558,28 +595,161 @@ class State:
         tmp.write_text(json.dumps(data, indent=1))
         tmp.replace(path)
 
-    def load_settings(self):
-        """ui_settings.json of this index version, with the per-dataset keys (PERSIST_KEYS) from persist_dir on top
-        (a workspace folder from before they moved still provides them until the next save)."""
-        out = self._read_json(self.settings_path) if self.cache_dir is not None else {}
-        out.update(self._read_json(self._persist_settings_path))
+    def _db_session(self, user_id=None, need_user=True):
+        """The database is the store when there is one and this State is a saved session (and, for per-user rows,
+        a user): the session id, else None (the JSON files)."""
+        if not self.dataset_id or (need_user and not user_id) or not _db_on():
+            return None
+        return self.dataset_id
+
+    def load_settings(self, user_id=None):
+        """The page's settings: the UI (per user), the filter + presets (per user) and the curation ignore list (per
+        session). Files: ui_settings.json of this index version with the PERSIST_KEYS from persist_dir on top."""
+        sid = self._db_session(user_id)
+        if sid is None:
+            out = self._read_json(self.settings_path) if self.cache_dir is not None else {}
+            out.update(self._read_json(self._persist_settings_path))
+            return out
+        from sqlalchemy import text
+        from . import db
+        with db.connect() as c:
+            prefs = c.execute(text('SELECT data FROM app.user_session_prefs WHERE user_id = :u AND session_id = :s'),
+                              {'u': user_id, 's': sid}).scalar() or {}
+            shared = c.execute(text('SELECT data FROM app.dataset_state WHERE session_id = :s'), {'s': sid}).scalar() or {}
+        out = dict(prefs.get('ui') or {})
+        out.update({k: prefs[k] for k in ('filter', 'filter_presets') if k in prefs})
+        if 'curation_ignored' in shared:
+            out['curation_ignored'] = shared['curation_ignored']
         return out
 
-    def save_settings(self, settings):
-        pp = self._persist_settings_path
-        if pp is not None:
-            self._write_json(pp, {k: settings[k] for k in PERSIST_KEYS if k in settings})
-            settings = {k: v for k, v in settings.items() if k not in PERSIST_KEYS}
-        if self.cache_dir is not None:
-            self._write_json(self.settings_path, settings)
+    def save_settings(self, settings, user_id=None):
+        sid = self._db_session(user_id)
+        if sid is None:
+            pp = self._persist_settings_path
+            if pp is not None:
+                self._write_json(pp, {k: settings[k] for k in PERSIST_KEYS if k in settings})
+                settings = {k: v for k, v in settings.items() if k not in PERSIST_KEYS}
+            if self.cache_dir is not None:
+                self._write_json(self.settings_path, settings)
+            return
+        from sqlalchemy import text
+        from . import db
+        mine = {k: settings[k] for k in ('filter', 'filter_presets') if k in settings}
+        mine['ui'] = {k: v for k, v in settings.items() if k not in PERSIST_KEYS}
+        with db.begin() as c:
+            # the whole UI dict is replaced (the page sends all of it); other keys (label page position, ...) stay
+            c.execute(text("""INSERT INTO app.user_session_prefs(user_id, session_id, data)
+                              VALUES (:u, :s, CAST(:d AS jsonb))
+                              ON CONFLICT (user_id, session_id) DO UPDATE
+                              SET data = app.user_session_prefs.data || EXCLUDED.data, updated_at = now()"""),
+                      {'u': user_id, 's': sid, 'd': json.dumps(mine)})
+        # curation_ignored is shared by the session: changed only through update_ignored(), never overwritten here
+
+    def ignored_ids(self):
+        """Curation issues marked "ignore": shared by everyone with access to the session."""
+        sid = self._db_session(need_user=False)
+        if sid is None:
+            return self.load_settings().get('curation_ignored', [])
+        from sqlalchemy import text
+        from . import db
+        with db.connect() as c:
+            d = c.execute(text('SELECT data FROM app.dataset_state WHERE session_id = :s'), {'s': sid}).scalar() or {}
+        return list(d.get('curation_ignored') or [])
+
+    def update_ignored(self, ids, ignore=True):
+        """Add (ignore=True) or remove issue ids from the ignore list; returns the new list."""
+        def change(cur):
+            cur = list(dict.fromkeys(cur or []))
+            if ignore:
+                have = set(cur)
+                return cur + [i for i in ids if i not in have]
+            drop = set(ids)
+            return [i for i in cur if i not in drop]
+        sid = self._db_session(need_user=False)
+        if sid is None:
+            with self.tags_lock:                      # read-modify-write: one writer at a time
+                settings = self.load_settings()
+                settings['curation_ignored'] = out = change(settings.get('curation_ignored'))
+                self.save_settings(settings)
+            return out
+        from sqlalchemy import text
+        from . import db
+        with db.begin() as c:
+            c.execute(text("""INSERT INTO app.dataset_state(session_id) VALUES (:s) ON CONFLICT DO NOTHING"""), {'s': sid})
+            d = c.execute(text('SELECT data FROM app.dataset_state WHERE session_id = :s FOR UPDATE'),
+                          {'s': sid}).scalar() or {}
+            out = change(d.get('curation_ignored'))
+            c.execute(text("""UPDATE app.dataset_state SET data = data || jsonb_build_object('curation_ignored',
+                              CAST(:v AS jsonb)), updated_at = now() WHERE session_id = :s"""),
+                      {'s': sid, 'v': json.dumps(out)})
+        return out
 
     # ------------------------------------------------------------ tags
     @property
     def tags_path(self):
         return self.cache_dir / 'tags.json'
 
+    def _tags_db(self):
+        return bool(self.fingerprint) and _db_on()
+
     def load_tags(self):
-        return self._read_json(self.tags_path)
+        """{tag: [sample ids]} of this dataset version (app.box_tags, keyed by the fingerprint; else tags.json)."""
+        if not self._tags_db():
+            return self._read_json(self.tags_path)
+        from sqlalchemy import text
+        from . import db
+        with db.connect() as c:
+            rows = c.execute(text('SELECT tag, sample_ids FROM app.box_tags WHERE fingerprint = :f ORDER BY tag'),
+                             {'f': self.fingerprint}).all()
+        return {r.tag: list(r.sample_ids) for r in rows}
 
     def save_tags(self, tags):
-        self._write_json(self.tags_path, tags)
+        """Replace every tag of this dataset version with `tags`."""
+        if not self._tags_db():
+            return self._write_json(self.tags_path, tags)
+        from sqlalchemy import text
+        from . import db
+        with db.begin() as c:
+            c.execute(text('DELETE FROM app.box_tags WHERE fingerprint = :f'), {'f': self.fingerprint})
+            rows = [{'f': self.fingerprint, 't': t, 'ids': sorted(int(i) for i in ids)} for t, ids in tags.items() if ids]
+            if rows:
+                c.execute(text('INSERT INTO app.box_tags(fingerprint, tag, sample_ids) VALUES (:f, :t, :ids)'), rows)
+
+    def update_tag(self, tag, ids, remove=False):
+        """Add / remove sample ids to one tag atomically (an empty tag is dropped); returns all tags."""
+        if not self._tags_db():
+            with self.tags_lock:
+                tags = self.load_tags()
+                cur = set(tags.get(tag, []))
+                cur = cur - set(ids) if remove else cur | set(ids)
+                if cur:
+                    tags[tag] = sorted(cur)
+                else:
+                    tags.pop(tag, None)
+                self.save_tags(tags)
+            return tags
+        from sqlalchemy import text
+        from . import db
+        with db.begin() as c:
+            c.execute(text("""INSERT INTO app.box_tags(fingerprint, tag) VALUES (:f, :t) ON CONFLICT DO NOTHING"""),
+                      {'f': self.fingerprint, 't': tag})
+            cur = set(c.execute(text('SELECT sample_ids FROM app.box_tags WHERE fingerprint = :f AND tag = :t FOR UPDATE'),
+                                {'f': self.fingerprint, 't': tag}).scalar() or [])
+            cur = cur - set(ids) if remove else cur | set(ids)
+            if cur:
+                c.execute(text('UPDATE app.box_tags SET sample_ids = :ids WHERE fingerprint = :f AND tag = :t'),
+                          {'f': self.fingerprint, 't': tag, 'ids': sorted(int(i) for i in cur)})
+            else:
+                c.execute(text('DELETE FROM app.box_tags WHERE fingerprint = :f AND tag = :t'),
+                          {'f': self.fingerprint, 't': tag})
+        return self.load_tags()
+
+
+def _db_on():
+    """True when the server has a database (dataviz.db initialised)."""
+    try:
+        from . import db
+        db.engine()
+    except RuntimeError:
+        return False
+    return True

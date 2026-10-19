@@ -1,7 +1,9 @@
 """
-Command line: read the config (flags win over config.yaml), bind the port, start the worker pools and
-serve. The page opens on the Sessions home; no dataset is opened at startup unless --dataset (or
-config.yaml dataset.path) names one, which is then saved as a session and opened.
+Command line: read the config (flags win over config.yaml), bind the port, connect to PostgreSQL (migrate,
+secret key, default settings, the first admin, the one-time import of the old JSON / SQLite stores), start the
+worker pools and serve. The page opens on the Sessions home; sessions load on first use at /s/<id>/ (up to
+sessions.max_loaded at once). --dataset (or config.yaml dataset.path) saves that folder as a session of the
+first admin and loads it at start.
 """
 
 import sys
@@ -14,6 +16,7 @@ from .core import hardware
 from .core import logging as vlog
 from .core import workers as compute
 from .core.jobs import JobManager
+from . import db
 from .data import connections
 from .labeling.projects import ProjectRegistry
 from .llm.store import LLMStore
@@ -116,6 +119,7 @@ def main():
 
     # only after the port is ours: never touch (or migrate) a workspace another running instance is using
     ws_root = vconfig.resolve(cfg['dataset']['workspace_root'])
+    admin, admin_pw = start_database(cfg, ws_root)
     datasets = connections.Registry(ws_root)
 
     w = cfg['workers']
@@ -132,14 +136,13 @@ def main():
               labeling=ProjectRegistry(ws_root / 'labeling'), llm=LLMStore(ws_root))
 
     def open_dataset(ds, cache_dir=None, rebuild=False, refresh=False):
-        """Make `ds` (a saved dataset) the one served; indexing / syncing runs as a background job."""
+        """A new State for `ds` (a saved dataset); indexing / syncing runs as a background job. Ctx keeps it
+        loaded under the session id (Ctx.open_dataset / state_for)."""
         src = datasets.source(ds, cfg['s3'], ctx.labeling)
         if src.kind in ('local', 'labeling'):       # labeling: its session + task still exist and have boxes
             src.check()
         state = State(src, cache_dir, registry, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
                       pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh)
-        ctx.state = state
-        datasets.set_active(ds['id'])
         vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
                                          + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session'}
                                          .get(src.kind, ' · read in place') + '[/]')
@@ -154,15 +157,19 @@ def main():
     if dataset_dir is not None:
         ws = cfg['dataset']['workspace']
         try:
-            ds = datasets.find_local(dataset_dir) or datasets.upsert_dataset({'kind': 'local', 'path': str(dataset_dir)})
-            state = open_dataset(ds, cache_dir=vconfig.resolve(ws) if ws else None, rebuild=bool(cfg['dataset']['rebuild']))
+            ds = start_session(datasets, dataset_dir, admin)
+            state = ctx.open_dataset(ds, cache_dir=vconfig.resolve(ws) if ws else None,
+                                     rebuild=bool(cfg['dataset']['rebuild']))
         except (ValueError, KeyError) as e:
             sys.exit(str(e))
 
-    n_sessions = len(datasets.datasets())
-    vlog.banner('Dataset Visualizer', [
-        ('sessions', f'{n_sessions} saved' + (' · create one in the page' if not n_sessions else '')),
-        ('open', f'{state.source.name}  ({state.source.uri})' if state else 'none (pick a session in the page)'),
+    n_sessions = count_sessions()
+    rows = [('sessions', f'{n_sessions} saved' + (' · create one in the page' if not n_sessions else ''))]
+    if admin_pw:
+        rows.append(('admin', f'{admin["username"]} / {admin_pw}  (generated: shown once, change it in the page)'))
+    vlog.banner('Dataset Visualizer', rows + [
+        ('open', f'{state.source.name}  ({state.source.uri}) · /s/{ds["id"]}/' if state else
+                 'none (pick a session in the page)'),
         ('workspaces', ws_root),
         ('features', f'{len(registry)} offered · start: {cfg["startup"]["feature"]} / {cfg["startup"].get("method", "umap")}'),
         ('workers', 'process pools (heavy + fast)' if w['enabled'] else 'inline (debug)'),
@@ -173,3 +180,75 @@ def main():
         server.run(sockets=[sock])
     finally:
         pools.shutdown()
+
+
+def start_database(cfg, ws_root):
+    """Connect + migrate, the secret key, default settings, the first admin and the one-time legacy import.
+    -> (an admin user dict or None, the admin password when one was generated now)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    from .auth import bootstrap
+    from .db import crypto, legacy, migrate
+    dlog = vlog.get_logger('database')
+    url = str((cfg.get('database') or {}).get('url') or '').strip()
+    if not url or url.startswith('${'):
+        sys.exit('\nNo database configured: set DATABASE_URL (or database.url in the config) to a PostgreSQL URL,\n'
+                 '  e.g. postgresql://dataviz:secret@127.0.0.1:5432/dataviz  (docker compose up -d starts one)')
+    try:
+        db.init(url, pool_size=int((cfg.get('database') or {}).get('pool_size', 10)))
+        migrate.upgrade(log=dlog.info)
+    except (ValueError, SQLAlchemyError, OSError) as e:
+        where = db.normalize_url(url).split('@')[-1]          # never print the password
+        sys.exit(f'\nCannot use the database at {where}: {type(e).__name__}: {str(e).strip().splitlines()[0]}\n'
+                 f'Is PostgreSQL running and is DATABASE_URL right?')
+    try:
+        crypto.init(key_file=ws_root / 'secret.key', log=dlog.info)
+    except RuntimeError as e:
+        sys.exit(f'\n{e}')
+    bootstrap.ensure_defaults()
+    admin, password = bootstrap.ensure_first_admin(log=dlog.info)
+    if admin is None:
+        with db.connect() as c:
+            r = c.execute(text("""SELECT id, username FROM app.users WHERE is_admin AND is_active
+                                  ORDER BY created_at LIMIT 1""")).mappings().first()
+        admin = dict(r) if r else None
+    if admin is not None:
+        try:
+            legacy.import_legacy(ws_root, admin['id'], log=dlog.info)
+        except Exception as e:  # noqa: BLE001 - the server still starts; the import runs again next start
+            dlog.exception(f'importing the old files failed ({type(e).__name__}: {e}); it is retried at the next start')
+    return admin, password
+
+
+def start_session(datasets, dataset_dir, admin):
+    """--dataset: the first admin's saved local dataset reading `dataset_dir` (matched by folder: restarting with
+    the same flag never adds duplicates), created as their visualizer session when new -> the dataset dict."""
+    import inspect
+    from sqlalchemy import text
+    from .data import sessions
+    owner = admin['id'] if admin else None
+
+    def call(fn, *a):                                 # the per-user registry takes owner_id, the JSON one does not
+        return fn(*a, owner_id=owner) if 'owner_id' in inspect.signature(fn).parameters else fn(*a)
+    ds = call(datasets.find_local, dataset_dir) or call(datasets.upsert_dataset, {'kind': 'local', 'path': str(dataset_dir)})
+    if owner is None:
+        vlog.get_logger('sessions').warning('no admin account: --dataset is loaded but not saved as a session')
+        return ds
+    try:
+        with db.begin() as c:
+            if sessions.get(ds['id'], c) is None:       # a registry that does not write app.sessions itself
+                sessions.create('viz', owner, ds['name'], sid=ds['id'], conn=c, auto_name=True)
+                c.execute(text("""INSERT INTO app.viz_sessions(session_id, source_kind, path)
+                                  VALUES (:s, 'local', :p) ON CONFLICT DO NOTHING"""), {'s': ds['id'], 'p': ds['path']})
+    except Exception as e:  # noqa: BLE001 - the dataset is still served (by the admin's URL)
+        vlog.get_logger('sessions').warning(f'--dataset: could not save the session ({type(e).__name__}: {e})')
+    return ds
+
+
+def count_sessions():
+    from sqlalchemy import text
+    try:
+        with db.connect() as c:
+            return c.execute(text("SELECT count(*) FROM app.sessions WHERE kind = 'viz'")).scalar() or 0
+    except Exception:  # noqa: BLE001
+        return 0

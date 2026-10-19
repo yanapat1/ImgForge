@@ -8,8 +8,8 @@ projections, and serving the page + JSON API. The `app.py` launcher one folder u
 
 | File | What it does |
 |---|---|
-| `cli.py` | Command line → config (flags win over `config.yaml`) → bind the port **before** touching any workspace → worker pools → pick the start dataset (`--dataset`, else the one open last time, else config's) → banner → uvicorn. Also defines `open_dataset()`, which the Settings "Open" button calls through `Ctx`. |
-| `state.py` | `State`: the dataset being served. Index, feature matrices, k-NN scores, projections and groups, each with an in-memory LRU and a copy in the workspace folder. `request_*` methods return the cached value or queue a job. |
+| `cli.py` | Command line → config (flags win over `config.yaml`) → bind the port **before** touching any workspace → PostgreSQL (`start_database`: `db.init`, migrate, `secret.key`, default settings, the first admin — its generated password shown once in the banner — and the one-time legacy import) → worker pools → `--dataset` (saved as a session of the first admin and loaded) → banner → uvicorn. Also defines `open_dataset()`, the State builder `Ctx` loads sessions with. |
+| `state.py` | `State`: one loaded visualizer session. Index, feature matrices (also kept in pgvector), k-NN scores, projections and groups, each with an in-memory LRU and a copy in the workspace folder. `request_*` methods return the cached value or queue a job. UI settings / filter per user, the curation ignore list per session and box tags per dataset version are database rows (JSON files without a database). `close()` frees it when unloaded. |
 | `workspace.py` | `resolve_workspace()` names the cache folder `<dataset>__<fingerprint[:8]>` (and migrates the old un-suffixed folder); `list_workspaces()` lists other versions of the same dataset. |
 | `paths.py` | `PKG_DIR`, `APP_DIR`, `PROJECT_ROOT`, `STATIC_DIR`, `DEFAULT_CONFIG`, `DATA_PREP_DIR`. The only file that knows where the package sits. |
 | `__main__.py` | `python -m dataviz`. |
@@ -30,11 +30,13 @@ Nothing imports `server` or `cli` back.
 - **Relative imports inside the package** (`from ..core import logging as vlog`). No `sys.path` hacks
   except the one in the launcher. `vlog` is the import alias for `core/logging.py`, so it never
   shadows the standard library `logging`.
-- **State lives in exactly one object** (`State`). Routes never cache dataset data themselves;
-  anything a route remembers (e.g. the full-image LRU) is keyed by `state.tag`, so a dataset switch
-  can never serve the previous dataset's bytes.
-- **Slow work is a job**: `state.jobs.submit(key, label, fn)` returns at once; the page polls
-  `/api/jobs/{id}`. Job keys include `state.tag` so a new dataset never attaches to an old job.
+- **State lives in exactly one object per loaded session** (`State`; several are loaded at once, see
+  `server/README.md`). Routes never cache dataset data themselves; anything a route remembers (e.g. the
+  full-image LRU) is keyed by `state.tag`, so one session can never serve another's bytes, and is
+  bounded / dropped on unload (`Ctx.close_hooks`).
+- **Slow work is a job**: `state.submit(key, label, fn)` returns at once; the page polls
+  `/api/jobs/{id}`. Job keys include `state.tag` so a new dataset never attaches to an old job; the job
+  records who started it and its session (users only see / cancel jobs of sessions they can open).
 - **Disk caches are content-addressed**: workspace folder = dataset fingerprint; feature / score
   files carry the fingerprint and `n`; projection files are `sha1(key|fingerprint)`. Changing the
   dataset changes the key — nothing is ever invalidated by hand.
@@ -45,7 +47,8 @@ Nothing imports `server` or `cli` back.
 | Technique | Where | Why |
 |---|---|---|
 | Lazy workspace resolution | `State._index_job` | For S3 the fingerprint needs a bucket listing (and in cache mode a sync); doing it in the job keeps startup instant and shows progress. |
-| Hot-swappable state | `server/app.py` `Ctx` + `_StateProxy` | "Open dataset" replaces `ctx.state`; live routes read through the proxy, no restart. |
+| Many sessions at once | `server/app.py` `Ctx.states` + `_StateProxy` | An LRU of loaded States (`sessions.max_loaded`); `/s/<id>/` binds each request to its own, routes read it through the proxy. |
+| Feature vectors in PostgreSQL | `ml/features.py` `vectors_*` | Every computed matrix is also saved to pgvector; a missing `.npy` is rebuilt from it instead of re-running the GPU model; old `.npy` files are backfilled in the background. |
 | Three-level cache per result | `State.get_projection` / `get_scores` / `get_features` | memory LRU (48 projections) → workspace `.npz/.npy` → compute as a job. |
 | Pre-serialized JSON | `State.payload()` | Big arrays are `orjson`-dumped once (numpy-native) and served as bytes from a 64-entry LRU; repeat requests cost a dict lookup. |
 | Per-key locks | `State._feature_locks` | Two requests for the same feature space compute it once; different spaces don't block each other. |
@@ -53,6 +56,10 @@ Nothing imports `server` or `cli` back.
 | Port bound before workspace touched | `cli.py` | A second instance fails fast instead of migrating a workspace the first one is using. |
 
 ## Gotchas
+
+- contextvars (the user, the bound session) follow a request into FastAPI's thread pool and
+  `asyncio.to_thread`, **not** into `loop.run_in_executor` or job threads: resolve what a job needs in the
+  handler.
 
 - `State.cache_dir` is `None` until the index job has run (S3 datasets). Code that needs it after
   startup should go through `need_index()` / `state.ready`.

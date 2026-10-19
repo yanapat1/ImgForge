@@ -4,8 +4,9 @@ answered with {ready: false, job_id} until done), density groups (bubbles), and 
 """
 
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from ...auth import deps
 from ...ml import analysis
 from ...state import normalize_params, projection_key
 from ..deps import guards, json_bytes
@@ -13,7 +14,7 @@ from ..models import ProjectionRequest, GroupsRequest
 
 
 def router(state, ctx):
-    r = APIRouter()
+    r = APIRouter(dependencies=[Depends(deps.require_bound('viewer'))])     # every route: the open session
     g = guards(state)
     need_index, feature_or_400, scores_or_409 = g.need_index, g.feature_or_400, g.scores_or_409
 

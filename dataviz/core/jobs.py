@@ -10,12 +10,19 @@ a long label-all never blocks an export or a feature job.
 Cancel: JobManager.cancel(jid) sets job.cancelled (a threading.Event). A queued job
 never starts; a running one sees it only if its fn checks job.cancelled (between
 batches) and returns early, keeping what it already wrote.
+
+Ownership: every job records who queued it (owner = user id) and the visualizer session it belongs to
+(session_id). Both default to the request's context (auth/context.py) when the caller does not pass them, so the
+page lists only jobs of sessions the user can open (server/routes/system.py) and only the owner of the job or of
+its session may cancel it. A finished job is written to app.jobs_log (best effort, never raises).
 """
 
 import time
 import queue
 import threading
 import itertools
+import uuid
+from datetime import datetime, timezone
 
 from rich.progress import (Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn,
                            TimeElapsedColumn, TimeRemainingColumn)
@@ -51,8 +58,10 @@ def _progress_release():
 
 
 class Job:
-    def __init__(self, jid, key, label, fn, lane='main', public_result=False):
+    def __init__(self, jid, key, label, fn, lane='main', public_result=False, owner=None, session_id=None):
         self.id = jid
+        self.owner = owner              # user id of who queued it (None: the server itself)
+        self.session_id = session_id    # the visualizer session it works on (None: not tied to one)
         self.key = key
         self.label = label
         self.fn = fn
@@ -124,7 +133,8 @@ class Job:
             'pct': round(100 * self.done / self.total, 1) if self.total else None,
             'eta': round(eta, 1) if eta is not None else None,
             'elapsed': round((self.finished or time.time()) - self.started, 1) if self.started else 0,
-            'error': self.error, 'cancelled': self.cancelled.is_set(),
+            'error': self.error, 'cancelled': self.cancelled.is_set(), 'owner': self.owner,
+            'session_id': self.session_id,
             **({'result': self.result} if self.public_result and self.status == 'done' else {}),
         }
 
@@ -143,13 +153,21 @@ class JobManager:
         for lane, q in self._queues.items():
             threading.Thread(target=self._worker, args=(q,), daemon=True, name=f'dataviz-jobs-{lane}').start()
 
-    def submit(self, key, label, fn, lane='main', public_result=False):
+    def submit(self, key, label, fn, lane='main', public_result=False, owner=None, session_id=None):
         """Queue fn(job) -> result. Returns the existing job if `key` is already queued/running.
-        public_result: GET /api/jobs/{id} carries the (small, JSON) result once done."""
+        public_result: GET /api/jobs/{id} carries the (small, JSON) result once done.
+        owner / session_id: default to the signed-in user and the /s/<id>/ session of the current request."""
+        if owner is None or session_id is None:
+            from ..auth import context
+            if owner is None:
+                owner = context.user_id()
+            if session_id is None:
+                b = context.bound()
+                session_id = b.session_id if b is not None and b.session_id else None
         with self._lock:
             if key in self._active and not self._active[key].cancelled.is_set():
                 return self._active[key]
-            job = Job(next(self._ids), key, label, fn, lane, public_result)
+            job = Job(next(self._ids), key, label, fn, lane, public_result, owner, session_id)
             self._jobs[job.id] = job
             self._active[key] = job
             old = sorted(j for j, x in self._jobs.items() if x.status in ('done', 'error'))
@@ -171,14 +189,35 @@ class JobManager:
         _log.info(f'[yellow]■ cancel[/]  {vlog.esc(job.label)}')
         return True
 
-    def list(self):
+    def list(self, visible=None):
+        """Recent jobs as dicts; visible(job) -> bool keeps only the ones a user may see."""
         with self._lock:
             jobs = sorted(self._jobs.values(), key=lambda j: j.id)
-        return [j.to_dict() for j in jobs]
+        return [j.to_dict() for j in jobs if visible is None or visible(j)]
 
-    def active(self):
+    def active(self, visible=None):
         with self._lock:
-            return [j.to_dict() for j in sorted(self._active.values(), key=lambda j: j.id)]
+            jobs = sorted(self._active.values(), key=lambda j: j.id)
+        return [j.to_dict() for j in jobs if visible is None or visible(j)]
+
+    def busy(self, tag):
+        """True while a queued / running job's key mentions `tag` (a State's tag): that State must stay loaded."""
+        with self._lock:
+            return any(tag in k for k in self._active)
+
+    def _log_finished(self, job):
+        """One app.jobs_log row (best effort: no database, a broken connection, ... never fail the job)."""
+        try:
+            from .. import db
+            from ..db import schema
+            ts = lambda t: datetime.fromtimestamp(t, timezone.utc) if t else None     # noqa: E731
+            with db.begin() as c:
+                c.execute(schema.jobs_log.insert().values(
+                    id=uuid.uuid4().hex, user_id=job.owner, session_id=job.session_id, label=str(job.label)[:300],
+                    status='cancelled' if job.cancelled.is_set() and job.status == 'done' else job.status,
+                    started_at=ts(job.started), ended_at=ts(job.finished), error=job.error))
+        except Exception as e:  # noqa: BLE001 - the log is a nicety
+            _log.debug(f'jobs_log: {vlog.esc(e)}')
 
     def _worker(self, q):
         while True:
@@ -190,6 +229,7 @@ class JobManager:
                     if self._active.get(job.key) is job:     # a cancelled job may have been replaced
                         self._active.pop(job.key)
                 job._event.set()
+                self._log_finished(job)
                 continue
             job.status = 'running'
             job.started = time.time()
@@ -220,3 +260,4 @@ class JobManager:
                     if self._active.get(job.key) is job:
                         self._active.pop(job.key)
                 job._event.set()
+                self._log_finished(job)

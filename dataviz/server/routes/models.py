@@ -2,6 +2,10 @@
 Settings › Models and the Model tab: saved models (local files or HTTP APIs), uploads, a one-image test,
 the prediction job over the open dataset, and the evaluation against its labels.
 Model loading / inference runs off the event loop (run_io) or as a job with progress.
+
+Saved models belong to a user (deps.owned passes owner_id to the registry when it is per-user). Managing them
+needs only a sign-in; the routes that read the open dataset need viewer on its /s/<id>/ session, running a
+prediction over it labeler.
 """
 
 import io
@@ -11,14 +15,15 @@ from pathlib import Path
 
 import orjson
 from PIL import Image, ImageDraw
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response, PlainTextResponse
 
+from ...auth import deps
 from ...core import logging as vlog
 from ...data import sources
 from ...models import insights, registry as mreg, schema
 from ...paths import PROJECT_ROOT
-from ..deps import guards, json_bytes
+from ..deps import guards, json_bytes, owned
 from .samples import draw_preds
 
 log = vlog.get_logger('models')
@@ -29,9 +34,9 @@ def eval_overview(ctx, split='val', conf_mode='best', conf=0.25, iou=None, focus
     dataset compared, one (focus) model explained with the dataset, and the findings. Blocking."""
     reg, svc = ctx.models, ctx.model_service
     st = ctx.current()
-    lb = insights.leaderboard(svc, st, reg.models(), split, conf_mode, conf, iou)
+    lb = insights.leaderboard(svc, st, owned(reg.models), split, conf_mode, conf, iou)
     fid = focus if focus in lb['per_class']['models'] else lb['best']
-    ins = insights.dataset_insights(svc, st, reg.model(fid), split, conf_mode, conf, iou) if fid else None
+    ins = insights.dataset_insights(svc, st, owned(reg.model, fid), split, conf_mode, conf, iou) if fid else None
     _, src = svc.splits(st)
     return {'leaderboard': lb, 'focus': fid, 'insights': ins, 'split_source': src,
             'findings': insights.findings(lb, ins, st.classes, src, ctx.curation(st)),
@@ -40,7 +45,8 @@ def eval_overview(ctx, split='val', conf_mode='best', conf=0.25, iou=None, focus
 
 
 def router(state, ctx):
-    r = APIRouter()
+    r = APIRouter(dependencies=[Depends(deps.current_user)])
+    viewer = [Depends(deps.require_bound('viewer'))]
     g = guards(state)
     reg, svc = ctx.models, ctx.model_service
 
@@ -51,12 +57,12 @@ def router(state, ctx):
     def model_or_404(mid):
         need()
         try:
-            return reg.model(mid)
+            return owned(reg.model, mid)
         except KeyError as e:
             raise HTTPException(404, str(e))
 
     def run_io(fn, *args):
-        return asyncio.get_running_loop().run_in_executor(None, fn, *args)
+        return asyncio.to_thread(fn, *args)          # carries the contextvars (user, bound session) along
 
     def public(m):
         out = reg.public(m)
@@ -72,12 +78,12 @@ def router(state, ctx):
     @r.get('/api/models')
     def list_models():
         need()
-        return {'models': [public(m) for m in reg.models()]}
+        return {'models': [public(m) for m in owned(reg.models)]}
 
     @r.get('/api/models/discover')
     def discover():
         need()
-        known = {m.get('path') for m in reg.models()}
+        known = {m.get('path') for m in owned(reg.models)}
         return {'found': [d for d in mreg.discover(PROJECT_ROOT) if d['path'] not in known][:60]}
 
     @r.get('/api/models/spec')
@@ -95,7 +101,7 @@ def router(state, ctx):
     def save_model(body: dict):
         need()
         try:
-            m = reg.upsert(body)
+            m = owned(reg.upsert, body)
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e))
         svc.forget(m['id'])
@@ -106,7 +112,7 @@ def router(state, ctx):
     def delete_model(mid: str):
         m = model_or_404(mid)
         svc.forget(mid)
-        reg.delete(mid)
+        owned(reg.delete, mid)
         svc.remove_upload(m)
         log.info(f'removed model {vlog.esc(m["name"])}')
         return {'ok': True}
@@ -204,7 +210,7 @@ def router(state, ctx):
             log.warning(f'test {vlog.esc(m["name"])} failed: {vlog.esc(e)}')
             raise HTTPException(400, f'{type(e).__name__}: {e}')
 
-    @r.post('/api/models/{mid}/predict')
+    @r.post('/api/models/{mid}/predict', dependencies=[Depends(deps.require_bound('labeler'))])
     def run_predict(mid: str):
         m = model_or_404(mid)
         st = ctx.current()
@@ -213,7 +219,7 @@ def router(state, ctx):
         job = svc.submit_predict(st, m)
         return {'ready': False, 'job_id': job.id}
 
-    @r.get('/api/models/{mid}/eval')
+    @r.get('/api/models/{mid}/eval', dependencies=viewer)
     async def evaluate(mid: str, conf: float | None = None, iou: float | None = None, split: str = 'val'):
         m = model_or_404(mid)
         g.need_index()
@@ -222,7 +228,7 @@ def router(state, ctx):
             raise HTTPException(409, f'{m["name"]}: run predictions first')
         return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
 
-    @r.get('/api/eval/overview')
+    @r.get('/api/eval/overview', dependencies=viewer)
     async def overview(split: str = 'val', conf_mode: str = 'best', conf: float = 0.25, iou: float | None = None,
                             focus: str | None = None):
         """Evaluation tab: every model that ran on this dataset compared, one (focus) model explained with the
@@ -232,7 +238,7 @@ def router(state, ctx):
         res = await run_io(lambda: eval_overview(ctx, split, conf_mode, conf, iou, focus))
         return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
 
-    @r.get('/api/eval/compare')
+    @r.get('/api/eval/compare', dependencies=viewer)
     async def eval_compare(a: str, b: str, split: str = 'val', conf_mode: str = 'best', conf: float = 0.25,
                            iou: float | None = None):
         """Evaluation tab: model a vs model b, label by label (insights.compare)."""
@@ -263,7 +269,7 @@ def router(state, ctx):
         img.save(buf, 'JPEG', quality=88)
         return Response(buf.getvalue(), media_type='image/jpeg')
 
-    @r.get('/api/models/{mid}/pred/{pid}')
+    @r.get('/api/models/{mid}/pred/{pid}', dependencies=viewer)
     def pred_info(mid: str, pid: int):
         m = model_or_404(mid)
         g.need_index()
@@ -275,7 +281,7 @@ def router(state, ctx):
         p['labels'] = state.by_image.get(p['image'], [])
         return p
 
-    @r.get('/api/models/{mid}/image-preds')
+    @r.get('/api/models/{mid}/image-preds', dependencies=viewer)
     def image_preds(mid: str, name: str, conf: float = 0.25):
         """One image's predictions as data (the viewer draws them, dashed, and the editor can accept one as a label):
         {preds: [{box: [x1, y1, x2, y2] px, score, cls (dataset id, -1 = unknown class), pid}]}."""
@@ -285,7 +291,7 @@ def router(state, ctx):
         return {'preds': [{'box': [round(v, 2) for v in b], 'score': round(sc, 4), 'cls': c, 'pid': j}
                           for b, sc, c, j in rows]}
 
-    @r.get('/api/models/{mid}/pred/{pid}/image')
+    @r.get('/api/models/{mid}/pred/{pid}/image', dependencies=viewer)
     def pred_image(mid: str, pid: int, conf: float = 0.25, max_w: int = 1280):
         """The whole image: labels solid, predictions dashed, this prediction ringed."""
         m = model_or_404(mid)
@@ -299,7 +305,7 @@ def router(state, ctx):
         preds = svc.image_preds(ctx.current(), m, p['image'], min(conf, p['score']))
         return _jpeg(_draw(img, gt, preds, focus=pid), max_w)
 
-    @r.get('/api/models/{mid}/pred/{pid}/crop')
+    @r.get('/api/models/{mid}/pred/{pid}/crop', dependencies=viewer)
     def pred_crop(mid: str, pid: int, size: int = 224):
         """Square crop around one prediction (same framing as the label crops)."""
         m = model_or_404(mid)

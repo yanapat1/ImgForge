@@ -8,11 +8,34 @@ server:
   host: "::"                     # "::" = IPv4 + IPv6 (needed for the VS Code port forward); "0.0.0.0" = IPv4 only
   port: 5151
 
+database:                        # PostgreSQL (with pgvector): accounts, sessions + sharing, labeling, feature vectors
+  url: ${DATABASE_URL}           # postgresql://user:password@host:5432/db; the server will not start without it
+  pool_size: 10                  # connections kept open (as many more may be opened under load)
+
+auth:                            # sign-in (the first admin comes from DATAVIZ_ADMIN_USERNAME / _EMAIL / _PASSWORD;
+                                 #  with no password one is generated and printed once at start)
+  cookie_secure: ${DATAVIZ_COOKIE_SECURE:-auto}   # auto = Secure cookie when the request came over https
+  session_idle_days: 7           # signed out after this long without a request
+  session_max_days: 30           # and after this long in total
+
+sessions:
+  max_loaded: 4                  # visualizer sessions kept loaded at once (shared by every user; least recently
+                                 #  used first out, never one with a running job)
+
+storage:
+  allowed_roots: ['.']           # folders users may read datasets / models from (and browse in the page);
+                                 #  relative = to the project root
+
+vectors:                         # a pgvector copy of every computed feature space: a lost workspace .npy is rebuilt
+  enabled: true                  #  from it instead of re-running the model
+  hnsw_min_rows: 50000           # build an HNSW index above this many boxes (below, an exact scan is faster)
+
 dataset:
   # The page opens on the Sessions home: create a session (one dataset each) there and click its card.
-  # Sessions are saved in <workspace_root>/connections.json, outside this folder, so a fresh checkout has none.
-  path: null                     # optional: open this YOLO folder at start, saved as a session (same as --dataset)
-  workspace_root: .dataviz_cache # sessions + auto-named workspaces <dataset>__<fingerprint>/ live here
+  # Sessions are saved in the database (per user, shareable); the old connections.json is imported once.
+  path: null                     # optional: load this YOLO folder at start, saved as a session of the first admin
+                                 #  (same as --dataset)
+  workspace_root: .dataviz_cache # auto-named workspaces <dataset>__<fingerprint>/, secret.key, uploads live here
   workspace: null                # with path: use exactly this folder instead of the auto-named one (null = auto)
   rebuild: false                 # with path: ignore every cache and recompute (same as --rebuild)
 

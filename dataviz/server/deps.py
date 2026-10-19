@@ -6,8 +6,10 @@ into the right HTTP status, and a raw-bytes JSON response.
     sample_or_404   a box record by id
     feature_or_400  a known feature key (None = the default feature)
     scores_or_409   k-NN scores, loading them from disk if cached; 409 = "compute them first"
+    owned           call a ModelRegistry method as the signed-in user (owner_id=) when it takes one
 """
 
+import inspect
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -16,6 +18,20 @@ from fastapi.responses import Response
 
 def _r(arr, nd=4):
     return [round(float(v), nd) for v in arr]
+
+
+def owned(method, *args, **kw):
+    """method(*args, owner_id=<the signed-in user>, **kw) when the method takes owner_id (the per-user model
+    repository), plain otherwise (the shared registry), so the routes work with both."""
+    from ..auth import context
+    uid = context.user_id()
+    try:
+        takes = 'owner_id' in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        takes = False
+    if takes and uid is not None:
+        kw['owner_id'] = uid
+    return method(*args, **kw)
 
 
 def json_bytes(data):
