@@ -5,7 +5,7 @@ import hashlib
 import pytest
 from PIL import Image
 
-from conftest import make_jpeg, wait_job
+from conftest import make_jpeg, make_user, wait_job
 
 from dataviz.data.labeling_source import LabelConflict, LabelingSource
 from dataviz.labeling import formats
@@ -26,9 +26,10 @@ def box(cid, x, y, w, h, **kw):
     return {'id': new_id(), 'class_id': cid, 'geometry_type': 'bbox', 'geometry': {'x': x, 'y': y, 'w': w, 'h': h}, **kw}
 
 
-def make_project(reg, names=('a.jpg', 'b.jpg', 'c.jpg'), sizes=None):
+def make_project(reg, names=('a.jpg', 'b.jpg', 'c.jpg'), sizes=None, owner_id=None):
     """A labeling session with uploaded images (no import job: media rows written directly)."""
-    entry = reg.create({'name': 'Proj', 'tasks': TASKS, 'source': {'kind': 'upload'}})
+    owner_id = owner_id or getattr(reg, 'owner_id', None) or make_user('labeler')['id']
+    entry = reg.create({'name': 'Proj', 'tasks': TASKS, 'source': {'kind': 'upload'}}, owner_id)
     pid = entry['id']
     images = reg.project_dir(pid) / 'images'
     rows = []
@@ -49,11 +50,10 @@ def put(st, mid, tid, rows):
 
 
 @pytest.fixture
-def lab(tmp_path):
+def lab(pg, tmp_path):
     reg = ProjectRegistry(tmp_path / 'labeling')
-    yield reg
-    for s in reg._stores.values():
-        s.close()
+    reg.owner_id = make_user('labeler')['id']
+    return reg
 
 
 def test_read_label_matches_yolo_export(lab, monkeypatch):
@@ -186,7 +186,7 @@ def test_write_label_round_trip_and_conflict(lab):
 
 def test_api_create_open_index(client):
     ctx = client.ctx
-    pid, st, tasks, mids = make_project(ctx.labeling)
+    pid, st, tasks, mids = make_project(ctx.labeling, owner_id=client.user['id'])
     det = tasks['object_detection']
     cat, dog = (c['id'] for c in det['classes'])
     put(st, mids['a.jpg'], det['id'], [box(cat, .1, .1, .2, .3), box(dog, .5, .4, .25, .25)])

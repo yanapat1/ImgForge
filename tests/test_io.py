@@ -249,7 +249,7 @@ def test_sftp_private_key(sftp_server):
 
 # ---------------------------------------------------------------- connections + routes
 
-def test_connection_kinds(tmp_path):
+def test_connection_kinds(pg, tmp_path):
     reg = connections.Registry(tmp_path)
     s3 = reg.upsert_connection({'name': 'old', 'endpoint': 'http://x', 'access_key': 'AKIA123456', 'secret_key': 'sssss'})
     assert 'kind' not in s3                                       # old-style s3 entries stay as they were
@@ -269,10 +269,18 @@ def test_connection_kinds(tmp_path):
         reg.merged_connection({'kind': 'gopher'})
     assert oct((tmp_path / 'connections.json').stat().st_mode & 0o777) == '0o600'
     # a labeling session that uses the connection blocks the delete
-    (tmp_path / 'labeling').mkdir()
-    (tmp_path / 'labeling' / 'projects.json').write_text(json.dumps({'projects': [
-        {'id': 'p1', 'name': 'Cats', 'source': {'kind': 'sftp', 'connection_id': sf['id']}},
-        {'id': 'p2', 'name': 'Dogs', 'source': {'kind': 'upload'}, 'export_default': {'kind': 'db', 'connection_id': db['id']}}]}))
+    from sqlalchemy import text
+    from conftest import make_user
+    from dataviz import db as appdb
+    from dataviz.data import sessions
+    owner = make_user('conn')
+    for pid, name, src, ed in (('p1', 'Cats', {'kind': 'sftp', 'connection_id': sf['id']}, None),
+                               ('p2', 'Dogs', {'kind': 'upload'}, {'kind': 'db', 'connection_id': db['id']})):
+        sessions.create('label', owner['id'], name, sid=pid)
+        with appdb.begin() as c:
+            c.execute(text('INSERT INTO app.label_projects(session_id, source, export_default) '
+                           'VALUES (:p, CAST(:s AS jsonb), CAST(:e AS jsonb))'),
+                      {'p': pid, 's': json.dumps(src), 'e': json.dumps(ed) if ed else None})
     with pytest.raises(ValueError, match='Cats'):
         reg.delete_connection(sf['id'])
     with pytest.raises(ValueError, match='Dogs'):

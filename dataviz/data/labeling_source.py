@@ -1,5 +1,5 @@
 """
-LabelingSource: one task of a labeling session (labeling/<pid>/annotations.db) read live as a YOLO dataset, so
+LabelingSource: one task of a labeling session (its rows in PostgreSQL lbl.*, labeling/store.py) read live as a YOLO dataset, so
 a visualize session can explore what is being labeled without an export. Nothing is copied: labels are built in
 memory from the annotation rows, images come through the project's ImageCache (local folders read in place,
 remote bytes cached once in <pid>/cache/).
@@ -15,7 +15,7 @@ label_ref(name), check()) plus the curation write API (label_writable, write_lab
     classification     refused (no boxes)
 
 Label names are `<stem>.txt` of the media file_name (the import keeps stems unique). The text of every label is
-built in ONE pass over the task (ProjectStore.iter_task_export, a private connection) and cached per
+built in ONE pass over the task (ProjectStore.iter_task_export, a private streamed connection) and cached per
 fingerprint, so the indexer's read_labels() and the curation scan never run a query per image.
 
 Coordinates in the store are relative to the EXIF-oriented image, so open_image() returns the transposed image
@@ -26,9 +26,9 @@ import difflib
 import hashlib
 import threading
 
-import orjson
 from PIL import Image, ImageOps
 
+from ..auth.context import user_id
 from ..labeling import formats
 from ..labeling.store import Conflict as StoreConflict, new_id
 from .sources import INDEX_VERSION, Conflict
@@ -166,19 +166,9 @@ class LabelingSource:
     def fingerprint(self):
         """Changes on any annotation edit / delete of this task, a new image, a class rename / reorder / delete,
         and (only_done) a status change. A handful of indexed aggregate queries: cheap at any size."""
-        c = self._store().conn()
         tid = self.task_id
         h = hashlib.sha1(f'{INDEX_VERSION}|labeling|{self.pid}|{tid}|{int(self.only_done)}'.encode())
-        # every edit, soft delete included, bumps updated_at; the live count catches a restore at the same instant
-        h.update(repr(tuple(c.execute('SELECT MAX(updated_at), COUNT(*), SUM(is_deleted = 0) FROM annotations '
-                                      'WHERE task_id = ?', (tid,)).fetchone())).encode())
-        h.update(repr(tuple(c.execute('SELECT COUNT(*), MAX(position), MAX(created_at) FROM media').fetchone())).encode())
-        for r in c.execute('SELECT id, name, position FROM label_classes WHERE task_id = ? AND is_deleted = 0 '
-                           'ORDER BY position, name', (tid,)):
-            h.update(f'{r[0]}:{r[1]}:{r[2]};'.encode())
-        if self.only_done:
-            h.update(repr(tuple(c.execute("SELECT COUNT(*), MAX(updated_at), SUM(status = 'done') "
-                                          'FROM media_task_status WHERE task_id = ?', (tid,)).fetchone())).encode())
+        h.update(repr(self._store().fingerprint_parts(tid, self.only_done)).encode())
         return h.hexdigest()
 
     def _snapshot(self):
@@ -277,16 +267,11 @@ class LabelingSource:
             want = [a['parent_id'] for a in rows if a['geometry_type'] == 'keypoints' and a.get('parent_id')
                     and a['parent_id'] not in own]
             if want:                                     # pose boxes of another task (read only here)
-                q = ','.join('?' * len(want))
-                for r in st.conn().execute(f"SELECT id, class_id, geometry FROM annotations WHERE id IN ({q}) "
-                                           "AND is_deleted = 0 AND geometry_type = 'bbox'", want):
-                    ext.append({'id': r[0], 'class_id': r[1], 'geometry_type': 'bbox',
-                                'geometry': orjson.loads(r[2]), '_parent_only': True})
+                for r in st.parent_boxes(want):
+                    ext.append({'id': r['id'], 'class_id': r['class_id'], 'geometry_type': 'bbox',
+                                'geometry': r['geometry'], '_parent_only': True})
         if any(a['geometry_type'] == 'polygon' for a in rows):
-            ids = [a['id'] for a in rows if a['geometry_type'] == 'polygon']
-            q = ','.join('?' * len(ids))
-            bb = {r[0]: r[1:] for r in st.conn().execute(
-                f'SELECT id, bbox_x, bbox_y, bbox_w, bbox_h FROM annotations WHERE id IN ({q})', ids)}
+            bb = st.bbox_extents([a['id'] for a in rows if a['geometry_type'] == 'polygon'])
             view = [dict(a, bbox_x=bb[a['id']][0], bbox_y=bb[a['id']][1], bbox_w=bb[a['id']][2], bbox_h=bb[a['id']][3])
                     if a['id'] in bb else a for a in rows]
         else:
@@ -383,7 +368,7 @@ class LabelingSource:
         # put_annotations turns an edited model shape into a manual one itself
         out = [a for aid, a in keep.items() if aid not in removed] + added
         try:
-            self._store().put_annotations(mid, self.task_id, out, version)
+            self._store().put_annotations(mid, self.task_id, out, version, user=user_id())
         except StoreConflict:
             raise LabelConflict(name) from None
         text_now, _ = self.current_label(name)
@@ -403,7 +388,7 @@ class LabelingSource:
         if expect_sha1 is not None and _sha1(cur) != expect_sha1:
             raise LabelConflict(name, _sha1(cur))
         try:
-            self._store().put_annotations(mid, self.task_id, [_row_copy(a) for a in rows], version)
+            self._store().put_annotations(mid, self.task_id, [_row_copy(a) for a in rows], version, user=user_id())
         except StoreConflict:
             raise LabelConflict(name) from None
         text_now, _ = self.current_label(name)

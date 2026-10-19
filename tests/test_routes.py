@@ -397,3 +397,31 @@ def test_review_endpoint_flag_and_card(client):
     assert client.post(f'/api/label/projects/{pid}/review', json={'task_ids': [det['id']], 'mode': 'nope'}).status_code == 400
     assert client.post(f'/api/label/projects/{pid}/review', json={'task_ids': ['x' * 32], 'mode': 'bulk'}).status_code == 404
     assert client.get(f'/api/label/projects/{pid}/media', params={'task_id': det['id'], 'review': 'nope'}).status_code == 400
+
+
+def test_routes_record_the_user_and_list_by_owner(client):
+    """PUT / commit fill created_by / committed_by with the signed-in user; the list carries the card header;
+    a duplicate belongs to the user who made it."""
+    from sqlalchemy import text
+    from dataviz import db
+    p = create(client)['project']
+    pid, det = p['id'], p['tasks'][0]
+    upload_and_import(client, pid)
+    mid = client.get(f'/api/label/projects/{pid}/media-ids').json()['ids'][0]
+    a = {'id': hid(), 'class_id': det['classes'][0]['id'], 'geometry_type': 'bbox',
+         'geometry': {'x': .1, 'y': .1, 'w': .2, 'h': .2}}
+    assert client.put(f'/api/label/projects/{pid}/annotations/{mid}',
+                      json={'task_id': det['id'], 'base_version': 0, 'annotations': [a]}).status_code == 200
+    assert client.post(f'/api/label/projects/{pid}/commit/{mid}', json={'task_ids': [det['id']]}).status_code == 200
+    with db.connect() as c:
+        assert c.execute(text('SELECT created_by FROM lbl.annotations WHERE id = :i'), {'i': a['id']}).scalar() == \
+            client.user['id']
+        assert c.execute(text('SELECT committed_by FROM lbl.media_task_status WHERE media_id = :m'),
+                         {'m': mid}).scalar() == client.user['id']
+    cards = client.get('/api/label/projects').json()['projects']
+    assert [x['id'] for x in cards] == [pid]
+    assert cards[0]['owner']['id'] == client.user['id'] and cards[0]['my_role'] == 'owner'
+    assert client.get('/api/label/projects', params={'scope': 'nope'}).status_code == 400
+    job = wait_job(client, client.post(f'/api/label/projects/{pid}/duplicate', json={}).json()['job_id'])
+    assert job['status'] == 'done' and job['result']['name'] == 'Test (copy)'
+    assert client.ctx.labeling.get(job['result']['id'])['owner_id'] == client.user['id']

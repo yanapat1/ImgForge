@@ -14,7 +14,7 @@ holds S3 secret keys. Secrets never leave the server: public() masks them for th
 Connection kinds: s3 (the default: files written before kinds existed have no `kind`), ftp, sftp (labeling
 image sources / export targets), postgres, mssql (labeling database export), model (a self-hosted model
 server the labeling page sends images to: url, optional api_key sent as a Bearer token, timeout_s). A
-connection used by a saved dataset or a labeling session (<root>/labeling/projects.json, including a task's
+connection used by a saved dataset or a labeling session (app.label_projects, including a task's
 model link) cannot be deleted.
 """
 
@@ -168,28 +168,19 @@ class Registry:
             self.save(data)
 
     def _labeling_users(self, cid):
-        """Labeling sessions whose image source or default export target is this connection."""
-        path = self.root / 'labeling' / 'projects.json'
+        """Labeling sessions whose image source, default export target or a task's model link is this connection."""
+        from sqlalchemy import text
+        from .. import db
         try:
-            data = json.loads(path.read_text())
-        except (OSError, ValueError):
+            with db.connect() as c:
+                rows = c.execute(text("""
+                    SELECT s.name FROM app.label_projects lp JOIN app.sessions s ON s.id = lp.session_id
+                    WHERE lp.source->>'connection_id' = :cid OR lp.export_default->>'connection_id' = :cid
+                       OR lp.export_default->'target'->>'connection_id' = :cid OR :cid = ANY(lp.model_connections)
+                    ORDER BY s.name"""), {'cid': cid}).scalars().all()
+        except RuntimeError:                         # no database (a bare Registry in a script)
             return []
-        projects = data.get('projects', data) if isinstance(data, dict) else data
-        if isinstance(projects, dict):
-            projects = list(projects.values())
-        used = []
-        for p in projects if isinstance(projects, list) else []:
-            if not isinstance(p, dict):
-                continue
-            refs = [(p.get(k) or {}).get('connection_id') for k in ('source', 'export_default')
-                    if isinstance(p.get(k), dict)]
-            ed = p.get('export_default')
-            if isinstance(ed, dict) and isinstance(ed.get('target'), dict):
-                refs.append(ed['target'].get('connection_id'))
-            refs += p.get('model_connections') or []
-            if cid in refs:
-                used.append(f"labeling session {p.get('name') or p.get('id')}")
-        return used
+        return [f'labeling session {n}' for n in rows]
 
     # ------------------------------------------------------------ datasets
     def datasets(self):

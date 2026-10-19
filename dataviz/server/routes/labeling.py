@@ -27,6 +27,7 @@ import orjson
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
+from ...auth import context
 from ...core import logging as vlog
 from ...labeling import colors, models
 from ...labeling.export import run_export
@@ -221,8 +222,9 @@ def router(state, ctx):
 
     # ------------------------------------------------------------ projects
     @r.get('/api/label/projects')
-    def list_projects():
-        return _json({'projects': need().list()})
+    def list_projects(scope: str = 'all'):
+        with _errors():
+            return _json({'projects': need().list(context.user(), scope)})
 
     @r.post('/api/label/projects')
     def create_project(body: LabelProjectIn):
@@ -230,7 +232,7 @@ def router(state, ctx):
         data['tasks'] = [{**t, 'classes': [c if isinstance(c, str) else {k: v for k, v in c.items() if v is not None}
                                            for c in t['classes']]} for t in data['tasks']]
         with _errors():
-            entry = need().create(data)
+            entry = need().create(data, context.user_id())
         job_id = None
         if entry['source']['kind'] != 'upload':
             job_id = submit_import(entry['id'], entry['source'])
@@ -446,7 +448,8 @@ def router(state, ctx):
         st = store(pid)
         try:
             with _errors():
-                return st.put_annotations(mid, body.task_id, body.annotations, body.base_version)
+                return st.put_annotations(mid, body.task_id, body.annotations, body.base_version,
+                                          user=context.user_id())
         except HTTPException as e:
             if e.status_code == 409 and isinstance(e.detail, dict):    # contract: {detail, version, annotations}
                 return Response(orjson.dumps(e.detail), status_code=409, media_type='application/json')
@@ -455,7 +458,7 @@ def router(state, ctx):
     def _status(pid, mid, body, action):
         st = store(pid)
         with _errors():
-            return {'status': st.set_status(mid, body.task_ids, action)}
+            return {'status': st.set_status(mid, body.task_ids, action, user=context.user_id())}
 
     @r.post('/api/label/projects/{pid}/commit/{mid}')
     def commit(pid: str, mid: str, body: LabelTaskIdsIn):
@@ -863,13 +866,14 @@ def router(state, ctx):
         with _errors():
             entry = reg.get(pid)
         name = ((body.name if body else None) or '').strip() or None
+        owner = context.user_id() or entry['owner_id']     # the copy belongs to the user who duplicated it
         if name:
             with _errors():
-                reg.check_name(name)            # a typed name that is taken: 400 now, not a failed job
+                reg.check_name(name, owner)     # a typed name that is taken: 400 now, not a failed job
 
         def fn(job):
             t0 = time.time()
-            new = reg.duplicate(pid, name, job.progress)
+            new = reg.duplicate(pid, name, job.progress, owner_id=owner)
             _log.info(f'duplicated [bold]{vlog.esc(entry["name"])}[/] -> [bold]{vlog.esc(new["name"])}[/] '
                       f'[dim]({new["n_media"]} images, {time.time() - t0:.1f}s)[/]')
             return reg.card(new)

@@ -8,14 +8,14 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from conftest import make_jpeg, wait_job
+from conftest import _TestUserMiddleware, make_jpeg, make_user, wait_job
 from test_models import KEY, servers  # noqa: F401 - the fake model servers (module fixture)
 
 from dataviz.models import hub, runners
 
 
 @pytest.fixture
-def mclient(tmp_path):
+def mclient(pg, tmp_path):
     from fastapi.testclient import TestClient
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
@@ -30,7 +30,9 @@ def mclient(tmp_path):
     reg = ModelRegistry(root)
     ctx = Ctx(None, datasets=connections.Registry(root), cfg=cfg, jobs=JobManager(), labeling=ProjectRegistry(root / 'labeling'),
               models=reg, model_service=ModelService(reg, cfg.get('models') or {}))
-    with TestClient(create_app(ctx)) as c:
+    app = create_app(ctx)
+    app.add_middleware(_TestUserMiddleware, user=make_user('admin', admin=True))
+    with TestClient(app) as c:
         c.ctx = ctx
         yield c
 

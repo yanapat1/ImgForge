@@ -1,28 +1,37 @@
 """
-ProjectStore: one labeling project's SQLite database (<pid>/annotations.db).
+ProjectStore: one labeling project's rows in the shared PostgreSQL schema `lbl` (dataviz/db/schema.py).
 
-The tables come from schema.make_metadata('') (created once through SQLAlchemy so the local copy and the
-PostgreSQL / MSSQL export targets can never drift); every read and write after that is raw sqlite3, which
-is several times faster than SQLAlchemy Core on the per-request hot paths (autosave PUT, media pages).
+Every lbl table holds the rows of every project of every user, each row carrying project_id = the label
+session id. Every query here filters by it (or joins through a row that does): a query without it would read or
+change another project's rows. tests/test_store.py::test_projects_never_see_each_other guards it.
 
-Concurrency: one connection per thread (sqlite3 connections must not be shared), WAL so readers never wait
-for the writer, and one process-wide write lock per store so writes never hit SQLITE_BUSY.
+Connections come from the process-wide pool (dataviz.db). write() is one transaction holding
+pg_advisory_xact_lock(hashtext(pid)): the writers of one project run one at a time across threads and
+processes, which the optimistic base_version check of put_annotations relies on. A write() opened inside
+another one on the same thread joins it, and reads made while a write() is open on the thread go through its
+connection (they see its uncommitted rows). Other reads take a pooled connection each.
 
-Stored values: times are epoch seconds (REAL), JSON columns are orjson text, booleans 0/1. iter_rows()
-converts rows into what SQLAlchemy inserts expect (datetime, dict, bool) for the database export.
+Stored values: times are epoch seconds (double precision: the API, the card stats and the visualizer's
+live-source fingerprint all work in epoch floats), JSON columns are JSONB (dicts in, dicts out), booleans are
+booleans. iter_rows() converts rows into what the export targets' SQLAlchemy inserts expect (datetime for *_at).
 """
 
+import functools
 import re
+import threading
 import time
 import uuid
-import sqlite3
-import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 
 import orjson
+from psycopg import errors as pg_errors
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
 
+from .. import db
+from ..db import schema as dbs
 from . import schema
 
 try:                                    # optional: a regex search with a timeout (the strip's /regex/ filter)
@@ -43,12 +52,46 @@ _HOTKEY = re.compile(r'^((ctrl|alt|shift|meta)\+)*[a-z0-9\[\];\',./`=\-]+$|^(f[1
 TASK_GEOMS = {'object_detection': ('bbox',), 'segmentation': ('polygon', 'mask_rle'),
               'keypoints': ('keypoints', 'bbox'), 'classification': ('tag',)}
 
-_MD = schema.make_metadata('')
-TABLES = schema.tables(_MD)
+TABLES = {t.name: t for t in (dbs.lbl_projects, dbs.lbl_tasks, dbs.lbl_label_classes, dbs.lbl_media,
+                              dbs.lbl_annotations, dbs.lbl_annotation_relations, dbs.lbl_media_task_status,
+                              dbs.lbl_export_runs)}
 _COLS = {name: [c.name for c in t.columns] for name, t in TABLES.items()}
-_JSON_COLS = {name: {c.name for c in t.columns if isinstance(c.type, schema.JSONDoc)} for name, t in TABLES.items()}
-_BOOL_COLS = {name: {c.name for c in t.columns if c.type.python_type is bool} for name, t in TABLES.items()}
+_JSON_COLS = {name: {c.name for c in t.columns if isinstance(c.type, JSONB)} for name, t in TABLES.items()}
 _TIME_COLS = {name: {c.name for c in t.columns if c.name.endswith('_at')} for name, t in TABLES.items()}
+_STREAM_BATCH = 1000
+
+# the write() connection open on this thread, per project id (nested writes and reads inside a write join it)
+_tx = threading.local()
+
+
+def _open():
+    m = getattr(_tx, 'm', None)
+    if m is None:
+        m = _tx.m = {}
+    return m
+
+
+@functools.lru_cache(maxsize=1024)
+def _q(sql):
+    """text() once per SQL string (the statements here are fixed strings or a few filter combinations)."""
+    return text(sql)
+
+
+def _rows(c, sql, params=None):
+    return c.execute(_q(sql), params or {}).mappings().all()
+
+
+def _many(c, sql, rows):
+    """executemany (psycopg 3 pipelines it); an empty list is a no-op, not a parameterless execute."""
+    if rows:
+        c.execute(_q(sql), rows)
+
+
+def _seq(t, k):
+    """created_at of the k-th row of one batch: insertion order survives an ORDER BY created_at (SQLite kept it
+    through rowid); 1 µs steps stay distinct at epoch magnitudes (the double's resolution there is ~0.24 µs)."""
+    return t + k * 1e-6
+
 
 ANN_FIELDS = ('id', 'task_id', 'class_id', 'geometry_type', 'geometry', 'attributes', 'parent_id', 'z_order',
               'version', 'score', 'source')
@@ -76,7 +119,8 @@ def _dumps(v):
 
 
 def _loads(v):
-    return None if v is None else orjson.loads(v)
+    """JSONB arrives decoded; text (an old row, a raw value) is parsed."""
+    return orjson.loads(v) if isinstance(v, (str, bytes)) else v
 
 
 def new_id():
@@ -160,106 +204,88 @@ def normalize_geometry(gtype, g, task):
 
 
 class ProjectStore:
-    def __init__(self, db_path):
-        self.path = Path(db_path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._local = threading.local()
-        self._wlock = threading.RLock()
-        self._ids_cache = None
-        self._conns = []
-        self._conns_lock = threading.Lock()
-        self._ensure_schema()
-        row = self.conn().execute('SELECT id FROM projects LIMIT 1').fetchone()
-        self.pid = row[0] if row else None
+    def __init__(self, pid):
+        self.pid = str(pid)
+        self._ids_cache = None              # ((count, max position, max created_at), [ids]) of this process
 
     # ------------------------------------------------------------ connections
-    def conn(self):
-        c = getattr(self._local, 'c', None)
-        if c is None:
-            c = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False, timeout=10)
-            c.row_factory = sqlite3.Row
-            for p in ('journal_mode=WAL', 'synchronous=NORMAL', 'foreign_keys=ON', 'busy_timeout=5000',
-                      'cache_size=-20000'):
-                c.execute(f'PRAGMA {p}')
-            self._local.c = c
-            with self._conns_lock:
-                self._conns.append(c)
-        return c
-
     @contextmanager
     def write(self):
-        """One write transaction (BEGIN IMMEDIATE under the store's lock)."""
-        with self._wlock:
-            c = self.conn()
-            if c.in_transaction:                         # nested call from inside a write(): join it
-                yield c
-                return
-            c.execute('BEGIN IMMEDIATE')
+        """One write transaction under the project's advisory lock; joins the one already open on this thread."""
+        opened = _open()
+        c = opened.get(self.pid)
+        if c is not None:                                  # nested call from inside a write(): join it
+            yield c
+            return
+        with db.begin() as c:
+            c.execute(_q('SELECT pg_advisory_xact_lock(hashtext(:p))'), {'p': self.pid})
+            opened[self.pid] = c
             try:
                 yield c
-            except BaseException:
-                c.execute('ROLLBACK')
-                raise
-            c.execute('COMMIT')
+            finally:
+                opened.pop(self.pid, None)
+
+    @contextmanager
+    def joined(self, c):
+        """Run this store's writes inside the caller's transaction `c` (registry create / duplicate: one
+        transaction for the session row, the project row and its tasks)."""
+        opened = _open()
+        if opened.get(self.pid) is not None:
+            yield c
+            return
+        c.execute(_q('SELECT pg_advisory_xact_lock(hashtext(:p))'), {'p': self.pid})
+        opened[self.pid] = c
+        try:
+            yield c
+        finally:
+            opened.pop(self.pid, None)
+
+    @contextmanager
+    def _read(self):
+        c = _open().get(self.pid)
+        if c is not None:                                  # inside a write: see its own rows
+            yield c
+            return
+        with db.connect() as c:
+            yield c
+
+    def _stream(self):
+        """A private connection for a streamed generator (server-side cursor, one snapshot for every cursor of
+        it). The generator closes it in `finally`; job threads consume these."""
+        c = db.engine().connect()
+        c.execution_options(isolation_level='REPEATABLE READ')
+        return c
 
     def close(self):
-        with self._conns_lock:
-            for c in self._conns:
-                try:
-                    c.close()
-                except sqlite3.Error:
-                    pass
-            self._conns.clear()
-        self._local = threading.local()
-
-    def _ensure_schema(self):
-        c = sqlite3.connect(self.path)
-        try:
-            ok = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_info'").fetchone()
-        finally:
-            c.close()
-        if not ok:
-            from sqlalchemy import create_engine
-            eng = create_engine(f'sqlite:///{self.path}')
-            _MD.create_all(eng)
-            eng.dispose()
-        with self.write() as c:
-            # local-only indexes the portable schema does not have: live rows only (partial), and the media
-            # order without project_id first, so ORDER BY position, id walks an index instead of sorting
-            # (a 200-row page at offset 9800 of 10k: 2.3 ms with a temp B-tree, measured)
-            c.execute('CREATE INDEX IF NOT EXISTS ix_ann_media_live ON annotations(media_id) WHERE is_deleted = 0')
-            c.execute('CREATE INDEX IF NOT EXISTS ix_ann_class_live ON annotations(class_id) WHERE is_deleted = 0')
-            c.execute('CREATE INDEX IF NOT EXISTS ix_media_order ON media(position, id)')
-            # local-only column (v2): when the model last ran on this image / task, so opening it does not run
-            # the model again. Not in the portable schema: the DB export copies only schema columns.
-            if 'model_run_at' not in {r[1] for r in c.execute('PRAGMA table_info(media_task_status)')}:
-                c.execute('ALTER TABLE media_task_status ADD COLUMN model_run_at REAL')
-            # local-only column (v3): the optional review of a done image, 'manual' (a person approved it) or
-            # 'bulk' (Review all); NULL = not reviewed. Any label edit / reopen clears it.
-            if 'review' not in {r[1] for r in c.execute('PRAGMA table_info(media_task_status)')}:
-                c.execute('ALTER TABLE media_task_status ADD COLUMN review TEXT')
-            if not ok:
-                c.execute('INSERT OR REPLACE INTO schema_info(key, value) VALUES (?, ?)',
-                          ('schema_version', str(schema.SCHEMA_VERSION)))
+        """Nothing to close: connections are pooled per process (kept for callers of the SQLite store)."""
 
     # ------------------------------------------------------------ project row
     def init_project(self, pid, name, description='', meta=None):
+        """The lbl.projects row (its app.sessions row must exist: lbl.projects.id references it)."""
+        if pid != self.pid:
+            raise ValueError('init_project: the id differs from the store\'s project id')
         t = _now()
         with self.write() as c:
-            c.execute('INSERT INTO projects(id, name, description, created_at, updated_at, meta) VALUES (?,?,?,?,?,?)',
-                      (pid, name, description or '', t, t, _dumps(meta or {})))
-        self.pid = pid
+            c.execute(_q('INSERT INTO lbl.projects(id, name, description, created_at, updated_at, meta) '
+                         'VALUES (:p, :name, :d, :t, :t, CAST(:meta AS jsonb))'),
+                      {'p': pid, 'name': name, 'd': description or '', 't': t, 'meta': _dumps(meta or {})})
 
     def update_project(self, **fields):
         sets = {k: v for k, v in fields.items() if k in ('name', 'description') and v is not None}
         sets['updated_at'] = _now()
         with self.write() as c:
-            c.execute(f"UPDATE projects SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
-                      (*sets.values(), self.pid))
+            c.execute(_q(f"UPDATE lbl.projects SET {', '.join(f'{k} = :{k}' for k in sets)} WHERE id = :p"),
+                      {**sets, 'p': self.pid})
+
+    def project_row(self):
+        with self._read() as c:
+            r = c.execute(_q('SELECT * FROM lbl.projects WHERE id = :p'), {'p': self.pid}).mappings().first()
+        return dict(r) if r else None
 
     # ------------------------------------------------------------ tasks
     def _task_row(self, c, tid, live=True):
-        r = c.execute('SELECT * FROM tasks WHERE id = ?' + (' AND is_deleted = 0' if live else ''), (tid,)).fetchone()
+        r = c.execute(_q('SELECT * FROM lbl.tasks WHERE id = :id AND project_id = :p'
+                         + (' AND NOT is_deleted' if live else '')), {'id': tid, 'p': self.pid}).mappings().first()
         if r is None:
             raise KeyError(f'no task {tid!r} in this session')
         return r
@@ -271,12 +297,14 @@ class ProjectStore:
 
     def tasks(self, include_deleted=False):
         """[Task] in position order, each with its live classes in position order."""
-        c = self.conn()
-        rows = c.execute('SELECT * FROM tasks' + ('' if include_deleted else ' WHERE is_deleted = 0')
-                         + ' ORDER BY position, created_at').fetchall()
-        classes = {}
-        for r in c.execute('SELECT * FROM label_classes WHERE is_deleted = 0 ORDER BY position, name'):
-            classes.setdefault(r['task_id'], []).append(self._class_json(r))
+        with self._read() as c:
+            rows = _rows(c, 'SELECT * FROM lbl.tasks WHERE project_id = :p'
+                         + ('' if include_deleted else ' AND NOT is_deleted') + ' ORDER BY position, created_at, id',
+                         {'p': self.pid})
+            classes = {}
+            for r in _rows(c, 'SELECT * FROM lbl.label_classes WHERE project_id = :p AND NOT is_deleted '
+                              'ORDER BY position, name COLLATE "C"', {'p': self.pid}):
+                classes.setdefault(r['task_id'], []).append(self._class_json(r))
         return [{'id': r['id'], 'name': r['name'], 'task_type': r['task_type'], 'position': r['position'],
                  'config': _loads(r['config']) or {}, 'classes': classes.get(r['id'], []),
                  **({'is_deleted': bool(r['is_deleted'])} if include_deleted else {})} for r in rows]
@@ -310,9 +338,12 @@ class ProjectStore:
         name, config = self.check_task(name, task_type, config)
         tid = new_id()
         with self.write() as c:
-            pos = c.execute('SELECT COALESCE(MAX(position) + 1, 0) FROM tasks').fetchone()[0]
-            c.execute('INSERT INTO tasks(id, project_id, name, task_type, position, config, created_at, is_deleted) '
-                      'VALUES (?,?,?,?,?,?,?,0)', (tid, self.pid, name, task_type, pos, _dumps(config), _now()))
+            pos = c.execute(_q('SELECT COALESCE(MAX(position) + 1, 0) FROM lbl.tasks WHERE project_id = :p'),
+                            {'p': self.pid}).scalar()
+            c.execute(_q('INSERT INTO lbl.tasks(id, project_id, name, task_type, position, config, created_at, '
+                         'is_deleted) VALUES (:id, :p, :name, :tt, :pos, CAST(:cfg AS jsonb), :t, false)'),
+                      {'id': tid, 'p': self.pid, 'name': name, 'tt': task_type, 'pos': pos, 'cfg': _dumps(config),
+                       't': _now()})
             if classes:
                 self.add_classes(tid, classes, strict=True)
         return self.task(tid)
@@ -323,23 +354,28 @@ class ProjectStore:
             if name is not None:
                 if not name.strip():
                     raise ValueError('a task needs a name')
-                c.execute('UPDATE tasks SET name = ? WHERE id = ?', (name.strip(), tid))
+                c.execute(_q('UPDATE lbl.tasks SET name = :n WHERE id = :id AND project_id = :p'),
+                          {'n': name.strip(), 'id': tid, 'p': self.pid})
             if config is not None:
                 _, cfg = self.check_task(r['name'], r['task_type'], config)
-                c.execute('UPDATE tasks SET config = ? WHERE id = ?', (_dumps(cfg), tid))
-        return self.task(tid)
+                c.execute(_q('UPDATE lbl.tasks SET config = CAST(:cfg AS jsonb) WHERE id = :id AND project_id = :p'),
+                          {'cfg': _dumps(cfg), 'id': tid, 'p': self.pid})
+            return self.task(tid)
 
     def delete_task(self, tid):
         with self.write() as c:
             self._task_row(c, tid)
-            c.execute('UPDATE tasks SET is_deleted = 1 WHERE id = ?', (tid,))
+            c.execute(_q('UPDATE lbl.tasks SET is_deleted = true WHERE id = :id AND project_id = :p'),
+                      {'id': tid, 'p': self.pid})
 
     def reorder_tasks(self, ids):
         with self.write() as c:
-            live = {r[0] for r in c.execute('SELECT id FROM tasks WHERE is_deleted = 0')}
+            live = set(c.execute(_q('SELECT id FROM lbl.tasks WHERE project_id = :p AND NOT is_deleted'),
+                                 {'p': self.pid}).scalars())
             if set(ids) != live or len(ids) != len(live):
                 raise ValueError('reorder needs every task id exactly once')
-            c.executemany('UPDATE tasks SET position = ? WHERE id = ?', [(i, t) for i, t in enumerate(ids)])
+            _many(c, 'UPDATE lbl.tasks SET position = :pos WHERE id = :id AND project_id = :p',
+                  [{'pos': i, 'id': t, 'p': self.pid} for i, t in enumerate(ids)])
 
     # ------------------------------------------------------------ classes
     def add_classes(self, tid, classes, strict=False):
@@ -348,8 +384,8 @@ class ProjectStore:
         from . import colors
         with self.write() as c:
             self._task_row(c, tid)
-            rows = c.execute('SELECT name, color, position FROM label_classes WHERE task_id = ? AND is_deleted = 0',
-                             (tid,)).fetchall()
+            rows = _rows(c, 'SELECT name, color, position FROM lbl.label_classes WHERE project_id = :p '
+                            'AND task_id = :t AND NOT is_deleted', {'p': self.pid, 't': tid})
             names = {r['name'].casefold() for r in rows}
             used = [r['color'] for r in rows]
             pos = max([r['position'] for r in rows], default=-1) + 1
@@ -368,126 +404,139 @@ class ProjectStore:
                 color = (cl.get('color') or '').lower() or colors.next_color(used)
                 if not re.fullmatch(r'#[0-9a-f]{6}', color):
                     raise ValueError(f'{color!r} is not a #rrggbb colour')
-                cid = new_id()
-                c.execute('INSERT INTO label_classes(id, task_id, name, color, position, hotkey, is_deleted) '
-                          'VALUES (?,?,?,?,?,?,0)', (cid, tid, name, color, pos, cl.get('hotkey')))
-                new.append({'id': cid, 'task_id': tid, 'name': name, 'color': color, 'position': pos,
+                new.append({'id': new_id(), 'task_id': tid, 'name': name, 'color': color, 'position': pos,
                             'hotkey': cl.get('hotkey')})
                 names.add(name.casefold())
                 used.append(color)
                 pos += 1
+            _many(c, 'INSERT INTO lbl.label_classes(id, project_id, task_id, name, color, position, hotkey, '
+                     'is_deleted) VALUES (:id, :p, :task_id, :name, :color, :position, :hotkey, false)',
+                  [{**n, 'p': self.pid} for n in new])
         return new
 
     def _class_row(self, c, cid):
-        r = c.execute('SELECT * FROM label_classes WHERE id = ? AND is_deleted = 0', (cid,)).fetchone()
+        r = c.execute(_q('SELECT * FROM lbl.label_classes WHERE id = :id AND project_id = :p AND NOT is_deleted'),
+                      {'id': cid, 'p': self.pid}).mappings().first()
         if r is None:
             raise KeyError(f'no class {cid!r} in this session')
         return r
 
     def update_class(self, cid, name=None, color=None, hotkey=..., position=None):
+        k = {'id': cid, 'p': self.pid}
         with self.write() as c:
             r = self._class_row(c, cid)
             if name is not None:
                 name = name.strip()
                 if not name:
                     raise ValueError('a class needs a name')
-                dup = c.execute('SELECT 1 FROM label_classes WHERE task_id = ? AND is_deleted = 0 AND id != ? '
-                                'AND lower(name) = lower(?)', (r['task_id'], cid, name)).fetchone()
+                dup = c.execute(_q('SELECT 1 FROM lbl.label_classes WHERE project_id = :p AND task_id = :t '
+                                   'AND NOT is_deleted AND id <> :id AND lower(name) = lower(:n)'),
+                                {**k, 't': r['task_id'], 'n': name}).first()
                 if dup:
                     raise ValueError(f'this task already has a class {name!r}')
-                c.execute('UPDATE label_classes SET name = ? WHERE id = ?', (name, cid))
+                c.execute(_q('UPDATE lbl.label_classes SET name = :n WHERE id = :id AND project_id = :p'),
+                          {**k, 'n': name})
             if color is not None:
                 color = color.lower()
                 if not re.fullmatch(r'#[0-9a-f]{6}', color):
                     raise ValueError(f'{color!r} is not a #rrggbb colour')
-                c.execute('UPDATE label_classes SET color = ? WHERE id = ?', (color, cid))
+                c.execute(_q('UPDATE lbl.label_classes SET color = :c WHERE id = :id AND project_id = :p'),
+                          {**k, 'c': color})
             if hotkey is not ...:
                 if hotkey is not None and not _HOTKEY.match(hotkey.lower()):
                     raise ValueError(f'{hotkey!r} is not a hotkey')
-                c.execute('UPDATE label_classes SET hotkey = ? WHERE id = ?', (hotkey and hotkey.lower(), cid))
+                c.execute(_q('UPDATE lbl.label_classes SET hotkey = :h WHERE id = :id AND project_id = :p'),
+                          {**k, 'h': hotkey and hotkey.lower()})
             if position is not None:
-                ids = [x[0] for x in c.execute('SELECT id FROM label_classes WHERE task_id = ? AND is_deleted = 0 '
-                                               'ORDER BY position, name', (r['task_id'],))]
+                ids = list(c.execute(_q('SELECT id FROM lbl.label_classes WHERE project_id = :p AND task_id = :t '
+                                        'AND NOT is_deleted ORDER BY position, name COLLATE "C"'),
+                                     {'p': self.pid, 't': r['task_id']}).scalars())
                 ids.remove(cid)
                 ids.insert(max(0, min(int(position), len(ids))), cid)
-                c.executemany('UPDATE label_classes SET position = ? WHERE id = ?', [(i, x) for i, x in enumerate(ids)])
+                _many(c, 'UPDATE lbl.label_classes SET position = :pos WHERE id = :id AND project_id = :p',
+                      [{'pos': i, 'id': x, 'p': self.pid} for i, x in enumerate(ids)])
             r = self._class_row(c, cid)
-        return self._class_json(r)
+            return self._class_json(r)
 
-    @staticmethod
-    def _unlink_children(c, ids, t, tid):
+    def _unlink_children(self, c, ids, t, tid):
         """Live rows whose parent (a keypoints set's box) is among `ids`, just soft-deleted, lose the link:
         parent_id NULL, version + 1. Their image / task status versions bump too (open tabs reload), except in
         task `tid`, whose statuses the caller bumps itself. Returns the number of rows unlinked."""
-        ids, n, pairs = list(ids), 0, set()
-        for i in range(0, len(ids), 900):
-            chunk = ids[i:i + 900]
-            q = ','.join('?' * len(chunk))
-            rows = c.execute(f'SELECT id, media_id, task_id FROM annotations WHERE parent_id IN ({q}) AND is_deleted = 0',
-                             chunk).fetchall()
-            if rows:
-                c.executemany('UPDATE annotations SET parent_id = NULL, version = version + 1, updated_at = ? '
-                              'WHERE id = ?', [(t, x[0]) for x in rows])
-                pairs.update((x[1], x[2]) for x in rows if x[2] != tid)
-                n += len(rows)
-        if pairs:
-            c.executemany('UPDATE media_task_status SET version = version + 1, updated_at = ? '
-                          'WHERE media_id = ? AND task_id = ?', [(t, m, k) for m, k in pairs])
-        return n
+        ids = list(ids)
+        if not ids:
+            return 0
+        rows = c.execute(_q('SELECT id, media_id, task_id FROM lbl.annotations WHERE project_id = :p '
+                            'AND parent_id = ANY(:ids) AND NOT is_deleted'), {'p': self.pid, 'ids': ids}).all()
+        if not rows:
+            return 0
+        c.execute(_q('UPDATE lbl.annotations SET parent_id = NULL, version = version + 1, updated_at = :t '
+                     'WHERE project_id = :p AND id = ANY(:ids)'), {'t': t, 'p': self.pid, 'ids': [x[0] for x in rows]})
+        pairs = {(x[1], x[2]) for x in rows if x[2] != tid}
+        _many(c, 'UPDATE lbl.media_task_status SET version = version + 1, updated_at = :t '
+                 'WHERE project_id = :p AND media_id = :m AND task_id = :k',
+              [{'t': t, 'p': self.pid, 'm': m, 'k': k} for m, k in pairs])
+        return len(rows)
 
     def delete_class(self, cid, reassign_to=None, delete_annotations=False):
         with self.write() as c:
             r = self._class_row(c, cid)
             tid, t = r['task_id'], _now()
-            n = c.execute('SELECT COUNT(*) FROM annotations WHERE class_id = ? AND is_deleted = 0', (cid,)).fetchone()[0]
+            k = {'p': self.pid, 'cid': cid, 'tid': tid, 't': t}
+            n = c.execute(_q('SELECT COUNT(*) FROM lbl.annotations WHERE project_id = :p AND class_id = :cid '
+                             'AND NOT is_deleted'), k).scalar()
             if n and not reassign_to and not delete_annotations:
                 raise InUse(f'class {r["name"]!r} is used by {n} annotation{"s" * (n != 1)}: move them to another '
                             f'class or delete them with it')
             if n:
                 # other tabs holding these images must reload (their base_version goes stale)
-                c.execute('UPDATE media_task_status SET version = version + 1, updated_at = ?, review = NULL '
-                          'WHERE task_id = ? AND '
-                          'media_id IN (SELECT media_id FROM annotations WHERE class_id = ? AND is_deleted = 0)',
-                          (t, tid, cid))
+                c.execute(_q('UPDATE lbl.media_task_status SET version = version + 1, updated_at = :t, review = NULL '
+                             'WHERE project_id = :p AND task_id = :tid AND media_id IN (SELECT media_id FROM '
+                             'lbl.annotations WHERE project_id = :p AND class_id = :cid AND NOT is_deleted)'), k)
                 if reassign_to:
                     to = self._class_row(c, reassign_to)
                     if to['task_id'] != tid or reassign_to == cid:
                         raise ValueError('reassign_to must be another class of the same task')
-                    c.execute('UPDATE annotations SET class_id = ?, version = version + 1, updated_at = ? '
-                              'WHERE class_id = ? AND is_deleted = 0', (reassign_to, t, cid))
+                    c.execute(_q('UPDATE lbl.annotations SET class_id = :to, version = version + 1, updated_at = :t '
+                                 'WHERE project_id = :p AND class_id = :cid AND NOT is_deleted'), {**k, 'to': reassign_to})
                 else:
-                    gone = c.execute('SELECT id, media_id FROM annotations WHERE class_id = ? AND is_deleted = 0',
-                                     (cid,)).fetchall()
+                    gone = c.execute(_q('SELECT id, media_id FROM lbl.annotations WHERE project_id = :p '
+                                        'AND class_id = :cid AND NOT is_deleted'), k).all()
                     media = list(dict.fromkeys(x[1] for x in gone))
-                    c.execute('UPDATE annotations SET is_deleted = 1, version = version + 1, updated_at = ? '
-                              'WHERE class_id = ? AND is_deleted = 0', (t, cid))
+                    c.execute(_q('UPDATE lbl.annotations SET is_deleted = true, version = version + 1, updated_at = :t '
+                                 'WHERE project_id = :p AND class_id = :cid AND NOT is_deleted'), k)
                     self._unlink_children(c, [x[0] for x in gone], t, tid)
-                    c.executemany('UPDATE media_task_status SET n_annotations = (SELECT COUNT(*) FROM annotations a '
-                                  'WHERE a.media_id = ? AND a.task_id = ? AND a.is_deleted = 0) '
-                                  'WHERE media_id = ? AND task_id = ?', [(m, tid, m, tid) for m in media])
-                    c.executemany("UPDATE media_task_status SET status = 'todo' WHERE media_id = ? AND task_id = ? "
-                                  "AND status = 'in_progress' AND n_annotations = 0", [(m, tid) for m in media])
-            c.execute('UPDATE label_classes SET is_deleted = 1 WHERE id = ?', (cid,))
+                    c.execute(_q('UPDATE lbl.media_task_status s SET n_annotations = (SELECT COUNT(*) FROM '
+                                 'lbl.annotations a WHERE a.media_id = s.media_id AND a.task_id = s.task_id '
+                                 'AND NOT a.is_deleted) WHERE s.project_id = :p AND s.task_id = :tid '
+                                 'AND s.media_id = ANY(:mids)'), {**k, 'mids': media})
+                    c.execute(_q("UPDATE lbl.media_task_status SET status = 'todo' WHERE project_id = :p "
+                                 "AND task_id = :tid AND media_id = ANY(:mids) AND status = 'in_progress' "
+                                 'AND n_annotations = 0'), {**k, 'mids': media})
+            c.execute(_q('UPDATE lbl.label_classes SET is_deleted = true WHERE id = :cid AND project_id = :p'), k)
             # a model link mapping to this class would make every later link save fail: map it to 'ignore'
             cfg = _loads(self._task_row(c, tid, live=False)['config']) or {}
             cmap = (cfg.get('model') or {}).get('class_map') or {}
             if cid in cmap.values():
-                cfg['model']['class_map'] = {k: 'ignore' if v == cid else v for k, v in cmap.items()}
-                c.execute('UPDATE tasks SET config = ? WHERE id = ?', (_dumps(cfg), tid))
+                cfg['model']['class_map'] = {kk: 'ignore' if v == cid else v for kk, v in cmap.items()}
+                c.execute(_q('UPDATE lbl.tasks SET config = CAST(:cfg AS jsonb) WHERE id = :tid AND project_id = :p'),
+                          {**k, 'cfg': _dumps(cfg)})
         return n
 
     # ------------------------------------------------------------ media
     def add_media(self, rows):
         """Batch insert media rows (dicts of media columns; id / position / project_id filled in).
-        Rows whose file_name already exists are skipped (the UNIQUE index). Returns the number inserted."""
+        Rows whose file_name already exists in this project are skipped (the unique index). Returns the number
+        inserted."""
         if not rows:
             return 0
         cols = _COLS['media']
         jcols = _JSON_COLS['media']
         t = _now()
+        count = 'SELECT COUNT(*) FROM lbl.media WHERE project_id = :p'
         with self.write() as c:
-            pos = c.execute('SELECT COALESCE(MAX(position) + 1, 0) FROM media').fetchone()[0]
-            before = c.total_changes
+            pos = c.execute(_q('SELECT COALESCE(MAX(position) + 1, 0) FROM lbl.media WHERE project_id = :p'),
+                            {'p': self.pid}).scalar()
+            before = c.execute(_q(count), {'p': self.pid}).scalar()
             vals = []
             for r in rows:
                 r = dict(r)
@@ -498,29 +547,48 @@ class ProjectStore:
                 if r.get('position') is None:
                     r['position'] = pos
                     pos += 1
-                vals.append(tuple(_dumps(r.get(k)) if k in jcols else r.get(k) for k in cols))
-            c.executemany(f"INSERT OR IGNORE INTO media({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", vals)
-            n = c.total_changes - before
+                vals.append({k: _dumps(r.get(k)) if k in jcols else r.get(k) for k in cols})
+            ph = ', '.join(f'CAST(:{k} AS jsonb)' if k in jcols else f':{k}' for k in cols)
+            # writers of this project are serialised by the advisory lock, so the count difference is ours
+            _many(c, f"INSERT INTO lbl.media({', '.join(cols)}) VALUES ({ph}) ON CONFLICT DO NOTHING", vals)
+            n = c.execute(_q(count), {'p': self.pid}).scalar() - before
         self._ids_cache = None
         return n
 
     def media_count(self):
-        return self.conn().execute('SELECT COUNT(*) FROM media').fetchone()[0]
+        with self._read() as c:
+            return c.execute(_q('SELECT COUNT(*) FROM lbl.media WHERE project_id = :p'), {'p': self.pid}).scalar()
 
     def media_ids(self):
-        """Every media id in position order (navigation); cached until media changes."""
-        ids = self._ids_cache
-        if ids is None:
-            ids = [r[0] for r in self.conn().execute('SELECT id FROM media ORDER BY position, id')]
-            self._ids_cache = ids
+        """Every media id in position order (navigation). Cached while the project's media (insert-only) keep
+        the same count / last position / last insert time, so an import by another process is seen."""
+        with self._read() as c:
+            key = tuple(c.execute(_q('SELECT COUNT(*), MAX(position), MAX(created_at) FROM lbl.media '
+                                     'WHERE project_id = :p'), {'p': self.pid}).one())
+            hit = self._ids_cache
+            if hit is not None and hit[0] == key:
+                return hit[1]
+            ids = list(c.execute(_q('SELECT id FROM lbl.media WHERE project_id = :p ORDER BY position, id'),
+                                 {'p': self.pid}).scalars())
+        self._ids_cache = (key, ids)
         return ids
+
+    def cover(self, n):
+        """The first n media ids in position order (the card's cover)."""
+        with self._read() as c:
+            return list(c.execute(_q('SELECT id FROM lbl.media WHERE project_id = :p ORDER BY position, id '
+                                     'LIMIT :n'), {'p': self.pid, 'n': int(n)}).scalars())
 
     def media_names(self):
         """{file_name: uri} of every media (import uses it to skip known files and keep names unique)."""
-        return {r[0]: r[1] for r in self.conn().execute('SELECT file_name, uri FROM media')}
+        with self._read() as c:
+            return {r[0]: r[1] for r in c.execute(_q('SELECT file_name, uri FROM lbl.media WHERE project_id = :p'),
+                                                  {'p': self.pid})}
 
     def media_row(self, mid):
-        r = self.conn().execute('SELECT * FROM media WHERE id = ?', (mid,)).fetchone()
+        with self._read() as c:
+            r = c.execute(_q('SELECT * FROM lbl.media WHERE id = :id AND project_id = :p'),
+                          {'id': mid, 'p': self.pid}).mappings().first()
         if r is None:
             raise KeyError(f'no image {mid!r} in this session')
         return dict(r)
@@ -529,20 +597,22 @@ class ProjectStore:
         """{id: row} for a few ids (prefetch)."""
         if not ids:
             return {}
-        q = f"SELECT * FROM media WHERE id IN ({','.join('?' * len(ids))})"
-        return {r['id']: dict(r) for r in self.conn().execute(q, list(ids))}
+        with self._read() as c:
+            return {r['id']: dict(r) for r in _rows(c, 'SELECT * FROM lbl.media WHERE project_id = :p '
+                                                       'AND id = ANY(:ids)', {'p': self.pid, 'ids': list(ids)})}
 
     def _statuses(self, c, ids, tids):
         st = {m: ({t: 'todo' for t in tids}, {t: 0 for t in tids}, {t: None for t in tids}, {}) for m in ids}
-        for i in range(0, len(ids), 900):              # SQLite's bound-parameter cap
-            chunk = ids[i:i + 900]
-            for r in c.execute('SELECT media_id, task_id, status, n_annotations, model_run_at, review '
-                               f"FROM media_task_status WHERE media_id IN ({','.join('?' * len(chunk))})", chunk):
-                s = st[r[0]]
-                if r[1] in s[0]:
-                    s[0][r[1]], s[1][r[1]], s[2][r[1]] = r[2], r[3], r[4]
-                    if r[5] and r[2] == 'done':
-                        s[3][r[1]] = r[5]
+        if not ids:
+            return st
+        for r in c.execute(_q('SELECT media_id, task_id, status, n_annotations, model_run_at, review '
+                              'FROM lbl.media_task_status WHERE project_id = :p AND media_id = ANY(:ids)'),
+                           {'p': self.pid, 'ids': list(ids)}):
+            s = st[r[0]]
+            if r[1] in s[0]:
+                s[0][r[1]], s[1][r[1]], s[2][r[1]] = r[2], r[3], r[4]
+                if r[5] and r[2] == 'done':
+                    s[3][r[1]] = r[5]
         return st
 
     @staticmethod
@@ -551,7 +621,8 @@ class ProjectStore:
                 'position': r['position'], 'status': st[0], 'n': st[1], 'model_run': st[2], 'review': st[3]}
 
     def _live_tids(self, c):
-        return [r[0] for r in c.execute('SELECT id FROM tasks WHERE is_deleted = 0 ORDER BY position')]
+        return list(c.execute(_q('SELECT id FROM lbl.tasks WHERE project_id = :p AND NOT is_deleted '
+                                 'ORDER BY position, created_at, id'), {'p': self.pid}).scalars())
 
     def media_page(self, offset=0, limit=200, task_id=None, status=None, q=None, cls=None, cls_mode='any',
                    min_ann=None, max_ann=None, review=None):
@@ -568,37 +639,39 @@ class ProjectStore:
         cls = [x for x in (cls or ()) if x]
         if q or cls or min_ann is not None or max_ann is not None or (review and task_id):
             return self._media_filtered(offset, limit, task_id, status, q, cls, cls_mode, min_ann, max_ann, review)
-        c = self.conn()
-        tids = self._live_tids(c)
         cols = 'm.id, m.file_name, m.width, m.height, m.position'
-        lim = [int(limit), int(offset)]
-        if task_id and status:
-            if status not in schema.STATUSES:
-                raise ValueError(f'unknown status {status!r}')
-            if status == 'todo':
-                # todo = no status row, or a 'todo' one: walk the media order, skip the touched ones
-                n_other = c.execute("SELECT COUNT(*) FROM media_task_status WHERE task_id = ? AND status != 'todo'",
-                                    (task_id,)).fetchone()[0]
-                total = self.media_count() - n_other
-                rows = c.execute(f'SELECT {cols} FROM media m WHERE NOT EXISTS (SELECT 1 FROM media_task_status s '
-                                 "WHERE s.media_id = m.id AND s.task_id = ? AND s.status != 'todo') "
-                                 'ORDER BY m.position, m.id LIMIT ? OFFSET ?', [task_id, *lim]).fetchall()
+        a = {'p': self.pid, 'lim': int(limit), 'off': int(offset)}
+        with self._read() as c:
+            tids = self._live_tids(c)
+            n_media = c.execute(_q('SELECT COUNT(*) FROM lbl.media WHERE project_id = :p'), a).scalar()
+            if task_id and status:
+                if status not in schema.STATUSES:
+                    raise ValueError(f'unknown status {status!r}')
+                a['tid'], a['st'] = task_id, status
+                if status == 'todo':
+                    # todo = no status row, or a 'todo' one: walk the media order, skip the touched ones
+                    n_other = c.execute(_q("SELECT COUNT(*) FROM lbl.media_task_status WHERE project_id = :p "
+                                           "AND task_id = :tid AND status <> 'todo'"), a).scalar()
+                    total = n_media - n_other
+                    rows = _rows(c, f'SELECT {cols} FROM lbl.media m WHERE m.project_id = :p AND NOT EXISTS ('
+                                    'SELECT 1 FROM lbl.media_task_status s WHERE s.media_id = m.id AND s.task_id = :tid '
+                                    "AND s.status <> 'todo') ORDER BY m.position, m.id LIMIT :lim OFFSET :off", a)
+                else:
+                    total = c.execute(_q('SELECT COUNT(*) FROM lbl.media_task_status WHERE project_id = :p '
+                                         'AND task_id = :tid AND status = :st'), a).scalar()
+                    rows = _rows(c, f'SELECT {cols} FROM lbl.media_task_status s JOIN lbl.media m ON m.id = s.media_id '
+                                    'WHERE s.project_id = :p AND s.task_id = :tid AND s.status = :st '
+                                    'ORDER BY m.position, m.id LIMIT :lim OFFSET :off', a)
             else:
-                # from the (task_id, status) index: 4.8 ms vs 20 ms for the LEFT JOIN + COALESCE (10k, measured)
-                total = c.execute('SELECT COUNT(*) FROM media_task_status WHERE task_id = ? AND status = ?',
-                                  (task_id, status)).fetchone()[0]
-                rows = c.execute(f'SELECT {cols} FROM media_task_status s JOIN media m ON m.id = s.media_id '
-                                 'WHERE s.task_id = ? AND s.status = ? ORDER BY m.position, m.id LIMIT ? OFFSET ?',
-                                 [task_id, status, *lim]).fetchall()
-        else:
-            total = self.media_count()
-            rows = c.execute(f'SELECT {cols} FROM media m ORDER BY m.position, m.id LIMIT ? OFFSET ?', lim).fetchall()
-        st = self._statuses(c, [r['id'] for r in rows], tids)
+                total = n_media
+                rows = _rows(c, f'SELECT {cols} FROM lbl.media m WHERE m.project_id = :p '
+                                'ORDER BY m.position, m.id LIMIT :lim OFFSET :off', a)
+            st = self._statuses(c, [r['id'] for r in rows], tids)
         return {'total': total, 'items': [self._media_json(r, st[r['id']]) for r in rows]}
 
     @staticmethod
     def _like(pat):
-        """A LIKE pattern (ESCAPE '\\') from a user wildcard: * = any run, ? = one character, the rest literal."""
+        """An ILIKE pattern (ESCAPE '\\') from a user wildcard: * = any run, ? = one character, the rest literal."""
         out = []
         for ch in pat:
             out.append('%' if ch == '*' else '_' if ch == '?' else '\\' + ch if ch in '%_\\' else ch)
@@ -608,24 +681,27 @@ class ProjectStore:
         """media_page with the strip filter: one indexed SQL pass (status / name / class / count), a regex on the
         names it returns. Every predicate is a correlated EXISTS / scalar subquery on (media_id[, task_id]) indexes,
         so the cost follows the media count, not the annotation count."""
-        c = self.conn()
-        where, args = [], []
+        args = {'p': self.pid}
+
+        def arg(v):                                     # a bound parameter (never user text inside the SQL)
+            k = f'a{len(args)}'
+            args[k] = v
+            return f':{k}'
+
+        where = ['m.project_id = :p']
         if task_id and status:
             if status not in schema.STATUSES:
                 raise ValueError(f'unknown status {status!r}')
             if status == 'todo':
-                where.append('NOT EXISTS (SELECT 1 FROM media_task_status s WHERE s.media_id = m.id AND s.task_id = ? '
-                             "AND s.status != 'todo')")
-                args.append(task_id)
+                where.append('NOT EXISTS (SELECT 1 FROM lbl.media_task_status s WHERE s.media_id = m.id '
+                             f"AND s.task_id = {arg(task_id)} AND s.status <> 'todo')")
             else:
-                where.append('EXISTS (SELECT 1 FROM media_task_status s WHERE s.media_id = m.id AND s.task_id = ? '
-                             'AND s.status = ?)')
-                args += [task_id, status]
+                where.append('EXISTS (SELECT 1 FROM lbl.media_task_status s WHERE s.media_id = m.id '
+                             f'AND s.task_id = {arg(task_id)} AND s.status = {arg(status)})')
         if review and task_id:
-            cond = "s.status = 'done' AND s.review IS NULL" if review == 'none' else 's.review = ?'
-            where.append(f'EXISTS (SELECT 1 FROM media_task_status s WHERE s.media_id = m.id AND s.task_id = ? '
-                         f'AND {cond})')
-            args += [task_id] + ([] if review == 'none' else [review])
+            cond = "s.status = 'done' AND s.review IS NULL" if review == 'none' else f's.review = {arg(review)}'
+            where.append(f'EXISTS (SELECT 1 FROM lbl.media_task_status s WHERE s.media_id = m.id '
+                         f'AND s.task_id = {arg(task_id)} AND {cond})')
         rx = None
         if len(q) >= 2 and q[0] == '/' and q[-1] == '/':
             if len(q) > 502:
@@ -639,70 +715,68 @@ class ProjectStore:
         elif q:
             if '*' in q or '?' in q:
                 pat = self._like(q)
-                where.append("(m.file_name LIKE ? ESCAPE '\\' OR m.file_name LIKE ? ESCAPE '\\')")
-                args += [pat, '%/' + pat]
+                where.append(f"(m.file_name ILIKE {arg(pat)} ESCAPE '\\' OR m.file_name ILIKE {arg('%/' + pat)} "
+                             "ESCAPE '\\')")
             else:
-                where.append("m.file_name LIKE ? ESCAPE '\\'")
-                args.append('%' + self._like(q.replace('*', '').replace('?', '')) + '%')
+                where.append(f"m.file_name ILIKE {arg('%' + self._like(q.replace('*', '').replace('?', '')) + '%')} "
+                             "ESCAPE '\\'")
         if cls:
             if cls_mode not in ('any', 'all', 'none'):
                 raise ValueError(f'unknown class mode {cls_mode!r}')
-            has = ('EXISTS (SELECT 1 FROM annotations a WHERE a.media_id = m.id AND a.is_deleted = 0 '
+            has = ('EXISTS (SELECT 1 FROM lbl.annotations a WHERE a.media_id = m.id AND NOT a.is_deleted '
                    'AND a.class_id {})')
             if cls_mode == 'all':
                 for cid in cls:
-                    where.append(has.format('= ?'))
-                    args.append(cid)
+                    where.append(has.format(f'= {arg(cid)}'))
             else:
-                where.append(('NOT ' if cls_mode == 'none' else '') + has.format(f"IN ({','.join('?' * len(cls))})"))
-                args += cls
+                where.append(('NOT ' if cls_mode == 'none' else '') + has.format(f'= ANY({arg(list(cls))})'))
         if min_ann is not None or max_ann is not None:
             if task_id:
-                n = ('COALESCE((SELECT s.n_annotations FROM media_task_status s WHERE s.media_id = m.id '
-                     'AND s.task_id = ?), 0)')
-                nargs = [task_id]
+                n = ('COALESCE((SELECT s.n_annotations FROM lbl.media_task_status s WHERE s.media_id = m.id '
+                     f'AND s.task_id = {arg(task_id)}), 0)')
             else:
-                n = '(SELECT COUNT(*) FROM annotations a WHERE a.media_id = m.id AND a.is_deleted = 0)'
-                nargs = []
+                n = '(SELECT COUNT(*) FROM lbl.annotations a WHERE a.media_id = m.id AND NOT a.is_deleted)'
             if min_ann is not None:
-                where.append(f'{n} >= ?')
-                args += nargs + [int(min_ann)]
+                where.append(f'{n} >= {arg(int(min_ann))}')
             if max_ann is not None:
-                where.append(f'{n} <= ?')
-                args += nargs + [int(max_ann)]
-        sql_where = (' WHERE ' + ' AND '.join(where)) if where else ''
+                where.append(f'{n} <= {arg(int(max_ann))}')
+        sql_where = ' WHERE ' + ' AND '.join(where)
         cols = 'm.id, m.file_name, m.width, m.height, m.position'
-        if rx is None:
-            total = c.execute(f'SELECT COUNT(*) FROM media m{sql_where}', args).fetchone()[0]
-            rows = c.execute(f'SELECT {cols} FROM media m{sql_where} ORDER BY m.position, m.id LIMIT ? OFFSET ?',
-                             [*args, int(limit), int(offset)]).fetchall()
-        else:
-            every = c.execute(f'SELECT {cols} FROM media m{sql_where} ORDER BY m.position, m.id', args).fetchall()
-            budget = REGEX_BUDGET_S + 5e-6 * len(every)
-            deadline = time.monotonic() + budget
-            slow = ValueError('bad regular expression: it takes too long over the image names, simplify it')
-            # regex: one search can never run past the budget, and releases the GIL while it runs (concurrent)
-            search = (lambda s: rx.search(s, timeout=budget, concurrent=True)) if _regex is not None else rx.search
-            hit = []
-            try:
-                for k, r in enumerate(every):
-                    if search(r[1][:_REGEX_NAME_MAX]):
-                        hit.append(r)
-                    if not k & 1023 and time.monotonic() > deadline:
-                        raise slow
-            except TimeoutError:
-                raise slow from None
-            total = len(hit)
-            rows = hit[int(offset):int(offset) + int(limit)]
-        st = self._statuses(c, [r['id'] for r in rows], self._live_tids(c))
+        with self._read() as c:
+            if rx is None:
+                total = c.execute(text(f'SELECT COUNT(*) FROM lbl.media m{sql_where}'), args).scalar()
+                rows = c.execute(text(f'SELECT {cols} FROM lbl.media m{sql_where} ORDER BY m.position, m.id '
+                                      'LIMIT :lim OFFSET :off'),
+                                 {**args, 'lim': int(limit), 'off': int(offset)}).mappings().all()
+            else:
+                every = c.execute(text(f'SELECT {cols} FROM lbl.media m{sql_where} ORDER BY m.position, m.id'),
+                                  args).mappings().all()
+                budget = REGEX_BUDGET_S + 5e-6 * len(every)
+                deadline = time.monotonic() + budget
+                slow = ValueError('bad regular expression: it takes too long over the image names, simplify it')
+                # regex: one search can never run past the budget, and releases the GIL while it runs (concurrent)
+                search = (lambda s: rx.search(s, timeout=budget, concurrent=True)) if _regex is not None else rx.search
+                hit = []
+                try:
+                    for k, r in enumerate(every):
+                        if search(r['file_name'][:_REGEX_NAME_MAX]):
+                            hit.append(r)
+                        if not k & 1023 and time.monotonic() > deadline:
+                            raise slow
+                except TimeoutError:
+                    raise slow from None
+                total = len(hit)
+                rows = hit[int(offset):int(offset) + int(limit)]
+            st = self._statuses(c, [r['id'] for r in rows], self._live_tids(c))
         return {'total': total, 'items': [self._media_json(r, st[r['id']]) for r in rows]}
 
     def media_item(self, mid):
-        c = self.conn()
-        r = c.execute('SELECT id, file_name, width, height, position FROM media WHERE id = ?', (mid,)).fetchone()
-        if r is None:
-            raise KeyError(f'no image {mid!r} in this session')
-        return self._media_json(r, self._statuses(c, [mid], self._live_tids(c))[mid])
+        with self._read() as c:
+            r = c.execute(_q('SELECT id, file_name, width, height, position FROM lbl.media WHERE id = :id '
+                             'AND project_id = :p'), {'id': mid, 'p': self.pid}).mappings().first()
+            if r is None:
+                raise KeyError(f'no image {mid!r} in this session')
+            return self._media_json(r, self._statuses(c, [mid], self._live_tids(c))[mid])
 
     # ------------------------------------------------------------ annotations
     @staticmethod
@@ -713,42 +787,56 @@ class ProjectStore:
                 'version': r['version'], 'score': r['score'], 'source': r['source']}
 
     def _live_anns(self, c, mid, tid=None):
-        q = ('SELECT a.* FROM annotations a JOIN tasks t ON t.id = a.task_id AND t.is_deleted = 0 '
-             'WHERE a.media_id = ? AND a.is_deleted = 0')
-        args = [mid]
+        q = ('SELECT a.* FROM lbl.annotations a JOIN lbl.tasks t ON t.id = a.task_id AND NOT t.is_deleted '
+             'WHERE a.project_id = :p AND a.media_id = :m AND NOT a.is_deleted')
+        args = {'p': self.pid, 'm': mid}
         if tid:
-            q += ' AND a.task_id = ?'
-            args.append(tid)
-        return [self._ann_json(r) for r in c.execute(q + ' ORDER BY a.z_order, a.created_at', args)]
+            q += ' AND a.task_id = :t'
+            args['t'] = tid
+        return [self._ann_json(r) for r in _rows(c, q + ' ORDER BY a.z_order, a.created_at, a.id', args)]
+
+    def live_annotations(self, mid, tid=None):
+        """[Ann] live on image `mid` (of task `tid`, else of every live task)."""
+        with self._read() as c:
+            return self._live_anns(c, mid, tid)
 
     def get_annotations(self, mid):
         """{media, versions:{tid: int}, annotations:[Ann]} for every live task."""
-        c = self.conn()
-        media = self.media_item(mid)
-        versions = {t: 0 for t in media['status']}
-        for r in c.execute('SELECT task_id, version FROM media_task_status WHERE media_id = ?', (mid,)):
-            if r[0] in versions:
-                versions[r[0]] = r[1]
-        return {'media': media, 'versions': versions, 'annotations': self._live_anns(c, mid)}
+        with self._read() as c:
+            media = self.media_item(mid)
+            versions = {t: 0 for t in media['status']}
+            for r in c.execute(_q('SELECT task_id, version FROM lbl.media_task_status WHERE project_id = :p '
+                                  'AND media_id = :m'), {'p': self.pid, 'm': mid}):
+                if r[0] in versions:
+                    versions[r[0]] = r[1]
+            return {'media': media, 'versions': versions, 'annotations': self._live_anns(c, mid)}
+
+    def _media_exists(self, c, mid):
+        if c.execute(_q('SELECT 1 FROM lbl.media WHERE id = :m AND project_id = :p'),
+                     {'m': mid, 'p': self.pid}).first() is None:
+            raise KeyError(f'no image {mid!r} in this session')
+
+    def _class_ids(self, c, tid):
+        return set(c.execute(_q('SELECT id FROM lbl.label_classes WHERE project_id = :p AND task_id = :t '
+                                'AND NOT is_deleted'), {'p': self.pid, 't': tid}).scalars())
 
     def put_annotations(self, mid, tid, rows, base_version, user=None):
         """Replace the live set of task `tid` on image `mid` with `rows` in one transaction (insert new ids,
         update changed ones with version + 1, soft-delete missing ones). Raises Conflict on a stale
-        base_version, ValueError on invalid rows, KeyError on unknown image / task."""
+        base_version, ValueError on invalid rows, KeyError on unknown image / task.
+        user: the editing user's id (annotations.created_by of new rows)."""
         t = _now()
         with self.write() as c:
             task = self._task_row(c, tid)
             ttype = task['task_type']
             cfg = _loads(task['config']) or {}
-            if c.execute('SELECT 1 FROM media WHERE id = ?', (mid,)).fetchone() is None:
-                raise KeyError(f'no image {mid!r} in this session')
-            st = c.execute('SELECT status, version FROM media_task_status WHERE media_id = ? AND task_id = ?',
-                           (mid, tid)).fetchone()
+            self._media_exists(c, mid)
+            st = c.execute(_q('SELECT status, version FROM lbl.media_task_status WHERE project_id = :p '
+                              'AND media_id = :m AND task_id = :t'), {'p': self.pid, 'm': mid, 't': tid}).first()
             cur_status, cur_version = (st[0], st[1]) if st else ('todo', 0)
             if int(base_version) != cur_version:
                 raise Conflict(cur_version, self._live_anns(c, mid, tid))
-            class_ids = {r[0] for r in c.execute('SELECT id FROM label_classes WHERE task_id = ? AND is_deleted = 0',
-                                                 (tid,))}
+            class_ids = self._class_ids(c, tid)
             allowed = TASK_GEOMS.get(ttype, (schema.TASK_GEOMETRY.get(ttype),))
             task_d = {'config': cfg}
             new, seen = {}, set()
@@ -769,16 +857,17 @@ class ProjectStore:
                 if src not in schema.SOURCES:
                     raise ValueError(f'unknown source {src!r}')
                 score = a.get('score')
-                new[aid] = {'class_id': a['class_id'], 'geometry_type': gtype, 'geometry': _dumps(geom),
-                            'attributes': _dumps(a.get('attributes') or {}), 'parent_id': a.get('parent_id'),
+                new[aid] = {'class_id': a['class_id'], 'geometry_type': gtype, 'geometry': geom,
+                            'attributes': a.get('attributes') or {}, 'parent_id': a.get('parent_id'),
                             'z_order': int(a.get('z_order') or 0), 'score': None if score is None else float(score),
                             'source': src, 'ext': ext or (None, None, None, None)}
             if ttype == 'classification' and not cfg.get('multi_label'):
                 if len(new) > 1:
                     raise ValueError('this classification task takes one class per image')
-            old = {r['id']: r for r in c.execute('SELECT id, class_id, geometry_type, geometry, attributes, parent_id, '
-                                                 'z_order, score, source, is_deleted FROM annotations '
-                                                 'WHERE media_id = ? AND task_id = ?', (mid, tid))}
+            old = {r['id']: r for r in _rows(c, 'SELECT id, class_id, geometry_type, geometry, attributes, parent_id, '
+                                                'z_order, score, source, is_deleted FROM lbl.annotations '
+                                                'WHERE project_id = :p AND media_id = :m AND task_id = :t',
+                                             {'p': self.pid, 'm': mid, 't': tid})}
             ins, upd = [], []
             for aid, n in new.items():
                 o = old.get(aid)
@@ -790,62 +879,71 @@ class ProjectStore:
                     n['source'], n['score'] = 'manual', None
                 key = (n['class_id'], n['geometry_type'], n['geometry'], n['attributes'], n['parent_id'],
                        n['z_order'], n['score'], n['source'])
-                vals = (n['class_id'], n['geometry_type'], n['geometry'], *n['ext'], n['attributes'], n['score'],
-                        n['source'], n['parent_id'], n['z_order'])
+                x, y, w, h = n['ext']
+                vals = {'class_id': n['class_id'], 'gt': n['geometry_type'], 'g': _dumps(n['geometry']),
+                        'x': x, 'y': y, 'w': w, 'h': h, 'attrs': _dumps(n['attributes']), 'score': n['score'],
+                        'src': n['source'], 'parent': n['parent_id'], 'z': n['z_order'], 't': t, 'id': aid,
+                        'p': self.pid}
                 if o is None:
-                    ins.append((aid, self.pid, tid, mid, *vals, user, t, t))
-                elif o['is_deleted'] or key != (o['class_id'], o['geometry_type'], o['geometry'], o['attributes'],
-                                                o['parent_id'], o['z_order'], o['score'], o['source']):
-                    upd.append((*vals, t, aid))
-            dels = [(t, aid) for aid, o in old.items() if aid not in new and not o['is_deleted']]
+                    ins.append({**vals, 'task': tid, 'm': mid, 'user': user, 'tc': _seq(t, len(ins))})
+                elif o['is_deleted'] or key != (o['class_id'], o['geometry_type'], o['geometry'],
+                                                o['attributes'] or {}, o['parent_id'], o['z_order'], o['score'],
+                                                o['source']):
+                    upd.append(vals)
+            dels = [aid for aid, o in old.items() if aid not in new and not o['is_deleted']]
             if ins:
                 try:
-                    c.executemany('INSERT INTO annotations(id, project_id, task_id, media_id, class_id, geometry_type, '
-                                  'geometry, bbox_x, bbox_y, bbox_w, bbox_h, attributes, score, source, parent_id, '
-                                  'z_order, created_by, created_at, updated_at, version, is_deleted) '
-                                  'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0)', ins)
-                except sqlite3.IntegrityError:
-                    raise ValueError('an annotation id is already used by another image or task') from None
-            if upd:
-                c.executemany('UPDATE annotations SET class_id = ?, geometry_type = ?, geometry = ?, bbox_x = ?, '
-                              'bbox_y = ?, bbox_w = ?, bbox_h = ?, attributes = ?, score = ?, source = ?, '
-                              'parent_id = ?, z_order = ?, updated_at = ?, version = version + 1, is_deleted = 0 '
-                              'WHERE id = ?', upd)
+                    _many(c, 'INSERT INTO lbl.annotations(id, project_id, task_id, media_id, class_id, geometry_type, '
+                             'geometry, bbox_x, bbox_y, bbox_w, bbox_h, attributes, score, source, parent_id, '
+                             'z_order, created_by, created_at, updated_at, version, is_deleted) VALUES (:id, :p, '
+                             ':task, :m, :class_id, :gt, CAST(:g AS jsonb), :x, :y, :w, :h, CAST(:attrs AS jsonb), '
+                             ':score, :src, :parent, :z, :user, :tc, :t, 1, false)', ins)
+                except IntegrityError as e:
+                    if isinstance(e.orig, pg_errors.UniqueViolation):
+                        raise ValueError('an annotation id is already used by another image or task') from None
+                    raise
+            _many(c, 'UPDATE lbl.annotations SET class_id = :class_id, geometry_type = :gt, '
+                     'geometry = CAST(:g AS jsonb), bbox_x = :x, bbox_y = :y, bbox_w = :w, bbox_h = :h, '
+                     'attributes = CAST(:attrs AS jsonb), score = :score, source = :src, parent_id = :parent, '
+                     'z_order = :z, updated_at = :t, version = version + 1, is_deleted = false '
+                     'WHERE id = :id AND project_id = :p', upd)
             if dels:
-                c.executemany('UPDATE annotations SET is_deleted = 1, version = version + 1, updated_at = ? '
-                              'WHERE id = ?', dels)
+                c.execute(_q('UPDATE lbl.annotations SET is_deleted = true, version = version + 1, updated_at = :t '
+                             'WHERE project_id = :p AND id = ANY(:ids)'), {'t': t, 'p': self.pid, 'ids': dels})
             n = len(new)
             if not (ins or upd or dels) and st is not None:
                 return {'version': cur_version, 'status': cur_status, 'n': n}
             status = cur_status if cur_status == 'done' or (cur_status == 'skipped' and not n) else \
                 ('in_progress' if n else 'todo')
             version = cur_version + 1
-            c.execute('INSERT INTO media_task_status(media_id, task_id, status, n_annotations, version, updated_at) '
-                      'VALUES (?,?,?,?,?,?) ON CONFLICT(media_id, task_id) DO UPDATE SET status = excluded.status, '
-                      'n_annotations = excluded.n_annotations, version = excluded.version, '
-                      'updated_at = excluded.updated_at, review = NULL', (mid, tid, status, n, version, t))
+            c.execute(_q('INSERT INTO lbl.media_task_status(media_id, task_id, project_id, status, n_annotations, '
+                         'version, updated_at) VALUES (:m, :t, :p, :st, :n, :v, :now) ON CONFLICT (media_id, task_id) '
+                         'DO UPDATE SET status = EXCLUDED.status, n_annotations = EXCLUDED.n_annotations, '
+                         'version = EXCLUDED.version, updated_at = EXCLUDED.updated_at, review = NULL'),
+                      {'m': mid, 't': tid, 'p': self.pid, 'st': status, 'n': n, 'v': version, 'now': t})
         return {'version': version, 'status': status, 'n': n}
 
     def set_status(self, mid, task_ids, action, user=None):
-        """commit -> done, skip -> skipped, reopen -> in_progress (or todo with no shapes). {tid: status}."""
+        """commit -> done, skip -> skipped, reopen -> in_progress (or todo with no shapes). {tid: status}.
+        user: the committing user's id (media_task_status.committed_by)."""
         t = _now()
         out = {}
         with self.write() as c:
-            if c.execute('SELECT 1 FROM media WHERE id = ?', (mid,)).fetchone() is None:
-                raise KeyError(f'no image {mid!r} in this session')
+            self._media_exists(c, mid)
             for tid in task_ids:
                 self._task_row(c, tid)
-                n = c.execute('SELECT COUNT(*) FROM annotations WHERE media_id = ? AND task_id = ? AND is_deleted = 0',
-                              (mid, tid)).fetchone()[0]
+                n = c.execute(_q('SELECT COUNT(*) FROM lbl.annotations WHERE project_id = :p AND media_id = :m '
+                                 'AND task_id = :t AND NOT is_deleted'), {'p': self.pid, 'm': mid, 't': tid}).scalar()
                 status = {'commit': 'done', 'skip': 'skipped'}.get(action) or ('in_progress' if n else 'todo')
                 done = action == 'commit'
-                c.execute('INSERT INTO media_task_status(media_id, task_id, status, n_annotations, version, '
-                          'committed_by, committed_at, updated_at) VALUES (?,?,?,?,0,?,?,?) '
-                          'ON CONFLICT(media_id, task_id) DO UPDATE SET status = excluded.status, '
-                          'n_annotations = excluded.n_annotations, updated_at = excluded.updated_at'
-                          + (', committed_by = excluded.committed_by, committed_at = excluded.committed_at'
-                             if done else ', review = NULL'),
-                          (mid, tid, status, n, user if done else None, t if done else None, t))
+                c.execute(_q('INSERT INTO lbl.media_task_status(media_id, task_id, project_id, status, n_annotations, '
+                             'version, committed_by, committed_at, updated_at) VALUES (:m, :t, :p, :st, :n, 0, :by, '
+                             ':cat, :now) ON CONFLICT (media_id, task_id) DO UPDATE SET status = EXCLUDED.status, '
+                             'n_annotations = EXCLUDED.n_annotations, updated_at = EXCLUDED.updated_at'
+                             + (', committed_by = EXCLUDED.committed_by, committed_at = EXCLUDED.committed_at'
+                                if done else ', review = NULL')),
+                          {'m': mid, 't': tid, 'p': self.pid, 'st': status, 'n': n, 'by': user if done else None,
+                           'cat': t if done else None, 'now': t})
                 out[tid] = status
         return out
 
@@ -861,20 +959,15 @@ class ProjectStore:
             for tid in task_ids:
                 self._task_row(c, tid)
                 val = None if mode == 'clear' else mode
-                cond = {'clear': 'review IS NOT NULL', 'manual': "status = 'done' AND COALESCE(review, '') != 'manual'",
+                cond = {'clear': 'review IS NOT NULL', 'manual': "status = 'done' AND COALESCE(review, '') <> 'manual'",
                         'bulk': "status = 'done' AND review IS NULL"}[mode]
-                n = 0
-                if media_ids is None:
-                    n = c.execute(f'UPDATE media_task_status SET review = ?, updated_at = ? WHERE task_id = ? AND {cond}',
-                                  (val, t, tid)).rowcount
-                else:
-                    ids = list(media_ids)
-                    for i in range(0, len(ids), 900):
-                        chunk = ids[i:i + 900]
-                        n += c.execute(f'UPDATE media_task_status SET review = ?, updated_at = ? WHERE task_id = ? '
-                                       f"AND {cond} AND media_id IN ({','.join('?' * len(chunk))})",
-                                       [val, t, tid, *chunk]).rowcount
-                out[tid] = n
+                q = f'UPDATE lbl.media_task_status SET review = :v, updated_at = :t WHERE project_id = :p ' \
+                    f'AND task_id = :tid AND {cond}'
+                a = {'v': val, 't': t, 'p': self.pid, 'tid': tid}
+                if media_ids is not None:
+                    q += ' AND media_id = ANY(:ids)'
+                    a['ids'] = list(media_ids)
+                out[tid] = c.execute(_q(q), a).rowcount
         return out
 
     # ------------------------------------------------------------ model predictions
@@ -882,8 +975,44 @@ class ProjectStore:
         """Store one image's model output for task `tid` (see apply_predictions_many). Returns
         {version, annotations: the task's full live set on that image, n_model}."""
         res = self.apply_predictions_many(tid, [(mid, preds)], replace_model)[mid]
-        return {'version': res['version'], 'annotations': self._live_anns(self.conn(), mid, tid),
+        return {'version': res['version'], 'annotations': self.live_annotations(mid, tid),
                 'n_model': res['n_model']}
+
+    def _status_rows(self, c, tid, mids):
+        """{media_id: (status, version, n_annotations)} of task `tid` on `mids`."""
+        if not mids:
+            return {}
+        return {r[0]: (r[1], r[2], r[3] or 0) for r in c.execute(
+            _q('SELECT media_id, status, version, n_annotations FROM lbl.media_task_status WHERE project_id = :p '
+               'AND task_id = :t AND media_id = ANY(:ids)'), {'p': self.pid, 't': tid, 'ids': list(mids)})}
+
+    def _live_counts(self, c, tid, mids):
+        if not mids:
+            return {}
+        return dict(c.execute(_q('SELECT media_id, COUNT(*) FROM lbl.annotations WHERE project_id = :p '
+                                 'AND task_id = :t AND NOT is_deleted AND media_id = ANY(:ids) GROUP BY media_id'),
+                              {'p': self.pid, 't': tid, 'ids': list(mids)}).all())
+
+    def _soft_delete(self, c, tid, mids, source_cond, t):
+        """Soft-delete the live rows of task `tid` on `mids` matching `source_cond` and unlink their children."""
+        if not mids:
+            return
+        gone = list(c.execute(_q('UPDATE lbl.annotations SET is_deleted = true, version = version + 1, '
+                                 'updated_at = :t WHERE project_id = :p AND task_id = :tid AND media_id = ANY(:ids) '
+                                 f'AND {source_cond} AND NOT is_deleted RETURNING id'),
+                              {'t': t, 'p': self.pid, 'tid': tid, 'ids': list(mids)}).scalars())
+        self._unlink_children(c, gone, t, tid)
+
+    _INSERT_ANN = ('INSERT INTO lbl.annotations(id, project_id, task_id, media_id, class_id, geometry_type, geometry, '
+                   'bbox_x, bbox_y, bbox_w, bbox_h, attributes, score, source, parent_id, z_order, created_at, '
+                   'updated_at, version, is_deleted) VALUES (:id, :p, :tid, :m, :cid, :gt, CAST(:g AS jsonb), :x, :y, '
+                   ':w, :h, CAST(:attrs AS jsonb), :score, :src, NULL, :z, :tc, :t, 1, false)')
+
+    _UPSERT_STATUS = ('INSERT INTO lbl.media_task_status(media_id, task_id, project_id, status, n_annotations, '
+                      'version, updated_at{extra_cols}) VALUES (:m, :tid, :p, :st, :n, :v, :t{extra_vals}) '
+                      'ON CONFLICT (media_id, task_id) DO UPDATE SET status = EXCLUDED.status, '
+                      'n_annotations = EXCLUDED.n_annotations, version = EXCLUDED.version, '
+                      'updated_at = EXCLUDED.updated_at{extra_set}')
 
     def apply_predictions_many(self, tid, items, replace_model=True, skip_done=False, scope=None):
         """items: [(media_id, [{class_id, score, geometry_type, geometry, attributes?}])], one transaction:
@@ -906,18 +1035,17 @@ class ProjectStore:
             cfg = _loads(task['config']) or {}
             task_d = {'config': cfg}
             allowed = TASK_GEOMS.get(ttype, (schema.TASK_GEOMETRY.get(ttype),))
-            class_ids = {r[0] for r in c.execute('SELECT id FROM label_classes WHERE task_id = ? AND is_deleted = 0',
-                                                 (tid,))}
+            class_ids = self._class_ids(c, tid)
             single_tag = ttype == 'classification' and not cfg.get('multi_label')
             mids = [m for m, _ in items]
-            known, cur = set(), {}
-            for i in range(0, len(mids), 900):
-                chunk = mids[i:i + 900]
-                q = ','.join('?' * len(chunk))
-                known.update(r[0] for r in c.execute(f'SELECT id FROM media WHERE id IN ({q})', chunk))
-                for r in c.execute(f'SELECT media_id, status, version, n_annotations FROM media_task_status '
-                                   f'WHERE task_id = ? AND media_id IN ({q})', [tid, *chunk]):
-                    cur[r[0]] = (r[1], r[2], r[3] or 0)
+            known = set(c.execute(_q('SELECT id FROM lbl.media WHERE project_id = :p AND id = ANY(:ids)'),
+                                  {'p': self.pid, 'ids': mids}).scalars()) if mids else set()
+            cur = self._status_rows(c, tid, mids)
+            picked = set()
+            if single_tag and mids:              # images where the user already picked the class
+                picked = set(c.execute(_q("SELECT DISTINCT media_id FROM lbl.annotations WHERE project_id = :p "
+                                          "AND task_id = :t AND media_id = ANY(:ids) AND NOT is_deleted "
+                                          "AND source <> 'model'"), {'p': self.pid, 't': tid, 'ids': mids}).scalars())
             ins, dels, todo = [], [], []
             for mid, preds in items:
                 if mid not in known:
@@ -939,49 +1067,42 @@ class ProjectStore:
                     rows.append((score, gtype, geom, ext, p['class_id'], p.get('attributes') or {}))
                 if single_tag and rows:
                     rows = [max(rows, key=lambda r: r[0] or 0)]
-                if single_tag and c.execute("SELECT 1 FROM annotations WHERE media_id = ? AND task_id = ? AND "
-                                            "is_deleted = 0 AND source != 'model' LIMIT 1", (mid, tid)).fetchone():
+                if single_tag and mid in picked:
                     rows = []                    # one class per image, and the user already picked it
                 if replace_model:
-                    dels.append((t, mid, tid))
+                    dels.append(mid)
                 for z, (score, gtype, geom, ext, cid, attrs) in enumerate(rows):
-                    ins.append((new_id(), self.pid, tid, mid, cid, gtype, _dumps(geom), *(ext or (None,) * 4),
-                                _dumps(attrs), None if score is None else float(score), t, t))
+                    x, y, w, h = ext or (None,) * 4
+                    ins.append({'id': new_id(), 'p': self.pid, 'tid': tid, 'm': mid, 'cid': cid, 'gt': gtype,
+                                'g': _dumps(geom), 'x': x, 'y': y, 'w': w, 'h': h, 'attrs': _dumps(attrs),
+                                'score': None if score is None else float(score), 'src': 'model', 'z': 0,
+                                'tc': _seq(t, len(ins)), 't': t})
                 todo.append((mid, len(rows)))
-            if dels:
-                gone = [x[0] for _, mid, _ in dels for x in c.execute(
-                    "SELECT id FROM annotations WHERE media_id = ? AND task_id = ? AND source = 'model' "
-                    'AND is_deleted = 0', (mid, tid))]
-                c.executemany("UPDATE annotations SET is_deleted = 1, version = version + 1, updated_at = ? "
-                              "WHERE media_id = ? AND task_id = ? AND source = 'model' AND is_deleted = 0", dels)
-                self._unlink_children(c, gone, t, tid)
-            if ins:
-                c.executemany('INSERT INTO annotations(id, project_id, task_id, media_id, class_id, geometry_type, '
-                              'geometry, bbox_x, bbox_y, bbox_w, bbox_h, attributes, score, source, parent_id, '
-                              'z_order, created_at, updated_at, version, is_deleted) '
-                              "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'model',NULL,0,?,?,1,0)", ins)
+            self._soft_delete(c, tid, dels, "source = 'model'", t)
+            _many(c, self._INSERT_ANN, ins)
+            counts = self._live_counts(c, tid, [m for m, _ in todo])
             ups = []
             for mid, n_model in todo:
-                n = c.execute('SELECT COUNT(*) FROM annotations WHERE media_id = ? AND task_id = ? AND is_deleted = 0',
-                              (mid, tid)).fetchone()[0]
+                n = counts.get(mid, 0)
                 status, version, _ = cur.get(mid, ('todo', 0, 0))
                 if status == 'todo' and n:
                     status = 'in_progress'
                 elif status == 'in_progress' and not n:
                     status = 'todo'
-                ups.append((mid, tid, status, n, version + 1, t, t))
+                ups.append({'m': mid, 'tid': tid, 'p': self.pid, 'st': status, 'n': n, 'v': version + 1, 't': t,
+                            'run': t})
                 out[mid] = {'version': version + 1, 'n_model': n_model, 'status': status}
-            c.executemany('INSERT INTO media_task_status(media_id, task_id, status, n_annotations, version, updated_at, '
-                          'model_run_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(media_id, task_id) DO UPDATE SET '
-                          'status = excluded.status, n_annotations = excluded.n_annotations, '
-                          'version = excluded.version, updated_at = excluded.updated_at, '
-                          'model_run_at = excluded.model_run_at', ups)
+            _many(c, self._UPSERT_STATUS.format(extra_cols=', model_run_at', extra_vals=', :run',
+                                                extra_set=', model_run_at = EXCLUDED.model_run_at'), ups)
         return out
 
     def media_for_import(self):
         """[{id, file_name, uri, width, height, meta}] of every media: the annotation import matches keys against it."""
-        return [{'id': r[0], 'file_name': r[1], 'uri': r[2], 'width': r[3], 'height': r[4], 'meta': _loads(r[5]) or {}}
-                for r in self.conn().execute('SELECT id, file_name, uri, width, height, meta FROM media')]
+        with self._read() as c:
+            return [{'id': r[0], 'file_name': r[1], 'uri': r[2], 'width': r[3], 'height': r[4],
+                     'meta': _loads(r[5]) or {}}
+                    for r in c.execute(_q('SELECT id, file_name, uri, width, height, meta FROM lbl.media '
+                                          'WHERE project_id = :p'), {'p': self.pid})]
 
     def import_annotations(self, tid, items, mode='merge', class_map=None, add_classes=True):
         """Existing annotations into task `tid`, one transaction: items = [(media_id, class name, geometry_type,
@@ -1050,13 +1171,11 @@ class ProjectStore:
         n_ann = 0
         with self.write() as c:
             mids = list(per)
-            cur = {}
-            for i in range(0, len(mids), 900):
-                chunk = mids[i:i + 900]
-                q = ','.join('?' * len(chunk))
-                for r in c.execute(f'SELECT media_id, status, version, n_annotations FROM media_task_status '
-                                   f'WHERE task_id = ? AND media_id IN ({q})', [tid, *chunk]):
-                    cur[r[0]] = (r[1], r[2], r[3] or 0)
+            # media ids of another project are never touched (the caller matched them against this one)
+            known = set(c.execute(_q('SELECT id FROM lbl.media WHERE project_id = :p AND id = ANY(:ids)'),
+                                  {'p': self.pid, 'ids': mids}).scalars()) if mids else set()
+            mids = [m for m in mids if m in known]
+            cur = self._status_rows(c, tid, mids)
             ins, dels, touched = [], [], []
             for mid in mids:
                 status, _, n_now = cur.get(mid, ('todo', 0, 0))
@@ -1067,32 +1186,18 @@ class ProjectStore:
                 if single_tag:
                     rows = [max(rows, key=lambda r: r[4] or 0)]
                 if mode == 'replace':
-                    dels.append((t, mid, tid))
+                    dels.append(mid)
                 for z, (cid, gtype, g, ext, score) in enumerate(rows):
-                    ins.append((new_id(), self.pid, tid, mid, cid, gtype, _dumps(g), *(ext or (None,) * 4), _dumps({}),
-                                score, z, t, t))
+                    x, y, w, h = ext or (None,) * 4
+                    ins.append({'id': new_id(), 'p': self.pid, 'tid': tid, 'm': mid, 'cid': cid, 'gt': gtype,
+                                'g': _dumps(g), 'x': x, 'y': y, 'w': w, 'h': h, 'attrs': _dumps({}), 'score': score,
+                                'src': 'import', 'z': z, 'tc': _seq(t, len(ins)), 't': t})
                 touched.append(mid)
-            if dels:
-                gone = [x[0] for _, mid, _ in dels for x in c.execute(
-                    "SELECT id FROM annotations WHERE media_id = ? AND task_id = ? AND source != 'model' "
-                    'AND is_deleted = 0', (mid, tid))]
-                c.executemany("UPDATE annotations SET is_deleted = 1, version = version + 1, updated_at = ? "
-                              "WHERE media_id = ? AND task_id = ? AND source != 'model' AND is_deleted = 0", dels)
-                self._unlink_children(c, gone, t, tid)
-            if ins:
-                c.executemany('INSERT INTO annotations(id, project_id, task_id, media_id, class_id, geometry_type, '
-                              'geometry, bbox_x, bbox_y, bbox_w, bbox_h, attributes, score, source, parent_id, '
-                              'z_order, created_at, updated_at, version, is_deleted) '
-                              "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'import',NULL,?,?,?,1,0)", ins)
-                n_ann = len(ins)
+            self._soft_delete(c, tid, dels, "source <> 'model'", t)
+            _many(c, self._INSERT_ANN, ins)
+            n_ann = len(ins)
+            counts = self._live_counts(c, tid, touched)
             ups = []
-            counts = {}
-            for i in range(0, len(touched), 900):
-                chunk = touched[i:i + 900]
-                q = ','.join('?' * len(chunk))
-                for r in c.execute(f'SELECT media_id, COUNT(*) FROM annotations WHERE task_id = ? AND is_deleted = 0 '
-                                   f'AND media_id IN ({q}) GROUP BY media_id', [tid, *chunk]):
-                    counts[r[0]] = r[1]
             for mid in touched:
                 n = counts.get(mid, 0)
                 status, version, _ = cur.get(mid, ('todo', 0, 0))
@@ -1100,11 +1205,8 @@ class ProjectStore:
                     status = 'in_progress'
                 elif status == 'in_progress' and not n:
                     status = 'todo'
-                ups.append((mid, tid, status, n, version + 1, t))
-            c.executemany('INSERT INTO media_task_status(media_id, task_id, status, n_annotations, version, updated_at) '
-                          'VALUES (?,?,?,?,?,?) ON CONFLICT(media_id, task_id) DO UPDATE SET '
-                          'status = excluded.status, n_annotations = excluded.n_annotations, '
-                          'version = excluded.version, updated_at = excluded.updated_at', ups)
+                ups.append({'m': mid, 'tid': tid, 'p': self.pid, 'st': status, 'n': n, 'v': version + 1, 't': t})
+            _many(c, self._UPSERT_STATUS.format(extra_cols='', extra_vals='', extra_set=''), ups)
         return {'annotations': n_ann, 'images': len(touched), 'classes_added': [c['name'] for c in added],
                 'skipped': skipped}
 
@@ -1114,32 +1216,23 @@ class ProjectStore:
         t = _now()
         with self.write() as c:
             self._task_row(c, tid)
-            q = ("SELECT media_id, COUNT(*) FROM annotations WHERE task_id = ? AND source = 'model' AND is_deleted = 0")
-            hit = {}
-            if media_ids is None:
-                hit = dict(c.execute(q + ' GROUP BY media_id', (tid,)).fetchall())
-            else:
-                ids = list(dict.fromkeys(media_ids))
-                for i in range(0, len(ids), 900):
-                    chunk = ids[i:i + 900]
-                    hit.update(c.execute(q + f" AND media_id IN ({','.join('?' * len(chunk))}) GROUP BY media_id",
-                                         [tid, *chunk]).fetchall())
+            q = ("SELECT media_id, COUNT(*) FROM lbl.annotations WHERE project_id = :p AND task_id = :t "
+                 "AND source = 'model' AND NOT is_deleted")
+            a = {'p': self.pid, 't': tid}
+            if media_ids is not None:
+                q += ' AND media_id = ANY(:ids)'
+                a['ids'] = list(dict.fromkeys(media_ids))
+            hit = dict(c.execute(_q(q + ' GROUP BY media_id'), a).all())
             if not hit:
                 return {'removed': 0, 'images': 0}
             mids = list(hit)
-            gone = [x[0] for m in mids for x in c.execute(
-                "SELECT id FROM annotations WHERE media_id = ? AND task_id = ? AND source = 'model' AND is_deleted = 0",
-                (m, tid))]
-            c.executemany("UPDATE annotations SET is_deleted = 1, version = version + 1, updated_at = ? "
-                          "WHERE media_id = ? AND task_id = ? AND source = 'model' AND is_deleted = 0",
-                          [(t, m, tid) for m in mids])
-            self._unlink_children(c, gone, t, tid)
-            c.executemany('UPDATE media_task_status SET n_annotations = (SELECT COUNT(*) FROM annotations a '
-                          'WHERE a.media_id = media_task_status.media_id AND a.task_id = media_task_status.task_id '
-                          'AND a.is_deleted = 0), version = version + 1, updated_at = ? '
-                          'WHERE media_id = ? AND task_id = ?', [(t, m, tid) for m in mids])
-            c.execute("UPDATE media_task_status SET status = 'todo' WHERE task_id = ? AND status = 'in_progress' "
-                      'AND n_annotations = 0', (tid,))
+            self._soft_delete(c, tid, mids, "source = 'model'", t)
+            c.execute(_q('UPDATE lbl.media_task_status s SET n_annotations = (SELECT COUNT(*) FROM lbl.annotations a '
+                         'WHERE a.media_id = s.media_id AND a.task_id = s.task_id AND NOT a.is_deleted), '
+                         'version = version + 1, updated_at = :now WHERE s.project_id = :p AND s.task_id = :t '
+                         'AND s.media_id = ANY(:ids)'), {'now': t, 'p': self.pid, 't': tid, 'ids': mids})
+            c.execute(_q("UPDATE lbl.media_task_status SET status = 'todo' WHERE project_id = :p AND task_id = :t "
+                         "AND status = 'in_progress' AND n_annotations = 0"), {'p': self.pid, 't': tid})
         return {'removed': sum(hit.values()), 'images': len(hit)}
 
     def predict_targets(self, tid, scope='unlabeled', batch=500):
@@ -1150,17 +1243,20 @@ class ProjectStore:
             raise ValueError(f"unknown scope {scope!r} (unlabeled, not_done or all)")
         where = {'unlabeled': "COALESCE(s.n_annotations, 0) = 0 AND COALESCE(s.status, 'todo') NOT IN "
                               "('done', 'skipped')",
-                 'not_done': "COALESCE(s.status, 'todo') != 'done'", 'all': '1'}[scope]
-        frm = (f'FROM media m LEFT JOIN media_task_status s ON s.media_id = m.id AND s.task_id = ? WHERE {where}')
-        n = self.conn().execute(f'SELECT COUNT(*) {frm}', (tid,)).fetchone()[0]
+                 'not_done': "COALESCE(s.status, 'todo') <> 'done'", 'all': 'TRUE'}[scope]
+        frm = ('FROM lbl.media m LEFT JOIN lbl.media_task_status s ON s.media_id = m.id AND s.task_id = :t '
+               f'WHERE m.project_id = :p AND {where}')
+        a = {'t': tid, 'p': self.pid}
+        with self._read() as c:
+            n = c.execute(_q(f'SELECT COUNT(*) {frm}'), a).scalar()
 
         def gen():
-            c = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
+            c = self._stream()
             try:
-                cur = c.execute(f'SELECT m.id, m.uri, m.width, m.height, m.file_name {frm} ORDER BY m.position, m.id',
-                                (tid,))
-                while rows := cur.fetchmany(batch):
-                    yield rows
+                res = c.execution_options(stream_results=True, yield_per=batch).execute(
+                    _q(f'SELECT m.id, m.uri, m.width, m.height, m.file_name {frm} ORDER BY m.position, m.id'), a)
+                while rows := res.fetchmany(batch):
+                    yield [tuple(r) for r in rows]
             finally:
                 c.close()
         return n, gen()
@@ -1168,13 +1264,15 @@ class ProjectStore:
     # ------------------------------------------------------------ class stats + bulk delete
     def class_stats(self):
         """{class_id: {n_annotations, n_images}} for every live class (0 for unused), one GROUP BY."""
-        c = self.conn()
-        out = {r[0]: {'n_annotations': 0, 'n_images': 0}
-               for r in c.execute('SELECT id FROM label_classes WHERE is_deleted = 0')}
-        for cid, n, k in c.execute('SELECT class_id, COUNT(*), COUNT(DISTINCT media_id) FROM annotations '
-                                   'WHERE is_deleted = 0 GROUP BY class_id'):
-            if cid in out:
-                out[cid] = {'n_annotations': n, 'n_images': k}
+        with self._read() as c:
+            out = {r: {'n_annotations': 0, 'n_images': 0}
+                   for r in c.execute(_q('SELECT id FROM lbl.label_classes WHERE project_id = :p AND NOT is_deleted'),
+                                      {'p': self.pid}).scalars()}
+            for cid, n, k in c.execute(_q('SELECT class_id, COUNT(*), COUNT(DISTINCT media_id) FROM lbl.annotations '
+                                          'WHERE project_id = :p AND NOT is_deleted GROUP BY class_id'),
+                                       {'p': self.pid}):
+                if cid in out:
+                    out[cid] = {'n_annotations': n, 'n_images': k}
         return out
 
     def delete_classes(self, class_ids):
@@ -1186,9 +1284,9 @@ class ProjectStore:
         with self.write() as c:
             for cid in ids:
                 self._class_row(c, cid)                 # KeyError before anything changes
-            q = ','.join('?' * len(ids))
-            n_ann, n_img = c.execute(f'SELECT COUNT(*), COUNT(DISTINCT media_id) FROM annotations WHERE class_id IN '
-                                     f'({q}) AND is_deleted = 0', ids).fetchone()
+            n_ann, n_img = c.execute(_q('SELECT COUNT(*), COUNT(DISTINCT media_id) FROM lbl.annotations '
+                                        'WHERE project_id = :p AND class_id = ANY(:ids) AND NOT is_deleted'),
+                                     {'p': self.pid, 'ids': ids}).one()
             for cid in ids:
                 self.delete_class(cid, delete_annotations=True)     # joins this transaction
         return {'deleted': len(ids), 'annotations': n_ann, 'images': n_img}
@@ -1197,95 +1295,146 @@ class ProjectStore:
     def stats(self):
         """{n_media, tasks:{tid: {done, in_progress, skipped, todo}}, review:{tid: {manual, bulk}}}: two grouped
         queries over the statuses (review = done images approved by hand / by Review all)."""
-        c = self.conn()
-        n_media = self.media_count()
-        out = {t: {'done': 0, 'in_progress': 0, 'skipped': 0, 'todo': 0} for t in self._live_tids(c)}
-        review = {t: {'manual': 0, 'bulk': 0} for t in out}
-        for tid, status, n in c.execute('SELECT task_id, status, COUNT(*) FROM media_task_status '
-                                        'GROUP BY task_id, status'):
-            if tid in out and status in out[tid]:
-                out[tid][status] = n
-        for tid, rv, n in c.execute("SELECT task_id, review, COUNT(*) FROM media_task_status "
-                                    "WHERE status = 'done' AND review IS NOT NULL GROUP BY task_id, review"):
-            if tid in review and rv in review[tid]:
-                review[tid][rv] = n
+        a = {'p': self.pid}
+        with self._read() as c:
+            n_media = c.execute(_q('SELECT COUNT(*) FROM lbl.media WHERE project_id = :p'), a).scalar()
+            out = {t: {'done': 0, 'in_progress': 0, 'skipped': 0, 'todo': 0} for t in self._live_tids(c)}
+            review = {t: {'manual': 0, 'bulk': 0} for t in out}
+            for tid, status, n in c.execute(_q('SELECT task_id, status, COUNT(*) FROM lbl.media_task_status '
+                                               'WHERE project_id = :p GROUP BY task_id, status'), a):
+                if tid in out and status in out[tid]:
+                    out[tid][status] = n
+            for tid, rv, n in c.execute(_q("SELECT task_id, review, COUNT(*) FROM lbl.media_task_status "
+                                           "WHERE project_id = :p AND status = 'done' AND review IS NOT NULL "
+                                           'GROUP BY task_id, review'), a):
+                if tid in review and rv in review[tid]:
+                    review[tid][rv] = n
         for s in out.values():
             s['todo'] = max(0, n_media - s['done'] - s['in_progress'] - s['skipped'])
         return {'n_media': n_media, 'tasks': out, 'review': review}
 
+    # ------------------------------------------------------------ the visualizer's live source + LLM context
+    def fingerprint_parts(self, tid, only_done=False):
+        """What LabelingSource.fingerprint() hashes: changes on any annotation edit / delete of task `tid`, a new
+        image, a class rename / reorder / delete and (only_done) a status change. Indexed aggregates only."""
+        a = {'p': self.pid, 't': tid}
+        with self._read() as c:
+            # every edit, soft delete included, bumps updated_at; the live count catches a restore at the same instant
+            out = [tuple(c.execute(_q('SELECT MAX(updated_at), COUNT(*), COUNT(*) FILTER (WHERE NOT is_deleted) '
+                                      'FROM lbl.annotations WHERE project_id = :p AND task_id = :t'), a).one()),
+                   tuple(c.execute(_q('SELECT COUNT(*), MAX(position), MAX(created_at) FROM lbl.media '
+                                      'WHERE project_id = :p'), a).one()),
+                   tuple(tuple(r) for r in c.execute(_q(
+                       'SELECT id, name, position FROM lbl.label_classes WHERE project_id = :p AND task_id = :t '
+                       'AND NOT is_deleted ORDER BY position, name COLLATE "C"'), a))]
+            if only_done:
+                out.append(tuple(c.execute(_q("SELECT COUNT(*), MAX(updated_at), COUNT(*) FILTER (WHERE status = "
+                                              "'done') FROM lbl.media_task_status WHERE project_id = :p "
+                                              'AND task_id = :t'), a).one()))
+        return tuple(out)
+
+    def parent_boxes(self, ids):
+        """[{id, class_id, geometry}] of the live boxes among `ids` (pose boxes another task's keypoints link)."""
+        if not ids:
+            return []
+        with self._read() as c:
+            return [dict(r) for r in _rows(c, "SELECT id, class_id, geometry FROM lbl.annotations WHERE project_id = :p "
+                                              "AND id = ANY(:ids) AND NOT is_deleted AND geometry_type = 'bbox'",
+                                           {'p': self.pid, 'ids': list(ids)})]
+
+    def bbox_extents(self, ids):
+        """{id: (bbox_x, bbox_y, bbox_w, bbox_h)} of these annotations (live or not)."""
+        if not ids:
+            return {}
+        with self._read() as c:
+            return {r[0]: tuple(r[1:]) for r in c.execute(_q(
+                'SELECT id, bbox_x, bbox_y, bbox_w, bbox_h FROM lbl.annotations WHERE project_id = :p '
+                'AND id = ANY(:ids)'), {'p': self.pid, 'ids': list(ids)})}
+
+    def box_signature(self, tid):
+        """(live box count, last change) of task `tid`: the cache key of its LLM exemplar sheets."""
+        with self._read() as c:
+            return tuple(c.execute(_q("SELECT COUNT(*), MAX(updated_at) FROM lbl.annotations WHERE project_id = :p "
+                                      "AND task_id = :t AND NOT is_deleted AND geometry_type = 'bbox'"),
+                                   {'p': self.pid, 't': tid}).one())
+
+    def class_boxes(self, tid, cid, limit=200):
+        """[(media_id, geometry)] of class `cid`'s live boxes, manual ones first, biggest first."""
+        with self._read() as c:
+            return [(r[0], _loads(r[1])) for r in c.execute(_q(
+                "SELECT media_id, geometry FROM lbl.annotations WHERE project_id = :p AND task_id = :t "
+                "AND class_id = :c AND NOT is_deleted AND geometry_type = 'bbox' "
+                "ORDER BY (source = 'model'), (bbox_w * bbox_h) DESC NULLS LAST LIMIT :n"),
+                {'p': self.pid, 't': tid, 'c': cid, 'n': int(limit)})]
+
     # ------------------------------------------------------------ export
     def iter_task_export(self, task_id, only_done=False):
-        """(media_row + 'status', [live ann rows with JSON decoded]) in media position order, streamed with a
-        merge of two cursors in the same order on a private connection (memory stays flat for any size)."""
-        c = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
-        c.row_factory = sqlite3.Row
+        """(media_row + 'status', [live ann rows]) in media position order, streamed with a merge of two
+        server-side cursors in the same order on a private connection (memory stays flat for any size)."""
+        c = self._stream()
         try:
-            anns = c.execute('SELECT a.* FROM annotations a JOIN media m ON m.id = a.media_id WHERE a.task_id = ? '
-                             'AND a.is_deleted = 0 ORDER BY m.position, m.id, a.z_order, a.created_at', (task_id,))
+            a = {'p': self.pid, 't': task_id}
+            anns = c.execution_options(stream_results=True, yield_per=_STREAM_BATCH).execute(_q(
+                'SELECT a.* FROM lbl.annotations a JOIN lbl.media m ON m.id = a.media_id WHERE a.project_id = :p '
+                'AND a.task_id = :t AND NOT a.is_deleted ORDER BY m.position, m.id, a.z_order, a.created_at, a.id'),
+                a).mappings()
             nxt = anns.fetchone()
-            media = c.execute("SELECT m.*, COALESCE(s.status, 'todo') AS status FROM media m "
-                              'LEFT JOIN media_task_status s ON s.media_id = m.id AND s.task_id = ? '
-                              'ORDER BY m.position, m.id', (task_id,))
+            media = c.execute(_q("SELECT m.*, COALESCE(s.status, 'todo') AS status FROM lbl.media m "
+                                 'LEFT JOIN lbl.media_task_status s ON s.media_id = m.id AND s.task_id = :t '
+                                 'WHERE m.project_id = :p ORDER BY m.position, m.id'), a).mappings()
             for m in media:
                 rows = []
                 while nxt is not None and nxt['media_id'] == m['id']:
-                    rows.append(nxt)
+                    rows.append(dict(nxt))
                     nxt = anns.fetchone()
                 if only_done and m['status'] != 'done':
                     continue
                 m = dict(m)
                 m['meta'] = _loads(m['meta'])
-                out = []
                 for r in rows:
-                    a = dict(r)
-                    a['geometry'] = _loads(a['geometry'])
-                    a['attributes'] = _loads(a['attributes'])
-                    out.append(a)
+                    r['geometry'] = _loads(r['geometry'])
+                    r['attributes'] = _loads(r['attributes'])
                 # a keypoints instance may be linked to a box of ANOTHER task (the pose box on export): fetch
                 # those parents too, marked _parent_only so they are never written or counted as this task's
-                own = {a['id'] for a in out}
-                want = [a['parent_id'] for a in out if a['geometry_type'] == 'keypoints' and a.get('parent_id')
-                        and a['parent_id'] not in own]
+                own = {r['id'] for r in rows}
+                want = [r['parent_id'] for r in rows if r['geometry_type'] == 'keypoints' and r.get('parent_id')
+                        and r['parent_id'] not in own]
                 if want:
-                    q = ','.join('?' * len(want))
-                    for r in c.execute(f"SELECT * FROM annotations WHERE id IN ({q}) AND is_deleted = 0 "
-                                       "AND geometry_type = 'bbox'", want):
-                        a = dict(r)
-                        a['geometry'] = _loads(a['geometry'])
-                        a['attributes'] = _loads(a['attributes'])
-                        a['_parent_only'] = True
-                        out.append(a)
-                yield m, out
+                    for p in c.execute(_q("SELECT * FROM lbl.annotations WHERE project_id = :p AND id = ANY(:ids) "
+                                          "AND NOT is_deleted AND geometry_type = 'bbox'"),
+                                       {'p': self.pid, 'ids': want}).mappings().all():
+                        p = dict(p)
+                        p['geometry'] = _loads(p['geometry'])
+                        p['attributes'] = _loads(p['attributes'])
+                        p['_parent_only'] = True
+                        rows.append(p)
+                yield m, rows
         finally:
             c.close()
 
     def iter_rows(self, table, where=None, batch=1000):
-        """Lists of row dicts of a table, converted for SQLAlchemy inserts (datetime UTC, dict, bool).
-        where: {column: value | list of values}."""
+        """Lists of this project's row dicts of a table, converted for SQLAlchemy inserts (datetime UTC for *_at;
+        JSON is already decoded, booleans are booleans). where: {column: value | list of values}."""
         if table not in _COLS:
             raise KeyError(f'no table {table!r}')
         cols = _COLS[table]
-        q, args = f'SELECT * FROM {table}', []
-        if where:
-            conds = []
-            for k, v in where.items():
-                if k not in cols:
-                    raise KeyError(f'no column {k!r} in {table}')
-                if isinstance(v, (list, tuple, set)):
-                    v = list(v)
-                    conds.append(f"{k} IN ({','.join('?' * len(v))})" if v else '0')
-                    args += v
-                else:
-                    conds.append(f'{k} = ?')
-                    args.append(v)
-            q += ' WHERE ' + ' AND '.join(conds)
-        jc, bc, tc = _JSON_COLS[table], _BOOL_COLS[table], _TIME_COLS[table]
-        c = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
-        c.row_factory = sqlite3.Row
+        conds, args = ['id = :p' if table == 'projects' else 'project_id = :p'], {'p': self.pid}
+        for i, (k, v) in enumerate((where or {}).items()):
+            if k not in cols:
+                raise KeyError(f'no column {k!r} in {table}')
+            if isinstance(v, (list, tuple, set)):
+                conds.append(f'{k} = ANY(:w{i})')
+                args[f'w{i}'] = list(v)
+            else:
+                conds.append(f'{k} = :w{i}')
+                args[f'w{i}'] = v
+        q = f'SELECT * FROM lbl.{table} WHERE ' + ' AND '.join(conds)
+        jc, tc = _JSON_COLS[table], _TIME_COLS[table]
+        c = self._stream()
         try:
-            cur = c.execute(q, args)
+            res = c.execution_options(stream_results=True, yield_per=batch).execute(text(q), args).mappings()
             while True:
-                rows = cur.fetchmany(batch)
+                rows = res.fetchmany(batch)
                 if not rows:
                     return
                 out = []
@@ -1293,8 +1442,6 @@ class ProjectStore:
                     d = dict(r)
                     for k in jc:
                         d[k] = _loads(d[k])
-                    for k in bc:
-                        d[k] = bool(d[k]) if d[k] is not None else None
                     for k in tc:
                         if isinstance(d[k], (int, float)):
                             d[k] = datetime.fromtimestamp(d[k], timezone.utc)
@@ -1305,15 +1452,20 @@ class ProjectStore:
 
     def add_export_run(self, run_id, task_id, target, target_uri, options):
         with self.write() as c:
-            c.execute('INSERT INTO export_runs(id, project_id, task_id, target, target_uri, options, started_at, '
-                      "status) VALUES (?,?,?,?,?,?,?,'running')",
-                      (run_id, self.pid, task_id, target, target_uri, _dumps(options), _now()))
+            c.execute(_q('INSERT INTO lbl.export_runs(id, project_id, task_id, target, target_uri, options, '
+                         "started_at, status) VALUES (:id, :p, :t, :tg, :uri, CAST(:o AS jsonb), :now, 'running')"),
+                      {'id': run_id, 'p': self.pid, 't': task_id, 'tg': target, 'uri': target_uri,
+                       'o': _dumps(options), 'now': _now()})
 
     def finish_export_run(self, run_id, status, n_media=None, n_annotations=None, error=None):
         with self.write() as c:
-            c.execute('UPDATE export_runs SET status = ?, finished_at = ?, n_media = ?, n_annotations = ?, '
-                      'error = ? WHERE id = ?', (status, _now(), n_media, n_annotations, error, run_id))
+            c.execute(_q('UPDATE lbl.export_runs SET status = :st, finished_at = :now, n_media = :nm, '
+                         'n_annotations = :na, error = :e WHERE id = :id AND project_id = :p'),
+                      {'st': status, 'now': _now(), 'nm': n_media, 'na': n_annotations, 'e': error, 'id': run_id,
+                       'p': self.pid})
 
     def export_runs(self, limit=50):
-        return [dict(r) for r in self.conn().execute('SELECT * FROM export_runs ORDER BY started_at DESC LIMIT ?',
-                                                     (limit,))]
+        with self._read() as c:
+            return [dict(r) for r in _rows(c, 'SELECT * FROM lbl.export_runs WHERE project_id = :p '
+                                              'ORDER BY started_at DESC NULLS LAST LIMIT :n',
+                                           {'p': self.pid, 'n': int(limit)})]

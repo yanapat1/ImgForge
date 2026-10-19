@@ -194,12 +194,11 @@ def test_only_done_and_reexport_one_task(db_conn, tmp_path):
     assert c['tasks'] == 1 and c['annotations'] == N_MEDIA // 2 and c['export_runs'] == 1 and c['media'] == N_MEDIA
 
 
-def test_real_project_store(db_conn, tmp_path):
-    """Against Agent 1's ProjectStore when it exists (its iter_rows already converts types)."""
-    store_mod = pytest.importorskip('dataviz.labeling.store')
-    st = store_mod.ProjectStore(tmp_path / 'p' / 'annotations.db')
+def test_real_project_store(pg, db_conn, tmp_path):
+    """Against the real ProjectStore (PostgreSQL lbl.*; its iter_rows already converts types)."""
+    from conftest import make_user, new_store
     pid = uuid.uuid4().hex
-    st.init_project(pid, 'ร้าน store')
+    st = new_store(make_user('exporter')['id'], 'ร้าน store', pid)
     task = st.add_task('Detect', 'object_detection', None, [{'name': 'แมว'}, {'name': 'dog'}])
     st.add_media([{'file_name': f'f{i}.jpg', 'width': 100, 'height': 80} for i in range(5)])
     mids = st.media_ids()
@@ -237,10 +236,9 @@ def test_engine_url_escaping():
 def _pose_store(tmp_path):
     """A real ProjectStore: pose task (person / crowd); image 0 has a crowd box B, a person set K linked to B and
     a lone crowd box C; image 1 a person set only."""
-    from dataviz.labeling.store import ProjectStore
-    st = ProjectStore(tmp_path / 'p' / 'annotations.db')
+    from conftest import make_user, new_store
     pid = uuid.uuid4().hex
-    st.init_project(pid, 'pose')
+    st = new_store(make_user('exporter')['id'], 'pose', pid)
     task = st.add_task('Pose', 'keypoints', {'keypoints': ['a', 'b']}, ['person', 'crowd'])
     person, crowd = (c['id'] for c in task['classes'])
     st.add_media([{'file_name': f'f{i}.jpg', 'width': 100, 'height': 80} for i in range(2)])
@@ -254,7 +252,7 @@ def _pose_store(tmp_path):
     return st, {'id': pid, 'name': 'pose'}, task['id'], person, (m0, m1), ids
 
 
-def test_class_filter_export_mirrors_exclusions(db_conn, tmp_path):
+def test_class_filter_export_mirrors_exclusions(pg, db_conn, tmp_path):
     """Re-exporting with a class filter after an unfiltered export: the excluded classes' remote rows are
     soft-deleted, kept keypoints keep their parent box (no dangling parent_id), the status counts are the
     exported ones."""

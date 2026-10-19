@@ -342,7 +342,7 @@ def router(state, ctx):
         image = context.prepare_image(media_bytes(pid, m))
         sheets = context.task_exemplars(pid, st, task, lambda row: media_bytes(pid, row))
         names = {c['id']: c['name'] for c in task['classes']}
-        existing = [names.get(a['class_id'], '?') for a in st._live_anns(st.conn(), m['id'], task['id'])
+        existing = [names.get(a['class_id'], '?') for a in st.live_annotations(m['id'], task['id'])
                     if a['geometry_type'] == 'bbox']
         with _llm_errors():
             return tasks.label_assist(p, task, image, sheets, question[:2000], limit(), prelabel=prelabel,

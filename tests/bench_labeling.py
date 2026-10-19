@@ -1,7 +1,8 @@
 """
 Benchmark of the labeling backend against the plan's budgets (not a test; run by hand):
 
-    .venv/bin/python tests/bench_labeling.py [n_images]      (default 10000)
+    DATAVIZ_TEST_DATABASE_URL=postgresql://user:pw@host:port/postgres .venv/bin/python tests/bench_labeling.py [n]
+    (default 10000; a throw-away database is created on that server, migrated, and dropped at the end)
 
 Measures: autosave PUT of 200 shapes (store + HTTP route), a media page of a 10k project (plain and filtered),
 the import scan of n local images, and the export of n images x 2 tasks to a local folder (time + Python heap
@@ -16,6 +17,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))      # conftest helpers
 
 from PIL import Image  # noqa: E402
 
@@ -36,7 +38,38 @@ def boxes(cls, n):
              'geometry': {'x': (i % 20) / 21, 'y': (i // 20) / 11, 'w': 0.04, 'h': 0.05}} for i in range(n)]
 
 
+def _database():
+    """A fresh migrated database on DATAVIZ_TEST_DATABASE_URL (the engine points at it); returns a drop()."""
+    import os
+    import psycopg
+    from sqlalchemy.engine import make_url
+    from dataviz import db
+    from dataviz.db import migrate
+    base = make_url(os.environ['DATAVIZ_TEST_DATABASE_URL']).set(drivername='postgresql')
+    name = f'bench_{uuid.uuid4().hex[:8]}'
+    admin = base.set(database='postgres').render_as_string(hide_password=False)
+    with psycopg.connect(admin, autocommit=True) as c:
+        c.execute(f'CREATE DATABASE {name}')
+    db.init(base.set(database=name).render_as_string(hide_password=False))
+    migrate.upgrade()
+
+    def drop():
+        db.dispose()
+        with psycopg.connect(admin, autocommit=True) as c:
+            c.execute(f'DROP DATABASE IF EXISTS {name} WITH (FORCE)')
+    return drop
+
+
 def main(n):
+    drop = _database()
+    try:
+        _main(n)
+    finally:
+        drop()
+
+
+def _main(n):
+    from conftest import _TestUserMiddleware, make_user
     from dataviz.labeling import media, sinks
     from dataviz.labeling.export import run_export
 
@@ -51,9 +84,10 @@ def main(n):
     print(f'generated {n} jpegs in {ms(t0) / 1000:.1f} s')
 
     reg = ProjectRegistry(tmp / 'ws' / 'labeling')
+    user = make_user('bench', admin=True)
     e = reg.create({'name': 'bench', 'source': {'kind': 'local', 'path': str(src)},
                     'tasks': [{'name': 'Detect', 'task_type': 'object_detection', 'classes': ['a', 'b']},
-                              {'name': 'Segment', 'task_type': 'segmentation', 'classes': ['c']}]})
+                              {'name': 'Segment', 'task_type': 'segmentation', 'classes': ['c']}]}, user['id'])
     pid = e['id']
     st = reg.store(pid)
     det, seg = st.tasks()
@@ -98,7 +132,9 @@ def main(n):
     from dataviz.server.app import Ctx, create_app
     cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG))
     cfg['logging']['http'] = False
-    client = TestClient(create_app(Ctx(None, cfg=cfg, jobs=JobManager(), labeling=reg)))
+    app = create_app(Ctx(None, cfg=cfg, jobs=JobManager(), labeling=reg))
+    app.add_middleware(_TestUserMiddleware, user=user)
+    client = TestClient(app)
     times = []
     for k in range(30):
         for s in shapes[:10]:

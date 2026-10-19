@@ -2,11 +2,20 @@ import uuid
 
 import pytest
 
+from conftest import make_user, new_store
 from dataviz.labeling.store import Conflict, InUse
 
 
 def hid():
     return uuid.uuid4().hex
+
+
+def sql(q, **a):
+    """Raw rows straight from the test database (what the store wrote)."""
+    from sqlalchemy import text
+    from dataviz import db
+    with db.connect() as c:
+        return c.execute(text(q), a).mappings().all()
 
 
 @pytest.fixture
@@ -52,16 +61,16 @@ def test_put_diff_versions_and_bbox_extent(proj):
     assert got['versions'][det['id']] == 1
     gb = next(x for x in got['annotations'] if x['id'] == b['id'])
     assert gb['geometry'] == {'x': 0.9, 'y': 0.1, 'w': 0.1, 'h': 0.2}
-    row = s.conn().execute('SELECT bbox_x, bbox_w FROM annotations WHERE id = ?', (b['id'],)).fetchone()
-    assert tuple(row) == (0.9, 0.1)
+    x, _, w, _ = s.bbox_extents([b['id']])[b['id']]
+    assert (x, w) == (0.9, 0.1)
     # same set again: no version bump
     assert s.put_annotations(ids[0], det['id'], [a, b], 1)['version'] == 1
     # change a, drop b
     a2 = dict(a, geometry={'x': 0.2, 'y': 0.2, 'w': 0.1, 'h': 0.1})
     r = s.put_annotations(ids[0], det['id'], [a2], 1)
     assert r['version'] == 2 and r['n'] == 1
-    rows = {x['id']: dict(x) for x in s.conn().execute('SELECT id, version, is_deleted FROM annotations')}
-    assert rows[a['id']]['version'] == 2 and rows[b['id']]['is_deleted'] == 1 and rows[b['id']]['version'] == 2
+    rows = {x['id']: x for x in sql('SELECT id, version, is_deleted FROM lbl.annotations WHERE project_id = :p', p=s.pid)}
+    assert rows[a['id']]['version'] == 2 and rows[b['id']]['is_deleted'] is True and rows[b['id']]['version'] == 2
     # undo the delete: the same id comes back
     s.put_annotations(ids[0], det['id'], [a2, b], 2)
     assert len(s.get_annotations(ids[0])['annotations']) == 2
@@ -136,8 +145,7 @@ def test_class_delete_needs_reassign_or_delete(proj):
     s.delete_class(dog, delete_annotations=True)
     assert s.get_annotations(ids[0])['annotations'] == []
     assert s.stats()['tasks'][det['id']]['in_progress'] == 0              # nothing left: back to todo
-    assert s.conn().execute('SELECT n_annotations FROM media_task_status WHERE media_id = ?',
-                            (ids[0],)).fetchone()[0] == 0
+    assert sql('SELECT n_annotations FROM lbl.media_task_status WHERE media_id = :m', m=ids[0])[0]['n_annotations'] == 0
 
 
 def test_add_media_skips_existing_and_iter_export(proj):
@@ -263,12 +271,13 @@ def test_class_stats_and_delete_classes_all_or_nothing(proj):
     assert got['annotations'] == [] and got['versions'][det['id']] > v0 and got['media']['n'][det['id']] == 0
 
 
-def test_duplicate_renews_every_id(tmp_path):
+def test_duplicate_renews_every_id(pg, tmp_path):
     from dataviz.labeling.projects import ProjectRegistry
     reg = ProjectRegistry(tmp_path / 'labeling')
+    owner = make_user('orig')
     e = reg.create({'name': 'Orig', 'tasks': [{'name': 'Det', 'task_type': 'object_detection', 'classes': ['a', 'b']},
                                               {'name': 'Pose', 'task_type': 'keypoints', 'config': {'keypoints': ['l']},
-                                               'classes': ['p']}]})
+                                               'classes': ['p']}]}, owner['id'])
     s = reg.store(e['id'])
     det, pose = s.tasks()
     a, b = (c['id'] for c in det['classes'])
@@ -289,8 +298,22 @@ def test_duplicate_renews_every_id(tmp_path):
     s.add_export_run('r' * 32, det['id'], 'zip', 'x', {})
     reg.update(e['id'], export_default={'target': {'kind': 'zip'}, 'task_ids': [det['id']], 'classes': {det['id']: [a]}})
 
+    before = {t: sql(f'SELECT * FROM lbl.{t} WHERE ' + ('id' if t == 'projects' else 'project_id') + ' = :p ORDER BY 1',
+                     p=e['id'])
+              for t in ('projects', 'tasks', 'label_classes', 'media', 'annotations', 'media_task_status', 'export_runs')}
     new = reg.duplicate(e['id'])
     assert new['name'] == 'Orig (copy)' and new['n_media'] == 3 and new['id'] != e['id']
+    assert new['owner_id'] == owner['id'] and new['visibility'] == 'private'
+    assert reg.duplicate(e['id'])['name'] == 'Orig (copy 2)'
+    # another user's copy is theirs, and the name is free for them
+    other = make_user('other')
+    theirs = reg.duplicate(e['id'], owner_id=other['id'])
+    assert theirs['owner_id'] == other['id'] and theirs['name'] == 'Orig (copy)'
+    with pytest.raises(ValueError):
+        reg.duplicate(e['id'], name='orig (COPY)')                     # typed + taken by this owner
+    after = {t: sql(f'SELECT * FROM lbl.{t} WHERE ' + ('id' if t == 'projects' else 'project_id') + ' = :p ORDER BY 1',
+                    p=e['id']) for t in before}
+    assert after == before                                             # the original is untouched
     c = reg.store(new['id'])
     old_ids, new_ids = set(), set()
     for st, acc in ((s, old_ids), (c, new_ids)):
@@ -427,9 +450,7 @@ def test_review_manual_bulk_and_clearing(proj):
         s.set_review(['x' * 32], 'bulk')
 
 
-def test_review_class_delete_clears_and_old_db_migrates(proj, tmp_path):
-    import sqlite3
-    from dataviz.labeling.store import ProjectStore
+def test_review_class_delete_clears(proj):
     s, det, _, _, ids = proj
     cat, dog = (c['id'] for c in det['classes'])
     d = det['id']
@@ -438,23 +459,190 @@ def test_review_class_delete_clears_and_old_db_migrates(proj, tmp_path):
     s.set_review([d], 'bulk')
     s.delete_class(cat, reassign_to=dog)
     assert s.stats()['review'][d] == {'manual': 0, 'bulk': 0}
-    # a database made before the column existed opens, gets it, and works
-    path = tmp_path / 'old.db'
-    old = ProjectStore(path)
-    old.init_project('q' * 32, 'old')
-    old.close()
-    c = sqlite3.connect(path)
-    c.execute('ALTER TABLE media_task_status DROP COLUMN review')
-    c.commit()
-    c.close()
-    again = ProjectStore(path)
-    try:
-        assert again.stats()['review'] == {}
-        t = again.add_task('T', 'object_detection', None, ['a'])
-        again.add_media([{'file_name': '0.jpg', 'uri': '0.jpg', 'width': 10, 'height': 10}])
-        mid = again.media_ids()[0]
-        again.put_annotations(mid, t['id'], [box(t['classes'][0]['id'])], 0)
-        again.set_status(mid, [t['id']], 'commit')
-        assert again.set_review([t['id']], 'bulk') == {t['id']: 1}
-    finally:
-        again.close()
+
+
+# ---------------------------------------------------------------- PostgreSQL: one shared schema for every project
+def _fill(s, prefix, n=4):
+    det = s.add_task('Detect', 'object_detection', None, ['cat', 'dog'])
+    s.add_media([{'file_name': f'{prefix}{i}.jpg', 'uri': f'{prefix}{i}.jpg', 'width': 10, 'height': 10}
+                 for i in range(n)])
+    ids = s.media_ids()
+    cat, dog = (c['id'] for c in det['classes'])
+    s.put_annotations(ids[0], det['id'], [box(cat), box(dog)], 0)
+    s.put_annotations(ids[1], det['id'], [box(cat)], 0)
+    s.set_status(ids[1], [det['id']], 'commit')
+    s.set_review([det['id']], 'bulk')
+    s.add_export_run(hid(), det['id'], 'zip', 'x', {})
+    return det, ids
+
+
+def test_projects_never_see_each_other(store):
+    """Two projects in the same database: every read is scoped to its own project_id."""
+    a = store
+    b = new_store(a.owner['id'], 'other')
+    adet, aids = _fill(a, 'shared_', 4)
+    bdet, bids = _fill(b, 'shared_', 6)                  # the same file names: unique per project only
+    assert set(aids).isdisjoint(bids)
+    for s, det, ids, n in ((a, adet, aids, 4), (b, bdet, bids, 6)):
+        other = bdet if s is a else adet
+        assert [t['id'] for t in s.tasks()] == [det['id']] and s.media_count() == n and len(ids) == n
+        assert s.media_page(0, 100)['total'] == n
+        assert {x['id'] for x in s.media_page(0, 100)['items']} == set(ids)
+        assert s.media_page(0, 100, det['id'], 'done')['total'] == 1
+        assert s.media_page(0, 100, det['id'], 'todo')['total'] == n - 2
+        # strip filters: name, wildcard, regex, classes, counts, review
+        assert s.media_page(0, 100, q='shared')['total'] == n
+        assert s.media_page(0, 100, q='SHARED_*.jpg')['total'] == n
+        assert s.media_page(0, 100, q='/^shared_\\d/')['total'] == n
+        cat = det['classes'][0]['id']
+        ocat = other['classes'][0]['id']
+        assert s.media_page(0, 100, cls=[cat])['total'] == 2
+        assert s.media_page(0, 100, cls=[ocat])['total'] == 0
+        assert s.media_page(0, 100, cls=[ocat], cls_mode='none')['total'] == n
+        assert s.media_page(0, 100, min_ann=1)['total'] == 2
+        assert s.media_page(0, 100, task_id=det['id'], max_ann=0)['total'] == n - 2
+        assert s.media_page(0, 100, task_id=det['id'], review='bulk')['total'] == 1
+        st = s.stats()
+        assert st['n_media'] == n and list(st['tasks']) == [det['id']]
+        assert st['tasks'][det['id']] == {'done': 1, 'in_progress': 1, 'skipped': 0, 'todo': n - 2}
+        assert set(s.class_stats()) == {c['id'] for c in det['classes']}
+        # export iterators and raw rows
+        out = list(s.iter_task_export(det['id']))
+        assert [m['id'] for m, _ in out] == ids and sum(len(r) for _, r in out) == 3
+        assert all(not r for _, r in s.iter_task_export(other['id']))      # another project's task: nothing
+        for t in ('tasks', 'label_classes', 'media', 'annotations', 'media_task_status', 'export_runs'):
+            rows = [r for bt in s.iter_rows(t) for r in bt]
+            assert rows and all(r['project_id'] == s.pid for r in rows), t
+        assert [r['id'] for bt in s.iter_rows('projects') for r in bt] == [s.pid]
+        assert len(s.export_runs()) == 1 and len(s.media_names()) == n and len(s.media_for_import()) == n
+        cnt, gen = s.predict_targets(det['id'], 'all')
+        assert cnt == n and [r[0] for batch in gen for r in batch] == ids
+        # another project's ids are unknown here
+        with pytest.raises(KeyError):
+            s.media_row((bids if s is a else aids)[0])
+        with pytest.raises(KeyError):
+            s.task(other['id'])
+        with pytest.raises(KeyError):
+            s.put_annotations((bids if s is a else aids)[0], det['id'], [], 0)
+        assert s.media_rows([(bids if s is a else aids)[0]]) == {}
+        assert s.parent_boxes([x['id'] for x in (b if s is a else a).get_annotations(
+            (bids if s is a else aids)[0])['annotations']]) == []
+    # writes stay scoped: a review / model removal / class delete in one project leaves the other alone
+    a.set_review([adet['id']], 'clear')
+    assert b.stats()['review'][bdet['id']] == {'manual': 0, 'bulk': 1}
+    a.delete_class(adet['classes'][0]['id'], delete_annotations=True)
+    assert b.class_stats()[bdet['classes'][0]['id']]['n_annotations'] == 2
+
+
+def test_created_by_and_committed_by(store):
+    s = store
+    det = s.add_task('Detect', 'object_detection', None, ['cat'])
+    s.add_media([{'file_name': '0.jpg', 'uri': '0.jpg', 'width': 10, 'height': 10}])
+    mid = s.media_ids()[0]
+    uid = s.owner['id']
+    b = box(det['classes'][0]['id'])
+    s.put_annotations(mid, det['id'], [b], 0, user=uid)
+    s.set_status(mid, [det['id']], 'commit', user=uid)
+    assert sql('SELECT created_by FROM lbl.annotations WHERE id = :i', i=b['id'])[0]['created_by'] == uid
+    row = sql('SELECT committed_by, committed_at, project_id FROM lbl.media_task_status WHERE media_id = :m', m=mid)[0]
+    assert row['committed_by'] == uid and row['committed_at'] > 0 and row['project_id'] == s.pid
+    # a reopen keeps who committed it last; a skip does not change it either
+    s.set_status(mid, [det['id']], 'reopen', user=None)
+    assert sql('SELECT committed_by FROM lbl.media_task_status WHERE media_id = :m', m=mid)[0]['committed_by'] == uid
+
+
+def test_concurrent_puts_one_conflict(store):
+    """Two writers with the same base_version (two tabs, two server processes): exactly one wins."""
+    import threading
+    from dataviz.labeling.store import ProjectStore
+    det = store.add_task('Detect', 'object_detection', None, ['cat'])
+    store.add_media([{'file_name': '0.jpg', 'uri': '0.jpg', 'width': 10, 'height': 10}])
+    mid = store.media_ids()[0]
+    cat = det['classes'][0]['id']
+    for rnd in range(5):
+        base = store.get_annotations(mid)['versions'][det['id']]
+        go = threading.Barrier(2)
+        res = []
+
+        def put(k):
+            st = ProjectStore(store.pid)                 # its own object, like another process
+            go.wait()
+            try:
+                res.append(st.put_annotations(mid, det['id'], [box(cat, x=0.1 * (k + 1))], base))
+            except Conflict as e:
+                res.append(e)
+        ts = [threading.Thread(target=put, args=(k,)) for k in range(2)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        assert sum(isinstance(r, Conflict) for r in res) == 1, rnd
+        ok = next(r for r in res if not isinstance(r, Conflict))
+        assert ok['version'] == base + 1
+        assert next(r for r in res if isinstance(r, Conflict)).version == base + 1
+
+
+def test_nested_write_joins_and_rolls_back(store):
+    s = store
+    det = s.add_task('Detect', 'object_detection', None, ['cat'])
+    with s.write():
+        s.add_classes(det['id'], ['dog'])
+        assert [c['name'] for c in s.task(det['id'])['classes']] == ['cat', 'dog']   # its own uncommitted row
+    assert len(s.task(det['id'])['classes']) == 2
+    with pytest.raises(RuntimeError):
+        with s.write():
+            s.add_classes(det['id'], ['horse'])
+            raise RuntimeError('boom')
+    assert [c['name'] for c in s.task(det['id'])['classes']] == ['cat', 'dog']
+
+
+def test_delete_cascades_every_row(pg, tmp_path):
+    from dataviz.labeling.projects import ProjectRegistry
+    reg = ProjectRegistry(tmp_path / 'labeling')
+    owner = make_user('del')
+    keep = reg.create({'name': 'Keep', 'tasks': [{'name': 'D', 'task_type': 'object_detection', 'classes': ['a']}]},
+                      owner['id'])
+    e = reg.create({'name': 'Gone', 'tasks': [{'name': 'D', 'task_type': 'object_detection', 'classes': ['a']}]},
+                   owner['id'])
+    for pid in (keep['id'], e['id']):
+        s = reg.store(pid)
+        _fill(s, 'x', 3)
+    reg.delete(e['id'], delete_files=True)
+    for t in ('tasks', 'label_classes', 'media', 'annotations', 'annotation_relations', 'media_task_status',
+              'export_runs'):
+        assert sql(f'SELECT 1 FROM lbl.{t} WHERE project_id = :p', p=e['id']) == [], t
+    assert sql('SELECT 1 FROM lbl.projects WHERE id = :p', p=e['id']) == []
+    assert sql('SELECT 1 FROM app.label_projects WHERE session_id = :p', p=e['id']) == []
+    assert not reg.project_dir(e['id']).exists()
+    with pytest.raises(KeyError):
+        reg.store(e['id'])
+    with pytest.raises(KeyError):
+        reg.delete(e['id'])
+    assert reg.store(keep['id']).media_count() == 3 and len(sql('SELECT 1 FROM lbl.annotations')) == 3
+
+
+def test_registry_entry_list_and_names(pg, tmp_path):
+    from dataviz.data import sessions
+    from dataviz.labeling.projects import ProjectRegistry
+    reg = ProjectRegistry(tmp_path / 'labeling')
+    alice, bob = make_user('alice'), make_user('bob')
+    body = {'name': 'Cars', 'tags': ['x'], 'review': True, 'source': {'kind': 'upload'},
+            'tasks': [{'name': 'D', 'task_type': 'object_detection', 'classes': ['a']}]}
+    e = reg.create(body, alice['id'])
+    assert set(e) >= {'id', 'name', 'description', 'created', 'updated', 'source', 'export_default', 'n_media',
+                      'task_ids', 'model_connections', 'tags', 'review', 'owner_id', 'visibility'}
+    assert e['owner_id'] == alice['id'] and e['tags'] == ['x'] and e['review'] is True and len(e['task_ids']) == 1
+    with pytest.raises(ValueError):
+        reg.create(body, alice['id'])                     # unique per owner
+    assert reg.create(body, bob['id'])['owner_id'] == bob['id']
+    assert [p['name'] for p in reg.list(alice)] == ['Cars'] and reg.list(alice)[0]['my_role'] == 'owner'
+    assert reg.list(bob)[0]['owner']['id'] == bob['id']
+    sessions.set_sharing(e['id'], 'private', [{'user_id': bob['id'], 'role': 'labeler'}], alice['id'])
+    assert len(reg.list(bob)) == 2 and len(reg.list(bob, 'shared')) == 1 and len(reg.list(None)) == 2
+    up = reg.update(e['id'], name='Trucks', description='d', tags=['y'], export_default={'target': {'kind': 'zip'}})
+    assert (up['name'], up['description'], up['tags']) == ('Trucks', 'd', ['y'])
+    assert reg.store(e['id']).project_row()['name'] == 'Trucks'
+    assert reg.set_counts(e['id'])['n_media'] == 0
+    reg.update(e['id'], source={'kind': 's3', 'connection_id': 'c9', 'bucket': 'b'})
+    assert reg.uses_connection('c9') == ['Trucks'] and reg.uses_connection('nope') == []
+    assert sorted(x['name'] for x in reg.entries()) == ['Cars', 'Trucks']

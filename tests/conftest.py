@@ -110,16 +110,50 @@ def make_user(username, admin=False, display_name=None, active=True):
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(pg):
+    """A ProjectStore on an empty project 'ppp…' owned by a fresh user (store.owner)."""
+    from dataviz.data import sessions
     from dataviz.labeling.store import ProjectStore
-    s = ProjectStore(tmp_path / 'annotations.db')
-    s.init_project('p' * 32, 'test')
+    owner = make_user('owner')
+    pid = 'p' * 32
+    sessions.create('label', owner['id'], 'test', sid=pid)
+    s = ProjectStore(pid)
+    s.init_project(pid, 'test')
+    s.owner = owner
     yield s
     s.close()
 
 
+def new_store(owner_id, name, pid=None):
+    """Another ProjectStore (session row + project row) in the test database."""
+    from dataviz.data import sessions
+    from dataviz.labeling.store import ProjectStore
+    pid = pid or uuid.uuid4().hex
+    sessions.create('label', owner_id, name, sid=pid)
+    s = ProjectStore(pid)
+    s.init_project(pid, name)
+    return s
+
+
+class _TestUserMiddleware:
+    """TEST ONLY: every request runs as `user` (dataviz.auth.context.USER), so routes that read
+    context.user_id() work without a login. Phase 2 replaces it with a real session cookie."""
+
+    def __init__(self, app, user):
+        self.app = app
+        self.user = user
+
+    async def __call__(self, scope, receive, send):
+        from dataviz.auth import context
+        token = context.USER.set(self.user)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            context.USER.reset(token)
+
+
 @pytest.fixture
-def app_ctx(tmp_path):
+def app_ctx(pg, tmp_path):
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
     from dataviz.data import connections
@@ -131,7 +165,10 @@ def app_ctx(tmp_path):
     root = tmp_path / 'ws'
     ctx = Ctx(None, datasets=connections.Registry(root), cfg=cfg, jobs=JobManager(),
               labeling=ProjectRegistry(root / 'labeling'), llm=LLMStore(root))
-    return ctx, create_app(ctx)
+    app = create_app(ctx)
+    ctx.user = make_user('admin', admin=True)
+    app.add_middleware(_TestUserMiddleware, user=ctx.user)
+    return ctx, app
 
 
 @pytest.fixture
@@ -139,6 +176,7 @@ def client(app_ctx):
     from fastapi.testclient import TestClient
     with TestClient(app_ctx[1]) as c:
         c.ctx = app_ctx[0]
+        c.user = app_ctx[0].user
         yield c
 
 

@@ -316,23 +316,18 @@ def state_exemplars(state, k=3, cell=96):
 def task_exemplars(pid, st, task, image_bytes, k=3, cell=96):
     """[jpeg] contact sheets of a labeling task's classes, from its own boxes (manual ones first, distinct
     images). image_bytes(media_row) -> bytes. Cached per (project, task, annotation count + last change)."""
-    c = st.conn()
-    sig = c.execute("SELECT COUNT(*), MAX(updated_at) FROM annotations WHERE task_id = ? AND is_deleted = 0 "
-                    "AND geometry_type = 'bbox'", (task['id'],)).fetchone()
+    sig = st.box_signature(task['id'])
     names = tuple((x['id'], x['name']) for x in task['classes'])
     key = ('task', pid, task['id'], tuple(sig), names, k, cell)
 
     def build():
-        import json
         rows = []
         for cid, name in names:
-            got = c.execute("SELECT media_id, geometry FROM annotations WHERE task_id = ? AND class_id = ? AND "
-                            "is_deleted = 0 AND geometry_type = 'bbox' ORDER BY (source = 'model'), "
-                            "(bbox_w * bbox_h) DESC LIMIT 200", (task['id'], cid)).fetchall()
+            got = st.class_boxes(task['id'], cid, 200)      # manual boxes first, biggest first
             pick, seen = [], set()
             for mid, g in got:
                 if mid not in seen:
-                    pick.append((mid, json.loads(g) if isinstance(g, str) else g))
+                    pick.append((mid, g))
                     seen.add(mid)
                 if len(pick) == k:
                     break

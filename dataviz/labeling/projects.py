@@ -1,35 +1,50 @@
 """
-ProjectRegistry: the labeling sessions index (<workspace_root>/labeling/projects.json) and the per-project
-folders (annotations.db, images/, cache/, thumbs/, exports/). One ProjectStore per project is cached here,
-so every request for a project reuses its thread-local SQLite connections.
+ProjectRegistry: the labeling sessions index and the per-project folders (images/, cache/, thumbs/, exports/
+under <workspace_root>/labeling/<pid>/).
 
-The index holds what the Sessions home needs without opening every database ({id, name, description,
-created, updated, source, export_default, n_media, task_ids, model_connections, tags}); tasks / classes /
-annotations live in the project's own store.
+The index lives in PostgreSQL: one app.sessions row per label session (kind 'label': owner, name, tags,
+visibility, sharing — the access model both kinds of card share, data/sessions.py), its app.label_projects row
+(description, source, export_default, n_media, task_ids, model_connections, review) and its lbl.projects row
+(the annotation store's root, labeling/store.py). Deleting the session row cascades to every lbl row.
+
+An entry (get / entries) has the shape the routes and the page always used: {id, name, description, created,
+updated, source, export_default, n_media, task_ids, model_connections, tags, review} (epoch times) plus
+owner_id and visibility.
 
 duplicate() copies a session with a NEW id for every row (project, tasks, classes, media, annotations,
-statuses, export runs), so the original and the copy can be exported into one PostgreSQL / MSSQL database
-without primary-key clashes.
+statuses, export runs) in one transaction, so the original and the copy can be exported into one PostgreSQL /
+MSSQL database without primary-key clashes.
 """
 
-import json
 import os
 import shutil
-import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
 
 import orjson
+from sqlalchemy import text
 
-from ..core.names import clean_tags, name_taken, unique_name
-from .store import ProjectStore
+from .. import db
+from ..core.names import clean_tags
+from ..data import sessions
+from .store import TABLES, ProjectStore
 
 SOURCE_KINDS = ('upload', 'local', 's3', 'ftp', 'sftp')
 N_COVER = 4
 _SOURCE_FIELDS = {'upload': (), 'local': ('path', 'recursive'), 's3': ('connection_id', 'bucket', 'prefix'),
                   'ftp': ('connection_id', 'path'), 'sftp': ('connection_id', 'path')}
+
+_ENTRY_SQL = """
+    SELECT s.id, s.name, s.owner_id, s.visibility, s.tags, s.created_at, s.updated_at, lp.description, lp.source,
+           lp.export_default, lp.n_media, lp.task_ids, lp.model_connections, lp.review
+    FROM app.sessions s JOIN app.label_projects lp ON lp.session_id = s.id
+    WHERE s.kind = 'label'"""
+
+
+def _json(v):
+    return None if v is None else orjson.dumps(v).decode()
 
 
 def clean_source(src):
@@ -58,47 +73,42 @@ def clean_source(src):
     return out
 
 
+def _entry(r):
+    return {'id': r.id, 'name': r.name, 'description': r.description or '', 'created': sessions.epoch(r.created_at),
+            'updated': sessions.epoch(r.updated_at), 'source': r.source or {'kind': 'upload'},
+            'export_default': r.export_default, 'n_media': r.n_media, 'task_ids': list(r.task_ids or []),
+            'model_connections': list(r.model_connections or []), 'tags': list(r.tags or []),
+            'review': bool(r.review), 'owner_id': r.owner_id, 'visibility': r.visibility}
+
+
 class ProjectRegistry:
     def __init__(self, root):
-        self.root = Path(root)
-        self.path = self.root / 'projects.json'
-        self._lock = threading.RLock()
+        self.root = Path(root)                      # files only: <root>/<pid>/images, cache, thumbs, exports
+        self._lock = threading.Lock()
         self._stores = {}
 
-    # ------------------------------------------------------------ index file
-    def _load(self):
-        try:
-            data = json.loads(self.path.read_text()) if self.path.exists() else {}
-        except ValueError:
-            data = {}
-        data.setdefault('projects', [])
-        return data
-
-    def _save(self, data):
-        self.root.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(f'.{os.getpid()}.{threading.get_ident()}.tmp')
-        tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False))
-        tmp.replace(self.path)                     # readers never see a half-written index
+    # ------------------------------------------------------------ index rows
+    def _entries(self, c, ids=None):
+        q, a = _ENTRY_SQL, {}
+        if ids is not None:
+            q += ' AND s.id = ANY(:ids)'
+            a['ids'] = list(ids)
+        return [_entry(r) for r in c.execute(text(q + ' ORDER BY s.updated_at DESC'), a)]
 
     def entries(self):
-        return self._load()['projects']
+        """Every label session (all owners)."""
+        with db.connect() as c:
+            return self._entries(c)
 
-    def get(self, pid):
-        for p in self.entries():
-            if p['id'] == pid:
-                return p
-        raise KeyError(f'no labeling session {pid!r}')
-
-    def _update_entry(self, pid, **fields):
-        with self._lock:
-            data = self._load()
-            for p in data['projects']:
-                if p['id'] == pid:
-                    p.update(fields)
-                    p['updated'] = time.time()
-                    self._save(data)
-                    return p
-        raise KeyError(f'no labeling session {pid!r}')
+    def get(self, pid, conn=None):
+        if conn is not None:
+            got = self._entries(conn, [pid])
+        else:
+            with db.connect() as c:
+                got = self._entries(c, [pid])
+        if not got:
+            raise KeyError(f'no labeling session {pid!r}')
+        return got[0]
 
     # ------------------------------------------------------------ folders + stores
     def project_dir(self, pid):
@@ -107,31 +117,33 @@ class ProjectRegistry:
         return self.root / pid
 
     def store(self, pid):
-        """The project's ProjectStore (cached; KeyError for an unknown project)."""
+        """The project's ProjectStore (KeyError for an unknown project, checked every time: another process may
+        have deleted it)."""
+        self.project_dir(pid)
+        with db.connect() as c:
+            if c.execute(text('SELECT 1 FROM lbl.projects WHERE id = :p'), {'p': pid}).first() is None:
+                raise KeyError(f'no labeling session {pid!r}')
         s = self._stores.get(pid)
-        if s is not None:
-            return s
-        with self._lock:
-            s = self._stores.get(pid)
-            if s is None:
-                self.get(pid)
-                s = self._stores[pid] = ProjectStore(self.project_dir(pid) / 'annotations.db')
+        if s is None:
+            with self._lock:
+                s = self._stores.setdefault(pid, ProjectStore(pid))
         return s
 
     # ------------------------------------------------------------ names
-    def check_name(self, name, pid=None, entries=None):
-        """ValueError when another session (not `pid`) is already called `name`, ignoring case."""
-        others = [e['name'] for e in (self.entries() if entries is None else entries) if e['id'] != pid]
-        if name_taken(name, others):
-            raise ValueError(f'a label session called “{name.strip()}” already exists: pick another name')
+    def check_name(self, name, owner_id, pid=None):
+        """ValueError when this owner already has another label session (not `pid`) called `name`, ignoring case."""
+        sessions.check_name(owner_id, 'label', name, sid=pid)
 
     # ------------------------------------------------------------ create / update / delete
-    def create(self, body):
-        """Validate, create the folder + store with tasks and classes, add the index entry. Returns the entry."""
+    def create(self, body, owner_id):
+        """Validate, then in one transaction: the session row (owned by owner_id), its label_projects row, the
+        lbl.projects row, the tasks and classes. Creates the folders. Returns the entry."""
         name = (body.get('name') or '').strip()
         if not name:
             raise ValueError('give the session a name')
-        self.check_name(name)
+        if not owner_id:
+            raise ValueError('a label session needs an owner (sign in first)')
+        self.check_name(name, owner_id)
         tags = clean_tags(body.get('tags'))
         tasks = body.get('tasks') or []
         if not tasks:
@@ -147,54 +159,60 @@ class ProjectRegistry:
                     raise ValueError(f'class {n!r} is listed twice in task {t["name"]!r}')
                 seen.add(n)
         source = clean_source(body.get('source'))
+        description = body.get('description') or ''
         pid = uuid.uuid4().hex
         d = self.project_dir(pid)
         for sub in ('images', 'cache', 'thumbs', 'exports'):
             (d / sub).mkdir(parents=True, exist_ok=True)
-        store = ProjectStore(d / 'annotations.db')
-        store.init_project(pid, name, body.get('description') or '', {'source': source})
-        task_ids = [store.add_task(t['name'], t['task_type'], t.get('config'), t.get('classes') or [])['id']
-                    for t in tasks]
-        now = time.time()
-        entry = {'id': pid, 'name': name, 'description': body.get('description') or '', 'created': now,
-                 'updated': now, 'source': source, 'export_default': body.get('export_default'), 'n_media': 0,
-                 'task_ids': task_ids, 'tags': tags, 'review': bool(body.get('review'))}
+        try:
+            with db.begin() as c:
+                sessions.create('label', owner_id, name, sid=pid, tags=tags, conn=c)
+                c.execute(text('INSERT INTO app.label_projects(session_id, description, source, export_default, '
+                               'review) VALUES (:id, :d, CAST(:src AS jsonb), CAST(:ed AS jsonb), :rv)'),
+                          {'id': pid, 'd': description, 'src': _json(source), 'ed': _json(body.get('export_default')),
+                           'rv': bool(body.get('review'))})
+                st = ProjectStore(pid)
+                with st.joined(c):
+                    st.init_project(pid, name, description, {'source': source})
+                    task_ids = [st.add_task(t['name'], t['task_type'], t.get('config'), t.get('classes') or [])['id']
+                                for t in tasks]
+                c.execute(text('UPDATE app.label_projects SET task_ids = :t WHERE session_id = :id'),
+                          {'t': task_ids, 'id': pid})
+        except BaseException:
+            shutil.rmtree(d, ignore_errors=True)
+            raise
         with self._lock:
-            data = self._load()
-            try:
-                self.check_name(name, entries=data['projects'])      # again: another create may have won
-            except ValueError:
-                store.close()
-                shutil.rmtree(d, ignore_errors=True)
-                raise
-            data['projects'].append(entry)
-            self._save(data)
-            self._stores[pid] = store
-        return entry
+            self._stores[pid] = st
+        return self.get(pid)
 
     def update(self, pid, name=None, description=None, export_default=None, source=None, tags=None, review=None):
-        fields = {}
-        if name is not None:
-            if not name.strip():
-                raise ValueError('give the session a name')
-            fields['name'] = name.strip()
-        if tags is not None:
-            fields['tags'] = clean_tags(tags)
+        if name is not None and not name.strip():
+            raise ValueError('give the session a name')
+        sets = {}
         if review is not None:
-            fields['review'] = bool(review)        # the optional review layer of the card / label page
+            sets['review'] = bool(review)          # the optional review layer of the card / label page
         if description is not None:
-            fields['description'] = description
+            sets['description'] = description
         if export_default is not None:
-            fields['export_default'] = export_default
+            sets['export_default'] = _json(export_default)
         if source is not None:
-            fields['source'] = clean_source(source)
-        with self._lock:
-            e = self.get(pid)
-            if 'name' in fields and fields['name'].casefold() != e['name'].casefold():
-                self.check_name(fields['name'], pid)    # only a new name: old duplicates stay editable
-            if 'name' in fields or 'description' in fields:
-                self.store(pid).update_project(name=fields.get('name'), description=fields.get('description'))
-            return self._update_entry(pid, **fields)
+            sets['source'] = _json(clean_source(source))
+        with db.begin() as c:
+            self.get(pid, c)                       # KeyError
+            if name is not None or tags is not None:
+                # only a new name is checked: old duplicates stay editable
+                sessions.update(pid, name=name.strip() if name is not None else None, tags=tags, conn=c)
+            else:
+                sessions.touch(pid, c)
+            if sets:
+                assign = ', '.join(f'{k} = CAST(:{k} AS jsonb)' if k in ('export_default', 'source') else f'{k} = :{k}'
+                                   for k in sets)
+                c.execute(text(f'UPDATE app.label_projects SET {assign} WHERE session_id = :id'), {**sets, 'id': pid})
+            if name is not None or description is not None:
+                st = ProjectStore(pid)
+                with st.joined(c):
+                    st.update_project(name=name.strip() if name is not None else None, description=description)
+            return self.get(pid, c)
 
     def set_counts(self, pid):
         """Refresh the index's n_media / task_ids / model_connections (the model connections the tasks link,
@@ -202,20 +220,21 @@ class ProjectRegistry:
         s = self.store(pid)
         tasks = s.tasks()
         models = sorted({(t['config'].get('model') or {}).get('connection_id') for t in tasks} - {None})
-        return self._update_entry(pid, n_media=s.media_count(), task_ids=[t['id'] for t in tasks],
-                                  model_connections=models)
+        with db.begin() as c:
+            c.execute(text('UPDATE app.label_projects SET n_media = :n, task_ids = :t, model_connections = :m '
+                           'WHERE session_id = :id'),
+                      {'n': s.media_count(), 't': [t['id'] for t in tasks], 'm': models, 'id': pid})
+            sessions.touch(pid, c)
+            return self.get(pid, c)
 
     def delete(self, pid, delete_files=False):
+        """Delete the session; its label_projects row, members and every lbl row cascade."""
+        self.project_dir(pid)
+        with db.begin() as c:
+            self.get(pid, c)                       # KeyError (and never deletes a visualize session here)
+            sessions.delete(pid, c)
         with self._lock:
-            data = self._load()
-            before = len(data['projects'])
-            data['projects'] = [p for p in data['projects'] if p['id'] != pid]
-            if len(data['projects']) == before:
-                raise KeyError(f'no labeling session {pid!r}')
-            self._save(data)
-            s = self._stores.pop(pid, None)
-        if s is not None:
-            s.close()
+            self._stores.pop(pid, None)
         if delete_files:
             shutil.rmtree(self.project_dir(pid), ignore_errors=True)
 
@@ -227,7 +246,8 @@ class ProjectRegistry:
         return {'id': e['id'], 'name': e['name'], 'description': e.get('description') or '',
                 'created': e['created'], 'updated': e['updated'], 'source': e['source'],
                 'export_default': e.get('export_default'), 'n_media': s.media_count(), 'tasks': s.tasks(),
-                'tags': e.get('tags') or [], 'review': bool(e.get('review'))}
+                'tags': e.get('tags') or [], 'review': bool(e.get('review')), 'owner_id': e['owner_id'],
+                'visibility': e['visibility']}
 
     def card(self, e):
         """Sessions home card: counts from one grouped status query + the first 4 media ids as the cover."""
@@ -237,144 +257,132 @@ class ProjectRegistry:
                   **st['tasks'].get(t['id'], {}),
                   **{f'review_{k}': v for k, v in st['review'].get(t['id'], {}).items()}} for t in s.tasks()]
         return {'id': e['id'], 'name': e['name'], 'created': e['created'], 'updated': e['updated'],
-                'source': e['source'], 'n_media': st['n_media'], 'cover': s.media_ids()[:N_COVER], 'tasks': tasks,
+                'source': e['source'], 'n_media': st['n_media'], 'cover': s.cover(N_COVER), 'tasks': tasks,
                 'tags': e.get('tags') or [], 'review': bool(e.get('review'))}
 
-    def list(self):
+    def list(self, user=None, scope='all'):
+        """The cards `user` sees in `scope` (data/sessions.py listing: newest opened first), each with the card
+        header {owner, members, visibility, my_role, opened_at}. user None = an internal caller: every session."""
+        if user is None:
+            user, scope = {'id': '', 'is_admin': True}, 'everyone'
+        heads = sessions.listing(user, 'label', scope)
+        with db.connect() as c:
+            entries = {e['id']: e for e in self._entries(c, [h['id'] for h in heads])}
         out = []
-        for e in self.entries():
+        for h in heads:
+            e = entries.get(h['id'])
+            if e is None:                          # a label session row without its project rows
+                continue
             try:
-                out.append(self.card(e))
+                card = self.card(e)
             except Exception as ex:  # noqa: BLE001 - one broken project must not hide the others
-                out.append({'id': e['id'], 'name': e['name'], 'created': e.get('created'), 'updated': e.get('updated'),
-                            'source': e.get('source'), 'n_media': e.get('n_media', 0), 'cover': [], 'tasks': [],
-                            'tags': e.get('tags') or [], 'error': f'{type(ex).__name__}: {ex}'})
-        out.sort(key=lambda p: p.get('updated') or 0, reverse=True)
+                card = {'id': e['id'], 'name': e['name'], 'created': e.get('created'), 'updated': e.get('updated'),
+                        'source': e.get('source'), 'n_media': e.get('n_media', 0), 'cover': [], 'tasks': [],
+                        'tags': e.get('tags') or [], 'error': f'{type(ex).__name__}: {ex}'}
+            card.update(owner=h['owner'], members=h['members'], visibility=h['visibility'], my_role=h['my_role'],
+                        opened_at=h['opened_at'])
+            out.append(card)
         return out
 
     def uses_connection(self, cid):
         """Names of the projects whose source uses connection `cid` (connections.delete_connection asks)."""
-        return [e['name'] for e in self.entries() if (e.get('source') or {}).get('connection_id') == cid]
+        with db.connect() as c:
+            return list(c.execute(text("""
+                SELECT s.name FROM app.label_projects lp JOIN app.sessions s ON s.id = lp.session_id
+                WHERE lp.source->>'connection_id' = :cid ORDER BY s.name"""), {'cid': cid}).scalars())
 
     # ------------------------------------------------------------ duplicate
-    def duplicate(self, pid, name=None, progress=None):
-        """Copy session `pid` into a new one (returns the new index entry):
-        1. annotations.db with SQLite's backup API (consistent even while someone is saving),
-        2. every id renewed inside the copy in ONE transaction through temp old -> new maps (parent_id,
-           relations, task config.model.class_map and export_default ids too),
+    def duplicate(self, pid, name=None, progress=None, owner_id=None):
+        """Copy session `pid` into a new one owned by `owner_id` (default: the original's owner); returns the new
+        entry. In ONE transaction (the source project's writers wait on its advisory lock meanwhile):
+        1. the session + label_projects rows (same source, tags, review; export_default ids remapped),
+        2. every lbl row copied with a NEW id through temp old -> new maps (parent_id, relations, task
+           config.model.class_map too),
         3. images/ (upload sessions) and thumbs/ hard-linked (copied across file systems), thumbs renamed to
-           the new media ids; cache/ and exports/ are left out (remote images refill the cache on demand),
-        4. the index entry with the same source, export_default and tags. No name = "<name> (copy)", made
-           unique with " (2)", " (3)" …; a typed name that is taken is a ValueError."""
+           the new media ids; cache/ and exports/ are left out (remote images refill the cache on demand).
+        No name = "<name> (copy)", made unique per owner with " (copy 2)", …; a typed name that is taken is a
+        ValueError. The copy is private."""
         progress = progress or (lambda **k: None)
         e = self.get(pid)
+        owner = owner_id or e['owner_id']
         name = (name or '').strip()
-        if name:
-            self.check_name(name)
-        new_name = name or unique_name(f"{e['name']} (copy)", [p['name'] for p in self.entries()],
-                                          nth=lambda _, n: f"{e['name']} (copy {n})")
         src_dir = self.project_dir(pid)
         new_pid = uuid.uuid4().hex
         d = self.project_dir(new_pid)
         for sub in ('images', 'cache', 'thumbs', 'exports'):
             (d / sub).mkdir(parents=True, exist_ok=True)
         try:
-            progress(stage='copying the database')
-            src = self.store(pid)
-            sc = sqlite3.connect(src.path, timeout=10)
-            dc = sqlite3.connect(d / 'annotations.db')
-            try:
-                sc.backup(dc)
-            finally:
-                sc.close()
-            try:
-                progress(stage='renewing ids')
-                maps = _reid(dc, new_pid, new_name)
-            finally:
-                dc.close()
-            if e['source'].get('kind') == 'upload':
-                progress(stage='linking images')
-                _link_tree(src_dir / 'images', d / 'images', progress)
-            progress(stage='linking thumbnails')
-            _link_thumbs(src_dir / 'thumbs', d / 'thumbs', maps['media'])
+            with db.begin() as c:
+                if name:
+                    sessions.check_name(owner, 'label', name, conn=c)
+                    new_name = name
+                else:
+                    new_name = sessions.free_name(owner, 'label', f"{e['name']} (copy)", c,
+                                                  nth=lambda _, n: f"{e['name']} (copy {n})")
+                with ProjectStore(pid).joined(c):            # the source's writers wait: one consistent copy
+                    progress(stage='copying the database')
+                    sessions.create('label', owner, new_name, sid=new_pid, tags=e['tags'], conn=c)
+                    maps = _copy_rows(c, pid, new_pid, new_name)
+                    c.execute(text('INSERT INTO app.label_projects(session_id, description, source, export_default, '
+                                   'n_media, task_ids, model_connections, review) VALUES (:id, :d, CAST(:src AS jsonb), '
+                                   'CAST(:ed AS jsonb), :n, :t, :m, :rv)'),
+                              {'id': new_pid, 'd': e['description'], 'src': _json(e['source']),
+                               'ed': _json(_remap_export_default(e.get('export_default'), maps)),
+                               'n': len(maps['media']), 't': [maps['task'].get(t, t) for t in e['task_ids']],
+                               'm': e['model_connections'], 'rv': e['review']})
+                if e['source'].get('kind') == 'upload':
+                    progress(stage='linking images')
+                    _link_tree(src_dir / 'images', d / 'images', progress)
+                progress(stage='linking thumbnails')
+                _link_thumbs(src_dir / 'thumbs', d / 'thumbs', maps['media'])
         except BaseException:
             shutil.rmtree(d, ignore_errors=True)
             raise
-        st = ProjectStore(d / 'annotations.db')
-        now = time.time()
-        tasks = st.tasks()
-        entry = {'id': new_pid, 'name': new_name, 'description': e.get('description') or '', 'created': now,
-                 'updated': now, 'source': dict(e['source']),
-                 'export_default': _remap_export_default(e.get('export_default'), maps),
-                 'n_media': st.media_count(), 'task_ids': [t['id'] for t in tasks],
-                 'model_connections': list(e.get('model_connections') or []), 'tags': list(e.get('tags') or []),
-                 'review': bool(e.get('review'))}
-        with self._lock:
-            data = self._load()
-            data['projects'].append(entry)
-            self._save(data)
-            self._stores[new_pid] = st
-        return entry
+        return self.get(new_pid)
 
 
-# id-bearing columns per table: (table, column, map). Each map is old -> new for one id space.
-_REID = [
-    ('projects', 'id', 'project'),
-    ('tasks', 'id', 'task'), ('tasks', 'project_id', 'project'),
-    ('label_classes', 'id', 'class'), ('label_classes', 'task_id', 'task'), ('label_classes', 'parent_id', 'class'),
-    ('media', 'id', 'media'), ('media', 'project_id', 'project'),
-    ('annotations', 'id', 'ann'), ('annotations', 'project_id', 'project'), ('annotations', 'task_id', 'task'),
-    ('annotations', 'media_id', 'media'), ('annotations', 'class_id', 'class'), ('annotations', 'parent_id', 'ann'),
-    ('annotation_relations', 'id', 'rel'), ('annotation_relations', 'project_id', 'project'),
-    ('annotation_relations', 'from_id', 'ann'), ('annotation_relations', 'to_id', 'ann'),
-    ('media_task_status', 'media_id', 'media'), ('media_task_status', 'task_id', 'task'),
-    ('export_runs', 'id', 'run'), ('export_runs', 'project_id', 'project'), ('export_runs', 'task_id', 'task'),
-]
+# id-bearing columns per lbl table, in insert order (FKs): {column: id space}; project_id is the new project
+_REMAP = {
+    'tasks': {'id': 'task'},
+    'label_classes': {'id': 'class', 'task_id': 'task', 'parent_id': 'class'},
+    'media': {'id': 'media'},
+    'annotations': {'id': 'ann', 'task_id': 'task', 'media_id': 'media', 'class_id': 'class', 'parent_id': 'ann'},
+    'annotation_relations': {'id': 'rel', 'from_id': 'ann', 'to_id': 'ann'},
+    'media_task_status': {'media_id': 'media', 'task_id': 'task'},
+    'export_runs': {'id': 'run', 'task_id': 'task'},
+}
 _MAP_SRC = {'task': 'tasks', 'class': 'label_classes', 'media': 'media', 'ann': 'annotations',
             'rel': 'annotation_relations', 'run': 'export_runs'}
 
 
-def _reid(c, new_pid, new_name):
-    """Renew every id of a copied store in one transaction; returns {'media': {old: new}, 'task': ..,
-    'class': ..} (what the files and the index entry need). New ids are uuid4-like hex made by SQLite
-    (randomblob), so 100k annotations never round-trip through Python."""
-    c.execute('PRAGMA foreign_keys = OFF')             # the ids of parents and children change in steps
-    c.isolation_level = None
-    c.execute('BEGIN IMMEDIATE')
-    try:
-        old_pid = c.execute('SELECT id FROM projects LIMIT 1').fetchone()[0]
-        c.execute('CREATE TEMP TABLE m_project(old TEXT PRIMARY KEY, new TEXT)')
-        c.execute('INSERT INTO m_project VALUES (?, ?)', (old_pid, new_pid))
-        for m, table in _MAP_SRC.items():
-            c.execute(f'CREATE TEMP TABLE m_{m}(old TEXT PRIMARY KEY, new TEXT)')
-            c.execute(f'INSERT INTO m_{m} SELECT id, lower(hex(randomblob(16))) FROM {table}')
-        by_table = {}
-        for table, col, m in _REID:
-            by_table.setdefault(table, []).append((col, m))
-        for table, cols in by_table.items():
-            sets = ', '.join(f'{col} = COALESCE((SELECT new FROM m_{m} WHERE old = {table}.{col}), {col})'
-                             for col, m in cols)
-            c.execute(f'UPDATE {table} SET {sets}')
-        c.execute('UPDATE projects SET name = ?, updated_at = ?', (new_name, time.time()))
-        maps = {m: dict(c.execute(f'SELECT old, new FROM m_{m}')) for m in ('task', 'class', 'media')}
-        # a task's model link maps model class names to class ids: those ids are renewed too
-        for tid, cfg in c.execute('SELECT id, config FROM tasks').fetchall():
-            cfg = json.loads(cfg) if cfg else None
-            cm = ((cfg or {}).get('model') or {}).get('class_map')
-            if isinstance(cm, dict):
-                cfg['model']['class_map'] = {k: maps['class'].get(v, v) if isinstance(v, str) else v
-                                             for k, v in cm.items()}
-                c.execute('UPDATE tasks SET config = ? WHERE id = ?',
-                          (orjson.dumps(cfg, option=orjson.OPT_SORT_KEYS).decode(), tid))
-        for m in ('project', *_MAP_SRC):
-            c.execute(f'DROP TABLE m_{m}')
-        bad = c.execute('PRAGMA foreign_key_check').fetchall()
-        if bad:
-            raise RuntimeError(f'duplicate: {len(bad)} rows lost their parent while renewing ids')
-        c.execute('COMMIT')
-    except BaseException:
-        c.execute('ROLLBACK')
-        raise
+def _copy_rows(c, old_pid, new_pid, new_name):
+    """Copy every lbl row of project old_pid into new_pid with new ids, INSERT … SELECT through temp id maps (100k
+    annotations never round-trip through Python). Returns {'media'|'task'|'class': {old: new}}."""
+    a = {'old': old_pid, 'new': new_pid}
+    for m, table in _MAP_SRC.items():
+        c.execute(text(f'CREATE TEMP TABLE m_{m} (old text PRIMARY KEY, new text NOT NULL) ON COMMIT DROP'))
+        # uuid hex like every other id (32 chars, no dashes)
+        c.execute(text(f"INSERT INTO m_{m} SELECT id, replace(gen_random_uuid()::text, '-', '') FROM lbl.{table} "
+                       'WHERE project_id = :old'), a)
+    c.execute(text('INSERT INTO lbl.projects(id, name, description, created_at, updated_at, meta) '
+                   'SELECT :new, :name, description, created_at, :now, meta FROM lbl.projects WHERE id = :old'),
+              {**a, 'name': new_name, 'now': time.time()})
+    for table, cols in _REMAP.items():
+        names = [col.name for col in TABLES[table].columns]
+        exprs = [':new' if n == 'project_id' else
+                 f'COALESCE((SELECT m.new FROM m_{cols[n]} m WHERE m.old = t.{n}), t.{n})' if n in cols else f't.{n}'
+                 for n in names]
+        c.execute(text(f"INSERT INTO lbl.{table} ({', '.join(names)}) SELECT {', '.join(exprs)} "
+                       f'FROM lbl.{table} t WHERE t.project_id = :old'), a)
+    maps = {m: dict(c.execute(text(f'SELECT old, new FROM m_{m}')).all()) for m in ('task', 'class', 'media')}
+    # a task's model link maps model class names to class ids: those ids are renewed too
+    for tid, cfg in c.execute(text('SELECT id, config FROM lbl.tasks WHERE project_id = :new'), a).all():
+        cm = ((cfg or {}).get('model') or {}).get('class_map')
+        if isinstance(cm, dict):
+            cfg['model']['class_map'] = {k: maps['class'].get(v, v) if isinstance(v, str) else v
+                                         for k, v in cm.items()}
+            c.execute(text('UPDATE lbl.tasks SET config = CAST(:cfg AS jsonb) WHERE id = :id'),
+                      {'cfg': _json(cfg), 'id': tid})
     return maps
 
 
@@ -382,7 +390,7 @@ def _remap_export_default(ed, maps):
     """The copy's export_default: task / class ids in it point at the copy's rows."""
     if not isinstance(ed, dict):
         return ed
-    ed = json.loads(json.dumps(ed))
+    ed = orjson.loads(orjson.dumps(ed))
     t, k = maps['task'], maps['class']
     if isinstance(ed.get('task_ids'), list):
         ed['task_ids'] = [t.get(x, x) for x in ed['task_ids']]

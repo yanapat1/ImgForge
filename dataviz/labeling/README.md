@@ -7,9 +7,9 @@ A **labeling session** (a "project" in code) has one image set and N **tasks**. 
 ## Files
 | File | What it does |
 |---|---|
-| `schema.py` | The global schema (SQLAlchemy Core) for every modality; the same tables for SQLite / PostgreSQL / MSSQL. `GEOMETRY` documents the geometry JSON per type. |
-| `projects.py` | `ProjectRegistry(root)`: the project index `labeling/projects.json`, the per-project folders, create / delete, card stats. |
-| `store.py` | `ProjectStore(db_path)`: the per-project SQLite (WAL), with the hot paths on raw `sqlite3`: annotations upsert / diff, status, classes. |
+| `schema.py` | The portable schema (SQLAlchemy Core) of the database export targets (PostgreSQL / MSSQL). `GEOMETRY` documents the geometry JSON per type. The app's own copy is `dataviz/db/schema.py` `lbl.*` (same columns + `project_id` everywhere + `model_run_at` / `review`). |
+| `projects.py` | `ProjectRegistry(root)`: the project index (`app.sessions` kind `label` + `app.label_projects` + `lbl.projects`), the per-project folders, create / delete / duplicate, card stats. |
+| `store.py` | `ProjectStore(pid)`: one project's rows in the shared PostgreSQL schema `lbl` (every query filtered by `project_id`): annotations upsert / diff, status, classes, media pages, export streams. |
 | `colors.py` | The colour-blind-safe class colour sequence (greedy max-min CIEDE2000 under normal vision + 3 CVD simulations). |
 | `media.py` | Image-only sources: upload folder, local folder, S3, FTP, SFTP; the import job; the remote image cache; thumbnails. |
 | `sinks.py` | File export targets: zip, local folder, S3, FTP, SFTP. |
@@ -18,27 +18,49 @@ A **labeling session** (a "project" in code) has one image set and N **tasks**. 
 | `db_export.py` | `DbSink`: PostgreSQL (`ON CONFLICT`) and MSSQL (`#stage` + `MERGE`) upserts, one run per task. |
 
 ## Optional review
-A session can switch on `review` (PATCH / create body, `projects.json` entry, card `review`). Then every done image
+A session can switch on `review` (PATCH / create body, `app.label_projects.review`, card `review`). Then every done image
 can be approved per task: `manual` (one by one, label page button or Alt+R) or `bulk` (Review all, from the card's ⋯
-menu or the label page). The state lives in the local-only column `media_task_status.review` (not in the portable
+menu or the label page). The state lives in the column `lbl.media_task_status.review` (not in the portable
 schema, so exports are unchanged) and is cleared by a label edit, skip, reopen or class delete. The card shows a
 second bar per task (solid = manual, hatched = bulk) and a checklist line; `stats()` returns `review:{tid:{manual,bulk}}`
 next to the status counts. All of it is one `UPDATE` per task (10k images: 5 ms).
 
-## On disk (`<workspace_root>/labeling/`)
+## Storage
+PostgreSQL (`dataviz/db/schema.py`):
 ```
-projects.json                 index (atomic writes)
-<pid>/annotations.db          SQLite, schema.make_metadata('') (no prefix locally)
+app.sessions          one row per label session: id = pid, kind 'label', owner_id, name (unique per owner), tags, visibility
+app.label_projects    description, source, export_default (JSONB), n_media, task_ids, model_connections, review
+lbl.projects          the store's root row (id -> app.sessions.id ON DELETE CASCADE)
+lbl.tasks / label_classes / media / annotations / annotation_relations / media_task_status / export_runs
+                      every row has project_id (-> lbl.projects, cascade); times epoch seconds; JSON JSONB
+```
+On disk (`<workspace_root>/labeling/`):
+```
 <pid>/images/                 uploaded files (UploadSource)
 <pid>/cache/                  remote images, sha1(rel).<ext>
 <pid>/thumbs/<media_id>.jpg   160 px thumbnails
 <pid>/exports/<run>.zip       zip downloads
 ```
-Page settings: `<workspace_root>/label_settings.json`.
+Page settings: `<workspace_root>/label_settings.json`. The old `projects.json` + `<pid>/annotations.db` are read
+only by the one-time legacy import (`dataviz/db/legacy.py`).
 
-`projects.json` entry: `{id, name, description, created, updated, source, export_default, n_media}`.
+Entry (`ProjectRegistry.get`): `{id, name, description, created, updated, source, export_default, n_media, task_ids,
+model_connections, tags, review, owner_id, visibility}`.
 `source` = `{kind:'upload'}` | `{kind:'local', path, recursive}` | `{kind:'s3', connection_id, bucket, prefix}` |
 `{kind:'ftp'|'sftp', connection_id, path}`.
+
+### Store concurrency (PostgreSQL)
+- `write()` = one transaction holding `pg_advisory_xact_lock(hashtext(pid))`: the writers of one project are serial
+  across threads and server processes, so the `base_version` check of a PUT stays exact (two PUTs with the same
+  base: exactly one gets 409). A `write()` inside an open one on the same thread joins it; reads made while it is
+  open use its connection (they see its rows). `joined(conn)` puts the store inside a caller's transaction
+  (registry create / duplicate).
+- Reads outside a write take a pooled connection. Streams (`iter_rows`, `iter_task_export`, `predict_targets`) use a
+  private REPEATABLE READ connection with server-side cursors, closed in `finally`.
+- `put_annotations(..., user=)` / `set_status(..., user=)` take the user id: `annotations.created_by` /
+  `media_task_status.committed_by` (routes pass `auth.context.user_id()`).
+- Rows inserted in one batch get `created_at` 1 µs apart, so `ORDER BY z_order, created_at` keeps the insertion order
+  (SQLite's rowid did it before).
 
 ## API contract (all JSON; errors are `{"detail": "<human message>"}` with 4xx)
 Ids are 32-char hex strings (`uuid4().hex`; the page creates annotation ids with `crypto.randomUUID().replaceAll('-','')`).
@@ -169,9 +191,9 @@ ProjectStore.add_media(rows: list[dict])          # batch insert, skips existing
 `progress` is `job.progress(done=, total=, stage=, extra=)` from `core/jobs.py`.
 
 ## Implementation notes (backend core)
-- `store.py` keeps times as epoch seconds (REAL), JSON as orjson text, booleans 0/1. `iter_rows()` converts
-  each row for SQLAlchemy inserts: `*_at` -> timezone-aware UTC `datetime`, JSON columns -> dict / list,
-  booleans -> `bool`. `iter_task_export()` rows have `geometry` / `attributes` / `meta` decoded and the media
+- `store.py` keeps times as epoch seconds (double precision), JSON as JSONB, booleans as booleans. `iter_rows()`
+  converts each row for SQLAlchemy inserts: `*_at` -> timezone-aware UTC `datetime` (rows also carry the app-only
+  columns `project_id` / `model_run_at` / `review`; the export's row converter keeps only the target's columns). `iter_task_export()` rows have `geometry` / `attributes` / `meta` decoded and the media
   row carries the task's `status`.
 - `media.uri` holds the source-relative path (`rel`); `media.file_name` is the flattened unique name
   (`sub__name.jpg` when two files share a base name, case-insensitive) used for `images/<file_name>` and the
@@ -186,16 +208,17 @@ ProjectStore.add_media(rows: list[dict])          # batch insert, skips existing
 - PUT with an unchanged set returns the current version without bumping it (idempotent autosave).
 
 ## Measured
-`tests/bench_labeling.py 10000` (this machine; 10k 64x48 JPEGs in a local folder, 2 tasks):
+`tests/bench_labeling.py 10000` (this machine; 10k 64x48 JPEGs in a local folder, 2 tasks). PostgreSQL 17 in docker on
+the same host (2026-10-19); the earlier SQLite numbers in brackets:
 
 | Area | Budget | Measured |
 |---|---|---|
-| autosave PUT, 200 shapes (store, 10 changed) | < 30 ms | median 1.5 ms, p95 3.3 ms; 200 new shapes 2.9 ms |
-| autosave PUT, 200 shapes (HTTP route, TestClient incl. JSON) | | median 8.4 ms, p95 26 ms |
-| media page of 200, 10k images | < 20 ms | 0.8 ms (first), 1.1 ms (offset 9800), 5.3 ms (filtered `done`), 9-11 ms over HTTP |
-| import scan, 10k local images | < 15 s | 3.4 s (list + header probe on 8 threads + 500-row batches) |
-| export 10k images x 2 tasks, local folder | < 30 s, flat memory | 14.1 s, Python heap peak 5.2 MB |
-| export 10k images x 2 tasks, zip | | 11.0 s, heap peak 22 MB |
+| autosave PUT, 200 shapes (store, 10 changed) | < 30 ms | median 12.4 ms, p95 25 ms; 200 new shapes 20 ms [1.5 / 3.3 / 2.9 ms] |
+| autosave PUT, 200 shapes (HTTP route, TestClient incl. JSON) | | median 24 ms, p95 32 ms [8.4 / 26 ms] |
+| media page of 200, 10k images | < 20 ms | 11.8 ms (first), 13.6 ms (offset 9800), 16.6 ms (filtered `done`), 24 ms over HTTP [0.8 / 1.1 / 5.3 / 9-11 ms] |
+| import scan, 10k local images | < 15 s | 3.9 s (list + header probe on 8 threads + 500-row batches) [3.4 s] |
+| export 10k images x 2 tasks, local folder | < 30 s, flat memory | 17.8 s, Python heap peak 8.8 MB [14.1 s, 5.2 MB] |
+| export 10k images x 2 tasks, zip | | 11.4 s, heap peak 24 MB [11.0 s, 22 MB] |
 | colour sequence (64) | ~50 ms planned | ~300 ms once, lazily, warmed in a thread at server start |
 
 Colours: first 25 have min pairwise CIEDE2000 = 8.22 under the worst of normal / protan / deutan / tritan (the
