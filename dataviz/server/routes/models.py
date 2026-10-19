@@ -19,8 +19,9 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response, PlainTextResponse
 
 from ...auth import deps
+from ...auth.deps import admin_user, can_add_connections, current_user
 from ...core import logging as vlog
-from ...data import sources
+from ...data import connections, sources
 from ...models import insights, registry as mreg, schema
 from ...paths import PROJECT_ROOT
 from ..deps import guards, json_bytes, owned
@@ -80,7 +81,7 @@ def router(state, ctx):
         need()
         return {'models': [public(m) for m in owned(reg.models)]}
 
-    @r.get('/api/models/discover')
+    @r.get('/api/models/discover', dependencies=[Depends(admin_user)])
     def discover():
         need()
         known = {m.get('path') for m in owned(reg.models)}
@@ -98,8 +99,10 @@ def router(state, ctx):
                                  headers={'Content-Disposition': 'attachment; filename="adapter_template.py"'})
 
     @r.post('/api/models')
-    def save_model(body: dict):
+    def save_model(body: dict, user=Depends(current_user)):
         need()
+        if not user.get('is_admin') and (body.get('format') == 'api' or body.get('api')):
+            can_add_connections(user)                # an API model is an outbound connection of the server
         try:
             m = owned(reg.upsert, body)
         except (ValueError, KeyError) as e:
@@ -132,16 +135,17 @@ def router(state, ctx):
         res['openvino'] = mreg.guess_format(p) == 'openvino'
         return res
 
-    @r.get('/api/models/browse')
+    @r.get('/api/models/browse', dependencies=[Depends(admin_user)])
     async def browse_files(path: str = ''):
         """Folders + model files (weights, arch yaml, adapter .py) under `path`, for the path picker."""
         need()
         try:
-            return await run_io(browse, path or str(PROJECT_ROOT))
+            return await run_io(browse, connections.check_local(path or str(PROJECT_ROOT),
+                                                                connections.allowed_roots(ctx.cfg)))
         except (ValueError, OSError) as e:
             raise HTTPException(400, str(e))
 
-    @r.get('/api/models/serving-list')
+    @r.get('/api/models/serving-list', dependencies=[Depends(can_add_connections)])
     async def serving_list(url: str):
         """Models offered by a serving/ app (GET {url}/): routes + class names, for the API form."""
         import httpx
@@ -152,8 +156,8 @@ def router(state, ctx):
             return r.json()
         try:
             data = await run_io(get)
-        except Exception as e:  # noqa: BLE001 - shown in the form
-            raise HTTPException(400, f'{type(e).__name__}: {e}')
+        except Exception as e:  # noqa: BLE001 - shown in the form, without the remote's body (no internal probing)
+            raise HTTPException(400, f'could not read the model list ({type(e).__name__})')
         if not isinstance(data, list):
             raise HTTPException(400, 'not a serving app: GET / did not return a list of models')
         out = []
@@ -165,7 +169,7 @@ def router(state, ctx):
                             'classes': len(d.get('classes') or {})})
         return {'models': out}
 
-    @r.post('/api/models/upload')
+    @r.post('/api/models/upload', dependencies=[Depends(admin_user)])
     async def upload(files: list[UploadFile] = File(...)):
         """Store uploaded weights under <workspace_root>/models/<id>/; returns the path to put in the form.
         OpenVINO: send the .xml and .bin together (the folder is returned)."""

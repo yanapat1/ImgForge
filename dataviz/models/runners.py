@@ -454,7 +454,21 @@ class CustomRunner(Runner):
 
 
 # ------------------------------------------------------------------ factory + single loaded runner
+def _trusted_owner(m):
+    """A file model loads (and so runs code: pickle, torch.load, adapters) only when an admin owns it. Saving one
+    is admin-only already (registry.upsert); this also stops a model whose owner was demoted since."""
+    uid = m.get('owner_id')
+    if not uid:
+        return True                              # internal / test dicts without an owner
+    from sqlalchemy import text
+    from .. import db
+    with db.connect() as c:
+        return bool(c.execute(text('SELECT is_admin AND is_active FROM app.users WHERE id = :u'), {'u': uid}).scalar())
+
+
 def load_runner(m, workdir):
+    if m['format'] != 'api' and not _trusted_owner(m):
+        raise PermissionError(f'model {m.get("name")!r} loads files on the server and its owner is not an admin')
     if m['format'] == 'api':
         from .remote import ApiRunner, LabelApiRunner
         return LabelApiRunner(m) if (m.get('api') or {}).get('preset') == 'label' else ApiRunner(m)

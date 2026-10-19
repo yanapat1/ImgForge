@@ -14,6 +14,7 @@ from starlette.exceptions import HTTPException
 from ...auth import audit, passwords, settings, tokens, users
 from ...auth.deps import current_user
 from ...auth.middleware import cookie_secure, cookie_token
+from ...auth.ratelimit import FailureLock
 from ...paths import STATIC_DIR
 from ..static import NO_CACHE, render_index
 
@@ -42,6 +43,8 @@ def _str(body, key, limit=1024):
 
 def router(cfg, limiter):
     r = APIRouter()
+    lockout = getattr(limiter, 'lockout', None) or FailureLock()
+    limiter.lockout = lockout                    # one per app: tests reset it with the limiter
 
     def limited(request):
         if not limiter.allow(client_ip(request) or '?'):
@@ -76,14 +79,17 @@ def router(cfg, limiter):
         if row is None:
             passwords.dummy_verify(password)
             fail('unknown')
-        if users.is_locked(row):
+        key = (row['id'], ip or '?')
+        if lockout.locked(key):
             passwords.dummy_verify(password)
             fail('locked', row['id'])
         if not passwords.verify(row['password_hash'], password):
+            lockout.fail(key)
             users.record_failure(row['id'])
             fail('password', row['id'])
         if not row['is_active']:
             fail('inactive', row['id'])
+        lockout.clear(key)
         users.record_success(row['id'], password, row['password_hash'])
         return signed_in(request, users.public(row), 'login')
 

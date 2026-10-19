@@ -173,6 +173,11 @@ class ModelRegistry:
             m['api'] = api
             m.pop('path', None)
         else:
+            # weights / adapters run code in the server process (pickle, torch.load, custom .py): admins only,
+            # because anyone can sign up
+            if not admin:
+                raise ValueError('only admins can add models that load files on this server (weights, adapters): '
+                                 'add an API model instead')
             if not m.get('path'):
                 raise ValueError('model file path is required')
             m['path'] = self.check_path(m['path'])

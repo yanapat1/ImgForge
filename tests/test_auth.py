@@ -54,29 +54,47 @@ def test_wrong_password_is_generic(app):
         assert 'dv_session' not in _set_cookie(r)
 
 
-def test_lockout(app):
+def test_lockout_is_per_account_and_address(app, monkeypatch):
+    """5 wrong passwords lock (alice, that address) — the right password from there gets the same 401 — while
+    alice signs in fine from another address, so a stranger cannot lock her out."""
     from dataviz import db
+    from dataviz.server.routes import auth as auth_routes
+    monkeypatch.setattr(auth_routes, 'client_ip', lambda request: request.headers.get('x-test-ip'))  # TestClient: one peer
     account('alice')
-    c = client(app)
+    attacker = client(app)
+    attacker.headers['x-test-ip'] = '203.0.113.9'
     for _ in range(5):
-        assert login(c, 'alice', 'wrong password!').status_code == 401
-    r = login(c, 'alice')                                   # correct password, but locked: same answer
+        assert login(attacker, 'alice', 'wrong password!').status_code == 401
+    r = login(attacker, 'alice')                            # correct password, but locked there: same answer
     assert r.status_code == 401 and r.json()['detail'] == 'Invalid username or password'
+    owner = client(app)
+    owner.headers['x-test-ip'] = '198.51.100.7'
+    assert login(owner, 'alice').status_code == 200
     with db.connect() as conn:
-        row = conn.execute(text("SELECT failed_logins, locked_until - now() AS left FROM app.users")).first()
-    assert row.failed_logins == 5 and 0 < row.left.total_seconds() <= 60
-    with db.begin() as conn:                                 # the minute is over
-        conn.execute(text("UPDATE app.users SET locked_until = now() - interval '1 second'"))
-    assert login(c, 'alice', 'wrong password!').status_code == 401      # 6th failure: 2 minutes
-    with db.connect() as conn:
-        left = conn.execute(text('SELECT locked_until - now() FROM app.users')).scalar()
-    assert 60 < left.total_seconds() <= 120
-    with db.begin() as conn:
-        conn.execute(text("UPDATE app.users SET locked_until = now() - interval '1 second'"))
-    assert login(c, 'alice').status_code == 200
-    with db.connect() as conn:
-        row = conn.execute(text('SELECT failed_logins, locked_until, last_login_at FROM app.users')).first()
-    assert row.failed_logins == 0 and row.locked_until is None and row.last_login_at is not None
+        assert conn.execute(text('SELECT failed_logins FROM app.users')).scalar() == 0   # reset by the success
+
+
+def test_failure_lock_schedule():
+    from dataviz.auth.ratelimit import FailureLock
+    t = [0.0]
+    lock = FailureLock(clock=lambda: t[0])
+    for _ in range(4):
+        lock.fail('k')
+    assert not lock.locked('k')
+    lock.fail('k')                                          # 5th: 1 minute
+    assert lock.locked('k') and not lock.locked('other')
+    t[0] = 61
+    assert not lock.locked('k')
+    lock.fail('k')                                          # 6th: 2 minutes
+    t[0] = 61 + 119
+    assert lock.locked('k')
+    for _ in range(10):
+        lock.fail('k')
+    t[0] += 15 * 60 + 1                                     # capped at 15 minutes
+    assert not lock.locked('k')
+    lock.clear('k')
+    lock.fail('k')
+    assert not lock.locked('k')
 
 
 def test_per_ip_rate_limit(app):

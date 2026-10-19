@@ -21,8 +21,6 @@ from . import passwords, tokens
 
 USERNAME_RE = re.compile(r'^[a-z0-9._-]{3,32}$')
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+$')
-LOCK_AFTER = 5                 # consecutive failures before the account locks
-LOCK_MAX_MIN = 15
 LAST_ADMIN = 'at least one active admin must remain'
 
 
@@ -249,22 +247,11 @@ def avatar(uid, conn=None):
 
 
 # ------------------------------------------------------------------------------------------ login bookkeeping
-def is_locked(r):
-    """True while the account (full row) is locked after repeated failures."""
-    from datetime import datetime, timezone
-    lu = r.get('locked_until')
-    return lu is not None and lu > datetime.now(timezone.utc)
-
-
 def record_failure(uid, conn=None):
-    """One more failed password; from the 5th in a row the account locks 1, 2, 4, 8, then 15 minutes."""
+    """One more failed password (shown to admins). The lock itself is per (account, address): auth/ratelimit.py
+    FailureLock, so a stranger's guesses cannot lock the owner out of their own account."""
     with _conn(conn) as c:
-        c.execute(text("""
-            UPDATE app.users SET failed_logins = failed_logins + 1,
-                locked_until = CASE WHEN failed_logins + 1 >= :n
-                    THEN now() + make_interval(mins => LEAST(:mx, power(2, LEAST(failed_logins + 1 - :n, 4))::int))
-                    ELSE locked_until END
-            WHERE id = :id"""), {'id': uid, 'n': LOCK_AFTER, 'mx': LOCK_MAX_MIN})
+        c.execute(text('UPDATE app.users SET failed_logins = failed_logins + 1 WHERE id = :id'), {'id': uid})
 
 
 def record_success(uid, password=None, stored_hash=None, conn=None):

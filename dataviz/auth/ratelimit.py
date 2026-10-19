@@ -33,3 +33,37 @@ class RateLimiter:
     def reset(self):
         with self._lock:
             self._buckets.clear()
+
+
+class FailureLock:
+    """Repeated wrong passwords lock (account, client address), not the account: someone guessing from one address
+    cannot lock the real owner out from theirs. From the 5th failure in a row the pair waits 1, 2, 4, 8, then 15
+    minutes; a success clears it."""
+
+    def __init__(self, after=5, max_minutes=15, max_keys=50000, clock=time.monotonic):
+        self.after, self.max_s, self.max_keys, self.clock = int(after), 60.0 * max_minutes, int(max_keys), clock
+        self._state = OrderedDict()             # key -> (consecutive failures, locked until)
+        self._lock = threading.Lock()
+
+    def locked(self, key):
+        with self._lock:
+            hit = self._state.get(key)
+        return hit is not None and hit[1] > self.clock()
+
+    def fail(self, key):
+        now = self.clock()
+        with self._lock:
+            n, _ = self._state.pop(key, (0, 0.0))
+            n += 1
+            until = now + min(self.max_s, 60.0 * 2 ** min(n - self.after, 4)) if n >= self.after else 0.0
+            self._state[key] = (n, until)
+            while len(self._state) > self.max_keys:
+                self._state.popitem(last=False)
+
+    def clear(self, key):
+        with self._lock:
+            self._state.pop(key, None)
+
+    def reset(self):
+        with self._lock:
+            self._state.clear()

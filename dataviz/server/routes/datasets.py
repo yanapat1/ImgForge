@@ -123,6 +123,11 @@ def router(state, ctx):
                             'n_classes': len(classes) if classes else None, 'classes': classes[:8],
                             'last_opened': meta.get('last_opened'), 'workspace': folder.name}
             out['cover'] = min(N_COVER, meta.get('n_boxes') or 0) if (folder / 'crops').is_dir() else 0
+        if out.get('my_role') not in (None, 'owner'):          # members see the data, not where it sits on the server
+            out.pop('path', None)
+            (out.get('mirror') or {}).pop('path', None)
+            if d['kind'] == 'local':
+                out['uri'] = Path(d.get('path', '')).name
         return out
 
     def list_public(user, scope):
