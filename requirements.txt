@@ -30,6 +30,11 @@ python-multipart     # model uploads
 # labeling sessions (dataviz/labeling/): database export, MSSQL without an ODBC driver (FreeTDS in the wheel), SFTP
 sqlalchemy>=2.0
 psycopg[binary]>=3.2
+# accounts + PostgreSQL storage: migrations, pgvector, password hashing, secrets at rest
+alembic>=1.13
+pgvector>=0.3
+argon2-cffi>=23.1
+cryptography>=42
 pymssql>=2.3
 paramiko>=3.4
 regex                # optional: timeout-guarded /regex/ in the label image strip filter (falls back to re + a deadline)

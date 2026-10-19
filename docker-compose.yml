@@ -1,19 +1,51 @@
 # Portable default: works on any Docker host (CPU). Add GPU with:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 # Per-server overrides (paths, GPU) go in an extra compose file chosen through COMPOSE_FILE in .env (see .env.example).
+# PostgreSQL (accounts, sessions, settings, annotations, feature vectors) starts with it; set POSTGRES_PASSWORD in .env.
 services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg17
+    container_name: image-tools-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dataviz
+      POSTGRES_USER: dataviz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+    # tuned for one app server: more memory for sorts / index builds than the 4 MB default
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "work_mem=32MB", "-c", "maintenance_work_mem=512MB",
+              "-c", "max_connections=100"]
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:${PG_PORT:-15432}:5432"     # psql / DBeaver from this host only, never from the network
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataviz -d dataviz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   image-tools:
     build: .
     image: image-tools:latest
     container_name: image-tools
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "19151:19151"
     shm_size: 8gb
     environment:
       DATAVIZ_DEVICE: ${DATAVIZ_DEVICE:-auto}   # auto | cpu | cuda
       HF_TOKEN: ${HF_TOKEN:-}                   # optional: higher Hugging Face rate limits
+      DATABASE_URL: postgresql://dataviz:${POSTGRES_PASSWORD}@postgres:5432/dataviz
+      DATAVIZ_SECRET_KEY: ${DATAVIZ_SECRET_KEY:-}           # encrypts stored passwords / API keys (see .env.example)
+      DATAVIZ_ADMIN_USERNAME: ${DATAVIZ_ADMIN_USERNAME:-admin}
+      DATAVIZ_ADMIN_EMAIL: ${DATAVIZ_ADMIN_EMAIL:-admin@localhost}
+      DATAVIZ_ADMIN_PASSWORD: ${DATAVIZ_ADMIN_PASSWORD:-}   # empty: a random one is printed once in the log
+      DATAVIZ_COOKIE_SECURE: ${DATAVIZ_COOKIE_SECURE:-auto}
     volumes:
-      - dataviz_cache:/workspace/.dataviz_cache  # sessions, crops, features, labeling DB
+      - dataviz_cache:/workspace/.dataviz_cache  # crops, features, projections (caches) + uploaded images
       - hf_cache:/workspace/.hf_cache            # downloaded Hugging Face models
       - ${DATASET_DIR:-./folder-server}:/workspace/folder-server   # live bind mount: new files/folders show up instantly
       # - ./runs:/workspace/runs:ro              # uncomment to offer your YOLO runs/**/weights/best.pt as features
@@ -21,3 +53,4 @@ services:
 volumes:
   dataviz_cache:
   hf_cache:
+  pg_data:

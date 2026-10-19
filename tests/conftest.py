@@ -1,8 +1,16 @@
-"""Shared fixtures: a temp workspace root, a FastAPI TestClient on it, small generated JPEGs."""
+"""Shared fixtures: a PostgreSQL database per test, a temp workspace root, a FastAPI TestClient on it, small
+generated JPEGs.
+
+PostgreSQL: DATAVIZ_TEST_DATABASE_URL (a server where the user may CREATE DATABASE), else a pgvector container
+started through docker (tests/conftest_io.docker_db; reused across runs while it is up). The schema is migrated
+once into a template database; every test gets a fresh copy of it (CREATE DATABASE ... TEMPLATE, ~50 ms).
+"""
 
 import io
+import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -28,6 +36,77 @@ def jpeg_bytes(w=64, h=48, color=(10, 120, 200)):
     b = io.BytesIO()
     Image.new('RGB', (w, h), color).save(b, 'JPEG')
     return b.getvalue()
+
+
+PG_IMAGE = 'pgvector/pgvector:0.8.0-pg17'
+TEST_SECRET_KEY = 'q2Xb0hJb7fWm1Xr3d6Y0cS9Zp8Lk4Nv2Tg5Ue7Ia1Ro='   # Fernet key for tests only
+
+
+def _admin_url(base, dbname):
+    from sqlalchemy.engine import make_url
+    return make_url(base).set(drivername='postgresql', database=dbname).render_as_string(hide_password=False)
+
+
+@pytest.fixture(scope='session')
+def pg_server():
+    """Base URL (database 'postgres') of a server the tests may create databases on, with a migrated template."""
+    import psycopg
+    url = os.environ.get('DATAVIZ_TEST_DATABASE_URL')
+    if url:
+        yield from _with_template(_admin_url(url, 'postgres'))
+        return
+    from conftest_io import docker_db, pg_ready
+    with docker_db('dataviz-pgtest', PG_IMAGE, {'POSTGRES_PASSWORD': 'pw'}, 55432, 5432, pg_ready, 120) as (host, port):
+        yield from _with_template(f'postgresql://postgres:pw@{host}:{port}/postgres')
+    del psycopg
+
+
+def _with_template(base):
+    import psycopg
+    from dataviz import db
+    from dataviz.db import migrate
+    tmpl = f'dataviz_tmpl_{os.getpid()}'
+    with psycopg.connect(base, autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS {tmpl} WITH (FORCE)')
+        c.execute(f'CREATE DATABASE {tmpl}')
+    db.init(_admin_url(base, tmpl))
+    migrate.upgrade()
+    db.dispose()                                   # a template must have no open connections
+    yield {'base': base, 'template': tmpl}
+    with psycopg.connect(base, autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS {tmpl} WITH (FORCE)')
+
+
+@pytest.fixture
+def pg(pg_server):
+    """A fresh, migrated database for this test; the app's engine (dataviz.db) points at it."""
+    import psycopg
+    from dataviz import db
+    from dataviz.db import crypto
+    name = f't_{uuid.uuid4().hex[:12]}'
+    with psycopg.connect(pg_server['base'], autocommit=True) as c:
+        c.execute(f'CREATE DATABASE {name} TEMPLATE {pg_server["template"]}')
+    url = _admin_url(pg_server['base'], name)
+    db.init(url, pool_size=5)
+    crypto.init(TEST_SECRET_KEY)
+    yield url
+    db.dispose()
+    with psycopg.connect(pg_server['base'], autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS {name} WITH (FORCE)')
+
+
+def make_user(username, admin=False, display_name=None, active=True):
+    """Insert a user straight into the database (no password login: the hash is a placeholder) -> user dict."""
+    from sqlalchemy import text
+    from dataviz import db
+    uid = uuid.uuid4().hex
+    u = {'id': uid, 'username': username, 'email': f'{username}@example.test',
+         'display_name': display_name or username.title(), 'is_admin': admin, 'avatar_ver': 0}
+    with db.begin() as c:
+        c.execute(text("""INSERT INTO app.users(id, username, email, display_name, password_hash, is_admin, is_active)
+                          VALUES (:id, :username, :email, :display_name, 'x', :is_admin, :active)"""),
+                  {**u, 'active': active})
+    return u
 
 
 @pytest.fixture

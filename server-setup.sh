@@ -12,5 +12,7 @@ if [ -f "$PERSIST/daemon.json" ] && ! cmp -s "$PERSIST/daemon.json" /etc/docker/
     sudo systemctl restart docker 2>/dev/null || sudo service docker restart
 fi
 
-[ -f .env ] || cp .env.example .env    # then set COMPOSE_FILE in .env for this server
+[ -f .env ] || cp .env.example .env    # then set COMPOSE_FILE and POSTGRES_PASSWORD in .env for this server
+# bind-mounted data folders (docker-compose.server.yml); PostgreSQL creates its own files inside
+mkdir -p /home/jovyan/work/image-tools-data/{postgres,dataviz_cache,hf_cache}
 docker compose up -d

@@ -7,6 +7,8 @@ reported (usually a typo) and ignored.
 """
 
 import copy
+import os
+import re
 from pathlib import Path
 
 import yaml
@@ -68,6 +70,14 @@ DEFAULTS = {
         'batch_size': 16,
     },
     'workers': {'enabled': True, 'warmup': True, 'omp_threads': 'auto'},   # auto = hardware.workers('omp')
+    # PostgreSQL (accounts, sessions, settings, annotations, vectors). ${VAR} / ${VAR:-default} read the environment
+    'database': {'url': '${DATABASE_URL}', 'pool_size': 10},
+    'auth': {'cookie_secure': '${DATAVIZ_COOKIE_SECURE:-auto}',   # auto = Secure cookie when the request came over https
+             'session_idle_days': 7, 'session_max_days': 30},
+    'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
+    # folders users may read datasets / models from (and browse in the page); relative = to the project root
+    'storage': {'allowed_roots': ['.']},
+    'vectors': {'enabled': True, 'hnsw_min_rows': 50000},   # pgvector copy of every feature set; HNSW index above n rows
     's3': {'concurrency': 32, 'connect_timeout': 5, 'read_timeout': 60, 'retries': 5},
     'logging': {'level': 'info', 'http': True, 'static': False},
     'ui': {
@@ -117,8 +127,23 @@ def load_config(path=None, log=None):
         warn = vlog.get_logger('config').warning
         for key in unknown:
             (log or warn)(f'unknown key "{key}" in {path.name} (ignored — typo?)')
+    cfg = expand_env(cfg)
     cfg['_path'] = str(path) if path.exists() else None
     return cfg
+
+
+_ENV = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}')
+
+
+def expand_env(v):
+    """${VAR} / ${VAR:-default} in every string of the config (unset without a default = empty string)."""
+    if isinstance(v, dict):
+        return {k: expand_env(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [expand_env(x) for x in v]
+    if isinstance(v, str) and '${' in v:
+        return _ENV.sub(lambda m: os.environ.get(m.group(1)) or (m.group(2) or ''), v)
+    return v
 
 
 def resolve(p):
