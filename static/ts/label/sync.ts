@@ -4,6 +4,7 @@
 // so commit / skip run strictly after the saves of that image. beforeunload sends what is left with keepalive.
 // The payload is built at send time from the image's cache entry (latest state, never a stale snapshot).
 
+import { apiFetch } from '../core/api.js';
 import type { Ann, SaveResult, SaveState } from '../types-label.js';
 import { L } from './state.js';
 
@@ -56,6 +57,7 @@ function updateState(): void {
 
 // the annotations of (mid, tid) changed: save them soon
 export function touch(mid: string, tids: Iterable<string>): void {
+  if (L.readOnly) return;                       // a viewer never sends a PUT
   for (const tid of tids) { const k = key(mid, tid); if (!conflicts.has(k)) pending.set(k, { mid, tid }); }
   clearTimeout(timer);
   if (!failing) timer = setTimeout(sendAll, DEBOUNCE);
@@ -87,7 +89,7 @@ function send(k: string): void {
     updateState();
     return;
   }
-  const pr = fetch(url(p.mid), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: b.json })
+  const pr = apiFetch(url(p.mid), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: b.json })
     .then(async (r) => {
       if (r.status === 409) {
         const d = await errBody(r);
@@ -150,7 +152,7 @@ const chains = new Map<string, Promise<StatusResult>>();
 export function postStatus(mid: string, kind: string, taskIds: string[]): Promise<StatusResult> {
   const prev = chains.get(mid) || Promise.resolve();
   const run = prev.catch(() => {}).then(() => flushMid(mid)).then(async () => {
-    const r = await fetch(`api/label/projects/${encodeURIComponent(String(L.pid))}/${kind}/${mid}`, {
+    const r = await apiFetch(`api/label/projects/${encodeURIComponent(String(L.pid))}/${kind}/${mid}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_ids: taskIds }),
     });
     if (!r.ok) { const d = await errBody(r); throw new Error(d.detail ? String(d.detail) : `${kind} failed (${r.status})`); }
@@ -194,7 +196,7 @@ function unloadFlush(ev: BeforeUnloadEvent): void {
     const b = body(p.mid, p.tid);
     if (!b) continue;
     try {
-      void fetch(url(p.mid), { method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: b.json });
+      void apiFetch(url(p.mid), { method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: b.json });
       pending.delete(k);
     } catch (e) { /* body over the keepalive quota: keep it, the prompt below asks the user to stay */ }
   }

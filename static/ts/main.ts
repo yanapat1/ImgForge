@@ -1,17 +1,19 @@
-// Dataset Visualizer frontend: the Sessions home (no ?session=) or the visualizer of one session:
-// 2D projection plot (right) + lasso-selection gallery (left).
-// Entry point: boot (Sessions home, or the startup screen until the session's index is ready), init (first
-// render) and every event binding of the page. Loaded by index.html as <script type="module">.
+// Dataset Visualizer frontend: the sign-in page (/login), the Sessions home (/), the labeling page (?label=<pid>) or
+// the visualizer of one session (/s/<id>/): 2D projection plot (right) + lasso-selection gallery (left).
+// Entry point: boot (the signed-in user first, then the screen; the startup screen until the session's index is
+// ready), init (first render) and every event binding of the page. Loaded by index.html as <script type="module">.
 
 import type { DatasetInfo, Job, Meta, Points, Sample, Status } from './types.js';
 import type { DuplicatesPayload, SimilarPayload, TextSearchResult, WorkspacePayload } from './types-plot.js';
 import { errText, getJSON, postJSON, waitForServer } from './core/api.js';
+import { loadMe } from './core/auth.js';
+import { homeUrl, sessionIdFromPath } from './core/nav.js';
 import { $, $req, esc, fmtEta, icon, sleep, syncRanges } from './core/dom.js';
 import { showError, installCrashHandlers } from './core/errorpage.js';
 import { toast } from './core/toast.js';
 import { pollJobs, setBar, waitJob } from './core/jobs.js';
 import { featureLabel, meta as metaOf, pts, S, status, UI } from './core/state.js';
-import { clsName, plotBase, THEME } from './core/theme.js';
+import { applyThemePrefs, clsName, plotBase, THEME } from './core/theme.js';
 import { plotDiv } from './plot/access.js';
 import { isOutlier, selectGroup, selectGroupOf } from './plot/groups.js';
 import { clickOutsideLasso, enableLasso, enableMiddleDrag, enableSelectTools, enableRightPan, enableWheelZoom, lassoEndedAt, plotAxes, redrawLasso, touchGestureRecent } from './plot/interactions.js';
@@ -25,23 +27,26 @@ import { narrowSelection, popSelection, renderGallery, setSelection } from './vi
 import { bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateGroupsBadge } from './views/layout.js';
 import { closeModal, initModal, modalId, openImage, openModal, stepModal, toggleModalPreds } from './views/modal.js';
 import { imageOrder, setImagePage } from './views/image-grid.js';
-import { viewerKey } from './views/viewer.js';
+import { loadViewerPrefs, viewerKey } from './views/viewer.js';
 import { renderHome } from './views/home.js';
+import { bindUserButton, mountUserMenu } from './views/usermenu.js';
 // filters + curation (WP-D)
 import { initCuration } from './views/curation.js';
 import { initFilterBar } from './views/filter-bar.js';
 
 declare const Plotly: typeof import('plotly.js');
 
-const SESSION = new URLSearchParams(location.search).get('session');
-const LABEL = !SESSION ? new URLSearchParams(location.search).get('label') : null;
+const SCREEN = document.documentElement.dataset['screen'];
+const SESSION = SCREEN === 'viz' ? sessionIdFromPath() : null;
+const LABEL = SCREEN === 'label' ? new URLSearchParams(location.search).get('label') : null;
 
-// Plotly (~1.5 MB) only on the visualizer: theme-boot.js already preloads it, this runs it
+// Plotly (~1.5 MB) only on the visualizer: theme-boot.js already preloads it, this runs it. Found from this module's
+// URL (static/js/main.js -> /plotly.min.js), the same absolute URL as the preload, never from the s/<id>/ page URL.
 function loadPlotly(): Promise<void> {
   if (window.Plotly) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'plotly.min.js';
+    s.src = new URL('../../plotly.min.js', import.meta.url).href;
     s.onload = () => resolve();
     s.onerror = () => reject(new Error('could not load plotly.min.js'));
     document.head.appendChild(s);
@@ -52,7 +57,7 @@ function loadPlotly(): Promise<void> {
 function slowHints(): { stop: () => void } {
   const hint = (txt: string, actions?: boolean): void => {
     const el = $('startup-hint');
-    if (el) el.innerHTML = txt + (actions ? ` <a href="./">${icon('chev-l')}All sessions</a>` : '');
+    if (el) el.innerHTML = txt + (actions ? ` <a href="${esc(homeUrl())}">${icon('chev-l')}All sessions</a>` : '');
   };
   const t = [setTimeout(() => hint('Still working… large datasets can take a while.'), 10000),
     setTimeout(() => hint('This is taking longer than usual.', true), 30000)];
@@ -67,10 +72,26 @@ async function boot(): Promise<void> {
     $req('startup-stage').textContent = 'it may be starting or restarting; this page continues on its own';
   });
   if (!up) { hints.stop(); showError({ kind: 'network' }); return; }
+  if (SCREEN === 'login') {                    // signed out: only the sign-in card (no user, no settings)
+    hints.stop();
+    $req('startup').classList.add('hidden');
+    await (await import('./views/login.js')).renderLogin();
+    return;
+  }
+  // who is signed in, and their prefs (theme, labeling settings…): a 401 here is already on its way to /login
+  if (!await loadMe()) { hints.stop(); return; }
+  applyThemePrefs();
   if (!SESSION) { hints.stop(); $req('startup').classList.add('hidden'); }   // home and labeling paint their own UI
   else { $req('startup-title').textContent = 'Loading visualizer…'; $req('startup-stage').textContent = 'loading plot library and dataset'; }
   bindSettings();
   initLLM();                                   // ◆ AI features: hidden until the server says they are usable
+  // the user menu: the home's header here, the visualizer's activity bar; the label page mounts its own (label/app.js)
+  const homeActions = document.querySelector<HTMLElement>('#home .header-actions');
+  if (!SESSION && !LABEL && homeActions) mountUserMenu(homeActions);
+  if (SESSION) {
+    bindUserButton($req<HTMLButtonElement>('act-user'));
+    $req<HTMLAnchorElement>('brand-home').href = homeUrl();
+  }
   // the labeling page loads its own code on demand: the home and the visualizer never download it
   if (LABEL) { import('./label/app.js').then((m) => m.start(LABEL)).catch((e: unknown) => {
     $req('label').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the labeling page: ${esc(errText(e))}</div>`;
@@ -93,9 +114,7 @@ async function boot(): Promise<void> {
     $req('startup-title').textContent = `Opening ${(st.dataset && st.dataset.name) || 'session'}…`;
     $req('startup-stage').textContent = 'starting';
     while (!st.ready) {
-      // another tab opened a different session (the server serves one at a time), or this one was removed
-      if (!st.dataset || st.dataset.id !== SESSION) { showStartupError('This session was closed or replaced in another tab.'); return; }
-      const indexJob = st.dataset.index_job;
+      const indexJob = st.dataset ? st.dataset.index_job : undefined;
       const isIdx = (x: Job): boolean => x.id === indexJob;
       const j = st.active.find(isIdx) || st.jobs.find(isIdx);
       if (j) {
@@ -134,6 +153,9 @@ async function init(st: Status): Promise<void> {
   S.meta = meta;
   S.P = points;
   S.status = st;
+  // a viewer of a shared session: no box editor, no curation fixes, no tag writes (css/states.css .needs-labeler)
+  document.documentElement.dataset['role'] = st.my_role || 'owner';
+  loadViewerPrefs();
   const sessions = [...new Set(points.session)].sort();
   S.sessionIdx = new Map(sessions.map((s, i) => [s, i]));
   const pill = (v: string | number, k: string, cls = ''): string => `<span class="pill ${cls}"><b>${esc(v)}</b>${k}</span>`;
@@ -332,7 +354,7 @@ function bindEvents(): void {
   $req('btn-export').onclick = () => { void exportCSV(); };
   $req('btn-ai-check').onclick = () => { void checkLabelsAI(); };      // ◆ hidden unless label_check is on (core/llm.js)
   $req('btn-tag').onclick = async () => {
-    if (!S.sel.length) return;
+    if (!S.sel.length || document.documentElement.dataset['role'] === 'viewer') return;
     const tag = prompt(`Tag ${S.sel.length} boxes as:`, 'relabel');
     if (!tag) return;
     await postJSON('api/tags', { tag, ids: S.sel });

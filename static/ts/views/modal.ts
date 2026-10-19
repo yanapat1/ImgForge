@@ -3,7 +3,7 @@
 // SVG: toggles, right-click copy, Edit mode).
 
 import { getJSON } from '../core/api.js';
-import { $req, esc } from '../core/dom.js';
+import { $req, esc, ICONS } from '../core/dom.js';
 import { featureLabel, S } from '../core/state.js';
 import { clsColor, clsName, ERR, errColor, THEME } from '../core/theme.js';
 import type { CardRef, EditResult, ImgBoxes, PredInfo, SampleInfo } from '../types-views.js';
@@ -132,7 +132,7 @@ export async function openImage(name: string, list: string[] | null = null): Pro
   sampleImage = name;
   setMode('image');
   syncPredsBtn();
-  $req('modal-title').innerHTML = `<span class="chip"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>image</span><span class="muted">${esc(name)}</span>`;
+  $req('modal-title').innerHTML = `<span class="chip"><svg class="ico" aria-hidden="true"><use href="${ICONS}#i-image"/></svg>image</span><span class="muted">${esc(name)}</span>`;
   $req('modal-meta').innerHTML = '';
   const b = await showImage(name);
   if (!imageMode || imageMode.name !== name || !b) return;

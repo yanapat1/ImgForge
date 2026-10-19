@@ -77,7 +77,11 @@ export interface Status {
   default_feature?: string;
   startup?: { feature: string; method: string; cached: boolean };
   features?: FeatureSpec[];
+  /** my access to the open session (s/<id>/): a viewer cannot edit boxes, fix curation issues or write tags */
+  my_role?: Role;
 }
+/** Access to a shared session (dataviz/auth/access.py): owner (or an admin) > labeler > viewer. */
+export type Role = 'owner' | 'labeler' | 'viewer';
 /** GET api/meta */
 export interface Meta {
   dataset: string; dataset_uri: string; source: string;

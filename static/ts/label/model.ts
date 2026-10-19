@@ -4,7 +4,8 @@
 // The single-image run and the merge of its result live in app.js (it owns the LRU entries and the autosave);
 // this module only talks to the API and draws its own UI. Contract: dataviz/labeling/README.md "v2 contract".
 
-import { errMessage, errText, getJSON } from '../core/api.js';
+import { apiFetch, errMessage, errText, getJSON } from '../core/api.js';
+import { userKey } from '../core/auth.js';
 import { $req, esc, fmtEta, icon } from '../core/dom.js';
 import type { Job } from '../types.js';
 import type { Ann, LabelTask, ModelLink } from '../types-label.js';
@@ -63,7 +64,7 @@ const must = <T extends Element>(root: ParentNode, sel: string): T => {
 };
 
 const pid = (): string => encodeURIComponent(String(L.pid));
-const jobKey = (): string => `label-model-job-${L.pid}`;
+const jobKey = (): string => userKey(`label-model-job-${L.pid}`);
 export const linkOf = (t: LabelTask | null | undefined): ModelLink | null => (t && t.config && t.config.model && t.config.model.model_id ? t.config.model : null);
 // a linked model runs only once activated in this server session (server-enforced: 409 otherwise)
 export const isActive = (t: LabelTask | null | undefined): boolean => !!(t && L.project && (L.project.model_active || []).includes(t.id));
@@ -94,9 +95,10 @@ export async function toggleActive(): Promise<void> {
 
 // T is the caller's claim about the server payload
 async function call<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  if (L.readOnly && method !== 'GET') throw new Error('View only: ask the owner for Labeler access');
   const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };
   if (body !== undefined) init.body = JSON.stringify(body);
-  const r = await fetch(path, init);
+  const r = await apiFetch(path, init);
   const d: unknown = await r.json().catch(() => ({}));
   if (!r.ok) {
     const detail = isRec(d) ? d.detail : undefined;

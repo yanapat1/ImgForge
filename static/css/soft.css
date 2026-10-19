@@ -36,3 +36,8 @@
 :root[data-look="soft"] .session-new:active:not(:disabled) { box-shadow: none; }
 :root[data-look="soft"] .session-new { border: 2px dashed var(--border-strong); border-radius: var(--r-lg); }
 :root[data-look="soft"] .session-new:hover:not(:disabled) { background: var(--accent-soft); }
+
+/* accounts: the sign-in card and dialogs pressed out like the other panels */
+:root[data-look="soft"] .login-card,
+:root[data-look="soft"] .ui-dlg { border-color: transparent; box-shadow: 8px 8px 18px var(--sf-dark), -8px -8px 18px var(--sf-light); }
+:root[data-look="soft"] .avatar-stack .avatar { box-shadow: 0 0 0 2px var(--surface), 2px 2px 4px var(--sf-dark); }

@@ -21,15 +21,20 @@ static/
 3. `css/tokens → base → layout → components → plot → settings → responsive`. They are separate
    `<link>`s (parallel downloads; `@import` would be serial), and later files win ties.
 4. `js/main.js` as `type="module"` (deferred by default).
-5. `plotly.min.js` (about 1.5 MB) **only on the visualizer screen** (`?session=`): `theme-boot.js` adds a
+5. `plotly.min.js` (about 1.5 MB) **only on the visualizer screen** (`/s/<id>/`): `theme-boot.js` adds a
    `<link rel="preload">` for it, and `main.js` runs it before the first plot. The Sessions home never
-   downloads it.
+   downloads it. Both find it from their own script URL, never from the page URL.
 
-## Two screens, one page
+## Four screens, one page
 
-`index.html` holds both: the **Sessions home** (`#home`, no `?session=`) and the **visualizer**
-(everything marked `.viz-only`). `theme-boot.js` sets `html[data-screen=home|viz]` before the first
-paint, so the other screen never flashes.
+`index.html` holds them all: the **sign-in page** (`#login`, path `/login`), the **Sessions home** (`#home`, `/`),
+the **labeling page** (`#label`, `/?label=<pid>`) and the **visualizer** (everything marked `.viz-only`,
+`/s/<session id>/`). `theme-boot.js` sets `html[data-screen=login|home|label|viz]` before the first paint, so the
+other screens never flash, and sends an old `?session=<id>` link to `s/<id>/`. The server renders the same
+`index.html` for `/login` and for `/s/<id>/` (there with `../../` in front of every asset URL); every link the
+page builds goes through `js/core/nav.js` (`homeUrl`, `vizUrl`, `labelUrl`, `loginUrl`), so a proxy prefix
+(`/user/x/proxy/5151/`) is kept. Every request goes through `js/core/api.js` `apiFetch` (header
+`X-Requested-With: dataviz`; a 401 goes to the sign-in page with `next=`).
 
 ## Caching
 

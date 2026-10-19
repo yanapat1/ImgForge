@@ -1,9 +1,10 @@
 // Settings › Labeling: the labeling page's options (label/state.js SETTINGS_DEFAULTS) and the hotkey editor.
-// Stored on the server (GET / PUT api/label/settings, label_settings.json) with only the hotkeys that differ from
-// DEFAULT_HOTKEYS, mirrored to localStorage 'label-settings' (the label page's first paint), and announced with the
+// Stored in the user's prefs (GET / PUT api/me/prefs, key label_settings) with only the hotkeys that differ from
+// DEFAULT_HOTKEYS, mirrored to localStorage 'label-settings:<user id>' (the label page's first paint), and announced with the
 // document event 'label-settings-changed' (detail = the full settings) so an open label page applies them live.
 
 import { errText, getJSON } from '../core/api.js';
+import { setPrefs, userKey } from '../core/auth.js';
 import { esc, icon, rgba } from '../core/dom.js';
 import { comboOf } from '../label/hotkeys.js';
 import { BROWSER_RESERVED, DEFAULT_HOTKEYS, HOLD_ACTIONS, HOTKEY_LABELS, SETTINGS_DEFAULTS } from '../label/state.js';
@@ -11,7 +12,8 @@ import type { LabSettings, SetAction, StatusLine } from '../types-settings.js';
 import { renderSettings } from './dialog.js';
 import { dd, statusHTML } from './forms.js';
 
-const LS_KEY = 'label-settings';
+const lsKey = (): string => userKey('label-settings');
+const PREF = 'label_settings';
 const SLOTS = 2;
 // the label page's constants, viewed by key (the hotkey editor looks actions up by name)
 const DEFAULTS: LabSettings = SETTINGS_DEFAULTS;
@@ -22,11 +24,11 @@ const HOLD: ReadonlySet<string> = HOLD_ACTIONS;
 
 interface Conflict { a: string; i: number; combo: string; b: string; j?: number; refused?: string }
 interface Lab {
-  s: LabSettings | null; rec: { a: string; i: number } | null; conflict: Conflict | null; status: StatusLine | null; saveTimer: number; classOpen: boolean;
+  s: LabSettings | null; rec: { a: string; i: number } | null; conflict: Conflict | null; status: StatusLine | null; classOpen: boolean;
 }
 // rec = the cell recording the next key press {a, i}; conflict = {a, i, combo, b, j}: the combo is already action b's slot j
 // classOpen: the 88-row "Class hotkeys" group is expanded (collapsed by default)
-const LAB: Lab = { s: null, rec: null, conflict: null, status: null, saveTimer: 0, classOpen: false };
+const LAB: Lab = { s: null, rec: null, conflict: null, status: null, classOpen: false };
 
 /** The loaded settings (the section only renders after loadLabSettings). */
 function lab(): LabSettings {
@@ -39,7 +41,7 @@ const optGet = (k: string): unknown => { const rec: Record<string, unknown> = la
 const optSet = (k: string, v: unknown): void => { const rec: Record<string, unknown> = lab(); rec[k] = v; };
 
 function readLocal(): unknown {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return null; }
+  try { return JSON.parse(localStorage.getItem(lsKey()) || 'null'); } catch (e) { return null; }
 }
 
 function normalise(s: unknown): LabSettings {
@@ -51,7 +53,8 @@ function normalise(s: unknown): LabSettings {
 export async function loadLabSettings(): Promise<void> {
   LAB.rec = LAB.conflict = null;
   try {
-    LAB.s = normalise(await getJSON('api/label/settings'));
+    const { prefs } = await getJSON<{ prefs?: Record<string, unknown> | null }>('api/me/prefs');
+    LAB.s = normalise((prefs && prefs[PREF]) ?? readLocal());
     LAB.status = null;
   } catch (e) {
     LAB.s = normalise(readLocal());
@@ -157,16 +160,10 @@ function snapshot(): LabSettings { return { ...lab(), hotkeys: { ...lab().hotkey
 
 function save(): void {
   const s = snapshot();
-  try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) { /* private window */ }
+  try { localStorage.setItem(lsKey(), JSON.stringify(s)); } catch (e) { /* private window */ }
   document.dispatchEvent(new CustomEvent('label-settings-changed', { detail: s }));
-  clearTimeout(LAB.saveTimer);
-  LAB.saveTimer = setTimeout(async () => {
-    try {
-      const r = await fetch('api/label/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot()) });
-      if (!r.ok) throw new Error(`api/label/settings: ${r.status} ${await r.text()}`);
-      setStatus({ kind: 'ok', text: 'Saved' });
-    } catch (e) { setStatus({ kind: 'err', text: `Not saved on the server: ${errText(e)}` }); }
-  }, 350);
+  setPrefs({ [PREF]: s }, 350).then(() => setStatus({ kind: 'ok', text: 'Saved' }),
+    (e: unknown) => setStatus({ kind: 'err', text: `Not saved on the server: ${errText(e)}` }));
 }
 
 function setStatus(st: StatusLine): void {

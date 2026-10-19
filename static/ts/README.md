@@ -2,7 +2,7 @@
 
 ```
 js/
-├── theme-boot.js      classic script, runs before the first paint (saved theme, home / viz screen, Plotly preload)
+├── theme-boot.js      classic script, runs before the first paint (saved theme, login / home / label / viz screen, Plotly preload)
 ├── main.js            entry: boot → init → bindEvents; nothing imports it
 ├── core/              no UI: DOM helpers, API, state, theme, jobs   → core/README.md
 ├── plot/              the embedding plot and its mouse interactions → plot/README.md
@@ -42,3 +42,12 @@ declarations, and nothing runs at import time except small constant setup.
 | Server payloads cached per key | `api/*` responses are pre-serialized | The page never asks twice for the same projection while it is open. |
 
 Details are in each folder's README.
+
+## Accounts and sharing
+
+- `core/auth.ts` loads the signed-in user once (`loadMe`, `ME`, `isAdmin`) with their prefs (`pref`, `setPrefs`,
+  `rememberPref`: theme / look / palette, `label_settings`, `homeTab`, `homeScope`, PUT `api/me/prefs` debounced).
+  `userKey(k)` suffixes every browser-storage key that holds a user's data with the user id.
+- `main.ts` boots in this order: wait for the server → on `/login` only `views/login.ts` → `loadMe()` → the screen.
+- Roles (`my_role`: viewer < labeler < owner) only hide what the server would refuse anyway: the home cards' actions,
+  the label page (`L.readOnly`: no tools, no saves, a "View only" banner), the visualizer (`html[data-role=viewer]`).

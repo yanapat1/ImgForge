@@ -22,3 +22,9 @@
 :root[data-look="terminal"] :focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
 :root[data-look="terminal"] .sec-sub::before { content: "# "; color: var(--accent-text); }
 :root[data-look="terminal"] .sec-sub2::before { content: "## "; color: var(--accent-text); }
+
+/* accounts: square-ish avatars in the mono face, no shadows */
+:root[data-look="terminal"] .avatar { border-radius: var(--r-sm); font-family: var(--mono); }
+:root[data-look="terminal"] .login-card,
+:root[data-look="terminal"] .ui-dlg { box-shadow: none; }
+:root[data-look="terminal"] .sc-vis { border-radius: var(--r-sm); }

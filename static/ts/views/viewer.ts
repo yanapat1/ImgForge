@@ -4,7 +4,8 @@
 // boxes to views/box-editor.js. The box data comes from the label file itself (api/img/boxes), so it is always
 // what is on disk, edits included.
 
-import { errMessage, getJSON } from '../core/api.js';
+import { apiFetch, errMessage, getJSON } from '../core/api.js';
+import { userKey } from '../core/auth.js';
 import { $, $req, textOn } from '../core/dom.js';
 import { S } from '../core/state.js';
 import { clsColor, THEME } from '../core/theme.js';
@@ -15,15 +16,17 @@ import { closestOf } from './ev-util.js';
 const NS = 'http://www.w3.org/2000/svg';
 const PREF_KEY = 'viewer-show';
 
-// what is drawn; kept per viewer (localStorage, never required)
+// what is drawn; kept per user in this browser (localStorage, never required), read once the user is known
 const show = { labels: true, names: true };
-try {
-  const saved: unknown = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
-  if (typeof saved === 'object' && saved !== null) {
-    if ('labels' in saved) show.labels = !!saved.labels;
-    if ('names' in saved) show.names = !!saved.names;
-  }
-} catch (e) { /* private mode */ }
+export function loadViewerPrefs(): void {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(userKey(PREF_KEY)) || '{}');
+    if (typeof saved === 'object' && saved !== null) {
+      if ('labels' in saved) show.labels = !!saved.labels;
+      if ('names' in saved) show.names = !!saved.names;
+    }
+  } catch (e) { /* private mode */ }
+}
 
 // the image on screen: name, size the label coordinates refer to, label boxes, focus box, predictions
 export const V: ViewerState = { name: null, W: 1, H: 1, boxes: [], sha1: null, label: null, writable: false, focus: null,
@@ -35,7 +38,7 @@ let onSaved: (r: EditResult) => void = () => {};
 const Z = { s: 1, x: 0, y: 0 };
 const ZMAX = 16;
 
-const savePrefs = (): void => { try { localStorage.setItem(PREF_KEY, JSON.stringify(show)); } catch (e) { /* ignore */ } };
+const savePrefs = (): void => { try { localStorage.setItem(userKey(PREF_KEY), JSON.stringify(show)); } catch (e) { /* ignore */ } };
 const svgEl = (tag: string, attrs: Record<string, string | number>): SVGElement => {
   const el = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
@@ -393,7 +396,7 @@ export function viewerKey(e: KeyboardEvent): boolean {
   const k = e.key.toLowerCase();
   if (k === 'b') { toggle('labels'); return true; }
   if (k === 'l') { toggle('names'); return true; }
-  if (k === 'e' && !V.fixed) { setEdit(!ED.active()); return true; }
+  if (k === 'e' && !V.fixed && document.documentElement.dataset['role'] !== 'viewer') { setEdit(!ED.active()); return true; }
   if (k === 'p' && !$req('m-preds').classList.contains('hidden')) { $req('m-preds').click(); return true; }
   return false;
 }
@@ -462,8 +465,8 @@ function flash(text: string): void {
 // the full-resolution image with what is shown on screen drawn on it (labels / editor boxes, names, predictions)
 async function composite(withBoxes: boolean): Promise<Blob> {
   let bmp: ImageBitmap;
-  if (V.fixed) bmp = await createImageBitmap(await (await fetch($req<HTMLImageElement>('modal-img').src)).blob());
-  else bmp = await createImageBitmap(await (await fetch(`api/img/raw?name=${encodeURIComponent(V.name ?? '')}&max_w=8192`)).blob());
+  if (V.fixed) bmp = await createImageBitmap(await (await apiFetch($req<HTMLImageElement>('modal-img').src)).blob());
+  else bmp = await createImageBitmap(await (await apiFetch(`api/img/raw?name=${encodeURIComponent(V.name ?? '')}&max_w=8192`)).blob());
   const cv = document.createElement('canvas');
   cv.width = bmp.width;
   cv.height = bmp.height;

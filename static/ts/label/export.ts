@@ -8,6 +8,7 @@
 // reExport(pid, project?) opens the dialog straight into that.
 
 import { errText, getJSON, postJSON } from '../core/api.js';
+import { userKey } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import type { Job } from '../types.js';
 import type { LabelProject, LabelTask } from '../types-label.js';
@@ -96,7 +97,7 @@ export async function openExportDialog(pid: string, project?: LabelProject | nul
 // its `kept` still equals the server's export_default.classes (no other tab / browser exported since); without a
 // matching record (another browser, a duplicated session, private mode) the dialog falls back to the kept list.
 type IdLists = Record<string, string[]>;
-const exclKey = (pid: string): string => `label-export-excluded-${pid}`;
+const exclKey = (pid: string): string => userKey(`label-export-excluded-${pid}`);
 const isIdLists = (v: unknown): v is IdLists => !!v && typeof v === 'object' && !Array.isArray(v);
 const sameKept = (a: IdLists | undefined, b: IdLists | undefined): boolean => {
   const ka = Object.keys(a || {}), kb = Object.keys(b || {});

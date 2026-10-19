@@ -3,8 +3,11 @@
 // banner and the empty / importing states, the model runs on one image (M, auto on open) and their merge.
 // main.js calls start(pid) through a dynamic import.
 
-import { getJSON, errText, postJSON } from '../core/api.js';
+import { apiFetch, errText, getJSON, postJSON } from '../core/api.js';
 import { $req, esc, icon } from '../core/dom.js';
+import { homeUrl } from '../core/nav.js';
+import { userKey } from '../core/auth.js';
+import { mountUserMenu } from '../views/usermenu.js';
 import { waitJob } from '../core/jobs.js';
 import { applyLLM, llmAny } from '../core/llm.js';
 import { setTheme, THEME } from '../core/theme.js';
@@ -62,10 +65,12 @@ const TOOLS: Record<string, AppTool> = { bbox: bboxTool, polygon: polygonTool, k
 const cache = new Map<string, LruEntry>();           // media id -> entry (Map order = LRU order, oldest first)
 let navTok = 0;
 const lastClass = new Map<string, string>();       // task id -> class id picked last
-const posKey = (): string => `label-pos-${L.pid}`;
+const posKey = (): string => userKey(`label-pos-${L.pid}`);
+const taskKey = (): string => userKey(`label-task-${L.pid}`);
 const pid = (): string => encodeURIComponent(L.pid ?? '');
 
 export const tool = (): AppTool | null => {
+  if (L.readOnly) return null;                       // a viewer browses: no drawing, no moving
   const t = P.activeTask();
   return t ? TOOLS[TASK_TYPES[t.task_type]?.geometry ?? ''] || null : null;
 };
@@ -75,7 +80,7 @@ function markup(): string {
   const ib = (id: string, ic: string, label: string, extra = ''): string => `<button id="${id}" class="icon-btn ghost" aria-label="${label}" title="${label}" ${extra}>${icon(ic)}</button>`;
   return `<div id="lb-app" class="lb-app">
   <header class="lb-top">
-    <a id="lb-back" class="lb-back" href="./" title="All sessions" aria-label="Back to all sessions">${icon('chev-l')}<span>Sessions</span></a>
+    <a id="lb-back" class="lb-back" href="${esc(homeUrl())}" title="All sessions" aria-label="Back to all sessions">${icon('chev-l')}<span>Sessions</span></a>
     <h1 id="lb-name" class="lb-name"></h1>
     <nav class="lb-nav" aria-label="Images">
       ${ib('lb-prev', 'chev-l', 'Previous image')}
@@ -85,13 +90,13 @@ function markup(): string {
     <span id="lb-pill" class="lb-pill" role="status"></span>
     <span class="grow"></span>
     <div class="lb-actions">
-      ${ib('lb-undo', 'undo', 'Undo')}${ib('lb-redo', 'redo', 'Redo')}
-      <button id="lb-review" class="lb-review hidden" aria-pressed="false">${icon('check')}<span>Reviewed</span></button>
-      <button id="lb-skip" class="lb-skip">${icon('skip')}<span>Skip</span></button>
-      <button id="lb-commit" class="primary">${icon('check')}<span>Commit</span><kbd id="lb-commit-key"></kbd></button>
-      <button id="lb-ai" class="icon-btn ghost gem hidden" data-llm="label_assist prelabel" aria-haspopup="dialog" aria-expanded="false" aria-controls="lb-assist"
+      <span class="lb-write lb-acts">${ib('lb-undo', 'undo', 'Undo')}${ib('lb-redo', 'redo', 'Redo')}</span>
+      <button id="lb-review" class="lb-review lb-write hidden" aria-pressed="false">${icon('check')}<span>Reviewed</span></button>
+      <button id="lb-skip" class="lb-skip lb-write">${icon('skip')}<span>Skip</span></button>
+      <button id="lb-commit" class="primary lb-write">${icon('check')}<span>Commit</span><kbd id="lb-commit-key"></kbd></button>
+      <button id="lb-ai" class="icon-btn ghost gem lb-write hidden" data-llm="label_assist prelabel" aria-haspopup="dialog" aria-expanded="false" aria-controls="lb-assist"
         aria-label="AI label assistant" title="◆ Label assistant: pre-label this image, ask how to label it">${icon('gem')}</button>
-      <div id="lb-model" class="lb-model"><button id="lb-model-btn" class="lb-model-btn" aria-haspopup="menu" aria-expanded="false"></button><button id="lb-model-cancel" class="icon-btn ghost hidden" aria-label="Cancel labeling all images" title="Cancel labeling all images">${icon('x')}</button></div>
+      <div id="lb-model" class="lb-model lb-write"><button id="lb-model-btn" class="lb-model-btn" aria-haspopup="menu" aria-expanded="false"></button><button id="lb-model-cancel" class="icon-btn ghost hidden" aria-label="Cancel labeling all images" title="Cancel labeling all images">${icon('x')}</button></div>
       ${ib('lb-export', 'download', 'Export labels')}
       <button id="lb-theme" class="icon-btn ghost" aria-label="Switch light / dark theme" title="Light / dark theme">${icon('sun').replace('class="ico"', 'class="ico only-dark"')}${icon('moon').replace('class="ico"', 'class="ico only-light"')}</button>
       ${ib('lb-gear', 'gear', 'Labeling settings')}
@@ -103,7 +108,7 @@ function markup(): string {
     <div class="lb-head"><span>Classes</span></div>
     <div class="lb-inputs">
       <div class="lb-field">${icon('search')}<input id="lb-filter" type="search" placeholder="Filter classes" aria-label="Filter classes" autocomplete="off"></div>
-      <div class="lb-field">${icon('plus')}<input id="lb-add" type="text" placeholder="Add class, Enter" aria-label="Add a class (Enter)" autocomplete="off" maxlength="120"></div>
+      <div class="lb-field lb-write">${icon('plus')}<input id="lb-add" type="text" placeholder="Add class, Enter" aria-label="Add a class (Enter)" autocomplete="off" maxlength="120"></div>
     </div>
     <div id="lb-classes" class="lb-classes" role="listbox" aria-label="Classes of the active task"></div>
   </aside>
@@ -116,6 +121,7 @@ function markup(): string {
       <button id="lb-reload">Reload this image</button><button id="lb-keep" class="ghost">Keep mine</button>
     </div>
     <div id="lb-msg" class="lb-msg hidden" role="status" aria-live="polite"></div>
+    <div id="lb-ro" class="lb-ro hidden" role="status">${icon('eye')}<span><b>View only</b> — ask the owner for Labeler access</span></div>
     <button id="lb-show-l" class="lb-show lb-show-l hidden" aria-label="Show the classes panel" title="Show classes">${icon('chev-r')}</button>
     <button id="lb-show-r" class="lb-show lb-show-r hidden" aria-label="Show the objects panel" title="Show objects">${icon('chev-l')}</button>
     <div id="lb-toast" class="lb-toast" role="status" aria-live="polite"></div>
@@ -133,7 +139,7 @@ function markup(): string {
           <option value="all">All</option><option value="todo">To do</option><option value="in_progress">In progress</option>
           <option value="done">Done</option><option value="skipped">Skipped</option>
           <optgroup id="lb-strip-rv" label="Review" class="hidden" disabled><option value="review:none">Not reviewed</option><option value="review:manual">Reviewed by hand</option><option value="review:bulk">Reviewed with Review all</option></optgroup></select>
-        <button id="lb-review-all" class="icon-btn ghost hidden" aria-label="Review all done images" title="Review all: mark every done image as reviewed (shown apart from ones you review by hand)">${icon('check')}</button>
+        <button id="lb-review-all" class="icon-btn ghost lb-write hidden" aria-label="Review all done images" title="Review all: mark every done image as reviewed (shown apart from ones you review by hand)">${icon('check')}</button>
         <button id="lb-strip-more" class="icon-btn ghost lb-strip-more" aria-expanded="false" aria-controls="lb-strip-pop"
           aria-label="Filter images by class and object count" title="Filter by class / object count">${icon('tag')}<span id="lb-strip-badge" class="lb-badge hidden"></span></button></div>
       <div class="lb-inputs lb-strip-inputs"><div class="lb-field">${icon('search')}<input id="lb-strip-q" type="search"
@@ -168,7 +174,7 @@ function loadAnns(e: LruEntry, priority: RequestPriority): Promise<LruEntry> {
   const signal = e.ctrl.signal;
   e.pA = (async () => {
     if (busy(e.mid)) await flushMid(e.mid);           // a save of this image is still on its way: read after it
-    const r = await fetch(`api/label/projects/${pid()}/annotations/${e.mid}`, { signal, priority });
+    const r = await apiFetch(`api/label/projects/${pid()}/annotations/${e.mid}`, { signal, priority });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `annotations: ${r.status}`);
     const d: PageAnnotations = await r.json();
     e.media = d.media;
@@ -187,7 +193,7 @@ function loadBitmap(e: LruEntry, priority: RequestPriority, dims: { width?: numb
   if (e.pB) return e.pB;
   const signal = e.ctrl.signal;
   const big = dims && Math.max(dims.width || 0, dims.height || 0) > BIG_SIDE;
-  e.pB = fetch(`api/label/projects/${pid()}/image/${e.mid}${big ? '?max=8192' : ''}`, { signal, priority })
+  e.pB = apiFetch(`api/label/projects/${pid()}/image/${e.mid}${big ? '?max=8192' : ''}`, { signal, priority })
     .then((r) => { if (!r.ok) throw new Error(r.status === 404 ? 'The image file is missing from its source' : `image: ${r.status}`); return r.blob(); })
     .then((b) => createImageBitmap(b, { imageOrientation: 'from-image' }))
     .then((bm) => {
@@ -349,7 +355,10 @@ function msg(html: string, kind = ''): void {
 }
 
 // ---------------------------------------------------------------- status changes: commit / skip
+const viewOnly = (): boolean => { if (L.readOnly) P.toast('View only: ask the owner for Labeler access'); return L.readOnly; };
+
 function setStatus(kind: 'commit' | 'skip'): void {
+  if (viewOnly()) return;
   if (!L.media || !L.media.id || !L.project || !settled()) return;   // a repeat press while the next image loads
   const media = L.media;
   const tids = kind === 'skip' || L.settings.commit_scope !== 'all' ? (L.taskId === null ? [] : [L.taskId]) : L.project.tasks.map((t) => t.id);
@@ -386,6 +395,7 @@ function dropReview(m: Media, tids: string[]): void {
 
 // toggles: every task in scope already approved by hand -> back to not reviewed, otherwise approve by hand
 function setReview(): void {
+  if (viewOnly()) return;
   if (!L.project || !L.project.review || !L.media || !L.media.id || !settled()) return;
   const media = L.media;
   const scope = L.settings.commit_scope === 'all' ? L.project.tasks.map((t) => t.id) : L.taskId === null ? [] : [L.taskId];
@@ -404,7 +414,7 @@ function setReview(): void {
 
 let reviewingAll = false;
 async function reviewAll(): Promise<void> {
-  if (!L.project || !L.project.review || reviewingAll) return;
+  if (!L.project || !L.project.review || reviewingAll || viewOnly()) return;
   const tids = L.project.tasks.map((t) => t.id);
   if (!window.confirm('Review all: mark every done image that is not reviewed yet as reviewed?\n\nThey are shown apart from the ones you review by hand, and any later edit puts an image back to not reviewed.')) return;
   reviewingAll = true;
@@ -460,7 +470,7 @@ function switchTask(tid: string): void {
   if (!t || tid === L.taskId) return;
   resetTool();
   L.taskId = tid;
-  try { localStorage.setItem(`label-task-${L.pid}`, tid); } catch (e) { /* private mode */ }
+  try { localStorage.setItem(taskKey(), tid); } catch (e) { /* private mode */ }
   const want = lastClass.get(tid);
   L.classId = want !== undefined && t.classes.some((c) => c.id === want) ? want : t.classes[0]?.id ?? null;
   const keep = [...L.selected].filter((id) => { const a = L.anns.get(id); return a && a.task_id === tid; });
@@ -585,7 +595,7 @@ const reloadWanted = new Set<string>();    // mids whose server-side rewrite (bu
 const autoTried = new Set<string>();       // 'mid|tid' auto-run once per page visit (model_run marks it on the server too)
 
 function autoRun(e: LruEntry): void {
-  if (!L.project || M.jobRunning()) return;
+  if (!L.project || M.jobRunning() || L.readOnly) return;
   // checked once: busy(mid) turns true as soon as the first task's run starts (held edits count as busy)
   if (L.dirty.size || busy(e.mid) || conflictsOf(e.mid).length) return;
   for (const t of L.project.tasks) {
@@ -651,6 +661,7 @@ function mergePredictions(e: LruEntry, tid: string, res: RunResult, markRun = tr
 }
 
 function labelThis(): void {
+  if (viewOnly()) return;
   const t = P.activeTask();
   if (!t || !M.linkOf(t)) { void M.openLinkDialog(); return; }
   if (!M.isActive(t)) { P.toast(`The model is off: activate it first (model menu, or ${M.activateKey()})`, 'err'); return; }
@@ -661,6 +672,7 @@ function labelThis(): void {
 }
 
 function removeModelHere(): void {
+  if (viewOnly()) return;
   if (!settled()) return;
   const list = [...L.anns.values()].filter((a) => a.task_id === L.taskId && a.source === 'model');
   if (!list.length) { P.toast('No model labels on this image'); return; }
@@ -754,7 +766,7 @@ const ACTIONS: Record<string, Action> = {
   paste: () => !L.loading && pasteClipboard(),
   model_this: () => { labelThis(); },
   model_remove: () => { removeModelHere(); },
-  model_activate: () => { void M.toggleActive(); },
+  model_activate: () => { if (!viewOnly()) void M.toggleActive(); },
   theme: () => toggleTheme(),
 };
 for (let i = 0; i < CLASS_KEYS.length; i++) ACTIONS[`class_${i + 1}`] = () => selectClassN(i);
@@ -850,7 +862,7 @@ async function emptyState(): Promise<void> {
   const canRescan = !!(L.project && L.project.source && L.project.source.kind !== 'upload');
   msg(`${icon('image')}<div><b>No images in this session yet</b><div class="muted">Add images from the Sessions home (edit this session),` +
     `${canRescan ? ' or rescan its source folder.' : ' by uploading a folder there.'}</div></div>` +
-    `<a class="lb-msg-btn" href="./">${icon('chev-l')}Sessions</a>${canRescan ? `<button id="lb-rescan">${icon('refresh')}Rescan source</button>` : ''}`, 'empty');
+    `<a class="lb-msg-btn" href="${esc(homeUrl())}">${icon('chev-l')}Sessions</a>${canRescan ? `<button id="lb-rescan">${icon('refresh')}Rescan source</button>` : ''}`, 'empty');
 }
 
 async function followImport(jid: number): Promise<void> {
@@ -913,9 +925,12 @@ function bindAssist(): void {
 async function loadProject(): Promise<void> {
   const [project, ids] = await Promise.all([getJSON<LabelProject>(`api/label/projects/${pid()}`), getJSON<{ ids?: string[] }>(`api/label/projects/${pid()}/media-ids`)]);
   L.project = project;
+  L.readOnly = project.my_role === 'viewer';
+  $req('lb-app').classList.toggle('readonly', L.readOnly);
+  $req('lb-ro').classList.toggle('hidden', !L.readOnly);
   L.ids = ids.ids || [];
   cv.indexClasses();
-  const savedTask = (() => { try { return localStorage.getItem(`label-task-${L.pid}`); } catch (e) { return null; } })();
+  const savedTask = (() => { try { return localStorage.getItem(taskKey()); } catch (e) { return null; } })();
   const tasks = project.tasks || [];
   L.taskId = (tasks.find((t) => t.id === savedTask) || tasks[0])?.id ?? null;
   const t = P.activeTask();
@@ -963,7 +978,7 @@ function bindTop(): void {
     else if (b.id === 'lb-msg-skip') setStatus('skip');
     else if (b.id === 'lb-rescan') {
       b.disabled = true;
-      fetch(`api/label/projects/${pid()}/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      apiFetch(`api/label/projects/${pid()}/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then((r) => r.json().then((d: { job_id: number; detail?: string }) => (r.ok ? d : Promise.reject(new Error(d.detail || String(r.status))))))
         .then((d) => followImport(d.job_id))
         .catch((err) => { b.disabled = false; P.toast(errText(err), 'err'); });
@@ -1021,11 +1036,13 @@ export async function start(projectId: string): Promise<void> {
   M.initModel({ task: () => P.activeTask(), labelThis, removeThis: removeModelHere, taskUpdated, staleAnns, afterBulk });
   bindTop();
   bindAssist();
+  const gear = $req('lb-gear');
+  if (gear.parentElement) mountUserMenu(gear.parentElement, gear.nextSibling);
   window.dataviz = window.dataviz || {};
   window.dataviz.label = { L, cache, perf: cv.perf, show, go, canvas: cv, tool, runs };
   try {
     await loadProject();
   } catch (e) {
-    msg(`${icon('alert')}<div><b>Could not open this labeling session</b><div class="muted">${esc(errText(e))}</div></div><a class="lb-msg-btn" href="./">${icon('chev-l')}Sessions</a>`, 'err');
+    msg(`${icon('alert')}<div><b>Could not open this labeling session</b><div class="muted">${esc(errText(e))}</div></div><a class="lb-msg-btn" href="${esc(homeUrl())}">${icon('chev-l')}Sessions</a>`, 'err');
   }
 }

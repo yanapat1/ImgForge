@@ -3,6 +3,7 @@
 // container (data-act / data-id); every interpolated value goes through esc(). Renders are coalesced per frame
 // with schedule(part).
 
+import { apiFetch } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import type { ToastKind } from '../core/toast.js';
 import type { AskOptions, AskResult, ClassMatchMode, MediaPage, ProjectStatsRow } from '../types-label-ui.js';
@@ -53,7 +54,8 @@ const detailOf = (data: { detail?: unknown }, fallback: string): string => (data
 
 interface ReqResult<T> { ok: boolean; status: number; data: Partial<T> & { detail?: unknown } }
 async function req<T extends object = object>(method: string, path: string, body?: unknown): Promise<ReqResult<T>> {
-  const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : null });
+  if (L.readOnly && method !== 'GET') return { ok: false, status: 403, data: { detail: 'View only: ask the owner for Labeler access' } as Partial<T> & { detail?: unknown } };
+  const r = await apiFetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : null });
   const data: Partial<T> & { detail?: unknown } = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, data };
 }
@@ -608,7 +610,7 @@ function loadPage(list: MediaList, pi: number): Promise<Media[]> {
   if (have) return Promise.resolve(have);
   const inflight = list.loading.get(pi);
   if (inflight) return inflight;
-  const pr: Promise<Media[]> = fetch(`api/label/projects/${pid()}/media?offset=${pi * PAGE}&limit=${PAGE}${listQuery(list)}`)
+  const pr: Promise<Media[]> = apiFetch(`api/label/projects/${pid()}/media?offset=${pi * PAGE}&limit=${PAGE}${listQuery(list)}`)
     .then((r): Promise<MediaPage> => (r.ok ? r.json() : r.json().catch(() => ({})).then((d: { detail?: unknown }) => {
       // a bad /regex/ (400): the strip says why instead of staying empty
       if (r.status === 400 && list !== ALL) { list.error = String(d.detail || 'Bad filter'); list.total = 0; if (list === SL) schedule('strip'); }

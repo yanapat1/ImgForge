@@ -2,7 +2,8 @@
 // Non-fatal problems use toast() instead.
 
 import { $, $req, esc, icon } from './dom.js';
-import { errMessage } from './api.js';
+import { apiFetch, errMessage } from './api.js';
+import { homeUrl } from './nav.js';
 import { toast } from './toast.js';
 
 export type ErrorKind = 'session' | 'network' | 'notfound' | 'server' | 'crash';
@@ -42,7 +43,7 @@ export function showError({ kind = 'crash', title, message, detail = '', retry }
   </div>`;
   document.body.appendChild(el);
   $req('err-retry').onclick = () => (retry ? retry() : location.reload());
-  $req('err-home').onclick = () => { location.href = './'; };
+  $req('err-home').onclick = () => { location.href = homeUrl(); };
   const copy = $('err-copy');
   if (copy) copy.onclick = () => navigator.clipboard?.writeText(`${title || t}\n${message || m || ''}\n${detail}`)
     .then(() => { copy.textContent = 'Copied'; }, () => {});
@@ -53,7 +54,7 @@ export function showError({ kind = 'crash', title, message, detail = '', retry }
 
 function pingUntilUp(wait: number): void {
   retryTimer = setTimeout(async () => {
-    try { if ((await fetch('api/status', { cache: 'no-store' })).ok) { location.reload(); return; } } catch (e) { /* still down */ }
+    try { if ((await apiFetch('api/status', { cache: 'no-store' })).ok) { location.reload(); return; } } catch (e) { /* still down */ }
     if ($('errpage')) pingUntilUp(Math.min(wait * 1.5, 15000));
   }, wait);
 }

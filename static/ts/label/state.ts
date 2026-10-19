@@ -123,6 +123,7 @@ export const L: LabelState = {
   editing: new Map(),       // id -> live Ann while a shape is dragged (drawn on the interaction layer only)
   loading: false,           // the image on screen is still loading: tools ignore input
   cursor: null,             // {nx, ny} pointer in normalised image coordinates, null when off the canvas
+  readOnly: false,          // my_role 'viewer' on this session: browse only (app.js sets it from the project)
 };
 
 // hold keys: active while pressed (bare keys only); the hotkey editor labels them "hold"

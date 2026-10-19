@@ -1,7 +1,7 @@
 // Background jobs: the progress bar under the header (polled), waiting on one job, the plot's wait overlay.
 
 import type { Job, JobsPayload } from '../types.js';
-import { getJSON } from './api.js';
+import { getJSON, isStatus } from './api.js';
 import { $req, fmtEta, sleep } from './dom.js';
 import { refreshStatus } from '../views/controls.js';
 
@@ -28,7 +28,10 @@ export async function pollJobs(): Promise<void> {
     if (active.length) delay = 600;
     if (prevActive && !active.length) void refreshStatus();   // something finished: update ✓ marks
     prevActive = active.length;
-  } catch (e) { /* server restarting */ }
+  } catch (e) {
+    if (isStatus(e, 401)) return;                // signed out: api() is taking the page to the sign-in page
+    /* server restarting */
+  }
   setTimeout(pollJobs, delay);
 }
 
@@ -57,7 +60,7 @@ function renderJobsBar(jobs: Job[], active: Job[]): void {
   }
 }
 
-/** Poll job `jid` every 500 ms until done (resolves to the job) or error (throws). */
+/** Poll job `jid` every 500 ms until done (resolves to the job) or error (throws; a 401 too, so it never loops). */
 export async function waitJob(jid: number | string, onProgress?: (j: Job) => void): Promise<Job> {
   for (;;) {
     const j = await getJSON<Job>(`api/jobs/${jid}`);

@@ -68,6 +68,8 @@ export interface LabelProject {
   tasks: LabelTask[];
   /** ids of the tasks whose linked model is activated in this server session */
   model_active?: string[];
+  /** my access to this session; 'viewer' = the page is read-only */
+  my_role?: 'owner' | 'labeler' | 'viewer';
   [k: string]: unknown;
 }
 
@@ -174,6 +176,8 @@ export interface LabelState {
   editing: Map<string, Ann>;
   loading: boolean;
   cursor: { nx: number; ny: number } | null;
+  /** a viewer of a shared session: browse only (no drawing, no status changes, no saves) */
+  readOnly: boolean;
 }
 
 // ------------------------------------------------------------------ canvas / tools

@@ -3,6 +3,7 @@
 
 import type { ColorScale } from '../types.js';
 import { $req } from './dom.js';
+import { pref, rememberPref } from './auth.js';
 import { S, meta } from './state.js';
 import { invalidateHover, renderPlot } from '../plot/render.js';
 import { renderSettings } from '../settings/dialog.js';
@@ -160,19 +161,35 @@ export function paletteName(): string { try { const p = localStorage.getItem('pa
 
 function resolveTheme(mode: ThemeMode): string { return mode === 'system' ? (darkQuery.matches ? 'dark' : 'light') : mode; }
 
+// the user's choice lives in their prefs (/api/me/prefs); localStorage is this browser's mirror for theme-boot's
+// first paint
 export function setTheme(mode: ThemeMode): void {
   try { localStorage.setItem('theme', mode); } catch (e) { /* private window: this page only */ }
+  rememberPref('theme', mode);
   applyTheme();
 }
 
 export function setPalette(id: string): void {
   try { localStorage.setItem('palette', id); } catch (e) { /* private window: this page only */ }
+  rememberPref('palette', id);
   applyTheme();
 }
 
 export function setLook(look: string): void {
   try { localStorage.setItem('look', look); } catch (e) { /* private window: this page only */ }
+  rememberPref('look', look);
   applyTheme();
+}
+
+/** After loadMe(): the user's saved theme / look / palette win over this browser's mirror (another device set them). */
+export function applyThemePrefs(): void {
+  const want: Array<[string, unknown]> = [['theme', pref('theme')], ['look', pref('look')], ['palette', pref('palette')]];
+  let changed = false;
+  for (const [k, v] of want) {
+    if (typeof v !== 'string' || !v) continue;
+    try { if (localStorage.getItem(k) !== v) { localStorage.setItem(k, v); changed = true; } } catch (e) { /* private window */ }
+  }
+  if (changed) applyTheme();
 }
 
 function applyTheme(): void {

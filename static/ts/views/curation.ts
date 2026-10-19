@@ -468,6 +468,8 @@ function onKey(e: KeyboardEvent): void {
   if (t && (t.closest('input, select, textarea, [contenteditable]') || t.closest('.modal:not(.hidden)'))) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const it = itemAt(C.active);
+  const viewer = document.documentElement.dataset['role'] === 'viewer';   // a viewer browses the issues, never fixes them
+  if (viewer && (e.key === 'f' || e.key === 'i' || e.key === 'u' || e.key === 'Enter')) return;
   if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setActive(C.active + 1); }
   else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setActive(C.active - 1); }
   else if ((e.key === 'f' || (e.key === 'Enter' && t?.id === 'cur-list')) && it && it.fixes.length && C.info?.writable && !C.showIgnored) {

@@ -3,9 +3,10 @@
 // (Markdown answers streamed from POST api/llm/chat as NDJSON, label-check verdict cards, report download, auto-tag
 // job progress) · composer (Enter sends, Shift+Enter new line, Stop, hold-to-talk mic).
 // Nothing here runs until the tab is first shown; every piece is drawn only when its feature is on (core/llm.js),
-// and a Settings change (window event `llm-state`) re-renders live. History: localStorage `ai-chat:<session>`.
+// and a Settings change (window event `llm-state`) re-renders live. History: localStorage `ai-chat:<session>:<user id>` (core/auth.ts userKey).
 
 import { api, errMessage, errText } from '../core/api.js';
+import { userKey } from '../core/auth.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { applyLLM, LLM, llmOn } from '../core/llm.js';
@@ -132,7 +133,7 @@ const selOn = (): boolean => llmOn('ask_selection') && S.sel.length > 0 && A.chi
 
 function chatKey(): string {
   const ds = S.status && S.status.dataset;
-  return `ai-chat:${(ds && ds.id) || 'default'}`;
+  return userKey(`ai-chat:${(ds && ds.id) || 'default'}`);
 }
 
 function save(): void {

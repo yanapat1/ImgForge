@@ -88,6 +88,12 @@
   /* inline icons for form controls (stroke colour = --text-muted) */
   --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aab4c2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
   --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314233a' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  /* avatars without a picture: initials on one of 8 colours picked from the user id (core/avatar.ts); white on each
+     is >= 5.5:1, so the same set works on every theme and palette */
+  --av-1: #2f5f9e; --av-2: #7a3fa0; --av-3: #a33b5c; --av-4: #9a4a12;
+  --av-5: #2e7350; --av-6: #1d6f7a; --av-7: #55589a; --av-8: #7d5a10;
+  --on-av: #ffffff;
+  --av-ring: var(--surface);    /* the gap between overlapping avatars */
   color-scheme: dark;
 }
 

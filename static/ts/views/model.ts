@@ -4,6 +4,7 @@
 // The per-label outcome is copied into S.P.m_status / m_pred / m_score so Explore can colour and sort by it.
 
 import { errMessage, errText, getJSON, postJSON } from '../core/api.js';
+import { userKey } from '../core/auth.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { pts, S } from '../core/state.js';
@@ -46,7 +47,7 @@ const cname = (c: number): string => clsName(c) ?? String(c);
 export async function loadModels(): Promise<void> {
   const r = await getJSON<ModelsPayload>('api/models');
   M.list = r.models;
-  const saved = store.get('dataviz.model');
+  const saved = store.get(userKey('dataviz.model'));
   if (!M.list.some((m) => m.id === M.id)) {
     const pick = M.list.find((m) => m.id === saved) || M.list.find((m) => m.predicted) || M.list[0];
     M.id = pick ? pick.id : null;
@@ -459,7 +460,7 @@ function bindModel(): void {
   const sel = $req<HTMLSelectElement>('m-model');
   sel.onchange = () => {
     M.id = sel.value;
-    store.set('dataviz.model', M.id);
+    store.set(userKey('dataviz.model'), M.id);
     const m = current();
     M.conf = m && m.conf ? m.conf : M.conf;
     M.ev = null;
@@ -525,7 +526,7 @@ export async function useModel(mid: string, conf: number | null = null): Promise
   if (M.id !== mid) {
     M.id = mid;
     M.ev = null;
-    store.set('dataviz.model', mid);
+    store.set(userKey('dataviz.model'), mid);
     $req<HTMLSelectElement>('m-model').value = mid;
   }
   if (!M.ev) await refreshEval();

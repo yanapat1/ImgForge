@@ -5,6 +5,7 @@ import { api, errText, getJSON, postJSON } from '../core/api.js';
 import { $, $req, esc, icon, syncRanges } from '../core/dom.js';
 import { setWheelMode, wheelModeHTML } from '../core/gesture.js';
 import { setBar, waitJob } from '../core/jobs.js';
+import { vizUrl } from '../core/nav.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
 import { updateMarks } from '../plot/marks.js';
 import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
@@ -15,6 +16,9 @@ import { LAB_ACTIONS, labCancelRec, labInput, labKeydown, loadLabSettings, rende
 import { saveSettings } from '../views/controls.js';
 import { loadModelsData, MODEL_ACTIONS, MODEL_CHANGES, renderModelsSec } from './models.js';
 import { LLM_ACTIONS, LLM_CHANGES, llmInput, loadLlmData, renderLlmSec } from './llm.js';
+import { ACCOUNT_ACTIONS, accFile, accInput, renderAccountSec } from './account.js';
+import { admInput, renderUsersSec, USERS_ACTIONS, USERS_CHANGES } from './users.js';
+import { isAdmin } from '../core/auth.js';
 
 // Datasets: local folders (read in place) and S3 / RustFS prefixes (stream or local cache), connections (S3, FTP,
 // SFTP, PostgreSQL, SQL Server), the labeling page's options + hotkeys, the AI assistant (LLM providers + feature
@@ -40,6 +44,7 @@ export async function openSettings(sec: SectionId = 'datasets', opts: OpenSettin
   const box = $req('settings');
   if (box.classList.contains('hidden')) settingsReturnFocus = document.activeElement;
   if (NEEDS_SESSION.has(sec) && !hasSession()) sec = 'labeling';
+  if (sec === 'users' && !isAdmin()) sec = 'account';
   $req('hover-tip').classList.add('hidden');
   box.classList.remove('hidden');
   SET.solo = !!opts.solo;
@@ -78,13 +83,14 @@ async function loadSettingsData(): Promise<void> {
 const RENDERERS: Record<SectionId, () => string> = {
   datasets: renderDatasetsSec, connections: renderConnsSec, labeling: renderLabelingSec, models: renderModelsSec, llm: renderLlmSec,
   appearance: () => renderAppearanceSec() + wheelModeHTML(), plot: renderPlotSec, workspace: renderWorkspaceSec,
+  account: renderAccountSec, users: renderUsersSec,
 };
 
 export function renderSettings(): void {
   const viz = hasSession();
   document.querySelectorAll<HTMLElement>('.snav').forEach((b) => {
     b.classList.toggle('active', b.dataset.sec === SET.sec);
-    b.classList.toggle('hidden', !viz && NEEDS_SESSION.has(b.dataset.sec ?? ''));
+    b.classList.toggle('hidden', (!viz && NEEDS_SESSION.has(b.dataset.sec ?? '')) || (b.dataset.needs === 'admin' && !isAdmin()));
   });
   const count = (id: string, n: number) => { const el = $(id); if (el) el.textContent = String(n || ''); };
   count('snav-nds', SET.datasets.length);
@@ -103,7 +109,7 @@ export function renderSettings(): void {
 // ---- actions
 // the visualizer screen of that session: boot() opens it on the server and shows its sync / index progress
 function openDataset(id: string): void {
-  location.href = `./?session=${encodeURIComponent(id)}`;
+  location.href = vizUrl(id);
 }
 
 // saved without opening: the Sessions home re-renders its cards; the full dialog goes back to its list
@@ -339,6 +345,8 @@ const SET_ACTIONS: Record<string, SetAction> = {
   ...MODEL_ACTIONS,
   ...LAB_ACTIONS,
   ...LLM_ACTIONS,
+  ...ACCOUNT_ACTIONS,
+  ...USERS_ACTIONS,
 };
 
 const SET_CHANGES: Record<string, SetChange> = {
@@ -350,6 +358,7 @@ const SET_CHANGES: Record<string, SetChange> = {
   'dist-toggle': (el) => { if (el instanceof HTMLInputElement) $req<HTMLInputElement>('show-dist').checked = el.checked; updateMarks(); saveSettings(); },
   ...MODEL_CHANGES,
   ...LLM_CHANGES,
+  ...USERS_CHANGES,
 };
 
 export function bindSettings(): void {
@@ -381,6 +390,8 @@ export function bindSettings(): void {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
     if (t.dataset.lab) { if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement) labInput(t, false); return; }
+    if (t instanceof HTMLInputElement && t.dataset.acc) { accInput(t); return; }
+    if (t instanceof HTMLInputElement && t.dataset.adm) { admInput(t); return; }
     if (isControl(t)) write(t);
     if (SET.sec === 'llm') llmInput(t);       // live step locks, capability guess, token budget
   });
@@ -388,6 +399,8 @@ export function bindSettings(): void {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
     if (t.dataset.lab) { if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement) labInput(t, true); return; }
+    if (t instanceof HTMLInputElement && t.dataset.accFile) { accFile(t); return; }
+    if (t instanceof HTMLInputElement && t.dataset.adm) { admInput(t); return; }
     if (isControl(t)) write(t);
     const act = t.dataset.actChange;
     const fn = act ? SET_CHANGES[act] : undefined;

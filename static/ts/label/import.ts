@@ -7,7 +7,7 @@
 // API: POST api/label/annotations/upload | preview, POST api/label/projects/{pid}/import-annotations
 // (dataviz/server/routes/label_import.py). Every interpolated value goes through esc().
 
-import { errText, getJSON, postJSON } from '../core/api.js';
+import { apiFetch, errText, getJSON, postJSON } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
 import { waitJob } from '../core/jobs.js';
 import type { ConnectionsPayload } from '../types-settings.js';
@@ -146,7 +146,7 @@ async function uploadFiles(I: ImportState, files: Iterable<File>, render: () => 
   const fd = new FormData();
   for (const f of list) { fd.append('files', f, f.name); fd.append('rel_paths', f.webkitRelativePath || f.name); }
   try {
-    const r = await fetch('api/label/annotations/upload', { method: 'POST', body: fd });
+    const r = await apiFetch('api/label/annotations/upload', { method: 'POST', body: fd });
     const d: { detail?: unknown } & Partial<ImportUpload> = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : `upload: ${r.status}`);
     I.upload = d as ImportUpload;

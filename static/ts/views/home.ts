@@ -1,25 +1,31 @@
-// Sessions home: the first page. Two tabs (an ARIA tablist, the last one remembered in localStorage 'home-tab'),
-// each its own grid, newest first, with its own "New … session" tile, empty state and load error line:
+// Sessions home: the first page. Two tabs (an ARIA tablist, the last one remembered in the user's prefs 'homeTab'),
+// each its own grid, the ones I opened last first, with its own "New … session" tile, empty state and load error line:
 // - Visualize: a saved dataset (local folder, S3 prefix or a labeling task read live) opens the visualizer on it
-//   (./?session=<id>); new / edit reuse the Settings dataset forms in solo mode; the open one is pinned first;
-// - Label: a labeling session (GET api/label/projects) opens the labeling page (./?label=<pid>); new / edit open
+//   (s/<id>/, core/nav.ts vizUrl); new / edit reuse the Settings dataset forms in solo mode;
+// - Label: a labeling session (GET api/label/projects) opens the labeling page (?label=<pid>); new / edit open
 //   the wizard (views/label-new.js, loaded on demand), export opens label/export.js; its ⋯ menu (#home-cardmenu)
 //   has Visualize a task…, Duplicate…, Manage classes… (label/session-actions.js, loaded on demand) and Re-export.
 // Find: a name search (#home-search) and a tag filter (#home-tagbar, AND) over the current tab; each session has up to
 // 20 tags of its own (under its name, edited in the #home-tagedit popover: PUT api/datasets/{id}/tags or
 // PATCH api/label/projects/{pid}).
+// Whose: a scope filter (#home-scope: All · Mine · Shared with me · Global · Everyone's for admins, prefs 'homeScope')
+// passed to both lists as ?scope=. Each card shows its owner, the people it is shared with (views/share.ts edits
+// them), a lock (private) or globe (global) badge, and only the actions my role on it allows (viewer < labeler < owner).
 // One innerHTML render per change, one delegated click listener on #home-body; no Plotly and no job polling here.
 
 import { api, errText, getJSON, postJSON } from '../core/api.js';
 import { toast } from '../core/toast.js';
-import { $, $req, esc, icon } from '../core/dom.js';
+import { $, $req, esc, icon, ICONS } from '../core/dom.js';
+import { isAdmin, pref, rememberPref } from '../core/auth.js';
+import { avatarStackHTML, ownerChipHTML } from '../core/avatar.js';
+import { labelUrl, vizUrl } from '../core/nav.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { TASK_TYPES } from '../label/state.js';
 import type { TaskTypeInfo } from '../label/state.js';
 import { VIZ_TASKS } from '../settings/forms.js';
 import { openSettings } from '../settings/dialog.js';
-import type { Status } from '../types.js';
-import type { HomeExportTarget, HomeProject, HomeSession, HomeTask, WizardOpts } from '../types-home.js';
+import type { Role, Status } from '../types.js';
+import type { HomeExportTarget, HomeProject, HomeScope, HomeSession, HomeTask, SharedFields, WizardOpts } from '../types-home.js';
 
 // errs: what failed to load ({ds, lp}); the other list still shows
 // tab: 'viz' | 'label', picked on the first render (the remembered one, else the kind that has sessions)
@@ -32,16 +38,28 @@ interface HomeState {
   palette: string[] | null; paletteLight: string[] | null;
   opening: boolean; bound: boolean; tab: TabId | null;
   menuFrom: HTMLElement | null; flash: string | null; q: string; tagSel: Set<string>; raf: number; te: TagEdit | null;
+  scope: HomeScope; loadSeq: number;
 }
 const H: HomeState = { sessions: [], projects: [], errs: { ds: null, lp: null }, palette: null, paletteLight: null, opening: false, bound: false, tab: null,
-  menuFrom: null, flash: null, q: '', tagSel: new Set(), raf: 0, te: null };
+  menuFrom: null, flash: null, q: '', tagSel: new Set(), raf: 0, te: null, scope: 'all', loadSeq: 0 };
 // q: the search text (lower-cased); tagSel: the selected filter tags (lower-cased); te: the open tag editor
 const TABS: readonly TabId[] = ['viz', 'label'];
 const isTab = (v: unknown): v is TabId => v === 'viz' || v === 'label';
 type Item = { d: HomeSession; p?: undefined; pid?: undefined; t: number } | { p: HomeProject; pid: string; d?: undefined; t: number };
 const strList = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.map(String) : null);
 const dataOf = (el: Element, attr: 'id' | 'pid'): string => el.closest<HTMLElement>(`[data-${attr}]`)?.dataset[attr] ?? '';
-const TAB_KEY = 'home-tab';
+const TAB_PREF = 'homeTab', SCOPE_PREF = 'homeScope';
+const SCOPES: ReadonlyArray<[HomeScope, string, string]> = [
+  ['all', 'All', 'Every session I can open'], ['mine', 'Mine', 'Sessions I created'],
+  ['shared', 'Shared with me', 'Sessions someone shared with me'], ['global', 'Global', 'Sessions every user can open'],
+  ['everyone', 'Everyone\'s', 'Every session on the server, private ones too (administrators)'],
+];
+const isScope = (v: unknown): v is HomeScope => SCOPES.some(([k]) => k === v) && (v !== 'everyone' || isAdmin());
+
+// ---- my role on a session: what the card offers (the server checks every request again)
+const RANK: Record<Role, number> = { viewer: 1, labeler: 2, owner: 3 };
+const roleOf = (x: SharedFields): Role => x.my_role || 'owner';     // no role in the row: an older server, single user
+const can = (x: SharedFields, need: Role): boolean => RANK[roleOf(x)] >= RANK[need];
 const NEW_TEXT: Record<TabId, string> = { viz: 'New visualize session', label: 'New label session' };
 const MAX_CHIPS = 5;
 const MAX_TAGS = 20, TAG_LEN = 32;               // the server's rules (dataviz/core/names.py clean_tags)
@@ -70,6 +88,29 @@ function tagsHTML(tags: string[]): string {
 
 const fmt = (n: unknown): string => Number(n).toLocaleString();
 
+// the people of a session (owner chip, member stack) and when I opened it, at the start of the card's footer
+function peopleHTML(x: SharedFields, when: string): string {
+  const members = (x.members || []).filter((m) => !x.owner || m.id !== x.owner.id);
+  return `<span class="sc-people">${ownerChipHTML(x.owner)}${avatarStackHTML(members)}` +
+    `${when ? `<span class="sc-when">${esc(when)}</span>` : ''}</span>`;
+}
+
+// private (lock) or global (globe): next to the source badge on the cover
+function visBadge(x: SharedFields): string {
+  if (!x.visibility) return '';
+  const glob = x.visibility === 'global';
+  const n = (x.members || []).length;
+  const tip = glob ? 'Global: every user can open it' : n ? `Private: you and ${n} ${n === 1 ? 'person' : 'people'}` : 'Private: only you';
+  return `<span class="sc-vis${glob ? ' glob' : ''}" title="${esc(tip)}" role="img" aria-label="${esc(tip)}">${icon(glob ? 'globe' : 'lock')}</span>`;
+}
+
+const shareBtn = (x: SharedFields & { name: string }, kind: 'viz' | 'label'): string => (can(x, 'owner')
+  ? `<button class="icon-btn ghost" data-act="${kind === 'viz' ? 'share' : 'lshare'}" aria-haspopup="dialog" aria-label="Share ${esc(x.name)}" title="Share: who can open it, who can label">${icon('share')}</button>` : '');
+
+function openedText(x: SharedFields, fallback: string): string {
+  return x.opened_at ? `opened ${timeAgo(x.opened_at)}` : fallback;
+}
+
 // workspace.json times are "YYYY-MM-DD HH:MM:SS" (server local time); `created` is epoch seconds
 function timeAgo(t: string | number): string {
   const ms = typeof t === 'number' ? t * 1000 : Date.parse(String(t).replace(' ', 'T'));
@@ -96,7 +137,7 @@ const kindIcon = (d: HomeSession): string => KIND_ICON[d.kind] || 'folder';
 function coverHTML(d: HomeSession): string {
   const st = d.stats || {};
   const tag = `<span class="sc-src${d.kind === 'labeling' ? ' lbl' : ''}">${icon(kindIcon(d))}${esc(sourceLabel(d))}</span>` +
-    (d.active ? `<span class="sc-live">${icon('check')}Open now</span>` : '');
+    (d.loaded ? `<span class="sc-live" title="Loaded on the server: it opens at once">${icon('check')}Loaded</span>` : '') + visBadge(d);
   if (!d.cover) {
     return `<div class="sc-cover empty">${tag}<div class="sc-glyph">${icon(d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : 'db')}` +
       '<span>Not indexed yet: the first open builds its crops</span></div></div>';
@@ -125,11 +166,11 @@ function cardHTML(d: HomeSession): string {
     `<span class="sc-chip"><i style="background:${esc(classColor(i))}"></i>${esc(c)}</span>`).join('') +
     (more > 0 ? `<span class="sc-chip more">+${more}</span>` : '');
   const problem = d.error || (d.exists === false ? 'folder not found' : '');
-  const when = st.last_opened ? `opened ${timeAgo(st.last_opened)}` : d.created ? `created ${timeAgo(d.created)}` : '';
+  const when = openedText(d, d.created ? `created ${timeAgo(d.created)}` : '');
   // a labeling-backed session names its labeling session + task (the label:// uri means nothing to people)
   const lb = d.kind === 'labeling' ? d.labeling || {} : null;
   const where = lb ? (lb.project ? `${lb.project} › ${lb.task}${d.only_done ? ' · finished images only' : ''}` : 'labeling session') : d.uri || '';
-  return `<article class="session-card${d.active ? ' active' : ''}${problem ? ' broken' : ''}" data-id="${esc(d.id)}">` +
+  return `<article class="session-card${d.loaded ? ' active' : ''}${problem ? ' broken' : ''}" data-id="${esc(d.id)}" data-role="${roleOf(d)}">` +
     coverHTML(d) +
     '<div class="sc-body">' +
     `<h3 class="sc-title"><button class="sc-open" data-act="open" title="Open ${esc(d.name)}">${esc(d.name)}</button></h3>` +
@@ -139,11 +180,12 @@ function cardHTML(d: HomeSession): string {
     (chips ? `<div class="sc-chips">${chips}</div>` : '') +
     '</div>' +
     '<footer class="sc-foot">' +
-    (problem ? `<span class="sc-problem">${icon('alert')}${esc(problem)}</span>` : `<span class="sc-when">${esc(when)}</span>`) +
+    (problem ? `<span class="sc-problem">${icon('alert')}${esc(problem)}</span>` : '') + peopleHTML(d, problem ? '' : when) +
     '<span class="grow"></span>' +
     (lb && lb.project ? `<button class="icon-btn ghost" data-act="tolabel" aria-label="Open the labeling session of ${esc(d.name)}" title="Open the labeling session ${esc(lb.project)}">${icon('tag')}</button>` : '') +
-    editBtn('tags', d, 'Edit tags or open the full edit') +
-    `<button class="icon-btn ghost danger" data-act="remove" aria-label="Remove ${esc(d.name)}" title="Remove the session (no files are deleted)">${icon('trash')}</button>` +
+    shareBtn(d, 'viz') +
+    (can(d, 'owner') ? editBtn('tags', d, 'Edit tags or open the full edit') +
+      `<button class="icon-btn ghost danger" data-act="remove" aria-label="Remove ${esc(d.name)}" title="Remove the session (no files are deleted)">${icon('trash')}</button>` : '') +
     '</footer><div class="sc-busy" aria-hidden="true"><span class="spin"></span>Opening…</div></article>';
 }
 
@@ -207,7 +249,7 @@ function checklistHTML(p: HomeProject): string {
 function labelCardHTML(p: HomeProject): string {
   const src = lpSource(p);
   const cover = p.cover || [];
-  const badge = `<span class="sc-src lbl">${icon('tag')}Labeling</span><span class="sc-live lp-src">${icon(src.ico)}${esc(src.label)}</span>`;
+  const badge = `<span class="sc-src lbl">${icon('tag')}Labeling</span><span class="sc-live lp-src">${icon(src.ico)}${esc(src.label)}</span>${visBadge(p)}`;
   let mosaic: string;
   if (!cover.length) {
     mosaic = `<div class="sc-cover empty">${badge}<div class="sc-glyph">${icon('image')}<span>No images yet: open it to import some</span></div></div>`;
@@ -222,7 +264,7 @@ function labelCardHTML(p: HomeProject): string {
   }
   const tasks = p.tasks || [];
   const more = tasks.length - TASK_MAX;
-  return `<article class="session-card label-card${H.flash === p.id ? ' flash' : ''}" data-pid="${esc(p.id)}">${mosaic}<div class="sc-body">` +
+  return `<article class="session-card label-card${H.flash === p.id ? ' flash' : ''}" data-pid="${esc(p.id)}" data-role="${roleOf(p)}">${mosaic}<div class="sc-body">` +
     `<h3 class="sc-title"><button class="sc-open" data-act="lopen" title="Open ${esc(p.name)}">${esc(p.name)}</button></h3>` +
     tagsHTML(tagsOf(p)) +
     (src.uri ? `<div class="sc-uri" title="${esc(src.uri)}"><bdi>${esc(src.uri)}</bdi></div>` : `<div class="sc-uri plain">${esc(src.plain ?? '')}</div>`) +
@@ -231,10 +273,11 @@ function labelCardHTML(p: HomeProject): string {
       (more > 0 ? `<span class="lp-more">+${more} more task${more === 1 ? '' : 's'}</span>` : '') + '</div>' : '') +
     checklistHTML(p) +
     '</div><footer class="sc-foot">' +
-    `<span class="sc-when">${p.updated ? `updated ${esc(timeAgo(p.updated))}` : ''}</span><span class="grow"></span>` +
-    `<button class="icon-btn ghost" data-act="lexport" aria-label="Export ${esc(p.name)}" title="Export the labels">${icon('download')}</button>` +
-    editBtn('ltags', p, 'Edit tags, or open the full edit to rename and add tasks or classes') +
-    `<button class="icon-btn ghost danger" data-act="lremove" aria-label="Remove ${esc(p.name)}" title="Remove the labeling session">${icon('trash')}</button>` +
+    peopleHTML(p, openedText(p, p.updated ? `updated ${timeAgo(p.updated)}` : '')) + '<span class="grow"></span>' +
+    (can(p, 'labeler') ? `<button class="icon-btn ghost" data-act="lexport" aria-label="Export ${esc(p.name)}" title="Export the labels">${icon('download')}</button>` : '') +
+    shareBtn(p, 'label') +
+    (can(p, 'owner') ? editBtn('ltags', p, 'Edit tags, or open the full edit to rename and add tasks or classes') +
+      `<button class="icon-btn ghost danger" data-act="lremove" aria-label="Remove ${esc(p.name)}" title="Remove the labeling session">${icon('trash')}</button>` : '') +
     `<button class="icon-btn ghost lp-more" data-act="lmore" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${esc(p.name)}" title="More: duplicate, manage classes, re-export"><span aria-hidden="true">⋯</span></button>` +
     '</footer><div class="sc-busy" aria-hidden="true"><span class="spin"></span>Opening…</div></article>';
 }
@@ -243,7 +286,7 @@ function labelCardHTML(p: HomeProject): string {
 function emptyHTML(): string {
   const step = (n: number, title: string, text: string): string => `<li><span class="es-n num">${n}</span><div><b>${title}</b><span>${text}</span></div></li>`;
   return '<div class="home-empty">' +
-    `<div class="es-mark"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="static/assets/icons.svg#i-brand"/></svg></div>` +
+    `<div class="es-mark"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg></div>` +
     '<h2>No sessions yet</h2>' +
     '<p class="muted">Visualize a YOLO dataset (a folder on this machine or an S3 / RustFS prefix with images/ and labels/), or label a folder of images: boxes, polygons, keypoints or tags, one or more tasks at once.</p>' +
     `<div class="es-actions"><button class="primary big" data-act="new-viz">${icon('scatter')}Visualize a dataset</button>` +
@@ -255,17 +298,18 @@ function emptyHTML(): string {
     '</ol></div>';
 }
 
-// most recently used first; the open visualize session first of all
+// the ones I opened last first (opened_at), then the most recently changed
 function stamp(x: Item): number {
   if (x.p) return (x.p.updated || x.p.created || 0) * 1000;
   const st = x.d.stats || {};
   const t = st.last_opened ? Date.parse(String(st.last_opened).replace(' ', 'T')) : NaN;
   return Number.isFinite(t) ? t : (x.d.created || 0) * 1000;
 }
+const openedAt = (x: Item): number => (x.p ? x.p.opened_at : x.d.opened_at) || 0;
 
 function sorted(list: Item[]): Item[] {
   for (const x of list) x.t = stamp(x);
-  return list.sort((a, b) => ((b.d && b.d.active) ? 1 : 0) - ((a.d && a.d.active) ? 1 : 0) || b.t - a.t);
+  return list.sort((a, b) => openedAt(b) - openedAt(a) || b.t - a.t);
 }
 
 interface TabDef {
@@ -300,7 +344,11 @@ function errLine(key: 'ds' | 'lp', what: string): string {
 function panelHTML(t: TabId, list: Item[], total: number): string {
   const T = TAB[t];
   const err = errLine(T.err, T.what);
+  const scoped = H.scope !== 'all' ? SCOPES.find(([k]) => k === H.scope) : undefined;
   const empty = list.length || err ? ''
+    : !total && scoped ? `<div class="tab-empty filtered">${icon(H.scope === 'global' ? 'globe' : 'users')}<div><b>Nothing in “${esc(scoped[1])}”</b>` +
+      `<span class="muted">No ${t === 'viz' ? 'visualize' : 'label'} sessions here: ${esc(scoped[2].toLowerCase())}.</span></div>` +
+      `<button data-act="scope-all">${icon('x')}Show all</button></div>`
     : total ? `<div class="tab-empty filtered">${icon('search')}<div><b>No sessions match</b><span class="muted">` +
       `None of the ${fmt(total)} ${t === 'viz' ? 'visualize' : 'label'} session${total === 1 ? '' : 's'} ${filterText()}.</span></div>` +
       `<button data-act="clear-filter">${icon('x')}Clear filters</button></div>`
@@ -355,15 +403,14 @@ function renderPanels(): void {
 }
 
 function readTab(): TabId | null {
-  try { const t = localStorage.getItem(TAB_KEY); return isTab(t) ? t : null; } catch (e) { return null; }
+  const t = pref(TAB_PREF);
+  return isTab(t) ? t : null;
 }
 
 // remember: a choice of the user (a click / arrow key), not the first render's pick
 function setTab(t: TabId, focus: boolean, remember: boolean): void {
   H.tab = t;
-  if (remember) {
-    try { localStorage.setItem(TAB_KEY, t); } catch (e) { /* private window: the tab is just not remembered */ }
-  }
+  if (remember) rememberPref(TAB_PREF, t);
   for (const k of TABS) {
     const on = k === t;
     const b = $req(`home-tab-${k}`);
@@ -381,7 +428,7 @@ function setTab(t: TabId, focus: boolean, remember: boolean): void {
 function render(): void {
   const lists: Record<TabId, Item[]> = { viz: TAB.viz.items(), label: TAB.label.items() };
   const failed = !!(H.errs.ds || H.errs.lp);
-  const none = !lists.viz.length && !lists.label.length && !failed;
+  const none = !lists.viz.length && !lists.label.length && !failed && H.scope === 'all';
   $req('home-head').classList.toggle('hidden', none);
   $req('home-tabs').classList.toggle('hidden', none);
   $req('home-filter').classList.toggle('hidden', none);
@@ -403,9 +450,11 @@ function render(): void {
   setTab(H.tab, false, false);
 }
 
+const scopeQ = (): string => `?scope=${encodeURIComponent(H.scope)}`;
+
 async function fetchSessions(): Promise<void> {
   try {
-    const { datasets } = await getJSON<{ datasets: HomeSession[] }>('api/datasets');
+    const { datasets } = await getJSON<{ datasets: HomeSession[] }>(`api/datasets${scopeQ()}`);
     H.sessions = datasets;
     H.errs.ds = null;
   } catch (e) { H.errs.ds = errText(e); }
@@ -413,15 +462,34 @@ async function fetchSessions(): Promise<void> {
 
 async function fetchProjects(): Promise<void> {
   try {
-    const { projects } = await getJSON<{ projects: HomeProject[] }>('api/label/projects');
+    const { projects } = await getJSON<{ projects: HomeProject[] }>(`api/label/projects${scopeQ()}`);
     H.projects = projects;
     H.errs.lp = null;
   } catch (e) { H.errs.lp = errText(e); }
 }
 
+// a newer load (scope switched meanwhile) wins: an older answer is not painted over it
 async function load(): Promise<void> {
+  const seq = ++H.loadSeq;
   await Promise.all([fetchSessions(), fetchProjects()]);
-  render();
+  if (seq === H.loadSeq) render();
+}
+
+// ---- the scope filter (#home-scope, a radiogroup in #home-filter)
+function renderScope(): void {
+  const box = $req('home-scope');
+  box.innerHTML = SCOPES.filter(([k]) => k !== 'everyone' || isAdmin()).map(([k, label, tip]) =>
+    `<button type="button" role="radio" data-scope="${k}" aria-checked="${H.scope === k}" tabindex="${H.scope === k ? 0 : -1}" ` +
+    `class="${H.scope === k ? 'view-btn active' : 'view-btn'}" title="${esc(tip)}">${esc(label)}</button>`).join('');
+}
+
+function setScope(s: HomeScope, focus: boolean): void {
+  if (s === H.scope) return;
+  H.scope = s;
+  rememberPref(SCOPE_PREF, s);
+  renderScope();
+  if (focus) $req('home-scope').querySelector<HTMLElement>(`[data-scope="${s}"]`)?.focus();
+  void load();
 }
 
 function open(sel: string, url: string): void {
@@ -433,8 +501,8 @@ function open(sel: string, url: string): void {
   location.href = url;
 }
 
-const openSession = (id: string): void => open(`.session-card[data-id="${CSS.escape(id)}"]`, `./?session=${encodeURIComponent(id)}`);
-const openProject = (pid: string): void => open(`.session-card[data-pid="${CSS.escape(pid)}"]`, `./?label=${encodeURIComponent(pid)}`);
+const openSession = (id: string): void => open(`.session-card[data-id="${CSS.escape(id)}"]`, vizUrl(id));
+const openProject = (pid: string): void => open(`.session-card[data-pid="${CSS.escape(pid)}"]`, labelUrl(pid));
 
 async function remove(id: string): Promise<void> {
   const d = H.sessions.find((x) => x.id === id);
@@ -543,13 +611,16 @@ function openCardMenu(from: HTMLElement): void {
   const reItem = (re: string): string => `<button role="menuitem" data-m="reexport" title="${esc(`Export again with the last choices to ${re}`)}">${icon('refresh')}<span class="nm">Re-export to ${esc(re)}</span></button>`;
   menuEl.dataset['pid'] = pid;
   const boxTasks = (p.tasks || []).filter((t) => VIZ_TASKS.has(t.task_type)).length;
+  const lab = can(p, 'labeler'), own = can(p, 'owner');
   menuEl.innerHTML = (boxTasks ? `<button role="menuitem" data-m="viz" title="Explore the boxes of a task as a map: a visualize session reading this labeling session live">${icon('scatter')}Visualize a task…</button>` : '') +
-    `<button role="menuitem" data-m="dup">${icon('layers')}Duplicate…</button>` +
-    `<button role="menuitem" data-m="classes">${icon('tag')}Manage classes…</button>` +
-    `<button role="menuitem" data-m="import">${icon('upload')}Import annotations…</button>` +
-    (p.review ? `<button role="menuitem" data-m="review" title="Mark every done, not yet reviewed image as reviewed (shown apart from images you review one by one)">${icon('check')}Review all…</button>` : '') +
-    (p.export_default !== undefined && lastTargetText(p) ? reItem(lastTargetText(p)) : '');
-  if (p.export_default === undefined) {            // the list rows carry no export_default: read it once
+    (own ? `<button role="menuitem" data-m="share">${icon('share')}Share…</button>` : '') +
+    (lab ? `<button role="menuitem" data-m="dup">${icon('layers')}Duplicate…</button>` : '') +
+    (own ? `<button role="menuitem" data-m="classes">${icon('tag')}Manage classes…</button>` : '') +
+    (lab ? `<button role="menuitem" data-m="import">${icon('upload')}Import annotations…</button>` : '') +
+    (lab && p.review ? `<button role="menuitem" data-m="review" title="Mark every done, not yet reviewed image as reviewed (shown apart from images you review one by one)">${icon('check')}Review all…</button>` : '') +
+    (own && p.export_default !== undefined && lastTargetText(p) ? reItem(lastTargetText(p)) : '');
+  if (!menuEl.querySelector('[role=menuitem]')) menuEl.innerHTML = '<div class="lb-menu-head muted">View only: nothing more to do here</div>';
+  if (p.export_default === undefined && own) {            // the list rows carry no export_default: read it once
     getJSON<Pick<HomeProject, 'export_default'>>(`api/label/projects/${encodeURIComponent(pid)}`).then((full) => {
       p.export_default = full.export_default || null;
       const re = lastTargetText(p);
@@ -835,8 +906,13 @@ async function reviewAll(pid: string): Promise<void> {
   } catch (e) { failLine('Review all', e); } finally { reviewing = false; }
 }
 
+// the share dialog (views/share.ts, loaded on demand); both kinds of cards: the ids are session ids
+const share = (id: string, name: string): Promise<void> => import('./share.js').then((m) => m.openShare({ id, name }))
+  .catch((e: unknown) => failLine('the share dialog', e));
+
 const CARD_MENU: Record<string, (pid: string) => unknown> = {
   viz: visualizeTask,
+  share: (pid) => share(pid, H.projects.find((x) => x.id === pid)?.name ?? ''),
   dup: (pid) => actions().then((m) => m.openDuplicate({ pid, project: H.projects.find((x) => x.id === pid) ?? null, onDone: showNewCard }))
     .catch((e: unknown) => failLine('the duplicate dialog', e)),
   classes: (pid) => actions().then((m) => m.openManageClasses({ pid, onDone: () => load() }))
@@ -866,12 +942,15 @@ const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
   lmore: (b) => { if (H.menuFrom === b) closeCardMenu(true); else openCardMenu(b); },
   tolabel: (b) => {
     const d = H.sessions.find((x) => x.id === dataOf(b, 'id'));
-    if (d && d.project_id) open(`.session-card[data-id="${CSS.escape(d.id)}"]`, `./?label=${encodeURIComponent(d.project_id)}`);
+    if (d && d.project_id) open(`.session-card[data-id="${CSS.escape(d.id)}"]`, labelUrl(d.project_id));
   },
   new: () => (H.tab === 'label' ? wizard({ names: labelNames(null) }) : openSettings('datasets', { solo: true, view: 'add' })),
   'new-viz': () => openSettings('datasets', { solo: true, view: 'add' }),
   'new-label': () => wizard({ names: labelNames(null) }),
   reload: () => load(),
+  share: (b) => { const id = dataOf(b, 'id'); return share(id, H.sessions.find((x) => x.id === id)?.name ?? ''); },
+  lshare: (b) => { const pid = dataOf(b, 'pid'); return share(pid, H.projects.find((x) => x.id === pid)?.name ?? ''); },
+  'scope-all': () => setScope('all', false),
 };
 
 function bind(): void {
@@ -896,6 +975,22 @@ function bind(): void {
   body.addEventListener('click', onClick);
   $req('home-status').addEventListener('click', onClick);
   $req('home-new').addEventListener('click', onClick);
+  // the scope radiogroup: click, or arrows / Home / End (roving tabindex, the choice follows the focus)
+  const scope = $req('home-scope');
+  scope.addEventListener('click', (e) => {
+    const b = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-scope]') : null;
+    if (b && isScope(b.dataset['scope'])) setScope(b.dataset['scope'], false);
+  });
+  scope.addEventListener('keydown', (e) => {
+    const keys = [...scope.querySelectorAll<HTMLElement>('[data-scope]')].map((b) => b.dataset['scope']).filter(isScope);
+    const i = keys.indexOf(H.scope);
+    const moves: Record<string, number> = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: keys.length - 1 };
+    const to = moves[e.key];
+    if (to === undefined || !keys.length) return;
+    e.preventDefault();
+    const next = keys[(to + keys.length) % keys.length];
+    if (next) setScope(next, true);
+  });
   // the tablist: arrows / Home / End move between the two tabs and show them (automatic activation)
   $req('home-tabs').addEventListener('keydown', (e) => {
     const i = H.tab ? TABS.indexOf(H.tab) : -1;
@@ -944,6 +1039,9 @@ function bind(): void {
 
 export async function renderHome(): Promise<void> {
   document.title = 'Sessions · Dataset Visualizer';
+  const saved = pref(SCOPE_PREF);
+  if (isScope(saved)) H.scope = saved;
+  renderScope();
   bind();
   // class colours for the chips: the same palettes as the plot (config.yaml ui.palette / palette_light)
   const status = getJSON<Status>('api/status').then((st) => {

@@ -194,3 +194,72 @@
 /* text search (Explore controls): wide enough for a short sentence, shrinks on small screens */
 .text-q { width: 26ch; max-width: 100%; }
 .cmp-chips { margin: 4px 0 8px; }
+
+/* ---------------------------------------------------------------- avatars (core/avatar.ts) */
+.avatar { --av-size: 24px; position: relative; display: inline-grid; place-items: center; flex: none; width: var(--av-size); height: var(--av-size);
+  border-radius: 50%; overflow: hidden; background: var(--surface-3); color: var(--on-av); font: 700 calc(var(--av-size) * .4) / 1 var(--font);
+  letter-spacing: .02em; user-select: none; vertical-align: middle; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar.av-c1 { background: var(--av-1); } .avatar.av-c2 { background: var(--av-2); } .avatar.av-c3 { background: var(--av-3); }
+.avatar.av-c4 { background: var(--av-4); } .avatar.av-c5 { background: var(--av-5); } .avatar.av-c6 { background: var(--av-6); }
+.avatar.av-c7 { background: var(--av-7); } .avatar.av-c8 { background: var(--av-8); }
+.avatar.av-more { background: var(--surface-3); color: var(--text-muted); font-size: calc(var(--av-size) * .38); font-family: var(--mono); }
+/* overlapping, each one ringed in the card colour so the edges read */
+.avatar-stack { display: inline-flex; align-items: center; padding-left: 5px; }
+.avatar-stack .avatar { margin-left: -5px; box-shadow: 0 0 0 2px var(--av-ring); }
+.owner-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 140px; font-size: var(--fs-xs); color: var(--text-muted); }
+.owner-chip .oc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- user menu (views/usermenu.ts) */
+button.user-btn { width: 34px; height: 34px; padding: 0; border-radius: 50%; justify-content: center; }
+button.user-btn .avatar { box-shadow: 0 0 0 2px var(--border); transition: box-shadow var(--t-fast) var(--ease); }
+button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="true"] .avatar { box-shadow: 0 0 0 2px var(--accent); }
+.activity-bar .act-user { margin-top: auto; }
+.activity-bar .act-user:not(.hidden) + .act-bottom { margin-top: 0; }
+.activity-bar .act-user .avatar { box-shadow: 0 0 0 2px var(--border); }
+.activity-bar .act-user[aria-expanded="true"] .avatar { box-shadow: 0 0 0 2px var(--accent); }
+.user-menu { min-width: 230px; max-width: min(320px, calc(100vw - 16px)); }
+.um-head { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s2) var(--s3); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.um-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.um-who b, .um-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.um-who span { font-size: var(--fs-xs); }
+.um-admin { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--accent-text); }
+.um-admin .ico { width: 13px; height: 13px; color: var(--accent); }
+.um-sep { height: 1px; margin: 4px 0; background: var(--border); }
+
+/* ---------------------------------------------------------------- small dialog (views/dialog.ts) */
+.ui-dlg-wrap { z-index: calc(var(--z-modal) + 10); }
+.ui-dlg { width: min(460px, 100%); max-height: 100%; overflow-y: auto; padding: var(--s4) var(--s5) var(--s5); display: flex; flex-direction: column;
+  gap: var(--s3); box-shadow: var(--shadow-3); outline: none; }
+.ui-dlg.wide { width: min(560px, 100%); }
+.ui-dlg-head { display: flex; align-items: center; gap: var(--s2); }
+.ui-dlg-head h3 { flex: 1; min-width: 0; font-size: var(--fs-lg); overflow-wrap: anywhere; }
+.ui-dlg-body { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.ui-dlg-body p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; }
+.ui-dlg-body .check { white-space: normal; align-items: flex-start; }
+
+/* ---------------------------------------------------------------- share dialog (views/share.ts) */
+.share { display: flex; flex-direction: column; gap: var(--s2); }
+.share-vis > button { flex: 1; justify-content: center; }
+.share-vis { display: flex; width: 100%; }
+.share-vis-note { min-height: 1.5em; }
+.share-h { margin: var(--s2) 0 0; font-size: var(--fs-sm); color: var(--text-muted); font-weight: 600; }
+.share-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.share-row { display: flex; align-items: center; gap: var(--s2); padding: 5px var(--s2); border-radius: var(--r); }
+.share-row:hover { background: var(--surface-3); }
+.share-who { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: var(--fs-sm); }
+.share-who b, .share-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-who span { font-size: var(--fs-xs); }
+.share-role-fixed { font-size: var(--fs-xs); color: var(--text-faint); padding: 0 var(--s3); }
+.share-row .danger:hover:not(:disabled) .ico { color: var(--danger); }
+.share-search { position: relative; }
+.share-q-wrap { position: relative; display: block; }
+.share-q-wrap .ico { position: absolute; left: 10px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--text-faint); pointer-events: none; }
+.share-q-wrap input { padding-left: 32px !important; }
+.share-results { position: absolute; left: 0; right: 0; top: 100%; margin: 4px 0 0; padding: 4px; list-style: none; z-index: 2; max-height: 220px; overflow-y: auto; }
+.share-results li { display: flex; align-items: center; gap: var(--s2); padding: 5px var(--s2); border-radius: var(--r-sm); font-size: var(--fs-sm); cursor: pointer; }
+.share-results li b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-results li.on, .share-results li[role=option]:hover { background: var(--accent-soft); }
+.share-results .share-res-note { cursor: default; color: var(--text-faint); }
+.share-results .share-res-note.err { color: var(--danger-text); }

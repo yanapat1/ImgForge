@@ -38,6 +38,8 @@ export const SECTIONS: Record<SectionId, [string, string]> = {
   llm: ['AI assistant', 'Connect an LLM (OpenAI, Claude, Gemini, vLLM, Ollama…) and choose which AI features to show'],
   appearance: ['Appearance', 'Theme for the page and every plot'],
   plot: ['Plot', 'Drawing and measuring on the embedding plot'],
+  account: ['Account', 'Your picture, name, username, email and password, and the devices you are signed in on'],
+  users: ['Users & admin', 'Everyone who can sign in, sign-up and connection rules, recent activity'],
   workspace: ['Workspace', 'Where this dataset’s crops, features and projections are cached'],
 };
 

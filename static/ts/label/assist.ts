@@ -5,7 +5,7 @@
 // Voice (mic) maps a spoken command to the same actions the toolbar / hotkeys use.
 // Nothing here runs unless label_assist or prelabel is on (app.js never loads this module otherwise).
 
-import { errText } from '../core/api.js';
+import { apiFetch, errText } from '../core/api.js';
 import { $req, esc, icon } from '../core/dom.js';
 import { LLM, applyLLM, llmAny, llmOn } from '../core/llm.js';
 import { md } from '../core/md.js';
@@ -240,7 +240,7 @@ function renderList(): void {
 
 // ---------------------------------------------------------------- requests
 async function post<T>(path: string, body: unknown, signal: AbortSignal): Promise<T> {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+  const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
   const d: unknown = await r.json().catch(() => ({}));
   if (!r.ok) {
     const detail = d && typeof d === 'object' && 'detail' in d ? d.detail : undefined;

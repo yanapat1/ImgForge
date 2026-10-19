@@ -40,7 +40,7 @@ button.big { height: 40px; padding: 0 var(--s5); font-size: var(--fs); border-ra
 .home-tabs .count-badge:empty { display: none; }
 
 /* ---------------------------------------------------------------- find: name search + tag filter (current tab) */
-.home-filter { display: flex; align-items: flex-start; gap: var(--s2) var(--s4); margin: -4px 0 var(--s4); }
+.home-filter { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s2) var(--s4); margin: -4px 0 var(--s4); }
 .hf-search { position: relative; flex: 0 1 300px; min-width: 200px; }
 .hf-search .ico { position: absolute; left: 10px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--text-faint); pointer-events: none; }
 .hf-search input { width: 100%; height: 34px; padding: 0 var(--s3) 0 32px; background: var(--surface-2); border: 1px solid var(--border-strong);
@@ -371,3 +371,42 @@ button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color
 @media (prefers-reduced-motion: reduce) {
   .session-card:hover, .session-card:hover .sc-mosaic img { transform: none; }
 }
+
+/* ---------------------------------------------------------------- whose sessions (#home-scope) + people on a card */
+.home-scope { flex: none; flex-wrap: wrap; }
+.home-scope > button { height: 34px; }
+.sc-vis { position: absolute; left: 8px; bottom: 8px; z-index: 1; display: inline-grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 50%; background: var(--overlay); color: var(--text-muted); backdrop-filter: blur(4px); }
+.sc-vis.glob { color: var(--accent-text); }
+.sc-vis .ico { width: 14px; height: 14px; vertical-align: 0; }
+.sc-foot { flex-wrap: wrap; row-gap: 4px; }
+.sc-people { display: inline-flex; align-items: center; gap: var(--s2); min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.sc-people .avatar-stack { --av-ring: var(--surface); }
+
+/* ---------------------------------------------------------------- sign-in page (#login, views/login.ts) */
+.login-wrap { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: var(--s6) var(--s4); background: var(--bg); }
+.login-card { width: min(400px, 100%); padding: var(--s6) var(--s6) var(--s5); display: flex; flex-direction: column; gap: var(--s4);
+  background: var(--surface); box-shadow: var(--shadow-3); }
+.login-brand { display: flex; align-items: center; gap: var(--s3); justify-content: center; }
+.login-brand .brand-mark { width: 36px; height: 36px; color: var(--accent); }
+.login-brand h1 { font-size: var(--fs-xl); }
+.login-tabs { display: flex; width: 100%; }
+.login-tabs > button { flex: 1; justify-content: center; height: 34px; }
+.login-tabs > button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); position: relative; z-index: 2; }
+/* only one tab left (sign-up off): it is a heading, not a choice */
+.login-tabs.single > button { border-radius: var(--r); }
+.login-form { display: flex; flex-direction: column; gap: var(--s3); }
+.login-form .fld input { height: 38px; }
+.login-form button.primary { height: 38px; margin-top: var(--s1); }
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { padding-right: 40px !important; }
+.pw-eye { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 32px !important; height: 32px !important; }
+.pw-meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: -4px; }
+.pw-meter i { height: 4px; border-radius: 999px; background: var(--surface-3); transition: background-color var(--t) var(--ease); }
+.pw-meter[data-s="0"] i:nth-child(1) { background: var(--danger); }
+.pw-meter[data-s="1"] i:nth-child(-n+1) { background: var(--danger); }
+.pw-meter[data-s="2"] i:nth-child(-n+2) { background: var(--warn); }
+.pw-meter[data-s="3"] i:nth-child(-n+3) { background: var(--accent); }
+.pw-meter[data-s="4"] i { background: var(--err-tp); }
+.pw-meter-text { margin-top: -6px; }
+@media (max-width: 600px) { .login-card { padding: var(--s5) var(--s4) var(--s4); } }

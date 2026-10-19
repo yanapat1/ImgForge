@@ -27,8 +27,10 @@ export function syncRanges(): void {
   }
 }
 
-// icons live in the SVG sprite static/assets/icons.svg
-export const ICONS = 'static/assets/icons.svg';
+// static/assets/ as an absolute URL, from this module's own URL (static/js/core/dom.js): a relative
+// 'static/assets/…' would point into s/<id>/ on the visualizer. Icons live in the SVG sprite icons.svg there.
+export const ASSET_BASE = new URL('../../assets/', import.meta.url).href;
+export const ICONS = `${ASSET_BASE}icons.svg`;
 
 export const icon = (name: string): string => `<svg class="ico" aria-hidden="true"><use href="${ICONS}#i-${name}"/></svg>`;
 

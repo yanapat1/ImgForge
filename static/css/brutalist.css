@@ -34,3 +34,11 @@
 :root[data-look="brutalist"] .sc-tag:hover:not(:disabled),
 :root[data-look="brutalist"] .session-new:hover:not(:disabled) { box-shadow: none; transform: none; }
 :root[data-look="brutalist"] .session-new { border-style: dashed; }
+
+/* accounts: ink-ringed avatars, a hard-shadowed sign-in card and dialogs, a square admin table */
+:root[data-look="brutalist"] .avatar { border: 2px solid var(--border-strong); }
+:root[data-look="brutalist"] .avatar-stack .avatar { box-shadow: none; }
+:root[data-look="brutalist"] .login-card,
+:root[data-look="brutalist"] .ui-dlg { border: 2px solid var(--border-strong); box-shadow: var(--shadow-3); }
+:root[data-look="brutalist"] .adm-table-wrap,
+:root[data-look="brutalist"] .audit-list { border: 2px solid var(--border-strong); box-shadow: var(--shadow-2); }

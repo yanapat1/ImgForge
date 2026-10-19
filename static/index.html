@@ -6,31 +6,31 @@
 <meta name="color-scheme" content="dark light">
 <title>Dataset Visualizer</title>
 <!-- before the first paint: the theme (localStorage "theme" = system | light | dark) and the screen
-     (data-screen = home without ?session=, viz with it; on viz it also starts the Plotly download) -->
-<script src="static/js/theme-boot.js?v=15"></script>
+     (data-screen = login on /login, viz on /s/<id>/, label with ?label=, else home; on viz it also starts the Plotly download) -->
+<script src="static/js/theme-boot.js?v=16"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='9' fill='%23458'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12.5' cy='13.5' r='2.4'/%3E%3Ccircle cx='18.5' cy='11.8' r='2.4'/%3E%3Ccircle cx='17' cy='17.6' r='2.4'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="stylesheet" href="static/css/tokens.css?v=17">
-<link rel="stylesheet" href="static/css/base.css?v=14">
+<link rel="stylesheet" href="static/css/tokens.css?v=18">
+<link rel="stylesheet" href="static/css/base.css?v=15">
 <link rel="stylesheet" href="static/css/layout.css?v=14">
-<link rel="stylesheet" href="static/css/components.css?v=15">
+<link rel="stylesheet" href="static/css/components.css?v=16">
 <link rel="stylesheet" href="static/css/plot.css?v=14">
-<link rel="stylesheet" href="static/css/settings.css?v=18">
-<link rel="stylesheet" href="static/css/home.css?v=14">
-<link rel="stylesheet" href="static/css/label.css?v=14">
+<link rel="stylesheet" href="static/css/settings.css?v=19">
+<link rel="stylesheet" href="static/css/home.css?v=15">
+<link rel="stylesheet" href="static/css/label.css?v=15">
 <link rel="stylesheet" href="static/css/curation.css?v=14">
 <link rel="stylesheet" href="static/css/assistant.css?v=14">
-<link rel="stylesheet" href="static/css/states.css?v=14">
+<link rel="stylesheet" href="static/css/states.css?v=15">
 <link rel="stylesheet" href="static/css/responsive.css?v=14">
-<link rel="stylesheet" href="static/css/handdrawn.css?v=15">
+<link rel="stylesheet" href="static/css/handdrawn.css?v=16">
 <link rel="stylesheet" href="static/css/glass.css?v=1">
-<link rel="stylesheet" href="static/css/brutalist.css?v=2">
-<link rel="stylesheet" href="static/css/terminal.css?v=1">
-<link rel="stylesheet" href="static/css/soft.css?v=2">
+<link rel="stylesheet" href="static/css/brutalist.css?v=3">
+<link rel="stylesheet" href="static/css/terminal.css?v=2">
+<link rel="stylesheet" href="static/css/soft.css?v=3">
 <link rel="stylesheet" href="static/css/palettes.css?v=1">
 <!-- ?v= on the entry files: bump it after a big change. Every static file is served with Cache-Control: no-cache
      (cheap 304 revalidation), so the ES modules imported by main.js are never stale either. -->
 <!-- painted before the stylesheets arrive: no white flash, icons never render huge -->
-<style>html[data-screen=home] .viz-only,html[data-screen=viz] #home,html[data-screen=label] .viz-only,html[data-screen=label] #home,html:not([data-screen=label]) .label-only{display:none!important}html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}html[data-look=handdrawn],html[data-look=handdrawn] body{background:#f6f1e7;color:#3b3630}html[data-look=handdrawn][data-theme=dark],html[data-look=handdrawn][data-theme=dark] body{background:#25221e;color:#ebe4d6}html[data-look=glass],html[data-look=glass] body{background:#1b2027;color:#e6e9ef}html[data-look=glass][data-theme=light],html[data-look=glass][data-theme=light] body{background:#e9ebf3;color:#1f2430}html[data-look=brutalist][data-theme=light],html[data-look=brutalist][data-theme=light] body{background:#fff8e1;color:#111111}html[data-look=brutalist][data-theme=dark],html[data-look=brutalist][data-theme=dark] body{background:#121212;color:#f5f5f5}html[data-look=terminal][data-theme=dark],html[data-look=terminal][data-theme=dark] body{background:#0b0f0c;color:#c8f7d4}html[data-look=terminal][data-theme=light],html[data-look=terminal][data-theme=light] body{background:#f2f5ef;color:#14231a}html[data-look=soft][data-theme=light],html[data-look=soft][data-theme=light] body{background:#e4e9f0;color:#2b3445}html[data-look=soft][data-theme=dark],html[data-look=soft][data-theme=dark] body{background:#23272f;color:#e8ebf1}html[data-palette=dracula][data-theme=dark],html[data-palette=dracula][data-theme=dark] body{background:#21222c;color:#f8f8f2}html[data-palette=dracula][data-theme=light],html[data-palette=dracula][data-theme=light] body{background:#efeadb;color:#1f1f1f}html[data-palette=nord][data-theme=dark],html[data-palette=nord][data-theme=dark] body{background:#2b303b;color:#eceff4}html[data-palette=nord][data-theme=light],html[data-palette=nord][data-theme=light] body{background:#e5e9f0;color:#2e3440}html[data-palette=solarized][data-theme=dark],html[data-palette=solarized][data-theme=dark] body{background:#00252e;color:#eee8d5}html[data-palette=solarized][data-theme=light],html[data-palette=solarized][data-theme=light] body{background:#eee8d5;color:#073642}html[data-palette=cbsafe][data-theme=dark],html[data-palette=cbsafe][data-theme=dark] body{background:#181c22;color:#eaeef4}html[data-palette=cbsafe][data-theme=light],html[data-palette=cbsafe][data-theme=light] body{background:#eceff3;color:#1b222c}html[data-palette=contrast][data-theme=dark],html[data-palette=contrast][data-theme=dark] body{background:#000000;color:#ffffff}html[data-palette=contrast][data-theme=light],html[data-palette=contrast][data-theme=light] body{background:#ffffff;color:#000000}html[data-palette=sepia][data-theme=dark],html[data-palette=sepia][data-theme=dark] body{background:#241d14;color:#ecdfc4}html[data-palette=sepia][data-theme=light],html[data-palette=sepia][data-theme=light] body{background:#ecdfc2;color:#3a2e1c}html[data-palette=dusk][data-theme=dark],html[data-palette=dusk][data-theme=dark] body{background:#1c1a28;color:#e0ddf0}html[data-palette=dusk][data-theme=light],html[data-palette=dusk][data-theme=light] body{background:#e6e3ef;color:#2a2740}html[data-palette=mono][data-theme=dark],html[data-palette=mono][data-theme=dark] body{background:#0f0f0f;color:#ececec}html[data-palette=mono][data-theme=light],html[data-palette=mono][data-theme=light] body{background:#f1f1f1;color:#111111}html[data-palette=paper][data-theme=dark],html[data-palette=paper][data-theme=dark] body{background:#151515;color:#e9e9e9}html[data-palette=paper][data-theme=light],html[data-palette=paper][data-theme=light] body{background:#f7f7f6;color:#1a1a1a}svg.ico{width:16px;height:16px;fill:none;stroke:currentColor}.brand-mark{width:32px;height:32px}</style>
+<style>html[data-screen=login] .viz-only,html[data-screen=login] #home,html:not([data-screen=login]) .login-only,html[data-screen=home] .viz-only,html[data-screen=viz] #home,html[data-screen=label] .viz-only,html[data-screen=label] #home,html:not([data-screen=label]) .label-only{display:none!important}html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}html[data-look=handdrawn],html[data-look=handdrawn] body{background:#f6f1e7;color:#3b3630}html[data-look=handdrawn][data-theme=dark],html[data-look=handdrawn][data-theme=dark] body{background:#25221e;color:#ebe4d6}html[data-look=glass],html[data-look=glass] body{background:#1b2027;color:#e6e9ef}html[data-look=glass][data-theme=light],html[data-look=glass][data-theme=light] body{background:#e9ebf3;color:#1f2430}html[data-look=brutalist][data-theme=light],html[data-look=brutalist][data-theme=light] body{background:#fff8e1;color:#111111}html[data-look=brutalist][data-theme=dark],html[data-look=brutalist][data-theme=dark] body{background:#121212;color:#f5f5f5}html[data-look=terminal][data-theme=dark],html[data-look=terminal][data-theme=dark] body{background:#0b0f0c;color:#c8f7d4}html[data-look=terminal][data-theme=light],html[data-look=terminal][data-theme=light] body{background:#f2f5ef;color:#14231a}html[data-look=soft][data-theme=light],html[data-look=soft][data-theme=light] body{background:#e4e9f0;color:#2b3445}html[data-look=soft][data-theme=dark],html[data-look=soft][data-theme=dark] body{background:#23272f;color:#e8ebf1}html[data-palette=dracula][data-theme=dark],html[data-palette=dracula][data-theme=dark] body{background:#21222c;color:#f8f8f2}html[data-palette=dracula][data-theme=light],html[data-palette=dracula][data-theme=light] body{background:#efeadb;color:#1f1f1f}html[data-palette=nord][data-theme=dark],html[data-palette=nord][data-theme=dark] body{background:#2b303b;color:#eceff4}html[data-palette=nord][data-theme=light],html[data-palette=nord][data-theme=light] body{background:#e5e9f0;color:#2e3440}html[data-palette=solarized][data-theme=dark],html[data-palette=solarized][data-theme=dark] body{background:#00252e;color:#eee8d5}html[data-palette=solarized][data-theme=light],html[data-palette=solarized][data-theme=light] body{background:#eee8d5;color:#073642}html[data-palette=cbsafe][data-theme=dark],html[data-palette=cbsafe][data-theme=dark] body{background:#181c22;color:#eaeef4}html[data-palette=cbsafe][data-theme=light],html[data-palette=cbsafe][data-theme=light] body{background:#eceff3;color:#1b222c}html[data-palette=contrast][data-theme=dark],html[data-palette=contrast][data-theme=dark] body{background:#000000;color:#ffffff}html[data-palette=contrast][data-theme=light],html[data-palette=contrast][data-theme=light] body{background:#ffffff;color:#000000}html[data-palette=sepia][data-theme=dark],html[data-palette=sepia][data-theme=dark] body{background:#241d14;color:#ecdfc4}html[data-palette=sepia][data-theme=light],html[data-palette=sepia][data-theme=light] body{background:#ecdfc2;color:#3a2e1c}html[data-palette=dusk][data-theme=dark],html[data-palette=dusk][data-theme=dark] body{background:#1c1a28;color:#e0ddf0}html[data-palette=dusk][data-theme=light],html[data-palette=dusk][data-theme=light] body{background:#e6e3ef;color:#2a2740}html[data-palette=mono][data-theme=dark],html[data-palette=mono][data-theme=dark] body{background:#0f0f0f;color:#ececec}html[data-palette=mono][data-theme=light],html[data-palette=mono][data-theme=light] body{background:#f1f1f1;color:#111111}html[data-palette=paper][data-theme=dark],html[data-palette=paper][data-theme=dark] body{background:#151515;color:#e9e9e9}html[data-palette=paper][data-theme=light],html[data-palette=paper][data-theme=light] body{background:#f7f7f6;color:#1a1a1a}svg.ico{width:16px;height:16px;fill:none;stroke:currentColor}.brand-mark{width:32px;height:32px}</style>
 <!-- plotly (~1.5 MB) is loaded only on the visualizer screen: theme-boot.js preloads it, main.js runs it -->
 </head>
 <body>
@@ -64,8 +64,9 @@
           <button id="home-tab-viz" role="tab" data-tab="viz" aria-controls="home-panel-viz" aria-selected="true" tabindex="0"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg>Visualize<span id="home-n-viz" class="count-badge num"></span></button>
           <button id="home-tab-label" role="tab" data-tab="label" aria-controls="home-panel-label" aria-selected="false" tabindex="-1"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Label<span id="home-n-label" class="count-badge num"></span></button>
         </div>
-        <!-- find sessions: name search + tag filter (AND), both over the current tab (views/home.js) -->
+        <!-- find sessions: whose (scope, sent to the server), name search + tag filter (AND), over the current tab (views/home.js) -->
         <div id="home-filter" class="home-filter hidden">
+          <div id="home-scope" class="segmented home-scope" role="radiogroup" aria-label="Whose sessions"></div>
           <div class="hf-search"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg><input type="search" id="home-search" placeholder="Search sessions by name" aria-label="Search sessions by name" autocomplete="off" spellcheck="false"></div>
           <div id="home-tagbar" class="home-tagbar" role="group" aria-label="Filter by tag"></div>
         </div>
@@ -100,8 +101,11 @@
 <!-- LABELING PAGE (?label=<project id>): markup owned by js/label/ (see js/label/README.md) -->
 <div id="label" class="label-only"></div>
 
+<!-- SIGN-IN PAGE (/login): markup owned by js/views/login.js -->
+<div id="login" class="login-only"></div>
+
 <header class="app-header viz-only">
-  <a class="brand" href="./" title="All sessions" aria-label="Back to all sessions">
+  <a id="brand-home" class="brand" href="./" title="All sessions" aria-label="Back to all sessions">
     <svg class="ico brand-back" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg>
     <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="static/assets/icons.svg#i-brand"/></svg>
     <h1>Dataset Visualizer</h1>
@@ -160,6 +164,8 @@
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg></button>
     <button class="act" data-tab="eval" role="tab" aria-selected="false" aria-label="Evaluation: compare models, explain them with the dataset" title="Evaluation — compare models, findings, report">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eval"/></svg></button>
+    <!-- the user menu (views/usermenu.js paints the avatar once the user is known) -->
+    <button id="act-user" class="act act-user hidden" aria-haspopup="menu" aria-expanded="false" aria-label="Account" title="Account"></button>
     <button id="btn-settings" class="act act-bottom" aria-label="Settings: datasets, S3 connections, appearance" title="Settings — datasets, S3 / RustFS, theme"
             aria-haspopup="dialog">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg></button>
@@ -796,7 +802,10 @@
       <button class="snav" data-sec="appearance"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-sun"/></svg>Appearance</button>
       <button class="snav" data-sec="plot" data-needs="session"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-ruler"/></svg>Plot</button>
       <button class="snav" data-sec="workspace" data-needs="session"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-folder"/></svg>Workspace</button>
-      <div class="settings-foot">Connection secrets stay on the server (connections.json, owner-only). The page only ever sees them masked.</div>
+      <div class="snav-sep" role="separator"></div>
+      <button class="snav" data-sec="account"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-user"/></svg>Account</button>
+      <button class="snav hidden" data-sec="users" data-needs="admin"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-users"/></svg>Users &amp; admin</button>
+      <div class="settings-foot">Your connections — only you can see them. Sessions you share use them without revealing the secrets.</div>
     </nav>
     <div class="settings-main">
       <header class="settings-head">
@@ -807,6 +816,6 @@
     </div>
   </div>
 </div>
-<script type="module" src="static/js/main.js?v=15"></script>
+<script type="module" src="static/js/main.js?v=16"></script>
 </body>
 </html>

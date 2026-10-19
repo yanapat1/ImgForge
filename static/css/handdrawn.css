@@ -11,3 +11,6 @@
 :root[data-look="handdrawn"] .form-card,
 :root[data-look="handdrawn"] .theme-choice { box-shadow: 2px 3px 0 var(--hd-shadow); }
 :root[data-look="handdrawn"] .theme-choice[aria-pressed="true"] { box-shadow: 3px 4px 0 var(--accent-line); }
+
+/* accounts: a pencil ring around avatars */
+:root[data-look="handdrawn"] .avatar { border: 1.5px solid var(--border-strong); }

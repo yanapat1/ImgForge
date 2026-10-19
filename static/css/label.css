@@ -537,3 +537,11 @@
   @keyframes lba-up { from { opacity: 0; transform: translateY(16px); } }
 }
 @media (prefers-reduced-motion: reduce) { .lb-assist { animation: none; } }
+
+/* ---------------------------------------------------------------- read-only page (a viewer: label/app.ts L.readOnly) */
+.lb-app.readonly .lb-write { display: none !important; }
+.lb-ro { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: var(--s2);
+  padding: 6px var(--s3); border-radius: 999px; background: var(--overlay); color: var(--text); font-size: var(--fs-sm);
+  border: 1px solid var(--border-strong); backdrop-filter: blur(4px); max-width: calc(100% - 24px); }
+.lb-ro .ico { color: var(--accent); flex: none; }
+.lb-actions .user-btn { margin-left: 2px; }

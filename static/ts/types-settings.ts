@@ -7,7 +7,7 @@ export type StatusKind = 'busy' | 'ok' | 'err' | '';
 /** One status line (statusHTML). */
 export interface StatusLine { kind: StatusKind; text: string }
 
-export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace';
+export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace' | 'account' | 'users';
 export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'labeling' | 'conn' | 'model' | 'llm-form' | 'llm-add';
 
 /** openSettings options (the Sessions home opens the dialog in solo mode). */
@@ -233,6 +233,20 @@ export interface SetState {
 export type SetAction = (b: HTMLElement, e?: Event) => void | Promise<void>;
 /** A data-act-change handler (the changed control). */
 export type SetChange = (el: HTMLElement) => void | Promise<void>;
+
+// ------------------------------------------------------------------ account + users (settings/account.ts, settings/users.ts)
+/** A user as the admin list shows it (GET api/admin/users → users[]); times are epoch seconds. */
+export interface AdminUser {
+  id: string; username: string; email: string; name: string; is_admin: boolean; is_active: boolean; avatar_ver: number;
+  created?: number | null; last_login?: number | null; n_sessions?: number;
+}
+/** GET / PUT api/admin/settings */
+export interface AdminSettings { signup_enabled: boolean; who_can_add_connections: 'everyone' | 'admins' }
+/** One row of GET api/admin/audit */
+export interface AuditEvent {
+  at: number | string; user: { id: string; username: string } | null; action: string; target?: string | null;
+  meta?: unknown; ip?: string | null;
+}
 
 // ------------------------------------------------------------------ labeling settings
 /** label_settings.json: scalar options + the hotkeys that differ from the defaults. */

@@ -1,12 +1,13 @@
 // Create / edit a labeling session: a modal wizard (#lw), loaded on demand by views/home.js.
 // New: 1 Name · 2 Images (drop files / folders, a local folder, an S3 prefix, an FTP / SFTP path) · 3 Tasks · 4 Export
 // default; Create = POST api/label/projects, then (dropped files) 3 parallel multipart uploads + finalize, then the
-// import job's progress, then ./?label=<pid>. Edit: name, tasks (rename existing, add classes / tasks, reorder) and
+// import job's progress, then ?label=<pid> (core/nav.ts labelUrl). Edit: name, tasks (rename existing, add classes / tasks, reorder) and
 // the export default, sent as small PATCH / POST calls.
 // Same patterns as the Settings dialog: all state in W, one innerHTML render per change (focus is restored by
 // data-fk), inputs write into W without a render, one delegated listener per event type on #lw.
 
-import { api, errText, getJSON, postJSON } from '../core/api.js';
+import { api, errText, getJSON, onUnauthorized, postJSON, XRW } from '../core/api.js';
+import { labelUrl } from '../core/nav.js';
 import { $, $req, esc, fmtEta, icon, sleep } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { attachImport, importHTML, importState, resultText, sourceError, startImport } from '../label/import.js';
@@ -720,9 +721,11 @@ function sendBatch(pid: string, batch: Batch, onProgress: (loaded: number) => vo
     up?.xhrs.add(xhr);
     const done = (): void => { up?.xhrs.delete(xhr); };
     xhr.open('POST', `api/label/projects/${encodeURIComponent(pid)}/upload`);
+    xhr.setRequestHeader('X-Requested-With', XRW);
     xhr.upload.onprogress = (e) => onProgress(e.loaded);
     xhr.onload = () => {
       done();
+      if (xhr.status === 401) onUnauthorized();
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve({ saved: batch.length, skipped: 0 }); }
       } else reject(new Error(`upload: ${xhr.status} ${xhr.responseText}`));
@@ -862,7 +865,7 @@ async function create(): Promise<void> {
     }
     W.dirty = false;
     setBusy('Opening the session');
-    location.href = `./?label=${encodeURIComponent(pid)}`;
+    location.href = labelUrl(pid);
   } catch (e) {
     const d = W.drop;
     W.busy = null;
@@ -959,7 +962,7 @@ const WACT: Record<string, Act> = {
   back: () => { const W = wz(); if (W.step > 0) { W.step--; W.error = null; render(); } },
   goto: (b) => { const W = wz(); W.step = Number(b.dataset['i']); W.error = null; render(); },
   close: () => closeWizard(false),
-  'open-now': () => { location.href = `./?label=${encodeURIComponent(wz().pid ?? '')}`; },
+  'open-now': () => { location.href = labelUrl(wz().pid ?? ''); },
   'imp-on': (b) => { const W = wz(); W.impOn = b.dataset['v'] === '1'; W.error = null; render(); },
   tab: (b) => {
     const W = wz();

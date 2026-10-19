@@ -45,7 +45,7 @@ function manualize(changes: Change[]): Change[] {
 
 // merge: consecutive edits with the same key within MERGE_MS become one undo step (arrow-key nudges)
 export function edit(changes: Change[], merge: string | null = null): void {
-  if (!changes.length || !L.history) return;
+  if (!changes.length || !L.history || L.readOnly) return;      // a viewer's page never changes a shape
   manualize(changes);
   const h = L.history;
   const top = h.undo[h.undo.length - 1];

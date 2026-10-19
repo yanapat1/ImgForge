@@ -1,11 +1,30 @@
 // Types of the Sessions home (views/home.ts) and the labeling session wizard (views/label-new.ts): the rows of
 // GET api/datasets and GET api/label/projects as the home cards read them. Pure types, no runtime code.
 
+import type { Role } from './types.js';
 import type { DatasetItem } from './types-settings.js';
 
+/** A person on a card (owner / member); never an email. */
+export interface SessionPerson { id: string; username?: string; name?: string; avatar_ver?: number }
+export interface SessionMember extends SessionPerson { role: 'viewer' | 'labeler' }
+export type Visibility = 'private' | 'global';
+/** Who owns / shares a session and what I may do with it (dataviz/data/sessions.py listing). */
+export interface SharedFields {
+  owner?: SessionPerson | null;
+  members?: SessionMember[];
+  visibility?: Visibility;
+  my_role?: Role;
+  /** when I last opened it (epoch seconds; null = never) */
+  opened_at?: number | null;
+}
+/** The home's scope filter (GET api/datasets?scope=, api/label/projects?scope=); 'everyone' is for admins. */
+export type HomeScope = 'all' | 'mine' | 'shared' | 'global' | 'everyone';
+
 /** A saved visualize session (GET api/datasets → datasets[], dataset_public in routes/datasets.py). */
-export interface HomeSession extends DatasetItem {
+export interface HomeSession extends DatasetItem, SharedFields {
   active?: boolean;
+  /** open on the server right now (in its registry of loaded sessions) */
+  loaded?: boolean;
   /** number of crop tiles that exist for the mosaic (0 = not indexed yet) */
   cover?: number;
   /** epoch seconds */
@@ -27,7 +46,7 @@ export interface HomeProjectSource { kind?: string; path?: string; bucket?: stri
 /** Where the last export went (project.export_default.target). */
 export interface HomeExportTarget { kind?: string; path?: string; bucket?: string; prefix?: string }
 /** A labeling session card (GET api/label/projects → projects[]). */
-export interface HomeProject {
+export interface HomeProject extends SharedFields {
   id: string; name: string;
   created?: number | null; updated?: number | null;
   source?: HomeProjectSource | null;
