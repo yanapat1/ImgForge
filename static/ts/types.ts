@@ -1,0 +1,250 @@
+// Shared domain types: API payloads (dataviz/server/routes/*.py), dataset / image / annotation / label shapes and the
+// page state S. Pure types: no runtime code. Fields the server may omit are optional (`?`); `| null` means the
+// server sends an explicit null. Payloads that other modules extend carry an index signature (`[k: string]: unknown`).
+
+// ------------------------------------------------------------------ generic
+/** Plain JSON value (what `JSON.parse` returns). */
+export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
+/** Lower / upper bound, null = open (filter ranges, slider pairs). */
+export type Range = [number | null, number | null];
+/** Numeric column of the points payload (JSON array, or a typed array once converted). */
+export type NumCol = ArrayLike<number>;
+/** `#rrggbb` colour. */
+export type Hex = string;
+/** Plotly colour scale: [[0, '#...'], ..., [1, '#...']]. */
+export type ColorScale = Array<[number, string]>;
+
+// ------------------------------------------------------------------ jobs (dataviz/core/jobs.py Job.to_dict)
+export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+export interface Job {
+  id: number;
+  key: string;
+  label: string;
+  status: JobStatus;
+  stage: string;
+  done: number;
+  total: number;
+  extra: string;
+  pct: number | null;            // null while total is unknown
+  eta: number | null;            // seconds left
+  elapsed: number;
+  error: string | null;
+  cancelled: boolean;
+  result?: unknown;              // only when the job is done and its result is public
+}
+/** GET api/jobs */
+export interface JobsPayload { jobs: Job[]; active: Job[] }
+
+// ------------------------------------------------------------------ LLM (GET api/llm/state)
+export interface LLMProviderInfo {
+  id: string; name: string; kind: string; model: string; vision: boolean; audio: boolean;
+}
+export interface LLMBudget { max_input_tokens: number; [k: string]: unknown }
+/** Server part of the assistant's switchboard. */
+export interface LLMStatePayload {
+  connected: boolean;
+  provider: LLMProviderInfo | null;
+  features: Record<string, boolean>;   // effective switches (switch on AND connected AND capability)
+  switches: Record<string, boolean>;   // what the user switched on in Settings
+  budget: LLMBudget;
+}
+/** Client-side LLM state (core/llm.ts `LLM`). */
+export interface LLMState extends LLMStatePayload { loaded: boolean }
+
+// ------------------------------------------------------------------ status / meta (GET api/status, api/meta)
+export interface MethodSpec { label: string; params: Record<string, unknown>; [k: string]: unknown }
+export interface FeatureSpec { key: string; label: string; group: string; note: string; text: boolean; cached: boolean }
+/** Set when the dataset changed after the cache shown was built (dataviz/state.py `State.stale`). */
+export interface DatasetStale { cached: string | null; current: string | null; built: string | null; [k: string]: unknown }
+
+export interface DatasetInfo {
+  id: string; name: string; uri: string; kind: string; mode: string | null; index_job: number | null; stale: DatasetStale | null;
+}
+/** Page defaults from config.yaml `ui` (+ analysis.groups / duplicate_threshold). */
+export interface UiDefaults {
+  page_size: number; similar_k: number; check_list_size: number; duplicate_threshold: number;
+  groups?: unknown; config?: string | null; [k: string]: unknown;
+}
+export interface Status {
+  ready: boolean;
+  methods: Record<string, MethodSpec>;
+  ui: UiDefaults;
+  jobs: Job[];
+  active: Job[];
+  dataset: DatasetInfo | null;         // null on the Sessions home
+  llm: LLMStatePayload | null;
+  // only with an open session:
+  default_feature?: string;
+  startup?: { feature: string; method: string; cached: boolean };
+  features?: FeatureSpec[];
+}
+/** GET api/meta */
+export interface Meta {
+  dataset: string; dataset_uri: string; source: string;
+  n_samples: number; n_images: number;
+  classes: string[];
+  counts: number[];                    // boxes per class
+  palette: string[];
+  palette_light?: string[];
+  knn_k: number;
+  index_stats: Record<string, unknown>;
+}
+
+// ------------------------------------------------------------------ points / projection / groups
+/** GET api/points (columnar, one entry per label box = sample id) + the columns added client side. */
+export interface Points {
+  id: number[];
+  cls: number[];                       // class id per box (curation edits it in place)
+  image: string[];
+  session: string[];
+  area: number[];
+  aspect: number[];
+  brightness: number[];
+  blur: number[];
+  // scores of the current feature (GET api/scores, set by ensureScores)
+  suspicion?: number[];
+  suggested?: number[];
+  outlier?: number[];
+  // curation: 1 = box removed by a fix
+  deleted?: Uint8Array;
+  // Model tab: outcome of each label box (-1 = n/a, 0 found, 1 wrong class, 2 badly placed, 3 missed)
+  m_status?: number[];
+  m_pred?: number[];
+  m_score?: number[];
+}
+/** Names of the numeric Points columns (colour-by / sort / filter fields). */
+export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score';
+
+/** GET api/scores?feature=… (ready) */
+export interface ScoresReady { ready: true; feature: string; suspicion: number[]; suggested: number[]; outlier: number[] }
+/** Not computed yet: wait for the job, ask again. */
+export interface NotReady { ready: false; job_id: number; key?: string }
+export type ScoresResult = ScoresReady | NotReady;
+
+/** POST api/projection body (dataviz/server/models.py ProjectionRequest). */
+export interface ProjectionRequest {
+  feature: string; method: string; params: Record<string, number>; classes: number[] | null;
+}
+export interface ProjectionInfo { explained_variance?: number[]; [k: string]: unknown }
+/** POST api/projection (ready): a 2D layout of the boxes `id`. */
+export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; info: ProjectionInfo | null }
+export type ProjectionResult = ProjectionReady | NotReady;
+/** GET api/projections → views[] (saved projections). */
+export interface SavedView {
+  key?: string; feature: string; method: string; params: Record<string, number>; classes?: number[] | null;
+  label: string; created?: string; last_used?: string; [k: string]: unknown;
+}
+
+/** POST api/groups response. */
+export interface GroupsPayload {
+  key: string;
+  group: number[];                     // group index per projected point, -1 = outlier, -2 = removed box
+  groups: Array<Record<string, unknown>>;
+  n_outliers: number;
+}
+/** Client-side density groups (S.groups). */
+export interface Groups { k: string; group: number[]; list: GroupsPayload['groups']; nOut: number; of: Map<number, number> }
+
+/** GET api/tags: tag name -> box ids. */
+export type Tags = Record<string, number[]>;
+/** POST api/distances → { d, metric }. */
+export interface DistancesPayload { d: number[][]; metric: string }
+export type DistState = { key: string | null; pending: string } | { key: string; d: number[][]; metric: string; pending?: undefined };
+
+// ------------------------------------------------------------------ samples / images / annotations
+/** One label box as sent by GET api/sample/{id}. bbox is pixels [x1, y1, x2, y2]. */
+export interface Sample {
+  id?: number; image: string; session?: string; cls?: number; class_name?: string;
+  bbox: [number, number, number, number]; img_w?: number; img_h?: number; area_px?: number;
+  same_image: number[];
+  // with scores:
+  feature?: string; suspicion?: number; suggested?: number; suggested_name?: string; outlier?: number;
+  [k: string]: unknown;
+}
+/** GET api/similar/{id} and POST api/text-search items. */
+export interface SimilarItem { id: number; sim: number; [k: string]: unknown }
+/** GET api/duplicates → pairs[]. */
+export interface DuplicatePair { a: number; b: number; sim: number }
+/** GET api/images. */
+export interface ImagesPayload { total: number; bg: string[]; pending: Record<string, unknown> }
+
+/** A label-page annotation (normalised 0..1 geometry). */
+export type AnnotationKind = 'bbox' | 'polygon' | 'keypoints' | 'classify';
+export interface Annotation {
+  id: string;
+  task_id?: string;
+  kind?: AnnotationKind | string;
+  cls?: number;
+  class_id?: number;
+  bbox?: [number, number, number, number];
+  points?: Array<[number, number]>;
+  score?: number | null;
+  source?: string;
+  [k: string]: unknown;
+}
+/** A class of a labeling task. */
+export interface LabelClass { id?: number | string; name: string; color?: string | null; hotkey?: string | null }
+
+// ------------------------------------------------------------------ sessions / datasets / models
+export interface DatasetEntry {
+  id: string; name: string; uri?: string; kind?: string; [k: string]: unknown;
+}
+export interface ModelEntry {
+  id: string; name: string; predicted?: boolean; [k: string]: unknown;
+}
+/** GET api/models/{id}/eval (scored model); more fields are read by views/model.ts. */
+export interface ModelEval {
+  split: string;
+  gt: { status: number[]; pred_cls: number[]; pred_score: number[] };
+  [k: string]: unknown;
+}
+
+// ------------------------------------------------------------------ filter (core/filter.ts)
+export type NameMode = 'substr' | 'glob' | 'regex' | 'fuzzy';
+export type ClsMode = 'any' | 'all' | 'none';
+/** The filter spec F (persisted in ui_settings as `filter`). */
+export interface FilterSpec {
+  scope: 'image' | 'box';
+  name: { mode: NameMode; q: string; neg: boolean };
+  cls: { mode: ClsMode; ids: number[] };
+  nbox: Range; area: Range; aspect: Range; brightness: Range; blur: Range;
+  session: string[]; tags: string[]; m_status: number[];
+  suspicion_min: number | null; outlier_min: number | null;
+  issues: string[];
+  clip: { q: string; k: number };
+}
+
+// ------------------------------------------------------------------ app state (core/state.ts `S`)
+export interface ModelState {
+  id: string | null; conf: number; iou: number; split: string; list: ModelEntry[]; ev: ModelEval | null; showPreds: boolean;
+}
+/** One entry of the gallery's back stack (S.selStack). */
+export interface SelEntry { ids: number[]; title: string; kind: 'samples' | 'pairs'; pairs: DuplicatePair[]; view: string | null | undefined }
+export interface AppState {
+  status: Status | null;
+  meta: Meta | null;
+  P: Points | null;                    // columnar points + current feature scores
+  view: ProjectionReady | null;        // current projection
+  viewPos?: Map<number, number>;       // point id -> index in view
+  viewReq: ProjectionRequest | null;   // request that produced `view`
+  scoresFeature: string | null;
+  hidden: Set<number>;                 // hidden class ids (All mode)
+  sel: number[];
+  selKind: 'samples' | 'pairs';
+  selStack?: SelEntry[];
+  activeView?: string | null;
+  pairs: DuplicatePair[];
+  selTitle: string;
+  page: number;
+  highlight: number[];
+  picked: number[];                    // gallery cards clicked (ctrl+click): pinned as yellow dots on the plot
+  sessionIdx: Map<string, number> | null;
+  groups: Groups | null;
+  tags: Tags;
+  lasso: { x: number[]; y: number[] } | null;
+  dimSet: Set<number> | null;          // ids inside the lasso (the rest is faded)
+  dist: DistState | null;
+  filterMask?: Uint8Array | null;      // filter bar result: 1 = shown
+  edited: Set<string>;                 // images saved from the dialog this session
+  model: ModelState;
+}

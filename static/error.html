@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>{{code}} · Dataset Visualizer</title>
+<script src="/static/js/theme-boot.js"></script>
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/states.css">
+<style>html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}</style>
+</head>
+<body>
+<div class="errpage">
+  <div class="errpage-box panel" role="alert">
+    <div class="errpage-code num">Error {{code}}</div>
+    <h2>{{title}}</h2>
+    <div class="errpage-msg muted">{{message}}</div>
+    <div class="errpage-actions">
+      <button class="primary" onclick="location.href='/'">All sessions</button>
+      <button onclick="history.length>1?history.back():location.reload()">Go back</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

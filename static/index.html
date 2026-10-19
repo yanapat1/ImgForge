@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Dataset Visualizer</title>
+<!-- before the first paint: the theme (localStorage "theme" = system | light | dark) and the screen
+     (data-screen = home without ?session=, viz with it; on viz it also starts the Plotly download) -->
+<script src="static/js/theme-boot.js?v=15"></script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='9' fill='%23458'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12.5' cy='13.5' r='2.4'/%3E%3Ccircle cx='18.5' cy='11.8' r='2.4'/%3E%3Ccircle cx='17' cy='17.6' r='2.4'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="static/css/tokens.css?v=17">
+<link rel="stylesheet" href="static/css/base.css?v=14">
+<link rel="stylesheet" href="static/css/layout.css?v=14">
+<link rel="stylesheet" href="static/css/components.css?v=15">
+<link rel="stylesheet" href="static/css/plot.css?v=14">
+<link rel="stylesheet" href="static/css/settings.css?v=18">
+<link rel="stylesheet" href="static/css/home.css?v=14">
+<link rel="stylesheet" href="static/css/label.css?v=14">
+<link rel="stylesheet" href="static/css/curation.css?v=14">
+<link rel="stylesheet" href="static/css/assistant.css?v=14">
+<link rel="stylesheet" href="static/css/states.css?v=14">
+<link rel="stylesheet" href="static/css/responsive.css?v=14">
+<link rel="stylesheet" href="static/css/handdrawn.css?v=15">
+<link rel="stylesheet" href="static/css/glass.css?v=1">
+<link rel="stylesheet" href="static/css/brutalist.css?v=2">
+<link rel="stylesheet" href="static/css/terminal.css?v=1">
+<link rel="stylesheet" href="static/css/soft.css?v=2">
+<link rel="stylesheet" href="static/css/palettes.css?v=1">
+<!-- ?v= on the entry files: bump it after a big change. Every static file is served with Cache-Control: no-cache
+     (cheap 304 revalidation), so the ES modules imported by main.js are never stale either. -->
+<!-- painted before the stylesheets arrive: no white flash, icons never render huge -->
+<style>html[data-screen=home] .viz-only,html[data-screen=viz] #home,html[data-screen=label] .viz-only,html[data-screen=label] #home,html:not([data-screen=label]) .label-only{display:none!important}html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}html[data-look=handdrawn],html[data-look=handdrawn] body{background:#f6f1e7;color:#3b3630}html[data-look=handdrawn][data-theme=dark],html[data-look=handdrawn][data-theme=dark] body{background:#25221e;color:#ebe4d6}html[data-look=glass],html[data-look=glass] body{background:#1b2027;color:#e6e9ef}html[data-look=glass][data-theme=light],html[data-look=glass][data-theme=light] body{background:#e9ebf3;color:#1f2430}html[data-look=brutalist][data-theme=light],html[data-look=brutalist][data-theme=light] body{background:#fff8e1;color:#111111}html[data-look=brutalist][data-theme=dark],html[data-look=brutalist][data-theme=dark] body{background:#121212;color:#f5f5f5}html[data-look=terminal][data-theme=dark],html[data-look=terminal][data-theme=dark] body{background:#0b0f0c;color:#c8f7d4}html[data-look=terminal][data-theme=light],html[data-look=terminal][data-theme=light] body{background:#f2f5ef;color:#14231a}html[data-look=soft][data-theme=light],html[data-look=soft][data-theme=light] body{background:#e4e9f0;color:#2b3445}html[data-look=soft][data-theme=dark],html[data-look=soft][data-theme=dark] body{background:#23272f;color:#e8ebf1}html[data-palette=dracula][data-theme=dark],html[data-palette=dracula][data-theme=dark] body{background:#21222c;color:#f8f8f2}html[data-palette=dracula][data-theme=light],html[data-palette=dracula][data-theme=light] body{background:#efeadb;color:#1f1f1f}html[data-palette=nord][data-theme=dark],html[data-palette=nord][data-theme=dark] body{background:#2b303b;color:#eceff4}html[data-palette=nord][data-theme=light],html[data-palette=nord][data-theme=light] body{background:#e5e9f0;color:#2e3440}html[data-palette=solarized][data-theme=dark],html[data-palette=solarized][data-theme=dark] body{background:#00252e;color:#eee8d5}html[data-palette=solarized][data-theme=light],html[data-palette=solarized][data-theme=light] body{background:#eee8d5;color:#073642}html[data-palette=cbsafe][data-theme=dark],html[data-palette=cbsafe][data-theme=dark] body{background:#181c22;color:#eaeef4}html[data-palette=cbsafe][data-theme=light],html[data-palette=cbsafe][data-theme=light] body{background:#eceff3;color:#1b222c}html[data-palette=contrast][data-theme=dark],html[data-palette=contrast][data-theme=dark] body{background:#000000;color:#ffffff}html[data-palette=contrast][data-theme=light],html[data-palette=contrast][data-theme=light] body{background:#ffffff;color:#000000}html[data-palette=sepia][data-theme=dark],html[data-palette=sepia][data-theme=dark] body{background:#241d14;color:#ecdfc4}html[data-palette=sepia][data-theme=light],html[data-palette=sepia][data-theme=light] body{background:#ecdfc2;color:#3a2e1c}html[data-palette=dusk][data-theme=dark],html[data-palette=dusk][data-theme=dark] body{background:#1c1a28;color:#e0ddf0}html[data-palette=dusk][data-theme=light],html[data-palette=dusk][data-theme=light] body{background:#e6e3ef;color:#2a2740}html[data-palette=mono][data-theme=dark],html[data-palette=mono][data-theme=dark] body{background:#0f0f0f;color:#ececec}html[data-palette=mono][data-theme=light],html[data-palette=mono][data-theme=light] body{background:#f1f1f1;color:#111111}html[data-palette=paper][data-theme=dark],html[data-palette=paper][data-theme=dark] body{background:#151515;color:#e9e9e9}html[data-palette=paper][data-theme=light],html[data-palette=paper][data-theme=light] body{background:#f7f7f6;color:#1a1a1a}svg.ico{width:16px;height:16px;fill:none;stroke:currentColor}.brand-mark{width:32px;height:32px}</style>
+<!-- plotly (~1.5 MB) is loaded only on the visualizer screen: theme-boot.js preloads it, main.js runs it -->
+</head>
+<body>
+<!-- SESSIONS HOME (first page, no ?session=): one card per session, each one dataset -->
+<div id="home" class="home">
+  <header class="app-header">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="static/assets/icons.svg#i-brand"/></svg>
+      <h1>Dataset Visualizer</h1>
+    </div>
+    <span class="grow"></span>
+    <div class="header-actions">
+      <button id="home-settings" class="icon-btn ghost" aria-label="Settings: connections, labeling, appearance" title="Settings: connections, labeling hotkeys, theme"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg></button>
+      <button id="home-theme" class="icon-btn ghost" aria-label="Switch light / dark theme" title="Switch light / dark theme">
+        <svg class="ico only-dark" aria-hidden="true"><use href="static/assets/icons.svg#i-sun"/></svg><svg class="ico only-light" aria-hidden="true"><use href="static/assets/icons.svg#i-moon"/></svg></button>
+    </div>
+  </header>
+  <div class="home-scroll">
+    <div class="home-wrap">
+      <div id="home-head" class="home-head hidden">
+        <div class="home-title">
+          <h2>Sessions</h2>
+          <p class="muted">Visualize a YOLO dataset (crops, features and views stay cached per session), or label a folder of images for one or more tasks.</p>
+        </div>
+        <button id="home-new" class="primary" data-act="new"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-plus"/></svg><span id="home-new-text">New session</span></button>
+      </div>
+      <div id="home-status" class="home-status" role="status" aria-live="polite"></div>
+      <!-- two kinds of sessions, one tab each (views/home.js); every click inside goes through one delegated listener -->
+      <div id="home-body" class="home-body">
+        <div id="home-tabs" class="home-tabs hidden" role="tablist" aria-label="Kind of session">
+          <button id="home-tab-viz" role="tab" data-tab="viz" aria-controls="home-panel-viz" aria-selected="true" tabindex="0"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg>Visualize<span id="home-n-viz" class="count-badge num"></span></button>
+          <button id="home-tab-label" role="tab" data-tab="label" aria-controls="home-panel-label" aria-selected="false" tabindex="-1"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Label<span id="home-n-label" class="count-badge num"></span></button>
+        </div>
+        <!-- find sessions: name search + tag filter (AND), both over the current tab (views/home.js) -->
+        <div id="home-filter" class="home-filter hidden">
+          <div class="hf-search"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg><input type="search" id="home-search" placeholder="Search sessions by name" aria-label="Search sessions by name" autocomplete="off" spellcheck="false"></div>
+          <div id="home-tagbar" class="home-tagbar" role="group" aria-label="Filter by tag"></div>
+        </div>
+        <div id="home-panel-viz" class="session-grid" role="tabpanel" aria-labelledby="home-tab-viz"></div>
+        <div id="home-panel-label" class="session-grid hidden" role="tabpanel" aria-labelledby="home-tab-label"></div>
+      </div>
+    </div>
+  </div>
+  <!-- the create / edit labeling session wizard (views/label-new.js) -->
+  <div id="lw" class="modal hidden">
+    <div id="lw-box" class="lw-box panel" role="dialog" aria-modal="true" aria-labelledby="lw-title" tabindex="-1">
+      <header class="lw-head">
+        <h3 id="lw-title">New labeling session</h3>
+        <ol id="lw-steps" class="lw-steps" aria-label="Steps"></ol>
+        <button id="lw-close" class="icon-btn ghost" aria-label="Close" title="Close (Esc)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
+      </header>
+      <div id="lw-body" class="lw-body"></div>
+      <footer id="lw-foot" class="lw-foot"></footer>
+    </div>
+  </div>
+  <!-- small confirm dialog of the home (remove a labeling session) -->
+  <div id="home-dlg" class="modal hidden">
+    <div class="home-dlg panel" role="alertdialog" aria-modal="true" aria-labelledby="home-dlg-title" aria-describedby="home-dlg-text" tabindex="-1">
+      <h3 id="home-dlg-title"></h3>
+      <p id="home-dlg-text" class="muted"></p>
+      <label id="home-dlg-check" class="check hidden"><input type="checkbox" id="home-dlg-cb"> <span id="home-dlg-cb-text"></span></label>
+      <div class="form-foot"><button id="home-dlg-cancel" class="ghost">Cancel</button><button id="home-dlg-ok" class="danger-btn"></button></div>
+    </div>
+  </div>
+</div>
+
+<!-- LABELING PAGE (?label=<project id>): markup owned by js/label/ (see js/label/README.md) -->
+<div id="label" class="label-only"></div>
+
+<header class="app-header viz-only">
+  <a class="brand" href="./" title="All sessions" aria-label="Back to all sessions">
+    <svg class="ico brand-back" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg>
+    <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="static/assets/icons.svg#i-brand"/></svg>
+    <h1>Dataset Visualizer</h1>
+  </a>
+  <div id="ds-info" class="ds-info"></div>
+  <div class="header-actions">
+    <button id="btn-theme" class="icon-btn ghost" aria-label="Switch light / dark theme" title="Switch light / dark theme">
+      <svg class="ico only-dark" aria-hidden="true"><use href="static/assets/icons.svg#i-sun"/></svg><svg class="ico only-light" aria-hidden="true"><use href="static/assets/icons.svg#i-moon"/></svg></button>
+  </div>
+</header>
+
+<!-- background job progress -->
+<div id="jobs-bar" class="jobs-bar viz-only hidden" role="status" aria-live="polite">
+  <svg class="ico err-only" aria-hidden="true"><use href="static/assets/icons.svg#i-alert"/></svg>
+  <span id="job-label" class="job-label"></span>
+  <span id="job-stage" class="muted"></span>
+  <div class="bar" role="progressbar" aria-label="Job progress"><div id="job-fill"></div></div>
+  <span id="job-pct" class="num"></span>
+  <span id="job-eta" class="muted num"></span>
+  <span id="job-queued" class="muted"></span>
+</div>
+
+<!-- shown until the server answers and (visualizer) the dataset index is ready; main.js hides it on the other screens -->
+<div id="startup" class="startup delayed">
+  <div class="startup-box panel" role="status" aria-live="polite">
+    <div class="load-head"><span class="spin big" aria-hidden="true"></span><h2 id="startup-title">Loading…</h2></div>
+    <div id="startup-stage" class="muted">waiting for the server</div>
+    <div class="bar big indeterminate" role="progressbar" aria-label="Loading progress"><div id="startup-fill"></div></div>
+    <div id="startup-pct" class="muted num"></div>
+    <div id="startup-hint" class="load-hint muted"></div>
+    <noscript><div class="status-line err">This page needs JavaScript.</div></noscript>
+  </div>
+</div>
+
+<main class="viz-only">
+  <!-- activity bar (VS Code style): each icon switches the left panel AND the right panel; the active icon collapses the left panel -->
+  <nav id="activity" class="activity-bar" role="tablist" aria-orientation="vertical" aria-label="Views">
+    <!-- ◆ AI assistant: hidden until an LLM is connected and the assistant is switched on (core/llm.js) -->
+    <button id="act-ai" class="act act-gem hidden" data-tab="ai" data-llm="assistant" role="tab" aria-selected="false" aria-label="AI assistant: ask about the dataset, the selection, the evaluation" title="AI assistant — ask about the dataset, the selection, the evaluation">
+      <svg class="ico gem-ico" viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="gem-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" style="stop-color:var(--gem-1)"/><stop offset=".55" style="stop-color:var(--gem-2)"/><stop offset="1" style="stop-color:var(--gem-3)"/></linearGradient></defs>
+        <path class="gem-body" d="M6.5 4h10l4.5 5.5L11.5 21 2 9.5z"/>
+        <path class="gem-facet" d="M2 9.5h19M9.3 4 7.2 9.5l4.3 11.5 4.3-11.5L13.7 4M7.2 9.5 11.5 4l4.3 5.5"/>
+        <path class="gem-spark" d="M20 1.5v4M18 3.5h4"/></svg></button>
+    <!-- data views: work without a model -->
+    <button class="act active" data-tab="explore" role="tab" aria-selected="true" aria-label="Explore: gallery + embedding plot" title="Explore — gallery + embedding plot">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg></button>
+    <button class="act" data-tab="stats" role="tab" aria-selected="false" aria-label="Class stats" title="Class stats">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-bars"/></svg></button>
+    <button id="act-curation" class="act" data-tab="curation" role="tab" aria-selected="false" aria-label="Curation: find and fix label problems" title="Curation — find and fix label / image problems">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-alert"/></svg><span id="act-cur-badge" class="act-badge num hidden"></span></button>
+    <!-- model views: need a model (Settings › Models) -->
+    <div class="act-sep" role="separator" aria-label="Model views"><span>model</span></div>
+    <button class="act" data-tab="model" role="tab" aria-selected="false" aria-label="Model: predictions vs labels" title="Model — predictions vs labels, likely label errors">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg></button>
+    <button class="act" data-tab="eval" role="tab" aria-selected="false" aria-label="Evaluation: compare models, explain them with the dataset" title="Evaluation — compare models, findings, report">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eval"/></svg></button>
+    <button id="btn-settings" class="act act-bottom" aria-label="Settings: datasets, S3 connections, appearance" title="Settings — datasets, S3 / RustFS, theme"
+            aria-haspopup="dialog">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg></button>
+  </nav>
+
+  <!-- LEFT (AI): the assistant chat, next to the plot (views/assistant.js renders it) -->
+  <section id="ai-side" class="left-panel hidden" aria-label="AI assistant" data-llm="assistant"></section>
+
+  <!-- LEFT (Explore): gallery of selected samples -->
+  <section id="gallery-panel" class="left-panel" aria-label="Selection gallery">
+    <div class="gallery-head">
+      <div class="gh-title">
+        <h2 id="gallery-title">No selection</h2>
+        <span id="gallery-count" class="count-badge num"></span>
+      </div>
+      <div id="breakdown" class="chips"></div>
+      <div id="edit-banner" class="cur-banner edit-banner hidden" role="status"></div>
+      <div class="row">
+        <label class="field">Sort
+          <select id="sort">
+            <option value="none">selection order</option>
+            <option value="suspicion">suspicion ↓</option>
+            <option value="outlier">outlier ↓</option>
+            <option value="group-out">outliers (no group) first</option>
+            <option value="area-asc">box area ↑</option>
+            <option value="area-desc">box area ↓</option>
+            <option value="blur">blurriest first</option>
+            <option value="dark">darkest first</option>
+            <option value="bright">brightest first</option>
+            <option value="class">class</option>
+            <option value="image">image name</option>
+            <option value="m-status" hidden disabled>model mistakes first</option>
+            <option value="m-score" hidden disabled>model confidence ↑</option>
+          </select>
+        </label>
+        <label class="field">Size <input id="thumb-size" type="range" min="64" max="220" value="110"></label>
+      </div>
+      <div class="row actions">
+        <button id="btn-tag" title="Save selection under a tag"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Tag…</button>
+        <select id="tag-list" aria-label="Load a saved tag"><option value="">Load tag…</option></select>
+        <button id="btn-ai-check" class="gem-btn hidden" data-llm="label_check" title="Ask the AI to check the labels of the selected boxes"><svg class="ico gem-mark" aria-hidden="true"><use href="static/assets/icons.svg#i-gem"/></svg>Check labels</button>
+        <button id="btn-export" title="Download selection as CSV"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-download"/></svg>CSV</button>
+        <span class="grow"></span>
+        <button id="btn-clear" class="ghost" title="Clear the selection"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg>Clear</button>
+      </div>
+    </div>
+    <div id="gallery" class="gallery"></div>
+    <nav id="pager" class="pager" aria-label="Gallery pages"></nav>
+  </section>
+
+  <!-- LEFT (Class stats): one row per class -->
+  <section id="stats-side" class="left-panel hidden" aria-label="Classes">
+    <div class="side-head">
+      <h2>Classes</h2>
+      <span id="stats-side-sub" class="muted hint"></span>
+    </div>
+    <div class="side-scroll">
+      <table id="class-table" class="class-table">
+        <thead><tr><th>class</th><th class="r">boxes</th><th class="r">%</th><th class="r" title="boxes whose nearest neighbours mostly have another class">suspicious</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted hint side-hint">Click a class to load its boxes into the gallery.</p>
+    </div>
+  </section>
+
+  <!-- LEFT (Model): pick a model, threshold, split; headline numbers and the per-class table -->
+  <section id="model-side" class="left-panel hidden" aria-label="Model evaluation">
+    <div class="side-head">
+      <h2>Model</h2>
+      <span id="m-sub" class="muted hint"></span>
+    </div>
+    <div class="side-scroll model-side">
+      <div class="m-row">
+        <select id="m-model" aria-label="Model" class="grow"></select>
+        <button id="m-add" class="icon-btn" aria-label="Add or edit models" title="Add / edit models (Settings › Models)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-plus"/></svg></button>
+      </div>
+      <div id="m-run-box" class="m-run hidden">
+        <button id="m-run" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-play"/></svg>Run on this dataset</button>
+        <div id="m-run-prog" class="m-prog hidden"><div class="bar"><div></div></div><span class="num muted"></span></div>
+      </div>
+      <div class="m-ctl">
+        <span class="m-lbl" title="Images the model never saw in training give honest numbers">Images</span>
+        <div id="m-split" class="segmented" role="group" aria-label="Which images to score">
+          <button class="view-btn" data-split="val" aria-pressed="true" title="Validation images only (not used in training)">val</button>
+          <button class="view-btn" data-split="train" aria-pressed="false" title="Training images: optimistic">train</button>
+          <button class="view-btn" data-split="all" aria-pressed="false" title="Every image of the dataset">all</button>
+        </div>
+      </div>
+      <div class="m-ctl">
+        <label class="m-lbl" for="m-conf" title="Predictions below this confidence are ignored">Confidence</label>
+        <input id="m-conf" type="range" min="0.01" max="0.99" step="0.01" value="0.25">
+        <span id="m-conf-v" class="num">0.25</span>
+        <button id="m-best" class="ghost" title="Jump to the confidence with the best F1">best</button>
+      </div>
+      <div class="m-ctl">
+        <label class="m-lbl" for="m-iou" title="How much a prediction must overlap a label to count as finding it">Match IoU</label>
+        <select id="m-iou"><option value="0.5">0.50</option><option value="0.75">0.75</option><option value="0.3">0.30</option></select>
+      </div>
+      <div id="m-warn"></div>
+      <div id="m-kpis" class="kpis"></div>
+      <table id="m-class-table" class="class-table">
+        <thead><tr><th>class</th><th class="r" title="AP at IoU 0.5 (all confidences)">AP50</th><th class="r" title="precision at this confidence">P</th>
+          <th class="r" title="recall at this confidence">R</th><th class="r" title="labels the model missed, misplaced or called another class">miss</th>
+          <th class="r" title="predictions with no matching label">FP</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted hint side-hint">Click a class to load its mistakes into the gallery.</p>
+    </div>
+  </section>
+
+  <!-- LEFT (Evaluation): what to compare and how, the focus model, export -->
+  <section id="eval-side" class="left-panel hidden" aria-label="Evaluation options">
+    <div class="side-head">
+      <h2>Evaluation</h2>
+      <span id="e-sub" class="muted hint"></span>
+      <button id="e-ai-explain" type="button" class="gem-btn hidden" data-llm="explain_eval" title="Ask the AI assistant to explain this evaluation"><svg class="ico gem-mark" aria-hidden="true"><use href="static/assets/icons.svg#i-gem"/></svg>Explain</button>
+    </div>
+    <div class="side-scroll model-side">
+      <div class="m-ctl">
+        <span class="m-lbl" title="Images the models never saw in training give honest numbers">Images</span>
+        <div id="e-split" class="segmented" role="group" aria-label="Which images to score">
+          <button class="view-btn active" data-split="val" aria-pressed="true">val</button>
+          <button class="view-btn" data-split="train" aria-pressed="false">train</button>
+          <button class="view-btn" data-split="all" aria-pressed="false">all</button>
+        </div>
+      </div>
+      <div class="m-ctl">
+        <span class="m-lbl" title="Precision / recall depend on the confidence threshold; mAP does not">Score at</span>
+        <div id="e-mode" class="segmented" role="group" aria-label="Confidence threshold">
+          <button class="view-btn active" data-mode="best" aria-pressed="true" title="each model at the threshold with its best F1: the fairest comparison">best F1</button>
+          <button class="view-btn" data-mode="fixed" aria-pressed="false" title="every model at the same threshold">fixed</button>
+        </div>
+      </div>
+      <div id="e-conf-row" class="m-ctl hidden">
+        <label class="m-lbl" for="e-conf">Confidence</label>
+        <input id="e-conf" type="range" min="0.05" max="0.95" step="0.05" value="0.25">
+        <span id="e-conf-v" class="num">0.25</span>
+      </div>
+      <div class="m-ctl">
+        <label class="m-lbl" for="e-focus" title="The model the dataset charts explain (default: the best one)">Explain</label>
+        <select id="e-focus" class="grow"></select>
+      </div>
+      <div>
+        <div class="e-models-head"><b>Models</b><button id="e-run-all" class="ghost hidden">Run all not run</button></div>
+        <div id="e-models" class="e-models"></div>
+      </div>
+      <div class="e-export">
+        <b>Export</b>
+        <div class="segmented">
+          <button id="e-html" title="A standalone HTML report: findings, leaderboard, charts"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-download"/></svg>Report</button>
+          <button id="e-csv" title="Leaderboard + per-class AP of every model">CSV</button>
+          <button id="e-json" title="Everything this tab shows, as data">JSON</button>
+        </div>
+        <span id="e-export-st" class="muted hint"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- LEFT (Curation): scan, issue types, history (views/curation.js) -->
+  <section id="cur-side" class="left-panel hidden" aria-label="Data curation">
+    <div class="side-head">
+      <h2>Curation</h2>
+      <span id="cur-sub" class="muted hint"></span>
+    </div>
+    <div class="side-scroll cur-side">
+      <div class="cur-scan">
+        <button id="cur-scan" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Scan dataset</button>
+        <div id="cur-prog" class="m-prog hidden"><div class="bar" role="progressbar" aria-label="Scan progress"><div></div></div><span class="num muted"></span></div>
+        <label class="check" title="Also list where the model chosen in the Model view disagrees with the labels"><input type="checkbox" id="cur-use-model"> Include model checks <span id="cur-model-name" class="muted"></span></label>
+      </div>
+      <div id="cur-banner" class="cur-banner hidden" role="status"></div>
+      <div id="cur-types" class="cur-types"></div>
+      <details id="cur-hist-wrap" class="cur-hist-wrap">
+        <summary>History <span id="cur-hist-n" class="muted num"></span></summary>
+        <ol id="cur-hist" class="cur-hist"></ol>
+      </details>
+    </div>
+  </section>
+
+  <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"
+       title="Drag to resize, or to either edge to collapse that side · double-click to reset · Ctrl+Alt+←/→ collapse">
+    <button id="splitter-open" class="splitter-open" aria-label="Show the collapsed panel" title="Show the collapsed panel (Ctrl+Alt+←/→)">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-r"/></svg></button>
+  </div>
+
+  <!-- RIGHT: plot + controls -->
+  <section id="main-panel">
+    <div id="tab-embed" class="tab-body" role="tabpanel">
+      <div id="controls" class="controls">
+        <button id="ctl-toggle" class="icon-btn ctl-toggle" aria-expanded="true" aria-controls="controls"
+                aria-label="Hide controls" title="Hide controls (more room for the plot)">
+          <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+        <button id="ctl-mini" class="ctl-mini" title="Show controls: projection, view, search, inspect"></button>
+        <div class="ctl-group">
+          <span class="ctl-title">Projection</span>
+          <div class="ctl-row">
+            <label class="field" title="What each box is turned into before projecting">Features
+              <select id="feature"></select>
+            </label>
+            <label class="field">Method
+              <select id="method"></select>
+            </label>
+            <span id="params"></span>
+            <button id="btn-apply" class="primary"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Re-project</button>
+            <select id="saved-views" aria-label="Saved views" title="Every projection already computed for this dataset — loads instantly"><option value="">Saved views…</option></select>
+          </div>
+          <span id="pca-info" class="muted num hint"></span>
+        </div>
+
+        <div class="ctl-group">
+          <span class="ctl-title">View</span>
+          <div class="ctl-row">
+            <label class="field">Classes
+              <select id="mode">
+                <option value="all">All classes</option>
+                <option value="single">One class</option>
+                <option value="compare">Compare 2 classes</option>
+              </select>
+            </label>
+            <label id="lbl-a" class="field">Class <select id="class-a"></select></label>
+            <label id="lbl-b" class="field">vs <select id="class-b"></select></label>
+            <label class="field">Color by
+              <select id="color-by">
+                <option value="class">class</option>
+                <option value="group">group</option>
+                <option value="suggested">kNN-suggested class</option>
+                <option value="session">session</option>
+                <option value="suspicion">label suspicion</option>
+                <option value="outlier">outlier score</option>
+                <option value="area">box area (log)</option>
+                <option value="aspect">aspect ratio (log)</option>
+                <option value="brightness">brightness</option>
+                <option value="blur">sharpness (log)</option>
+                <optgroup label="Model (Model tab)" data-needs="model" hidden disabled>
+                  <option value="m_status">model: found / missed / wrong</option>
+                  <option value="m_pred">model: predicted class</option>
+                  <option value="m_score">model: confidence</option>
+                </optgroup>
+              </select>
+            </label>
+            <label class="field" title="Dot size">Dot <input id="dot-size" type="range" min="2" max="12" value="5"></label>
+            <label class="dist-toggle" title="Pick 2+ thumbnails (ctrl+click): lines between their dots show the feature-space distance">
+              <input type="checkbox" id="show-dist" checked> Distances</label>
+          </div>
+        </div>
+
+        <div class="ctl-group">
+          <span class="ctl-title">Search</span>
+          <form id="text-search" class="ctl-row" role="search">
+            <input id="text-q" type="search" class="text-q" placeholder="Describe boxes, e.g. person on a bike at night"
+                   aria-label="Search boxes by text" autocomplete="off">
+            <button id="text-go" type="submit" title="Closest boxes to the text, in the current feature space">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Search</button>
+          </form>
+        </div>
+
+        <div class="ctl-group">
+          <span class="ctl-title">Inspect</span>
+          <div class="ctl-row">
+            <div class="segmented" role="group" aria-label="Find problems">
+              <button id="btn-suspicious" class="view-btn" data-view="suspicious" aria-pressed="false" title="Boxes whose nearest neighbours mostly have another class">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Suspicious labels</button>
+              <button id="btn-outliers" class="view-btn" data-view="far" aria-pressed="false" title="Boxes far from their class centre">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Far from class</button>
+              <button id="btn-dups" class="view-btn" data-view="dups" aria-pressed="false" title="Near-identical boxes in different images">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Near-duplicates</button>
+            </div>
+            <div class="popover-anchor">
+              <button id="btn-groups" aria-haspopup="true" aria-expanded="false" aria-controls="groups-pop" title="Density groups: bubbles, outliers">
+                <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Groups
+                <span id="groups-badge" class="badge-count num hidden"></span>
+                <svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg>
+              </button>
+              <div id="groups-pop" class="popover panel hidden" role="group" aria-label="Group options">
+                <div class="pop-title">Density groups</div>
+                <label class="check" title="Draw a bubble around every group of dots"><input type="checkbox" id="g-bubbles"> Draw bubbles</label>
+                <label class="check" title="Mark dots that belong to no group with a red cross"><input type="checkbox" id="g-outliers"> Mark outliers</label>
+                <label class="check" title="Fade dots that are inside a group, so outliers stand out"><input type="checkbox" id="g-dim"> Dim grouped dots</label>
+                <div class="pop-grid">
+                  <label class="field" for="g-mode" title="Per class: each bubble holds one class; a dot that fits no group of its own class is an outlier">Grouping</label>
+                  <select id="g-mode">
+                    <option value="class">per class</option>
+                    <option value="all">all points</option>
+                  </select>
+                  <label class="field" for="g-min" title="Smallest number of dots that counts as a group">Min size</label>
+                  <input id="g-min" type="number" min="3" max="500" value="15">
+                </div>
+                <button id="btn-sel-outliers" class="view-btn block" data-view="sel-outliers" aria-pressed="false" title="Show every outlier dot in the gallery">
+                  <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Select all outliers</button>
+              </div>
+            </div>
+            <span id="g-info" class="muted num hint"></span>
+          </div>
+        </div>
+      </div>
+      <!-- image / box filter (views/filter-bar.js, engine core/filter.js) -->
+      <div id="filter-bar" class="filter-bar" role="search" aria-label="Filter images and boxes">
+        <div class="fb-row">
+          <div class="fb-name">
+            <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>
+            <input id="fb-q" type="search" placeholder="Filter by image name…" aria-label="Filter by image name"
+                   aria-describedby="fb-err" autocomplete="off" spellcheck="false">
+            <select id="fb-mode" aria-label="How the name is matched" title="contains: plain text · wildcard: cam1* or img_??.jpg · regex: /^cam[12]_/ · related: shares words or numbers">
+              <option value="substr">contains</option><option value="glob">wildcard</option><option value="regex">regex</option><option value="fuzzy">related</option>
+            </select>
+            <label class="fb-neg" title="Keep the images whose name does NOT match"><input type="checkbox" id="fb-neg"> not</label>
+          </div>
+          <div class="popover-anchor">
+            <button id="fb-cls-btn" class="fb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-cls-pop" title="Images that contain some / all / none of the chosen classes">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg><span class="fb-t">Has class</span><span id="fb-cls-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+            <div id="fb-cls-pop" class="popover panel hidden fb-pop" role="group" aria-label="Image has class">
+              <div class="pop-title">Image has class</div>
+              <div id="fb-cls-mode" class="fb-seg" role="group" aria-label="How classes combine">
+                <button type="button" data-m="any" aria-pressed="true" title="at least one of the chosen classes">any</button>
+                <button type="button" data-m="all" aria-pressed="false" title="every chosen class">all</button>
+                <button type="button" data-m="none" aria-pressed="false" title="none of the chosen classes">none</button>
+              </div>
+              <div id="fb-cls-chips" class="chips fb-cls-chips"></div>
+            </div>
+          </div>
+          <div class="popover-anchor">
+            <button id="fb-more-btn" class="fb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-more-pop" title="Box count, size, aspect, light, sessions, tags, model, scores, issues, text">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg><span class="fb-t">More filters</span><span id="fb-more-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+            <div id="fb-more-pop" class="popover panel hidden fb-pop fb-more" role="group" aria-label="More filters"></div>
+          </div>
+          <div id="fb-scope" class="fb-seg" role="group" aria-label="Filter scope" title="Images: a matching image shows all its boxes · Boxes: only the matching boxes">
+            <button type="button" data-scope="image" aria-pressed="true">Images</button>
+            <button type="button" data-scope="box" aria-pressed="false">Boxes</button>
+          </div>
+          <span class="grow"></span>
+          <span id="fb-count" class="fb-count num" aria-live="polite"></span>
+          <button id="fb-show" class="fb-btn" title="Load the filtered boxes into the gallery"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg><span class="fb-t">Show in gallery</span></button>
+          <div class="popover-anchor">
+            <button id="fb-preset-btn" class="fb-btn icon-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-preset-pop" aria-label="Filter presets" title="Saved filter presets"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg></button>
+            <div id="fb-preset-pop" class="popover panel hidden fb-pop fb-presets" role="group" aria-label="Filter presets"></div>
+          </div>
+        </div>
+        <!-- ◆ describe the filter in words (LLM, views/filter-bar.js runNLFilter); hidden unless nl_filter is on -->
+        <div class="fb-row fb-ai-row hidden" data-llm="nl_filter">
+          <form id="fb-ai-form" class="fb-ai-form" role="search">
+            <svg class="ico gem-mark" aria-hidden="true"><use href="static/assets/icons.svg#i-gem"/></svg>
+            <input id="fb-ai-q" type="search" placeholder="Describe… e.g. small dark cars at night" aria-label="Describe the filter in words (AI)" autocomplete="off">
+            <button id="fb-ai-go" type="submit" class="fb-btn" title="Turn the sentence into a filter">Apply</button>
+          </form>
+          <button id="fb-ai-undo" type="button" class="ghost fb-clear hidden" title="Back to the filter before the AI one"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-undo"/></svg>Undo</button>
+          <span id="fb-ai-msg" class="fb-ai-msg hidden" role="status"></span>
+        </div>
+        <div id="fb-err" class="fb-err hidden" role="alert"></div>
+        <!-- one line of active-filter chips; the ones that do not fit are in the "+N" popover -->
+        <div id="fb-chips-line" class="fb-chips-line hidden">
+          <div id="fb-chips" class="chips fb-chips" role="group" aria-label="Active filters"></div>
+          <div class="popover-anchor">
+            <button id="fb-chips-more" type="button" class="ghost fb-clear hidden" aria-haspopup="true" aria-expanded="false" aria-controls="fb-chips-pop"></button>
+            <div id="fb-chips-pop" class="popover panel hidden fb-pop fb-chips-pop" role="group" aria-label="More active filters"></div>
+          </div>
+          <button id="fb-chips-clear" type="button" class="ghost fb-clear hidden" data-clear="all">Clear all</button>
+        </div>
+      </div>
+      <div id="class-filter" class="chips class-filter" aria-label="Class filter"></div>
+      <div id="plot-wrap">
+        <div id="plot"></div>
+        <svg id="lasso-layer" class="lasso-layer" aria-hidden="true"><path id="lasso-path" d=""/></svg>
+        <div id="select-tools" class="segmented select-tools" role="group" aria-label="Selection shape">
+          <button class="view-btn icon-btn active" data-shape="lasso" aria-pressed="true" aria-label="Freehand lasso" title="Freehand lasso — draw around the dots"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-polygon"/></svg></button>
+          <button class="view-btn icon-btn" data-shape="box" aria-pressed="false" aria-label="Box" title="Box — drag corner to corner"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg></button>
+          <button class="view-btn icon-btn" data-shape="circle" aria-pressed="false" aria-label="Circle" title="Circle — drag corner to corner (Shift: round)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-circle"/></svg></button>
+        </div>
+        <div id="plot-idle" class="plot-wait plot-idle hidden">
+          <div class="wait-box panel">
+            <div id="idle-title">Embedding not computed yet</div>
+            <p id="idle-note" class="muted"></p>
+            <button id="btn-compute" class="primary"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg><span id="btn-compute-label">Compute embedding</span></button>
+            <p class="muted hint">Model check and Model diff work without it.</p>
+          </div>
+        </div>
+        <div id="plot-wait" class="plot-wait hidden">
+          <div class="wait-box panel" role="status" aria-live="polite">
+            <div id="wait-label">Computing…</div>
+            <div id="wait-stage" class="muted"></div>
+            <div class="bar" role="progressbar" aria-label="Computation progress"><div id="wait-fill"></div></div>
+            <div id="wait-pct" class="muted num"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-stats" class="tab-body hidden" role="tabpanel">
+      <div id="stats-idle" class="panel hidden" style="margin:var(--s4)">
+        <p>Suspicion and outlier stats need the embedding scores, which have not been computed yet.</p>
+        <button id="btn-stats-compute" class="primary">Go to Explore and compute</button>
+      </div>
+      <div class="stats-grid">
+        <section class="stat-card">
+          <h3>Boxes per class</h3>
+          <div id="stat-counts" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Box area per class <span class="muted">% of image, log scale</span></h3>
+          <div id="stat-area" class="stat"></div>
+        </section>
+        <section class="stat-card wide">
+          <h3>Labelled class vs kNN-majority class <span id="stat-confusion-sub" class="muted"></span></h3>
+          <p class="muted hint">Rows: the label. Columns: what the nearest neighbours say. Click a cell to load those boxes into the gallery.</p>
+          <div id="stat-confusion" class="stat"></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="tab-model" class="tab-body hidden" role="tabpanel">
+      <div id="m-empty" class="m-empty hidden"></div>
+      <div id="m-grid" class="stats-grid hidden">
+        <section class="stat-card wide">
+          <h3>Likely label errors <span id="m-issues-sub" class="muted"></span></h3>
+          <p class="muted hint">Where a confident model disagrees with the label. Click to open the image (labels solid, predictions dashed).</p>
+          <div id="m-issue-filter" class="chips"></div>
+          <div id="m-issues" class="issue-list"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Confusion matrix <span class="muted">rows: label · columns: prediction</span></h3>
+          <div id="m-cm" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>What happened to each label, per class</h3>
+          <div id="m-errs" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Precision–recall <span class="muted">IoU 0.5, all confidences</span></h3>
+          <div id="m-pr" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Precision, recall, F1 vs confidence</h3>
+          <div id="m-f1" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Confidence: correct vs wrong predictions</h3>
+          <div id="m-hist" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Where the model misses
+            <select id="m-recall-by" aria-label="Recall by"><option value="area">box size</option><option value="brightness">brightness</option><option value="blur">sharpness</option><option value="aspect">aspect ratio</option></select></h3>
+          <div id="m-recall" class="stat"></div>
+        </section>
+        <section class="stat-card wide">
+          <h3>False positives <span id="m-fp-sub" class="muted"></span></h3>
+          <p class="muted hint">Predictions with no matching label, most confident first: often a box someone forgot to draw.</p>
+          <div id="m-fps" class="fp-strip"></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="tab-eval" class="tab-body hidden" role="tabpanel">
+      <div id="e-empty" class="m-empty hidden"></div>
+      <div id="e-grid" class="stats-grid hidden">
+        <section class="stat-card wide">
+          <h3>What matters <span id="e-find-sub" class="muted"></span></h3>
+          <div id="e-findings" class="findings"></div>
+        </section>
+        <section class="stat-card wide">
+          <h3>Leaderboard <span id="e-lb-sub" class="muted"></span></h3>
+          <div class="lb-wrap"><table id="e-lb" class="class-table lb-table"></table></div>
+        </section>
+        <section id="e-cmp-card" class="stat-card wide hidden">
+          <h3>Compare <select id="e-cmp-a" aria-label="Model A"></select> vs <select id="e-cmp-b" aria-label="Model B"></select>
+            <span id="e-cmp-sub" class="muted"></span></h3>
+          <div id="e-cmp-chips" class="chips cmp-chips"></div>
+          <div id="e-cmp" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Speed vs accuracy <span class="muted">bubble = file size</span></h3>
+          <div id="e-speed" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>AP50 per class, every model <span class="muted">click: that class's mistakes</span></h3>
+          <div id="e-heat" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Training labels vs AP <span id="e-bal-sub" class="muted"></span></h3>
+          <div id="e-balance" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Train vs val AP50 <span id="e-gap-sub" class="muted">gap = overfitting</span></h3>
+          <div id="e-gap" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Per session <span class="muted">click: its mistakes</span></h3>
+          <div id="e-sess" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Can the scores be trusted? <span id="e-cal-sub" class="muted"></span></h3>
+          <div id="e-calib" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Box fit (IoU of found objects) <span id="e-loc-sub" class="muted"></span></h3>
+          <div id="e-loc" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Model vs neighbours <span id="e-knn-sub" class="muted"></span></h3>
+          <p class="muted hint">Do the model and the kNN label check agree on which labels look wrong? Click a cell.</p>
+          <div id="e-knn" class="knn-grid"></div>
+          <h3 style="margin-top:16px">Recall by box size</h3>
+          <div id="e-sizes" class="size-bars"></div>
+        </section>
+        <section class="stat-card wide">
+          <h3>Worst images <span class="muted">most mistakes (labels solid, predictions dashed)</span></h3>
+          <div id="e-worst" class="fp-strip"></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="tab-curation" class="tab-body hidden" role="tabpanel" aria-label="Curation issues">
+      <div class="cur-head">
+        <h3 id="cur-title">Issues</h3>
+        <span id="cur-count" class="count-badge num"></span>
+        <span class="grow"></span>
+        <label class="check" title="List the issues you marked as fine"><input type="checkbox" id="cur-show-ign"> Ignored</label>
+        <button id="cur-plot" title="Filter the plot to the images / boxes with these issues"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg>Show on plot</button>
+        <button id="cur-fixall" class="primary" disabled><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Fix all…</button>
+      </div>
+      <div id="cur-empty" class="m-empty hidden"></div>
+      <div id="cur-list" class="cur-list" role="listbox" tabindex="0" aria-label="Issues (j / k to move, f to fix, i to ignore, u to undo)">
+        <div id="cur-spacer" class="cur-spacer"></div>
+      </div>
+      <p class="hint cur-keys"><kbd>j</kbd> <kbd>k</kbd> move · <kbd>f</kbd> apply the first fix · <kbd>i</kbd> ignore · <kbd>u</kbd> undo the last fix</p>
+    </div>
+  </section>
+</main>
+
+<!-- curation: undo toast + fix-all confirm -->
+<div id="cur-toast" class="cur-toast panel hidden" role="status" aria-live="polite">
+  <span id="cur-toast-text"></span>
+  <button id="cur-toast-undo" class="ghost"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-undo"/></svg>Undo</button>
+  <button id="cur-toast-x" class="icon-btn ghost" aria-label="Dismiss"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
+</div>
+<div id="cur-dlg" class="modal hidden">
+  <div class="cur-dlg panel" role="alertdialog" aria-modal="true" aria-labelledby="cur-dlg-title" aria-describedby="cur-dlg-text" tabindex="-1">
+    <h3 id="cur-dlg-title"></h3>
+    <p id="cur-dlg-text" class="muted"></p>
+    <ul id="cur-dlg-list" class="cur-dlg-list"></ul>
+    <div class="form-foot"><button id="cur-dlg-cancel" class="ghost">Cancel</button><button id="cur-dlg-ok" class="primary"></button></div>
+  </div>
+</div>
+
+<div id="hover-tip" class="hover-tip panel hidden"><img alt=""><div></div></div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
+    <div class="modal-head">
+      <div id="modal-title" class="modal-title"></div>
+      <div class="modal-actions">
+        <div class="segmented">
+          <button id="m-prev" class="icon-btn" aria-label="Previous box" title="Previous (←)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg></button>
+          <button id="m-next" class="icon-btn" aria-label="Next box" title="Next (→)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-r"/></svg></button>
+        </div>
+        <div id="vw-toggles" class="segmented" role="group" aria-label="What to draw">
+          <button id="vw-labels" class="view-btn" aria-pressed="true" title="Show / hide the labeled boxes (B)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eye"/></svg>Labels</button>
+          <button id="vw-names" class="view-btn" aria-pressed="true" title="Show / hide the class names on the boxes (L)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Names</button>
+          <button id="m-preds" class="view-btn hidden" aria-pressed="false" title="Draw the selected model's predictions (dashed) (P)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-target"/></svg>Predictions</button>
+        </div>
+        <button id="vw-edit" class="view-btn" aria-pressed="false" title="Fix boxes or draw missing ones (E) · right-click the image to copy it"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-edit"/></svg>Edit</button>
+        <button id="m-sameimg"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Boxes in this image</button>
+        <button id="m-group" class="hidden" title="All dots in the same group as this one"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Its group</button>
+        <button id="m-similar" class="primary"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Find similar</button>
+        <button id="m-close" class="icon-btn" aria-label="Close" title="Close (Esc)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-stage">
+        <!-- image editor bar (views/box-editor.js): shown in Edit mode -->
+        <div id="vw-editbar" class="vw-editbar hidden" role="toolbar" aria-label="Edit boxes">
+          <label class="field">Class <select id="vw-cls" aria-label="Class of new and selected boxes"></select></label>
+          <div class="segmented" role="group" aria-label="Tool">
+            <button id="vw-t-select" class="view-btn active" aria-pressed="true" title="Select, move, resize (V)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-crosshair"/></svg>Select</button>
+            <button id="vw-t-draw" class="view-btn" aria-pressed="false" title="Draw a new box: drag on the image (N)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg>Draw</button>
+            <button id="vw-t-region" class="view-btn" aria-pressed="false" title="Drag a region to select all the boxes inside it, then pick a class to relabel them together (R)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-crosshair"/></svg>Region</button>
+          </div>
+          <button id="vw-del" class="icon-btn" aria-label="Delete the selected box" title="Delete the selected box (Del)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-trash"/></svg></button>
+          <div class="segmented">
+            <button id="vw-undo" class="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-undo"/></svg></button>
+            <button id="vw-redo" class="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-redo"/></svg></button>
+          </div>
+          <span id="vw-edit-st" class="muted hint grow" aria-live="polite"></span>
+          <button id="vw-discard" class="ghost" title="Drop the unsaved changes">Discard</button>
+          <button id="vw-save" class="primary" title="Write the label file (Ctrl+S) · undo from the toast or Curation › History"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Save</button>
+        </div>
+        <div class="vw-view">
+          <div id="vw" class="vw">
+            <img id="modal-img" alt="Full image" draggable="false">
+            <svg id="vw-svg" class="vw-svg" aria-hidden="true"></svg>
+          </div>
+        </div>
+        <!-- zoom bar (views/viewer.js): its own row under the image, never on top of it -->
+        <div id="vw-zoombar" class="vw-zoombar" role="toolbar" aria-label="Zoom the image">
+          <div class="segmented">
+            <button data-z="out" class="view-btn vw-zb" title="Zoom out (− or mouse wheel)" aria-label="Zoom out">−</button>
+            <button data-z="actual" class="view-btn vw-zlv" title="Actual size, 1 image pixel = 1 screen pixel (1)" aria-label="Actual size"><span id="vw-zoom-lv">100%</span></button>
+            <button data-z="in" class="view-btn vw-zb" title="Zoom in (+ or mouse wheel)" aria-label="Zoom in">+</button>
+          </div>
+          <button data-z="fit" class="view-btn" title="Fit the image to the window (0 or double-click)">Fit</button>
+          <span class="hint vw-zhint">Wheel to zoom · drag to move · double-click to fit</span>
+        </div>
+      </div>
+      <aside class="modal-side">
+        <img id="modal-crop" alt="Box crop">
+        <table id="modal-meta"></table>
+      </aside>
+    </div>
+  </div>
+</div>
+
+
+<!-- right-click menu of the image viewer (views/viewer.js) -->
+<div id="vw-menu" class="vw-menu panel hidden" role="menu" aria-label="Image">
+  <button role="menuitem" data-vm="copy-boxes"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Copy image with boxes</button>
+  <button role="menuitem" data-vm="copy-plain"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Copy image without boxes</button>
+  <hr>
+  <button role="menuitem" data-vm="save-boxes"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-download"/></svg>Save PNG with boxes</button>
+  <button role="menuitem" data-vm="save-plain"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-download"/></svg>Save PNG without boxes</button>
+  <hr>
+  <button role="menuitem" data-vm="copy-name"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Copy file name</button>
+  <div class="vw-menu-foot muted">Shift + right-click: the browser's own menu</div>
+</div>
+
+<!-- settings: sessions (local folders, S3 / RustFS), connections, appearance, plot, workspace.
+     The Sessions home opens it in "solo" mode (class solo: no section nav) to create / edit one session. -->
+<div id="settings" class="modal hidden">
+  <div class="settings-box panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
+    <nav class="settings-nav" aria-label="Settings sections">
+      <h2 id="settings-title"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg>Settings</h2>
+      <button class="snav active" data-sec="datasets"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-db"/></svg>Sessions<span id="snav-nds" class="n"></span></button>
+      <button class="snav" data-sec="connections"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-plug"/></svg>Connections<span id="snav-ncs" class="n"></span></button>
+      <button class="snav" data-sec="labeling"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Labeling</button>
+      <button class="snav" data-sec="models"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg>Models<span id="snav-nms" class="n"></span></button>
+      <button class="snav" data-sec="llm"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gem"/></svg>AI assistant<span id="snav-nllm" class="n"></span></button>
+      <button class="snav" data-sec="appearance"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-sun"/></svg>Appearance</button>
+      <button class="snav" data-sec="plot" data-needs="session"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-ruler"/></svg>Plot</button>
+      <button class="snav" data-sec="workspace" data-needs="session"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-folder"/></svg>Workspace</button>
+      <div class="settings-foot">Connection secrets stay on the server (connections.json, owner-only). The page only ever sees them masked.</div>
+    </nav>
+    <div class="settings-main">
+      <header class="settings-head">
+        <h3 id="sec-title">Sessions</h3>
+        <button id="settings-close" class="icon-btn ghost" aria-label="Close settings" title="Close (Esc)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
+      </header>
+      <div id="settings-body" class="settings-body"></div>
+    </div>
+  </div>
+</div>
+<script type="module" src="static/js/main.js?v=15"></script>
+</body>
+</html>

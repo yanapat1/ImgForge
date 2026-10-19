@@ -1,0 +1,8 @@
+# THIS SERVER ONLY: only /home/jovyan/work survives a reset, so caches are bind-mounted there instead of using
+# Docker named volumes. Not needed anywhere else. Enabled by COMPOSE_FILE in .env (copy from .env.example).
+services:
+  image-tools:
+    volumes:
+      - /home/jovyan/work/image-tools-data/dataviz_cache:/workspace/.dataviz_cache
+      - /home/jovyan/work/image-tools-data/hf_cache:/workspace/.hf_cache
+      - ${DATASET_DIR:-./folder-server}:/workspace/folder-server

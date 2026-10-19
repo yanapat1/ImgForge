@@ -1,0 +1,38 @@
+/* Responsive overrides (loaded last so they win) and reduced motion. */
+
+/* ---------------------------------------------------------------- responsive */
+@media (max-width: 1280px) {
+  .ds-info .pill.opt { display: none; }
+}
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: minmax(0, 1fr); }
+  .ctl-group { border-right: none; border-bottom: 1px solid var(--border); flex: 1 1 100%; }
+  .ctl-group:last-child { border-bottom: none; }
+}
+@media (max-width: 900px) {
+  :root { --header-h: auto; }
+  body { overflow: auto; height: auto; min-height: 100%; }
+  .app-header { flex-wrap: wrap; padding: var(--s2) var(--s4); gap: var(--s2); }
+  .ds-info { order: 3; flex-basis: 100%; flex-wrap: wrap; }
+  .startup { inset: 0; }
+  main, main.left-collapsed, main.right-collapsed { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+  main.right-collapsed #main-panel { display: flex !important; }   /* stacked: nothing to collapse into */
+  .activity-bar { grid-column: 1; grid-row: 1; flex-direction: row; padding: 6px var(--s3); border-right: none; border-bottom: 1px solid var(--border); }
+  .activity-bar .act-sep { width: auto; height: 28px; margin: 0 4px; padding: 0 0 0 6px; border-top: none; border-left: 1px solid var(--border); display: flex; align-items: center; }
+  .activity-bar .act.active::before { left: 9px; right: 9px; top: auto; bottom: -7px; width: auto; height: 3px; border-radius: 3px 3px 0 0; }
+  .splitter { display: none; }
+  #main-panel { grid-column: 1; grid-row: 2; min-height: 75vh; }
+  .left-panel { grid-column: 1; grid-row: 3; border-top: 1px solid var(--border); min-height: 60vh; }
+  .modal-body { flex-direction: column; }
+  .modal-side { width: 100%; }
+}
+@media (max-width: 600px) {
+  .segmented { flex-wrap: wrap; }
+  #feature, #saved-views { max-width: 100%; }
+  .gallery-head, .gallery, .ctl-group { padding-left: var(--s3); padding-right: var(--s3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  .bar.indeterminate > div { width: 100% !important; opacity: .5; }
+}

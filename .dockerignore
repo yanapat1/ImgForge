@@ -1,0 +1,17 @@
+.venv/
+.git/
+.claude/
+.pytest_cache/
+__pycache__/
+*.pyc
+.dataviz_cache/
+connections.json
+graphify-out/
+folder-server/
+tests/
+image.png
+q1.text
+.env
+
+node_modules/
+static/js/

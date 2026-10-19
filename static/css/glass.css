@@ -1,0 +1,30 @@
+/* glass look (data-look="glass"): tokens live in tokens.css; these rules add the raised-panel details
+   (top-light gradients, soft blurred shadows, recessed inputs, violet-to-blue gradient for primary / selected states) */
+:root[data-look="glass"] .form-card,
+:root[data-look="glass"] .theme-choice,
+:root[data-look="glass"] .radio-card {
+  background: linear-gradient(180deg, var(--gl-hi), transparent 60%), var(--surface);
+  border-color: var(--border); box-shadow: var(--shadow-2);
+}
+:root[data-look="glass"] button {
+  background: linear-gradient(180deg, var(--gl-hi), transparent), var(--surface-2);
+  border-color: var(--border); box-shadow: inset 0 1px 0 var(--gl-hi);
+}
+:root[data-look="glass"] button:hover:not(:disabled) { background: linear-gradient(180deg, var(--gl-hi), transparent), var(--surface-3); transform: translateY(-1px); }
+:root[data-look="glass"] button:active:not(:disabled) { transform: none; background: var(--pressed); box-shadow: inset 0 2px 5px var(--gl-inset); }
+:root[data-look="glass"] button.ghost { background: transparent; box-shadow: none; }
+:root[data-look="glass"] button.ghost:hover:not(:disabled) { background: var(--surface-3); }
+:root[data-look="glass"] button.primary,
+:root[data-look="glass"] button.primary:hover:not(:disabled) {
+  background: var(--gl-grad); border-color: transparent; color: var(--on-accent);
+  box-shadow: 0 6px 18px var(--accent-soft-hover), inset 0 1px 0 rgba(255, 255, 255, .25);
+}
+:root[data-look="glass"] button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+:root[data-look="glass"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:root[data-look="glass"] select,
+:root[data-look="glass"] textarea {
+  background-color: var(--bg); border-color: var(--border); box-shadow: inset 0 2px 6px var(--gl-inset);
+}
+:root[data-look="glass"] .theme-choice[aria-pressed="true"] { border-color: var(--accent-line); box-shadow: var(--shadow-2), 0 0 0 1px var(--accent-line); }
+:root[data-look="glass"] dialog,
+:root[data-look="glass"] .modal { backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }

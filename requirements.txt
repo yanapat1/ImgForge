@@ -1,0 +1,41 @@
+# Dataset visualizer (scripts/image-tools) — versions this was built and tested with (Python 3.12).
+# Install into an existing venv WITHOUT -U, so numpy/scipy/torch already there are not upgraded:
+#   uv pip install --python .venv/bin/python -r scripts/image-tools/requirements.txt
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+orjson==3.10.12
+pyyaml>=6.0
+numpy==2.2.6
+scipy==1.17.1
+scikit-learn==1.9.0
+umap-learn==0.5.12
+pacmap==0.9.1
+opentsne==1.0.4
+plotly==6.7.0
+opencv-python==5.0.0.93
+pillow
+tqdm
+rich
+boto3                # S3 / RustFS datasets
+torch==2.14.1
+transformers==5.17.0
+ultralytics==8.4.174         # YOLO backbone features and YOLO models
+# models (Settings › Models + the Model tab): each runtime is imported only when a model of that kind is used
+onnxruntime-gpu==1.30.0      # ONNX models (falls back to CPU)
+openvino==2026.4.1           # OpenVINO models
+safetensors          # .safetensors weights
+rfdetr==1.11.2               # RF-DETR models (rfdetr_plus for xlarge / 2xlarge)
+httpx                # models behind an HTTP API
+python-multipart     # model uploads
+# labeling sessions (dataviz/labeling/): database export, MSSQL without an ODBC driver (FreeTDS in the wheel), SFTP
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
+pymssql>=2.3
+paramiko>=3.4
+regex                # optional: timeout-guarded /regex/ in the label image strip filter (falls back to re + a deadline)
+# test only (tests/): not needed to run the server
+#   pytest              the unit + I/O suite
+#   moto[server]        mock S3 (ThreadedMotoServer)
+#   pyftpdlib           in-process FTP server
+#   playwright          end-to-end page tests (+ `playwright install chromium`)
+#   docker (CLI)        tests/test_db.py starts postgres:16 / mssql/server:2022 containers, else skips

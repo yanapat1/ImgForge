@@ -1,0 +1,23 @@
+# Portable default: works on any Docker host (CPU). Add GPU with:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Per-server overrides (paths, GPU) go in an extra compose file chosen through COMPOSE_FILE in .env (see .env.example).
+services:
+  image-tools:
+    build: .
+    image: image-tools:latest
+    container_name: image-tools
+    restart: unless-stopped
+    ports:
+      - "19151:19151"
+    shm_size: 8gb
+    environment:
+      DATAVIZ_DEVICE: ${DATAVIZ_DEVICE:-auto}   # auto | cpu | cuda
+      HF_TOKEN: ${HF_TOKEN:-}                   # optional: higher Hugging Face rate limits
+    volumes:
+      - dataviz_cache:/workspace/.dataviz_cache  # sessions, crops, features, labeling DB
+      - hf_cache:/workspace/.hf_cache            # downloaded Hugging Face models
+      - ${DATASET_DIR:-./folder-server}:/workspace/folder-server   # live bind mount: new files/folders show up instantly
+      # - ./runs:/workspace/runs:ro              # uncomment to offer your YOLO runs/**/weights/best.pt as features
+
+volumes:
+  dataviz_cache:
+  hf_cache:

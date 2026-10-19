@@ -1,0 +1,43 @@
+/* Loading + error states: the slow-load overlay (index.html #startup), the error page (core/errorpage.js,
+   error.html) and the toast. Tokens only. */
+
+/* ---------------------------------------------------------------- loading (shown only when slow) */
+/* the overlay is in the HTML from the first byte, but stays invisible for 300 ms: a fast load never flashes it */
+.startup.delayed { opacity: 0; animation: state-in .25s ease .3s forwards; }
+@keyframes state-in { to { opacity: 1; } }
+.startup-box .load-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s1); }
+.startup-box .load-head h2 { margin: 0; }
+.startup-box .spin.big { width: 22px; height: 22px; border-width: 3px; }
+.startup-box .load-hint { margin-top: var(--s3); min-height: 1.4em; }
+.startup-box .bar { margin-top: var(--s3); }
+
+/* ---------------------------------------------------------------- error page */
+.errpage { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--bg);
+  display: flex; align-items: center; justify-content: center; padding: var(--s4); }
+.errpage-box { width: min(560px, 100%); padding: var(--s6); }
+.errpage-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%;
+  background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger-text); margin-bottom: var(--s3); }
+.errpage-icon .ico { width: 22px; height: 22px; }
+.errpage-box h2 { font-size: var(--fs-xl); margin-bottom: var(--s1); }
+.errpage-msg { overflow-wrap: anywhere; }
+.errpage-code { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: var(--s1); }
+.errpage-details { margin-top: var(--s3); font-size: var(--fs-sm); }
+.errpage-details summary { cursor: pointer; color: var(--text-muted); }
+.errpage-details pre { margin-top: var(--s2); padding: var(--s3); max-height: 220px; overflow: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+.errpage-actions { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: var(--s4); }
+.errpage-note { margin-top: var(--s3); font-size: var(--fs-sm); }
+
+/* ---------------------------------------------------------------- toast (visualizer + home) */
+.app-toast { position: fixed; left: 50%; bottom: var(--s5); transform: translate(-50%, 12px); z-index: var(--z-modal);
+  max-width: min(520px, calc(100vw - 2 * var(--s4))); padding: var(--s2) var(--s4); border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: var(--shadow-2, 0 6px 20px rgba(0, 0, 0, .3));
+  font-size: var(--fs-sm); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+.app-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.app-toast.err { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .startup.delayed { animation-duration: .01s; }
+  .app-toast { transition: none; }
+  .startup-box .spin.big { animation: none; }
+}

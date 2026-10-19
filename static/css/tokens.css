@@ -1,0 +1,789 @@
+/* Design tokens: fonts, colours, spacing, radii, shadows, layers, motion, for the dark (default) and light theme.
+   The theme is data-theme="dark|light" on <html> (set before paint by js/theme-boot.js, switched by js/core/theme.js).
+   js/core/theme.js reads the colour tokens Plotly needs (THEME). Contrast: --text / --text-muted >= 5.4:1 and
+   --text-faint >= 4.5:1 on bg/surface/surface-2; every class colour (config.yaml ui.palette) >= 4.3:1 on --plot-bg. */
+
+@font-face { font-family: "Atkinson Hyperlegible Next"; src: url("../assets/fonts/atkinson-next.woff2") format("woff2");
+  font-weight: 200 800; font-style: normal; font-display: swap; }
+@font-face { font-family: "Atkinson Hyperlegible Mono"; src: url("../assets/fonts/atkinson-mono.woff2") format("woff2");
+  font-weight: 200 800; font-style: normal; font-display: swap; }
+
+:root {
+  /* surfaces: desaturated slate, each step ~+4% lightness */
+  --bg: #1b2028;
+  --surface: #212731;
+  --surface-2: #28303b;
+  --surface-3: #313a46;
+  --border: #353e4b;
+  --border-strong: #4a5463;
+  --border-hover: #5c6778;
+  --pressed: #3a4452;
+  --plot-bg: #1e242d;
+  --media-bg: #171c23;          /* behind thumbnails / full images: darker than chrome so photos read as photos */
+  --media-hatch: rgba(170, 180, 194, .07);
+  /* text */
+  --text: #e3e8ef;
+  --text-muted: #aab4c2;
+  --text-faint: #8c97a7;
+  /* roles */
+  --accent: #8ab4f0;            /* soft sky blue: primary action, active tab, toggled buttons, focus */
+  --accent-hover: #a3c4f4;
+  --accent-soft: rgba(138, 180, 240, .14);
+  --accent-soft-hover: rgba(138, 180, 240, .22);
+  --accent-line: rgba(138, 180, 240, .55);
+  --accent-text: #c9dcfa;
+  --on-accent: #14233a;
+  --danger: #ff7b72;
+  --danger-soft: rgba(255, 123, 114, .13);
+  --danger-line: rgba(255, 123, 114, .5);
+  --danger-bg: #3a2429;
+  --danger-border: #6a3438;
+  --danger-text: #ffc2bc;
+  --on-danger: #2e0c0a;
+  --mislabel-bg: rgba(122, 36, 40, .92);   /* "→ other class" badge on a crop (most neighbours say another class) */
+  --on-mislabel: #ffe3e0;
+  /* model outcome per label box (Model tab, colour by error type): found, wrong class, misplaced, missed, false positive */
+  --err-tp: #5fd17a;
+  --err-cls: #ff9f43;
+  --err-loc: #ffd84d;
+  --err-miss: #ff6b6b;
+  --err-fp: #b98cff;
+  --highlight: #f4c04e;         /* amber: the gallery card whose dot is drawn big on the plot */
+  --highlight-soft: rgba(244, 192, 78, .28);
+  --highlight-line: rgba(244, 192, 78, .55);
+  --on-highlight: #2b1f04;
+  --ring: #e3e8ef;              /* white-ish ring around highlighted dots on the plot */
+  --dot-ungrouped: #7a8696;     /* "group" colouring: dots in no group */
+  --bubble-mixed: #c5cfdc;      /* "group" bubbles holding several classes */
+  --scrim: rgba(12, 15, 20, .72);
+  --overlay: rgba(20, 25, 32, .86);
+  --plot-dim: rgba(27, 32, 40, .72);
+  /* behind crops: a box at the image edge gets a crop whose outside part is transparent (server: indexer.
+     crop_outside_transparent); fine diagonal hatching marks it as "no photo here" instead of a black bar */
+  --media-fill: repeating-linear-gradient(135deg, var(--media-hatch) 0 1.5px, transparent 1.5px 7px), var(--media-bg);
+  /* type */
+  --font: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  /* spacing (4px grid) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px;
+  /* shape: small things are less round than big things */
+  --r-sm: 5px; --r: 7px; --r-md: 8px; --r-lg: 12px;
+  --shadow-2: 0 10px 28px rgba(8, 11, 16, .45), 0 1px 0 rgba(255, 255, 255, .04) inset;
+  --shadow-3: 0 24px 60px rgba(8, 11, 16, .6), 0 1px 0 rgba(255, 255, 255, .05) inset;
+  /* layers */
+  --z-overlay: 5; --z-startup: 30; --z-popover: 40; --z-tip: 50; --z-modal: 100;
+  /* motion */
+  --t-fast: 120ms; --t: 180ms; --ease: cubic-bezier(.2, .7, .2, 1);
+  /* layout */
+  --header-h: 52px;
+  --control-h: 30px;
+  --activity-w: 52px;
+  --left-w: clamp(320px, 36%, 640px);   /* the splitter sets this in px */
+  --splitter-w: 7px;
+  /* inline icons for form controls (stroke colour = --text-muted) */
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aab4c2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314233a' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  color-scheme: dark;
+}
+
+/* light theme: same roles, light slate surfaces. Contrast: --text-muted >= 6.5:1, --text-faint >= 4.6:1 on surface-2;
+   class colours come from config.yaml ui.palette_light (>= 4.3:1 on --plot-bg) */
+:root[data-theme="light"] {
+  --bg: #eceff4;
+  --surface: #ffffff;
+  --surface-2: #f5f7fa;
+  --surface-3: #e8ecf1;
+  --border: #dce1e8;
+  --border-strong: #c3cbd6;
+  --border-hover: #a3adbb;
+  --pressed: #dce2ea;
+  --plot-bg: #f7f9fb;
+  --media-bg: #e3e7ed;
+  --media-hatch: rgba(40, 60, 90, .07);
+  --text: #1b222c;
+  --text-muted: #4b5666;
+  --text-faint: #606b7c;
+  --accent: #2766c4;
+  --accent-hover: #1f58ad;
+  --accent-soft: rgba(39, 102, 196, .10);
+  --accent-soft-hover: rgba(39, 102, 196, .17);
+  --accent-line: rgba(39, 102, 196, .5);
+  --accent-text: #1c4f9b;
+  --on-accent: #ffffff;
+  --danger: #cf3328;
+  --danger-soft: rgba(207, 51, 40, .08);
+  --danger-line: rgba(207, 51, 40, .45);
+  --danger-bg: #fdecea;
+  --danger-border: #efb3ad;
+  --danger-text: #a2241b;
+  --on-danger: #ffffff;
+  --mislabel-bg: rgba(178, 34, 34, .92);
+  --on-mislabel: #ffffff;
+  --err-tp: #23833a;
+  --err-cls: #b85a00;
+  --err-loc: #8f7000;
+  --err-miss: #d93636;
+  --err-fp: #8e45ff;
+  --highlight: #d48c00;
+  --highlight-soft: rgba(212, 140, 0, .25);
+  --highlight-line: rgba(212, 140, 0, .6);
+  --on-highlight: #2b1f04;
+  --ring: #1b222c;
+  --dot-ungrouped: #9aa4b2;
+  --bubble-mixed: #5b6676;
+  --scrim: rgba(30, 40, 55, .42);
+  --overlay: rgba(255, 255, 255, .9);
+  --plot-dim: rgba(247, 249, 251, .78);
+  --shadow-2: 0 10px 28px rgba(30, 45, 70, .12), 0 1px 0 rgba(255, 255, 255, .7) inset;
+  --shadow-3: 0 24px 60px rgba(30, 45, 70, .22), 0 1px 0 rgba(255, 255, 255, .7) inset;
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b5666' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  color-scheme: light;
+}
+
+/* ---------------------------------------------------------------- home / wizard (labeling sessions)
+   progress segments of a task (done / in progress / skipped; to do = the track), the "Labeling" card badge,
+   success + warning text, the drop zone */
+:root {
+  --ok: #5fd17a;
+  --ok-soft: rgba(95, 209, 122, .14);
+  --ok-text: #7fd6a0;
+  --warn: #f4c04e;
+  --warn-soft: rgba(244, 192, 78, .14);
+  --warn-text: #f5d38a;
+  --prog-done: #5fd17a;
+  --prog-doing: #8ab4f0;
+  --prog-skip: #8c97a7;
+  --prog-track: #313a46;
+  --prog-review: #b79cf0;
+  --prog-bulk: #e3a64f;
+  --label-badge: rgba(122, 82, 196, .9);
+  --on-label-badge: #f3ecff;
+  --drop-bg: rgba(138, 180, 240, .06);
+}
+:root[data-theme="light"] {
+  --ok: #23833a;
+  --ok-soft: rgba(35, 131, 58, .10);
+  --ok-text: #1f7334;
+  --warn: #b77700;
+  --warn-soft: rgba(183, 119, 0, .10);
+  --warn-text: #8a5900;
+  --prog-done: #2e9e4b;
+  --prog-doing: #2766c4;
+  --prog-skip: #9aa4b2;
+  --prog-track: #e1e6ec;
+  --prog-review: #7c4dcc;
+  --prog-bulk: #c27a10;
+  --label-badge: rgba(108, 62, 186, .92);
+  --on-label-badge: #ffffff;
+  --drop-bg: rgba(39, 102, 196, .04);
+}
+
+/* ---- labeling page (js/label, css/label.css). Canvas colours sit on top of photos, so the crosshair / halo / handles
+   keep the same high-contrast values in both themes; JS reads them with getComputedStyle (canvas.js readTokens). */
+:root {
+  --lb-stage-bg: #101318;
+  --lb-cross: #ffffff;
+  --lb-cross-shadow: rgba(0, 0, 0, .78);
+  --lb-halo: rgba(0, 0, 0, .6);
+  --lb-handle: #ffffff;
+  --lb-handle-line: #11151b;
+  --lb-sel: #ffffff;
+  --lb-preview: #ffd84d;
+  --lb-tag-dark: #0d1117;
+  --lb-tag-light: #ffffff;
+  --lb-st-todo: #6f7a8a;
+  --lb-st-progress: #f4c04e;
+  --lb-st-done: #5fd17a;
+  --lb-st-skipped: #b98cff;
+  --lb-ok-text: #7fd6a0;
+  --lb-left-w: 260px;
+  --lb-right-w: 300px;
+  --lb-status-h: 28px;
+}
+:root[data-theme="light"] {
+  --lb-stage-bg: #d5dbe3;
+  --lb-cross: #ffffff;
+  --lb-cross-shadow: rgba(0, 0, 0, .78);
+  --lb-halo: rgba(0, 0, 0, .6);
+  --lb-handle: #ffffff;
+  --lb-handle-line: #11151b;
+  --lb-sel: #ffffff;
+  --lb-preview: #b88a00;
+  --lb-tag-dark: #0d1117;
+  --lb-tag-light: #ffffff;
+  --lb-st-todo: #8a94a3;
+  --lb-st-progress: #c98a00;
+  --lb-st-done: #23833a;
+  --lb-st-skipped: #8e45ff;
+  --lb-ok-text: #23833a;
+}
+
+/* ---- ◆ AI assistant: the diamond's gradient (sky → violet → pink) and its glow. Used by the activity-bar icon
+   (#act-ai .gem-ico), .gem-mark on other AI buttons and Settings › AI assistant; the light theme gets deeper stops so
+   the thin strokes keep their contrast on white. */
+:root {
+  --gem-1: #7dd3fc;
+  --gem-2: #a78bfa;
+  --gem-3: #f0abfc;
+  --gem-glow: rgba(167, 139, 250, .35);
+}
+:root[data-theme="light"] {
+  --gem-1: #0284c7;
+  --gem-2: #7c3aed;
+  --gem-3: #c026d3;
+  --gem-glow: rgba(124, 58, 237, .25);
+}
+
+/* ---------------------------------------------------------------- hand-drawn look (data-look="handdrawn" on <html>)
+   A calm "soft paper + sage" pencil-on-paper style. Works in light and dark (data-theme follows System / Light / Dark).
+   Same token roles as the default themes; only colours, font, radii and shadows change. Chosen in Settings > Appearance.
+   The first block is light and also holds the shared font / radii / sizes; the second overrides colours for dark. */
+:root[data-look="handdrawn"] {
+  color-scheme: light;
+  --bg: #f6f1e7;
+  --surface: #fcf9f2;
+  --surface-2: #f3ede0;
+  --surface-3: #ebe3d2;
+  --border: #ddd3bf;
+  --border-strong: #b9ab91;
+  --border-hover: #8f8269;
+  --pressed: #e4dac5;
+  --plot-bg: #faf6ec;
+  --media-bg: #e9e1d0;
+  --media-hatch: rgba(80, 65, 45, .08);
+  --text: #3b3630;
+  --text-muted: #5c554a;
+  --text-faint: #6e665a;
+  --accent: #4f7a63;
+  --accent-hover: #416a54;
+  --accent-soft: rgba(79, 122, 99, .13);
+  --accent-soft-hover: rgba(79, 122, 99, .22);
+  --accent-line: rgba(79, 122, 99, .55);
+  --accent-text: #3a6350;
+  --on-accent: #fbf8f1;
+  --danger: #b5483e;
+  --danger-soft: rgba(181, 72, 62, .09);
+  --danger-line: rgba(181, 72, 62, .45);
+  --danger-bg: #f6e4de;
+  --danger-border: #dcab9f;
+  --danger-text: #8e362d;
+  --ring: #3b3630;
+  --dot-ungrouped: #a39880;
+  --bubble-mixed: #766c5a;
+  --scrim: rgba(59, 54, 48, .38);
+  --overlay: rgba(252, 249, 242, .92);
+  --plot-dim: rgba(250, 246, 236, .78);
+  --font: "Patrick Hand", "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS", "Comic Neue", cursive, system-ui, sans-serif;
+  --fs-xs: 13px; --fs-sm: 14px; --fs: 15px; --fs-lg: 17px; --fs-xl: 22px;
+  --r-sm: 6px 9px 7px 10px / 9px 6px 10px 7px;
+  --r: 8px 12px 9px 13px / 12px 8px 13px 9px;
+  --r-md: 10px 14px 11px 15px / 14px 10px 15px 11px;
+  --r-lg: 14px 20px 15px 22px / 20px 14px 22px 15px;
+  --hd-shadow: rgba(80, 65, 45, .22);
+  --shadow-2: 3px 4px 0 rgba(80, 65, 45, .26);
+  --shadow-3: 5px 7px 0 rgba(80, 65, 45, .3);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235c554a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fbf8f1' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  /* home page */
+  --ok-text: #2f6f3e; --warn-text: #7a5a14; --prog-doing: #4f7a63; --prog-track: #e3d9c4; --drop-bg: rgba(79, 122, 99, .06);
+  /* labeling page */
+  --lb-stage-bg: #e0d7c4; --lb-st-todo: #9a9078; --lb-ok-text: #2f6f3e;
+  /* AI gem */
+  --gem-1: #3f8f6b; --gem-2: #4f7a63; --gem-3: #b7791f; --gem-glow: rgba(79, 122, 99, .25);
+}
+:root[data-look="handdrawn"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #25221e;
+  --surface: #2d2a25;
+  --surface-2: #35312b;
+  --surface-3: #3e3a33;
+  --border: #4a453c;
+  --border-strong: #625b4e;
+  --border-hover: #7a7262;
+  --pressed: #46413a;
+  --plot-bg: #292621;
+  --media-bg: #1f1d19;
+  --media-hatch: rgba(235, 228, 214, .06);
+  --text: #ebe4d6;
+  --text-muted: #bdb4a2;
+  --text-faint: #9d9484;
+  --accent: #8fb89d;
+  --accent-hover: #a5c8b1;
+  --accent-soft: rgba(143, 184, 157, .15);
+  --accent-soft-hover: rgba(143, 184, 157, .25);
+  --accent-line: rgba(143, 184, 157, .55);
+  --accent-text: #b5d3bf;
+  --on-accent: #1c2a21;
+  --danger: #e08a80;
+  --danger-soft: rgba(224, 138, 128, .12);
+  --danger-line: rgba(224, 138, 128, .5);
+  --danger-bg: #3a2825;
+  --danger-border: #6a403a;
+  --danger-text: #f2bdb5;
+  --ring: #ebe4d6;
+  --dot-ungrouped: #8a8271;
+  --bubble-mixed: #a79d89;
+  --scrim: rgba(0, 0, 0, .55);
+  --overlay: rgba(45, 42, 37, .92);
+  --plot-dim: rgba(41, 38, 33, .78);
+  --hd-shadow: rgba(0, 0, 0, .4);
+  --shadow-2: 3px 4px 0 rgba(0, 0, 0, .4);
+  --shadow-3: 5px 7px 0 rgba(0, 0, 0, .45);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23bdb4a2' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231c2a21' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  --ok-text: #8fd0a0; --warn-text: #e3c27a; --prog-doing: #8fb89d; --prog-track: #3e3a33; --drop-bg: rgba(143, 184, 157, .07);
+  --lb-stage-bg: #1a1815; --lb-st-todo: #7a7262; --lb-ok-text: #8fd0a0;
+  --gem-1: #8fd0b0; --gem-2: #8fb89d; --gem-3: #e3c27a; --gem-glow: rgba(143, 184, 157, .25);
+}
+
+/* ---------------------------------------------------------------- glass look (data-look="glass" on <html>)
+   Soft, raised slate panels with a violet-to-blue accent, big rounded corners and blurred shadows (see glass.css for the
+   gradients and highlights). Dark first; data-theme="light" gives the frosted pale-lavender twin. Chosen in Settings > Appearance. */
+:root[data-look="glass"] {
+  color-scheme: dark;
+  --bg: #1b2027;
+  --surface: #262c35;
+  --surface-2: #2d343e;
+  --surface-3: #363e49;
+  --border: #3a424d;
+  --border-strong: #4b5461;
+  --border-hover: #5f6978;
+  --pressed: #414a56;
+  --plot-bg: #222831;
+  --media-bg: #171b21;
+  --text: #e6e9ef;
+  --text-muted: #a4adba;
+  --text-faint: #8790a0;
+  --accent: #8b7cf6;
+  --accent-hover: #9d90f8;
+  --accent-soft: rgba(139, 124, 246, .16);
+  --accent-soft-hover: rgba(139, 124, 246, .26);
+  --accent-line: rgba(139, 124, 246, .55);
+  --accent-text: #c4bcfb;
+  --on-accent: #12121f;
+  --danger: #ff7b8a;
+  --danger-soft: rgba(255, 123, 138, .12);
+  --danger-line: rgba(255, 123, 138, .5);
+  --danger-bg: #3a2630;
+  --danger-border: #6a3a47;
+  --danger-text: #ffc0c8;
+  --ring: #e6e9ef;
+  --dot-ungrouped: #7c8696;
+  --bubble-mixed: #9aa4b4;
+  --scrim: rgba(8, 10, 14, .6);
+  --overlay: rgba(38, 44, 53, .85);
+  --plot-dim: rgba(34, 40, 49, .78);
+  --r-sm: 10px; --r: 14px; --r-md: 18px; --r-lg: 24px;
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .05);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .06);
+  --gl-hi: rgba(255, 255, 255, .05);
+  --gl-inset: rgba(0, 0, 0, .3);
+  --gl-grad: linear-gradient(135deg, #8b7cf6, #6aa8f5);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a4adba' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2312121f' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  --ok-text: #7fe0b6; --warn-text: #f0c266; --prog-doing: #8b7cf6; --prog-track: #363e49; --drop-bg: rgba(139, 124, 246, .07);
+  --lb-stage-bg: #14181d; --lb-st-todo: #6f7a8a; --lb-ok-text: #7fe0b6;
+  --gem-1: #6aa8f5; --gem-2: #8b7cf6; --gem-3: #e0568f; --gem-glow: rgba(139, 124, 246, .3);
+}
+:root[data-look="glass"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #e9ebf3;
+  --surface: #f5f6fb;
+  --surface-2: #eef0f7;
+  --surface-3: #e4e7f1;
+  --border: #d9dce9;
+  --border-strong: #c0c5d8;
+  --border-hover: #a2a9c4;
+  --pressed: #dadef0;
+  --plot-bg: #f7f8fc;
+  --media-bg: #dfe2ee;
+  --text: #1f2430;
+  --text-muted: #4d5568;
+  --text-faint: #5f677b;
+  --accent: #6a5ae0;
+  --accent-hover: #5a49d0;
+  --accent-soft: rgba(106, 90, 224, .12);
+  --accent-soft-hover: rgba(106, 90, 224, .2);
+  --accent-line: rgba(106, 90, 224, .5);
+  --accent-text: #4f3fc4;
+  --on-accent: #ffffff;
+  --danger: #d0384c;
+  --danger-soft: rgba(208, 56, 76, .09);
+  --danger-line: rgba(208, 56, 76, .45);
+  --danger-bg: #fbe6ea;
+  --danger-border: #ebb0ba;
+  --danger-text: #a3243a;
+  --ring: #1f2430;
+  --dot-ungrouped: #9aa2b8;
+  --bubble-mixed: #707891;
+  --scrim: rgba(31, 36, 48, .38);
+  --overlay: rgba(245, 246, 251, .88);
+  --plot-dim: rgba(247, 248, 252, .78);
+  --shadow-2: 0 8px 22px rgba(110, 120, 165, .22), inset 0 1px 0 rgba(255, 255, 255, .9);
+  --shadow-3: 0 16px 38px rgba(110, 120, 165, .3), inset 0 1px 0 rgba(255, 255, 255, .9);
+  --gl-hi: rgba(255, 255, 255, .8);
+  --gl-inset: rgba(110, 120, 165, .18);
+  --gl-grad: linear-gradient(135deg, #6a5ae0, #3b78d8);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234d5568' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+  --ok-text: #1f7a4d; --warn-text: #8a5a00; --prog-doing: #6a5ae0; --prog-track: #dadef0; --drop-bg: rgba(106, 90, 224, .06);
+  --lb-stage-bg: #d5d9e8; --lb-st-todo: #8a92aa; --lb-ok-text: #1f7a4d;
+  --gem-1: #3b82f6; --gem-2: #6a5ae0; --gem-3: #c0306f; --gem-glow: rgba(106, 90, 224, .25);
+}
+
+/* ---------------------------------------------------------------- brutalist look (data-look="brutalist" on <html>)
+   Flat, loud and square: 0 radius, 2px ink borders, hard offset shadows, bold type. Cream paper in the light theme, near-black
+   with a yellow accent in the dark one (see brutalist.css for the component details). Chosen in Settings > Appearance. */
+:root[data-look="brutalist"] {
+  --font: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", system-ui, sans-serif;
+  --r-sm: 0;
+  --r: 0;
+  --r-md: 0;
+  --r-lg: 0;
+}
+:root[data-look="brutalist"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #fff8e1;
+  --surface: #ffffff;
+  --surface-2: #fff1c2;
+  --surface-3: #ffe58a;
+  --border: #111111;
+  --border-strong: #111111;
+  --border-hover: #111111;
+  --pressed: #ffd84d;
+  --plot-bg: #ffffff;
+  --media-bg: #f0e6c8;
+  --media-hatch: rgba(17, 17, 17, .08);
+  --text: #111111;
+  --text-muted: #2e2e2e;
+  --text-faint: #474747;
+  --accent: #d92d12;
+  --accent-hover: #b8240d;
+  --accent-soft: rgba(217, 45, 18, .12);
+  --accent-soft-hover: rgba(217, 45, 18, .2);
+  --accent-line: #111111;
+  --accent-text: #a81e08;
+  --on-accent: #ffffff;
+  --danger: #b00020;
+  --danger-soft: rgba(176, 0, 32, .09);
+  --danger-line: #b00020;
+  --danger-bg: #ffd9de;
+  --danger-border: #b00020;
+  --danger-text: #8a0019;
+  --ring: #111111;
+  --dot-ungrouped: #8a8470;
+  --bubble-mixed: #4a4636;
+  --scrim: rgba(17, 17, 17, .5);
+  --overlay: rgba(255, 255, 255, .95);
+  --plot-dim: rgba(255, 255, 255, .8);
+  --bd-shadow: #111111;
+  --shadow-2: 4px 4px 0 #111111;
+  --shadow-3: 6px 6px 0 #111111;
+  --ok-text: #0a6b2d;
+  --warn-text: #7a4f00;
+  --prog-doing: #d92d12;
+  --prog-track: #f0e6c8;
+  --drop-bg: rgba(217, 45, 18, .06);
+  --lb-stage-bg: #e8dcb8;
+  --lb-st-todo: #8a8470;
+  --lb-ok-text: #0a6b2d;
+  --gem-1: #d92d12;
+  --gem-2: #111111;
+  --gem-3: #b36b00;
+  --gem-glow: rgba(17, 17, 17, .2);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111111' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+}
+:root[data-look="brutalist"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121212;
+  --surface: #1c1c1c;
+  --surface-2: #262626;
+  --surface-3: #333333;
+  --border: #e8e8e8;
+  --border-strong: #e8e8e8;
+  --border-hover: #ffffff;
+  --pressed: #4a4a4a;
+  --plot-bg: #181818;
+  --media-bg: #0c0c0c;
+  --media-hatch: rgba(255, 255, 255, .07);
+  --text: #f5f5f5;
+  --text-muted: #cfcfcf;
+  --text-faint: #a8a8a8;
+  --accent: #ffd84d;
+  --accent-hover: #ffe27a;
+  --accent-soft: rgba(255, 216, 77, .14);
+  --accent-soft-hover: rgba(255, 216, 77, .24);
+  --accent-line: #ffd84d;
+  --accent-text: #ffe27a;
+  --on-accent: #111111;
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, .13);
+  --danger-line: #ff6b6b;
+  --danger-bg: #3a1d1d;
+  --danger-border: #ff6b6b;
+  --danger-text: #ffb3b3;
+  --ring: #ffffff;
+  --dot-ungrouped: #8a8a8a;
+  --bubble-mixed: #b5b5b5;
+  --scrim: rgba(0, 0, 0, .65);
+  --overlay: rgba(28, 28, 28, .95);
+  --plot-dim: rgba(24, 24, 24, .8);
+  --bd-shadow: #8a8a8a;
+  --shadow-2: 4px 4px 0 #8a8a8a;
+  --shadow-3: 6px 6px 0 #8a8a8a;
+  --ok-text: #7fe0a0;
+  --warn-text: #ffd84d;
+  --prog-doing: #ffd84d;
+  --prog-track: #333333;
+  --drop-bg: rgba(255, 216, 77, .07);
+  --lb-stage-bg: #0c0c0c;
+  --lb-st-todo: #8a8a8a;
+  --lb-ok-text: #7fe0a0;
+  --gem-1: #ffd84d;
+  --gem-2: #ffffff;
+  --gem-3: #ff6b6b;
+  --gem-glow: rgba(255, 216, 77, .3);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e8e8e8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111111' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------- terminal look (data-look="terminal" on <html>)
+   Monospace, 1px hairlines, almost square, no shadows. Phosphor green on near-black in the dark theme, a pale paper
+   twin in the light one (see terminal.css for the component details). Chosen in Settings > Appearance. */
+:root[data-look="terminal"] {
+  --font: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 19px;
+  --r-sm: 1px;
+  --r: 2px;
+  --r-md: 2px;
+  --r-lg: 3px;
+  --shadow-2: none;
+  --shadow-3: 0 0 0 1px var(--border-strong);
+}
+:root[data-look="terminal"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0f0c;
+  --surface: #0f1511;
+  --surface-2: #141c17;
+  --surface-3: #1b2620;
+  --border: #1f3a2a;
+  --border-strong: #2f5a41;
+  --border-hover: #4a8a64;
+  --pressed: #223328;
+  --plot-bg: #0c120e;
+  --media-bg: #070a08;
+  --media-hatch: rgba(120, 255, 170, .05);
+  --text: #c8f7d4;
+  --text-muted: #92d2a6;
+  --text-faint: #78b78d;
+  --accent: #3dff8f;
+  --accent-hover: #6dffab;
+  --accent-soft: rgba(61, 255, 143, .12);
+  --accent-soft-hover: rgba(61, 255, 143, .2);
+  --accent-line: rgba(61, 255, 143, .6);
+  --accent-text: #7dffb3;
+  --on-accent: #04110a;
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, .12);
+  --danger-line: rgba(255, 107, 107, .5);
+  --danger-bg: #2a1414;
+  --danger-border: #6a2e2e;
+  --danger-text: #ffa8a8;
+  --ring: #c8f7d4;
+  --dot-ungrouped: #5f8a70;
+  --bubble-mixed: #8fbfa0;
+  --scrim: rgba(0, 4, 2, .7);
+  --overlay: rgba(15, 21, 17, .94);
+  --plot-dim: rgba(12, 18, 14, .78);
+  --ok-text: #7dffb3;
+  --warn-text: #ffd65c;
+  --prog-doing: #3dff8f;
+  --prog-track: #1b2620;
+  --drop-bg: rgba(61, 255, 143, .06);
+  --lb-stage-bg: #070a08;
+  --lb-st-todo: #5f8a70;
+  --lb-ok-text: #7dffb3;
+  --gem-1: #3dff8f;
+  --gem-2: #35d6c4;
+  --gem-3: #ffd65c;
+  --gem-glow: rgba(61, 255, 143, .25);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2392d2a6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304110a' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+}
+:root[data-look="terminal"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f5ef;
+  --surface: #fbfcf8;
+  --surface-2: #e9eee4;
+  --surface-3: #dde5d6;
+  --border: #c5d0bb;
+  --border-strong: #94a688;
+  --border-hover: #667a58;
+  --pressed: #d3ddc9;
+  --plot-bg: #f8faf4;
+  --media-bg: #dfe6d8;
+  --media-hatch: rgba(20, 35, 26, .07);
+  --text: #14231a;
+  --text-muted: #3a4d40;
+  --text-faint: #4f6455;
+  --accent: #0b7a3b;
+  --accent-hover: #096530;
+  --accent-soft: rgba(11, 122, 59, .11);
+  --accent-soft-hover: rgba(11, 122, 59, .2);
+  --accent-line: rgba(11, 122, 59, .55);
+  --accent-text: #095c2d;
+  --on-accent: #ffffff;
+  --danger: #b3261e;
+  --danger-soft: rgba(179, 38, 30, .09);
+  --danger-line: rgba(179, 38, 30, .45);
+  --danger-bg: #f8e1de;
+  --danger-border: #e0a8a2;
+  --danger-text: #8a1c16;
+  --ring: #14231a;
+  --dot-ungrouped: #8fa088;
+  --bubble-mixed: #5d6f55;
+  --scrim: rgba(20, 35, 26, .4);
+  --overlay: rgba(251, 252, 248, .94);
+  --plot-dim: rgba(248, 250, 244, .78);
+  --ok-text: #0b6b34;
+  --warn-text: #7a5a00;
+  --prog-doing: #0b7a3b;
+  --prog-track: #dde5d6;
+  --drop-bg: rgba(11, 122, 59, .06);
+  --lb-stage-bg: #d3dccb;
+  --lb-st-todo: #8fa088;
+  --lb-ok-text: #0b6b34;
+  --gem-1: #0b7a3b;
+  --gem-2: #0e8a8a;
+  --gem-3: #a86a00;
+  --gem-glow: rgba(11, 122, 59, .22);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233a4d40' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------- soft look (data-look="soft" on <html>)
+   Clay / neumorphic: big radii, no borders, paired light + dark shadows so panels look pressed out of the page and inputs
+   pressed into it (see soft.css). Cool grey-blue in both themes. Chosen in Settings > Appearance. */
+:root[data-look="soft"] {
+  --r-sm: 10px;
+  --r: 14px;
+  --r-md: 18px;
+  --r-lg: 26px;
+}
+:root[data-look="soft"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #e4e9f0;
+  --surface: #e9eef5;
+  --surface-2: #e1e7ef;
+  --surface-3: #d8dfe9;
+  --border: #d3dae5;
+  --border-strong: #b7c0cf;
+  --border-hover: #8f9bb0;
+  --pressed: #d0d8e4;
+  --plot-bg: #edf1f7;
+  --media-bg: #d6dde8;
+  --text: #2b3445;
+  --text-muted: #475268;
+  --text-faint: #5b667c;
+  --accent: #3f6fc8;
+  --accent-hover: #335fb4;
+  --accent-soft: rgba(63, 111, 200, .13);
+  --accent-soft-hover: rgba(63, 111, 200, .22);
+  --accent-line: rgba(63, 111, 200, .5);
+  --accent-text: #2f58a8;
+  --on-accent: #ffffff;
+  --danger: #c9444f;
+  --danger-soft: rgba(201, 68, 79, .1);
+  --danger-line: rgba(201, 68, 79, .45);
+  --danger-bg: #f6dfe2;
+  --danger-border: #e3aab0;
+  --danger-text: #9c2e38;
+  --ring: #2b3445;
+  --dot-ungrouped: #9aa5b9;
+  --bubble-mixed: #6b768c;
+  --scrim: rgba(43, 52, 69, .38);
+  --overlay: rgba(233, 238, 245, .9);
+  --plot-dim: rgba(237, 241, 247, .78);
+  --sf-dark: rgba(150, 165, 190, .55);
+  --sf-light: rgba(255, 255, 255, .9);
+  --shadow-2: 6px 6px 14px rgba(150, 165, 190, .55), -6px -6px 14px rgba(255, 255, 255, .9);
+  --shadow-3: 10px 10px 24px rgba(150, 165, 190, .6), -10px -10px 24px rgba(255, 255, 255, .95);
+  --ok-text: #1f7a4d;
+  --warn-text: #8a5a00;
+  --prog-doing: #3f6fc8;
+  --prog-track: #d0d8e4;
+  --drop-bg: rgba(63, 111, 200, .06);
+  --lb-stage-bg: #d0d8e4;
+  --lb-st-todo: #8a96ac;
+  --lb-ok-text: #1f7a4d;
+  --gem-1: #3f8ae0;
+  --gem-2: #3f6fc8;
+  --gem-3: #c0306f;
+  --gem-glow: rgba(63, 111, 200, .25);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23475268' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+}
+:root[data-look="soft"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #23272f;
+  --surface: #292e37;
+  --surface-2: #2f3540;
+  --surface-3: #373e4a;
+  --border: #353c47;
+  --border-strong: #48515f;
+  --border-hover: #5d6777;
+  --pressed: #3b4350;
+  --plot-bg: #262b33;
+  --media-bg: #1c2027;
+  --text: #e8ebf1;
+  --text-muted: #b0b8c6;
+  --text-faint: #949eae;
+  --accent: #8fb0f0;
+  --accent-hover: #a6c0f4;
+  --accent-soft: rgba(143, 176, 240, .15);
+  --accent-soft-hover: rgba(143, 176, 240, .25);
+  --accent-line: rgba(143, 176, 240, .55);
+  --accent-text: #b4cbf6;
+  --on-accent: #14203a;
+  --danger: #f0838d;
+  --danger-soft: rgba(240, 131, 141, .12);
+  --danger-line: rgba(240, 131, 141, .5);
+  --danger-bg: #3b2830;
+  --danger-border: #6c4048;
+  --danger-text: #f8c0c6;
+  --ring: #e8ebf1;
+  --dot-ungrouped: #7b8596;
+  --bubble-mixed: #9ba5b6;
+  --scrim: rgba(8, 10, 14, .6);
+  --overlay: rgba(41, 46, 55, .9);
+  --plot-dim: rgba(38, 43, 51, .78);
+  --sf-dark: rgba(0, 0, 0, .5);
+  --sf-light: rgba(255, 255, 255, .045);
+  --shadow-2: 6px 6px 14px rgba(0, 0, 0, .45), -5px -5px 12px rgba(255, 255, 255, .04);
+  --shadow-3: 10px 10px 24px rgba(0, 0, 0, .55), -8px -8px 20px rgba(255, 255, 255, .05);
+  --ok-text: #7fe0b6;
+  --warn-text: #f0c266;
+  --prog-doing: #8fb0f0;
+  --prog-track: #373e4a;
+  --drop-bg: rgba(143, 176, 240, .07);
+  --lb-stage-bg: #1c2027;
+  --lb-st-todo: #7b8596;
+  --lb-ok-text: #7fe0b6;
+  --gem-1: #8fb0f0;
+  --gem-2: #a99cf0;
+  --gem-3: #f0a0c0;
+  --gem-glow: rgba(143, 176, 240, .28);
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b0b8c6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314203a' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
+}

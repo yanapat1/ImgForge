@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+# sessions, S3 secrets and caches are per machine (they normally live outside this folder, in workspace_root)
+.dataviz_cache/
+connections.json
+.venv/
+.env
+
+# TypeScript build
+node_modules/
+static/js/
+*.tsbuildinfo
+
+# large local data / tool output (not source)
+folder-server/
+graphify-out/
+.pytest_cache/

@@ -1,0 +1,144 @@
+# Dataset visualizer config — read by app.py in this folder (scripts/image-tools/config.yaml)
+#   .venv/bin/python scripts/image-tools/app.py                       # uses this file, opens on the Sessions home
+#   .venv/bin/python scripts/image-tools/app.py --config other.yaml   # another file
+# Command-line flags (--port, --dataset, --feature, ...) override values here.
+# Paths are relative to the project root (two folders up from this file). A missing key falls back to the built-in default.
+
+server:
+  host: "::"                     # "::" = IPv4 + IPv6 (needed for the VS Code port forward); "0.0.0.0" = IPv4 only
+  port: 5151
+
+dataset:
+  # The page opens on the Sessions home: create a session (one dataset each) there and click its card.
+  # Sessions are saved in <workspace_root>/connections.json, outside this folder, so a fresh checkout has none.
+  path: null                     # optional: open this YOLO folder at start, saved as a session (same as --dataset)
+  workspace_root: .dataviz_cache # sessions + auto-named workspaces <dataset>__<fingerprint>/ live here
+  workspace: null                # with path: use exactly this folder instead of the auto-named one (null = auto)
+  rebuild: false                 # with path: ignore every cache and recompute (same as --rebuild)
+
+index:
+  # Changing these does NOT rebuild existing crops/features by itself: start once with --rebuild.
+  thumb_size: 224                # crop thumbnail size in px (all models run at 224)
+  crop_pad: 0.1                  # extra margin around each box, as a fraction of the box size
+
+startup:
+  feature: openclip-h14          # the only view loaded at start (best class separation); any key under features.models / simple / yolo:<run>
+  method: umap                   # umap | pacmap | localmap | tsne | pca (only this one is compiled at warm-up)
+  precompute: []                 # also compute these in the background at start, e.g. [openclip-h14, hog]
+
+features:
+  batch_size: 128                # default GPU batch for the models below (MIG 35 GB slice, fp16)
+  # Deep models offered in the "Features" dropdown. Delete an entry to hide it, add one to offer another
+  # Hugging Face model. type: dinov2 (AutoModel pooler_output) | clip | siglip (image tower embeddings).
+  # Optional per model: batch_size, mean, std (input normalization), note (tooltip).
+  # The key names the cache file: keep it stable, or that model is recomputed.
+  models:
+    - key: openclip-h14
+      label: OpenCLIP ViT-H/14 (1024-d) · best
+      type: clip
+      model: laion/CLIP-ViT-H-14-laion2B-s32B-b79K
+      batch_size: 64
+      note: "LAION, MIT: fully open data, best class separation on our dataset (94% k-NN)"
+    - key: siglip2-so400m
+      label: SigLIP 2 So400m (1152-d)
+      type: siglip
+      model: google/siglip2-so400m-patch14-224
+      batch_size: 64
+      note: "Google 2025, Apache-2.0: strongest open CLIP-style encoder"
+    - key: dinov2reg-large
+      label: DINOv2-reg large (1024-d)
+      type: dinov2
+      model: facebook/dinov2-with-registers-large
+      batch_size: 64
+      note: "Meta, Apache-2.0: DINOv2 + registers, cleaner fine-grained features"
+    - key: dinov2-base
+      label: DINOv2 base (768-d)
+      type: dinov2
+      model: facebook/dinov2-base
+      note: general visual similarity
+    - key: dinov2-small
+      label: DINOv2 small (384-d)
+      type: dinov2
+      model: facebook/dinov2-small
+    - key: dinov2-large
+      label: DINOv2 large (1024-d)
+      type: dinov2
+      model: facebook/dinov2-large
+    - key: clip-b32
+      label: CLIP ViT-B/32 (512-d)
+      type: clip
+      model: openai/clip-vit-base-patch32
+      note: semantic / concept similarity
+
+  # Your own trained ultralytics weights as feature extractors ("YOLO backbone · <run>").
+  yolo:
+    auto_discover: true          # offer the newest runs/**/weights/best.pt
+    runs_dir: runs
+    limit: 5                     # how many of the newest runs to offer
+    exclude: [rfdetr]            # skip paths containing these words (RF-DETR checkpoints are not ultralytics)
+    extra_weights: []            # more .pt files to offer, e.g. [weights/yolo11x.pt]
+    batch_size: 64
+    imgsz: 224
+
+  # Fast CPU features; remove any you don't want in the dropdown.
+  simple: [color-hist, hog, geometry]
+
+projections:                     # default parameters (the page can change them per view)
+  umap:     {n_neighbors: 15, min_dist: 0.1}
+  pacmap:   {n_neighbors: 10}
+  localmap: {n_neighbors: 10}
+  tsne:     {perplexity: 30}
+  pca:      {}
+  tsne_threads: 8                # the box shows 128 CPUs but is shared: more threads made t-SNE 20x slower
+
+analysis:
+  knn_k: 10                      # neighbours used for label suspicion / suggested class / near-duplicates
+  duplicate_threshold: 0.97      # cosine similarity for "Near-duplicates"
+  groups:                        # bubbles / outliers
+    min_cluster_size: 15         # default "min size" in the page
+    per_class: true              # default "per class" (false = "all points")
+    bubble_pad: 0.015            # bubble margin around its dots, as a fraction of the plot size
+
+models:                          # detectors added in the page (Settings › Models) and scored in the Model tab
+  store_dir: null                # where models.json + uploaded weights live; null = dataset.workspace_root
+  allowed_roots: []              # extra folders model files may be loaded from (the project root always is;
+                                 # .pkl / full torch.load files run code, so keep this to folders you trust)
+  split_source: dataset_split    # split dataset (train/ val/ folders) or split_report.json the models were
+                                 # trained on: the Model tab scores val images by default (train images look too good)
+  default_conf: 0.25             # starting confidence threshold (predictions are kept down to 0.001 for PR curves)
+  match_iou: 0.5                 # IoU for a prediction to count as finding a label
+  batch_size: 16                 # images per forward pass for local models (exported ONNX/OpenVINO with a fixed batch use 1)
+
+workers:
+  enabled: true                  # heavy work in background processes (false = in the server process, for debugging)
+  warmup: true                   # compile UMAP/PaCMAP/HDBSCAN at start (~20 s) so the first projection is fast
+  omp_threads: 8                 # thread cap inside the workers
+
+s3:                              # S3 / RustFS datasets (added in the page: Settings › Datasets)
+  concurrency: 32                # parallel downloads (sync, and indexing in stream mode)
+  connect_timeout: 5             # seconds
+  read_timeout: 60
+  retries: 5
+
+logging:
+  level: info                    # debug | info | warning | error  (debug also logs thumbnail / polling requests)
+  http: true                     # log API requests (method, path, status, time, client address) in the terminal
+  static: false                  # also log static files, thumbnails and polling (shows every request the browser makes)
+
+ui:
+  # Defaults for a fresh page. Your last-used settings (saved in the workspace's ui_settings.json) win over these.
+  page_size: 100                 # thumbnails per gallery page
+  thumb_size: 110                # gallery thumbnail size in px
+  dot_size: 5
+  similar_k: 48                  # boxes shown by "Find similar"
+  text_search_k: 200             # boxes shown by text search (OpenCLIP / SigLIP features only)
+  check_list_size: 300           # boxes shown by "Suspicious labels" / "Far from class"
+  # class colours, in class-id order. Tuned for the dark plot: every colour is >= 4.3:1 against the
+  # plot background, so no class fades into it. Hue order follows the old Trubetskoy palette.
+  palette: ['#ff6b6b', '#5fd17a', '#ffd84d', '#5aa9ff', '#ff9f43', '#b98cff', '#4fd8e0', '#ff7ad9',
+            '#c3e65a', '#ffb3b3', '#2fbfa3', '#d9b8ff', '#d4a373', '#fff1a8', '#e05780', '#9ff0c0',
+            '#c8c25a', '#ffc9a3', '#8c9eff', '#b0b6bd']
+  # the same classes in the light theme (darker, >= 4.3:1 on the light plot background)
+  palette_light: ['#d93636', '#23833a', '#8f7000', '#006fe9', '#b85a00', '#8e45ff', '#158087', '#db009c',
+                  '#627d10', '#b03a48', '#1d8470', '#9c3fb0', '#a3682e', '#3f6e8c', '#dc285e', '#3d7a5a',
+                  '#7c7727', '#8a5a44', '#4562ff', '#6c7682']

@@ -1,0 +1,55 @@
+"""
+Small helpers shared by the route modules: guards that turn "not ready / unknown / not computed"
+into the right HTTP status, and a raw-bytes JSON response.
+
+    need_index      503 while the dataset index is being built (the page shows its progress)
+    sample_or_404   a box record by id
+    feature_or_400  a known feature key (None = the default feature)
+    scores_or_409   k-NN scores, loading them from disk if cached; 409 = "compute them first"
+"""
+
+from types import SimpleNamespace
+
+from fastapi import HTTPException
+from fastapi.responses import Response
+
+
+def _r(arr, nd=4):
+    return [round(float(v), nd) for v in arr]
+
+
+def json_bytes(data):
+    return Response(data, media_type='application/json')
+
+
+
+def guards(state):
+    """The four guards bound to `state` (the proxy of the current dataset)."""
+
+    def need_index():
+        if not state.ready:
+            raise HTTPException(503, 'dataset index is still being built')
+
+    def sample_or_404(sid):
+        need_index()
+        if sid < 0 or sid >= len(state.samples):
+            raise HTTPException(404, f'no sample {sid}')
+        return state.samples[sid]
+
+    def feature_or_400(key):
+        key = key or state.default_feature
+        if key not in state.registry:
+            raise HTTPException(400, f'unknown feature {key!r}')
+        return key
+
+    def scores_or_409(key):
+        need_index()
+        sc = state.scores.get(key)
+        if sc is None and state.feature_cached(key):
+            sc = state.get_scores(key)
+        if sc is None:
+            raise HTTPException(409, f'features {key!r} not computed yet')
+        return sc
+
+    return SimpleNamespace(need_index=need_index, sample_or_404=sample_or_404, feature_or_400=feature_or_400,
+                           scores_or_409=scores_or_409)

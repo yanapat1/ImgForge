@@ -1,0 +1,24 @@
+/* terminal look (data-look="terminal"): tokens live in tokens.css; these rules add the monospace details (flat, hairline, prompt-style headings) */
+:root[data-look="terminal"] body { letter-spacing: 0; }
+:root[data-look="terminal"] ::selection { background: var(--accent); color: var(--on-accent); }
+:root[data-look="terminal"] button { box-shadow: none; text-transform: uppercase; letter-spacing: .06em; font-size: var(--fs-xs); font-weight: 600; background: var(--surface-2); border-color: var(--border-strong); }
+:root[data-look="terminal"] button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--accent-line); color: var(--accent-text); }
+:root[data-look="terminal"] button:active:not(:disabled) { background: var(--pressed); }
+:root[data-look="terminal"] button.ghost,
+:root[data-look="terminal"] button.icon-btn { background: transparent; border-color: transparent; }
+:root[data-look="terminal"] button.ghost:hover:not(:disabled),
+:root[data-look="terminal"] button.icon-btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
+:root[data-look="terminal"] button.primary,
+:root[data-look="terminal"] button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+:root[data-look="terminal"] button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+:root[data-look="terminal"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:root[data-look="terminal"] select,
+:root[data-look="terminal"] textarea { background-color: var(--bg); border-color: var(--border-strong); caret-color: var(--accent); }
+:root[data-look="terminal"] .form-card,
+:root[data-look="terminal"] .radio-card,
+:root[data-look="terminal"] .theme-choice { box-shadow: none; background: var(--surface); }
+:root[data-look="terminal"] .theme-choice { text-transform: none; letter-spacing: 0; }
+:root[data-look="terminal"] .theme-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+:root[data-look="terminal"] :focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
+:root[data-look="terminal"] .sec-sub::before { content: "# "; color: var(--accent-text); }
+:root[data-look="terminal"] .sec-sub2::before { content: "## "; color: var(--accent-text); }

@@ -1,0 +1,21 @@
+{
+  "name": "image-tools-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "lint": "eslint static/ts",
+    "typecheck:tools": "tsc -p tsconfig.tools.json",
+    "build:tools": "node build-tools.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/plotly.js": "^3.0.15",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2"
+  }
+}

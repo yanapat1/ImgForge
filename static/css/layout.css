@@ -1,0 +1,153 @@
+/* Page layout: header, jobs bar, startup screen, the 4-column grid (activity bar | left panel | splitter |
+   main), the activity bar and the class-stats side panel. */
+
+/* ---------------------------------------------------------------- header */
+.app-header {
+  flex: none; height: var(--header-h); display: flex; align-items: center; gap: var(--s5);
+  padding: 0 var(--s4) 0 10px; background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -.01em; }
+.brand-mark { width: 32px; height: 32px; flex: none; color: var(--accent); }
+.ds-info { display: flex; gap: var(--s2); align-items: center; min-width: 0; overflow: hidden; flex: 1; }
+.pill { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+  background: var(--surface-2); border: 1px solid var(--border); font-size: var(--fs-xs); color: var(--text-muted); }
+.pill b { color: var(--text); font: 600 var(--fs-xs) var(--mono); font-variant-numeric: tabular-nums; }
+.pill.name { background: transparent; border-color: var(--border-strong); }
+.pill.name b { font-family: var(--font); font-size: var(--fs-sm); }
+.pill.ws { cursor: help; }
+button.pill { height: auto; font-weight: normal; cursor: pointer; }
+button.pill:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
+.pill .src { font: 600 10.5px var(--font); letter-spacing: .03em; text-transform: uppercase; color: var(--accent-text);
+  padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); }
+.header-actions { display: flex; align-items: center; gap: var(--s1); flex: none; }
+.header-actions .icon-btn { width: 34px; height: 34px; border-radius: var(--r-md); }
+.header-actions .icon-btn .ico { width: 18px; height: 18px; }
+:root[data-theme="dark"] .only-light, :root:not([data-theme="dark"]) .only-dark { display: none; }
+
+/* ---------------------------------------------------------------- jobs + startup */
+.jobs-bar { flex: none; display: flex; gap: var(--s3); align-items: center; min-height: 36px;
+  padding: 4px var(--s4); background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.jobs-bar .job-label { font-weight: 650; }
+.jobs-bar .err-only { display: none; color: var(--danger); }
+.jobs-bar.error { background: var(--danger-bg); border-bottom-color: var(--danger-border); color: var(--danger-text); }
+.jobs-bar.error .muted { color: var(--danger-text); }
+.jobs-bar.error .err-only { display: inline; }
+.jobs-bar.error .bar { display: none; }
+.jobs-bar #job-stage { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.startup { position: fixed; inset: var(--header-h) 0 0 0; z-index: var(--z-startup); background: var(--bg);
+  display: flex; align-items: center; justify-content: center; padding: var(--s4); }
+.startup-box { width: min(520px, 100%); padding: var(--s6); }
+.startup-box h2 { font-size: var(--fs-xl); margin-bottom: var(--s1); }
+
+/* ---------------------------------------------------------------- layout */
+/* one row that never grows past the window: each panel scrolls inside itself */
+main { display: grid; grid-template-columns: var(--activity-w) var(--left-w) var(--splitter-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; }
+/* a side dragged (or Ctrl+Alt+arrow) shut: the splitter stays, with a chevron to bring the side back */
+main.left-collapsed { grid-template-columns: var(--activity-w) 0 var(--splitter-w) minmax(0, 1fr); }
+main.right-collapsed { grid-template-columns: var(--activity-w) minmax(0, 1fr) var(--splitter-w) 0; }
+main.left-collapsed .left-panel, main.right-collapsed #main-panel { display: none !important; }   /* beats #gallery-panel etc. */
+.left-panel { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; overflow: hidden; }
+#main-panel { grid-column: 4; grid-row: 1; }
+#model-side, #eval-side { display: flex; flex-direction: column; min-height: 0; }
+
+/* activity bar: icon-only view switcher; active view gets a filled tile */
+.activity-bar { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: var(--s2) 0; background: var(--bg); border-right: 1px solid var(--border); }
+.activity-bar .act { position: relative; height: 40px; width: 40px; padding: 0; justify-content: center;
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-md); color: var(--text-muted); }
+.activity-bar .act .ico { width: 22px; height: 22px; stroke-width: 1.6; vertical-align: 0; color: inherit; }
+.activity-bar .act:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; color: var(--text); }
+.activity-bar .act.active { background: var(--accent-soft); color: var(--accent); }
+.activity-bar .act.active:hover:not(:disabled) { background: var(--accent-soft-hover); color: var(--accent); }
+.activity-bar .act.active::before { content: ""; position: absolute; left: -6px; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent); }
+.activity-bar .act:focus-visible { outline-offset: 0; }
+main.left-collapsed .activity-bar .act.active { background: transparent; }
+.activity-bar .act-bottom { margin-top: auto; }
+/* data views above, model views below: a rule with a small caption between the two groups */
+.activity-bar .act-sep { width: 40px; margin: 4px 0 0; padding-top: 4px; border-top: 1px solid var(--border); text-align: center;
+  font-size: 9px; line-height: 1; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); user-select: none; }
+.activity-bar .act-bottom .ico { transition: transform .4s var(--ease); }
+.activity-bar .act-bottom:hover .ico { transform: rotate(45deg); }
+main.left-collapsed .activity-bar .act.active::before { opacity: .45; }
+
+/* draggable divider between the left and right panels */
+.splitter { grid-column: 3; grid-row: 1; cursor: col-resize; position: relative; background: var(--surface);
+  border-right: 1px solid var(--border); touch-action: none; transition: background-color var(--t-fast) var(--ease); }
+.splitter::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 36px; transform: translate(-50%, -50%);
+  border-radius: 3px; background: var(--border-strong); transition: background-color var(--t-fast) var(--ease); }
+.splitter:hover, .splitter.dragging { background: var(--surface-2); }
+.splitter:hover::after, .splitter.dragging::after, .splitter:focus-visible::after { background: var(--accent); }
+.splitter:focus-visible { outline-offset: -2px; }
+/* the chevron on a collapsed side's splitter: click (or double-click the splitter) to bring the side back */
+.splitter-open { display: none; position: absolute; top: 50%; left: 50%; z-index: 4; width: 20px; height: 44px; min-height: 0; padding: 0;
+  transform: translate(-50%, -50%); justify-content: center; border-radius: var(--r-md); background: var(--surface);
+  border: 1px solid var(--border-strong); color: var(--text-muted); box-shadow: var(--shadow-2); cursor: pointer; }
+.splitter-open:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.splitter-open .ico { width: 14px; height: 14px; }
+main.left-collapsed .splitter-open, main.right-collapsed .splitter-open { display: inline-flex; }
+main.right-collapsed .splitter-open .ico { transform: rotate(180deg); }
+main.left-collapsed .splitter::after, main.right-collapsed .splitter::after { display: none; }
+main.left-collapsed .splitter { border-left: 1px solid var(--border); }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+body.resizing #plot, body.resizing iframe { pointer-events: none; }
+
+/* class stats: left panel */
+#stats-side { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.side-head { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: var(--s2); }
+.side-head h2 { font-size: var(--fs-lg); }
+.side-scroll { flex: 1; overflow-y: auto; padding: var(--s1) var(--s3) var(--s3); }
+.class-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.class-table th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-weight: 600;
+  font-size: var(--fs-xs); color: var(--text-muted); padding: 8px 8px; border-bottom: 1px solid var(--border-strong); }
+.class-table td { padding: 8px; border-bottom: 1px solid var(--border); }
+.class-table .r { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.class-table th.r { font-family: var(--font); }
+.class-table tbody tr { cursor: pointer; transition: background-color var(--t-fast) var(--ease); }
+.class-table tbody tr:hover { background: var(--surface-2); }
+.class-table .cname { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.class-table .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.class-table .bar-cell { position: relative; }
+.class-table .share { position: absolute; left: 8px; bottom: 3px; height: 3px; border-radius: 3px; opacity: .65;
+  max-width: calc(100% - 8px); }
+.class-table .sus { color: var(--danger-text); font-weight: 600; }
+.side-hint { margin: var(--s3) 8px 0; }
+
+/* ---------------------------------------------------------------- ◆ AI assistant diamond
+   #act-ai (index.html) is the first activity button, shown only when an LLM is connected and the AI panel is switched
+   on (core/llm.js). Its inline svg.gem-ico paints with the gradient #gem-grad (stops --gem-1/2/3 from tokens.css):
+   a faint gradient body, a gradient outline and thin facets, and a pink spark. Hover / active add a soft glow;
+   hover plays one sheen of the body and one twinkle of the spark. No motion under prefers-reduced-motion.
+
+   .gem-mark: a small inline gradient diamond for other AI buttons and labels (filter bar "Describe…", Evaluation
+   "Explain", gallery "Check labels", label page ◆). Use <span class="gem-mark" aria-hidden="true"></span> before the
+   text; it sizes with the font (0.85em) and needs no sprite or gradient id. .gem-mark.lg = 1.2em. */
+.gem-ico { overflow: visible; }
+.gem-ico .gem-body { fill: url(#gem-grad); fill-opacity: .2; stroke: url(#gem-grad); stroke-width: 1.6; }
+.gem-ico .gem-facet { fill: none; stroke: url(#gem-grad); stroke-width: 1; stroke-opacity: .85; }
+.gem-ico .gem-spark { fill: none; stroke: var(--gem-3); stroke-width: 1.6; transform-box: fill-box; transform-origin: center; }
+.activity-bar .act-gem .gem-ico { transition: filter var(--t) var(--ease); }
+.activity-bar .act-gem:hover:not(:disabled) .gem-ico,
+.activity-bar .act-gem.active .gem-ico { filter: drop-shadow(0 0 4px var(--gem-glow)) drop-shadow(0 0 1px var(--gem-glow)); }
+.activity-bar .act-gem:hover:not(:disabled) .gem-body { animation: gem-sheen 1.2s var(--ease) 1; }
+.activity-bar .act-gem:hover:not(:disabled) .gem-spark { animation: gem-twinkle 1.2s var(--ease) 1; }
+.activity-bar .act-gem.active,
+.activity-bar .act-gem.active:hover:not(:disabled) { background: color-mix(in srgb, var(--gem-2) 14%, transparent); }
+.activity-bar .act-gem.active::before { background: linear-gradient(var(--gem-1), var(--gem-2), var(--gem-3)); }
+.activity-bar .act-gem.active .gem-body { fill-opacity: .32; }
+@keyframes gem-sheen { 0%, 100% { fill-opacity: .2; } 40% { fill-opacity: .55; } }
+@keyframes gem-twinkle { 0%, 100% { transform: scale(1) rotate(0); opacity: 1; } 30% { transform: scale(.4) rotate(45deg); opacity: .5; }
+  60% { transform: scale(1.35) rotate(90deg); opacity: 1; } }
+.gem-mark { display: inline-block; flex: none; width: .85em; height: .85em; vertical-align: -.08em;
+  background: linear-gradient(135deg, var(--gem-1), var(--gem-2) 55%, var(--gem-3));
+  clip-path: polygon(27% 17%, 69% 17%, 88% 40%, 48% 88%, 8% 40%); }
+.gem-mark.lg { width: 1.2em; height: 1.2em; }
+@media (prefers-reduced-motion: reduce) {
+  .activity-bar .act-gem .gem-ico { transition: none; }
+  .activity-bar .act-gem:hover .gem-body, .activity-bar .act-gem:hover .gem-spark { animation: none; }
+}
+.pill.stale { border-color: var(--warn, #d9a400); color: var(--text); }
+.pill.stale b { color: var(--warn, #d9a400); }

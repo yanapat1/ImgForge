@@ -1,0 +1,299 @@
+"""
+Data curation (Curation view): scan the open dataset for label / image problems (a background job),
+page through the issues, fix them in the label files (backup + undo), ignore the ones that are fine.
+
+    POST /api/curation/scan        {force, feature, model, conf, iou} -> {ready: true, summary} | {ready: false, job_id}
+    GET  /api/curation/summary     counts per issue type, fixes since the index, history
+    GET  /api/curation/issues      ?type=&offset=&limit=&ignored=0|1 -> {summary, total, items}
+    GET  /api/curation/ids         ?types=a,b -> {images, boxes} (the page's filter "has issue")
+    POST /api/curation/fix         {items: [{label|image, expect_sha1, ops}]} | {type}
+                                   -> {applied, conflicts, errors: [{file, error}], undo_id, patch} (200 on partial)
+    POST /api/curation/undo        {undo_id} -> {restored, conflicts, errors, patch, stale}
+    POST /api/curation/ignore      {ids, ignore}
+    GET  /api/curation/patch       in-memory edits since the index ({cls, deleted}), re-applied after a page reload
+    GET  /api/curation/image       ?name=&max_w= one image, scaled (issue cards)
+
+The image editor (viewer in the Explore view) goes through the same backup / undo / sha1 path:
+    GET  /api/img/boxes            ?name= -> {label, sha1, writable, img_w, img_h, boxes:[{line, cls, cx, cy, w, h, sid}]}
+    POST /api/edits                {image, expect_sha1, ops:[{op: set_box|add|set_class|delete, line?, cls?, cx, cy, w, h}]}
+                                   -> {applied, undo_id, patch, label, sha1, boxes, status}; 409 {detail, boxes, sha1}
+    GET  /api/edits/status         {pending_new, moved, images}: what a re-index would place in the plot
+
+Every handler is a plain `def`: FastAPI runs it on its thread pool, the event loop never waits on disk.
+"""
+
+import threading
+from collections import OrderedDict
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
+
+from ...core import config as vconfig
+from ...data import curation as cur
+from ...data.sources import Conflict
+from ...models.splits import load_splits
+from ..deps import guards
+
+IGNORE_KEY = 'curation_ignored'
+
+
+def router(state, ctx):
+    r = APIRouter()
+    need_index = guards(state).need_index
+    stores = {}                     # State.tag -> Curation (only the open session's is kept)
+    lock = threading.Lock()
+    thumbs = OrderedDict()
+
+    def scanned(st):
+        c = stores.get(st.tag)
+        return c if c is not None and c.ready else None
+    ctx.curation = scanned          # the Evaluation tab reads split_leak from here
+
+    def store():
+        need_index()
+        st = ctx.current()
+        with lock:
+            c = stores.get(st.tag)
+            if c is None:
+                stores.clear()
+                thumbs.clear()
+                c = stores[st.tag] = cur.Curation(st, (st.cfg or {}).get('curation'))
+        if not c.ready and not c.scanning:
+            c.load_cached()
+        return c
+
+    def ignored_ids():
+        return state.load_settings().get(IGNORE_KEY, [])
+
+    def summary_payload(c):
+        return {'ready': c.ready, 'scanning': c.scanning, 'scanned_at': c.scanned_at, 'scan_s': c.scan_s,
+                'summary': c.summary(ignored_ids()) if c.ready else {},
+                'n_fixes': c.n_fixes(), 'writable': bool(getattr(state.source, 'label_writable', False)),
+                'scores': c.scores[0] if c.scores else None,
+                'model': c.model_raw[0] if c.model_raw else None,
+                'types': {t: {'group': g, 'severity': s, 'label': lbl, 'bulk': b} for t, (g, s, lbl, b) in cur.TYPES.items()}}
+
+    def split_map(st):
+        """{image name: split} of the split the models were trained on (split_leak), {} when there is none."""
+        try:
+            if ctx.model_service is not None:
+                return ctx.model_service.splits(st)[0]
+            src = ((st.cfg or {}).get('models') or {}).get('split_source')
+            return load_splits(st.dataset_dir, vconfig.resolve(src) if src else None)[0]
+        except Exception:  # noqa: BLE001 - the other rules still run
+            return {}
+
+    @r.post('/api/curation/scan')
+    def scan(body: dict | None = None):
+        body = body or {}
+        c = store()
+        if c.ready and not body.get('force'):
+            return {**summary_payload(c), 'ready': True}
+        model = None
+        mid = body.get('model')
+        if mid and ctx.models is not None and ctx.model_service is not None:
+            try:
+                model = ctx.models.model(mid)
+            except KeyError:
+                raise HTTPException(404, f'no model {mid!r}')
+        st = ctx.current()
+
+        def run(job):
+            raw = None
+            if model is not None:
+                job.progress(stage='scoring the model')
+                try:
+                    raw = cur.model_issues(ctx.model_service, st, model, body.get('conf'), body.get('iou'),
+                                           c.cfg['model_min_score'], c.cfg['limit_per_type'])
+                except Exception:  # noqa: BLE001 - the label rules still run without the model ones
+                    raw = None
+            res = c.scan(job.progress, feature=body.get('feature'), model=raw, splits=split_map(st))
+            return {'n': sum(v['n'] for v in res.values())}
+
+        job = st.jobs.submit(f'curation:{st.tag}', f'Curation scan · {st.source.name}', run, lane='io')
+        return {'ready': False, 'job_id': job.id}
+
+    @r.get('/api/curation/summary')
+    def summary():
+        c = store()
+        return {**summary_payload(c), 'history': c.history()[:50]}
+
+    @r.get('/api/curation/issues')
+    def issues(type: str = '', offset: int = 0, limit: int = 200, ignored: int = 0):
+        c = store()
+        if not c.ready:
+            raise HTTPException(409, 'not scanned yet')
+        if type and type not in cur.TYPES:
+            raise HTTPException(400, f'unknown issue type {type!r}')
+        ign = ignored_ids()
+        total, items = c.items(type or None, max(0, offset), max(1, min(limit, 1000)), ign, bool(ignored))
+        return {'summary': c.summary(ign), 'total': total, 'offset': offset, 'items': items}
+
+    @r.get('/api/curation/ids')
+    def ids(types: str = ''):
+        c = store()
+        if not c.ready:
+            return {'images': [], 'boxes': []}
+        return c.ids_for([t for t in types.split(',') if t], ignored_ids())
+
+    @r.post('/api/curation/fix')
+    def fix(body: dict):
+        c = store()
+        if not c.ready:
+            raise HTTPException(409, 'not scanned yet')
+        if body.get('type'):
+            typ = body['type']
+            if typ not in cur.TYPES:
+                raise HTTPException(400, f'unknown issue type {typ!r}')
+            items = c.default_fix_items(typ, ignored_ids())
+            text = f'Fix all · {cur.TYPES[typ][2]}'
+        else:
+            items = body.get('items') or []
+            text = body.get('summary') or ''
+        if not items:
+            return {'applied': 0, 'files': 0, 'conflicts': [], 'errors': [], 'undo_id': None,
+                    'patch': {'cls': {}, 'deleted': []},
+                    'summary': c.summary(ignored_ids()), 'n_fixes': c.n_fixes()}
+        try:
+            res = c.fix(items, text)
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
+        except (ValueError, Conflict) as e:
+            raise HTTPException(400, str(e))
+        return {**res, 'summary': c.summary(ignored_ids()), 'n_fixes': c.n_fixes()}
+
+    @r.post('/api/curation/undo')
+    def undo(body: dict):
+        c = store()
+        try:
+            res = c.undo(str(body.get('undo_id', '')))
+        except KeyError:
+            raise HTTPException(404, 'nothing to undo (already undone, or pruned)')
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
+        except (ValueError, OSError) as e:             # an unreadable backup (per-file failures come back in errors)
+            raise HTTPException(400, f'cannot undo: {e}')
+        return {**res, 'summary': c.summary(ignored_ids()) if c.ready else {}, 'n_fixes': c.n_fixes()}
+
+    @r.post('/api/curation/ignore')
+    def ignore(body: dict):
+        need_index()
+        ids_ = [str(i) for i in body.get('ids') or []]
+        st = ctx.current()
+        with st.tags_lock:                     # settings are read-modify-written: one writer at a time
+            settings = st.load_settings()
+            cur_ids = list(dict.fromkeys(settings.get(IGNORE_KEY, [])))
+            if body.get('ignore', True):
+                have = set(cur_ids)
+                cur_ids += [i for i in ids_ if i not in have]
+            else:
+                drop = set(ids_)
+                cur_ids = [i for i in cur_ids if i not in drop]
+            settings[IGNORE_KEY] = cur_ids
+            st.save_settings(settings)
+        return {'ignored': cur_ids}
+
+    @r.get('/api/curation/patch')
+    def patch():
+        c = store()
+        return c.state_patch()
+
+    @r.get('/api/curation/history')
+    def history():
+        return {'history': store().history()}
+
+    @r.get('/api/curation/image')
+    def image(name: str, max_w: int = 360):
+        need_index()
+        st = ctx.current()
+        max_w = max(64, min(int(max_w), 1280))
+        key = (st.tag, name, max_w)
+        with lock:
+            if key in thumbs:
+                thumbs.move_to_end(key)
+                return Response(thumbs[key], media_type='image/jpeg', headers={'Cache-Control': 'max-age=600'})
+        if '/' in name or '\\' in name or name not in set_of_images(st):
+            raise HTTPException(404, f'no image {name!r}')
+        try:
+            data = cur.thumbnail(st.source, name, max_w)
+        except Exception as e:  # noqa: BLE001 - unreadable file, S3 error
+            raise HTTPException(502, f'cannot load {name}: {e}') from e
+        with lock:
+            thumbs[key] = data
+            while len(thumbs) > 256:
+                thumbs.popitem(last=False)
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=600'})
+
+    # ------------------------------------------------------------ the image editor
+    def image_size(st, name):
+        ids = st.by_image.get(name)
+        if ids:
+            s0 = st.samples[ids[0]]
+            return s0['img_w'], s0['img_h']
+        try:
+            with st.source.open_image(name) as im:     # header only: PIL decodes lazily
+                return im.size
+        except Exception as e:  # noqa: BLE001 - missing file, S3 error
+            raise HTTPException(502, f'cannot load {name}: {e}') from e
+
+    def boxes_payload(c, st, name):
+        out = c.image_boxes(name)
+        out['img_w'], out['img_h'] = image_size(st, name)
+        out['writable'] = bool(getattr(st.source, 'label_writable', False))
+        return out
+
+    @r.get('/api/img/boxes')
+    def img_boxes(name: str):
+        c = store()
+        st = ctx.current()
+        if not name or not st.has_image(name):
+            raise HTTPException(404, f'no image {name!r}')
+        return boxes_payload(c, st, name)
+
+    @r.post('/api/edits')
+    def edits(body: dict):
+        c = store()
+        st = ctx.current()
+        name = str(body.get('image') or '')
+        if not name or not st.has_image(name):
+            raise HTTPException(404, f'no image {name!r}')
+        ops = body.get('ops') or []
+        if not isinstance(ops, list) or not all(isinstance(o, dict) for o in ops):
+            raise HTTPException(400, 'ops must be a list of objects')
+        try:
+            res = c.edit(name, body.get('expect_sha1'), ops)
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
+        except (ValueError, Conflict) as e:
+            raise HTTPException(400, str(e))
+        if res['conflicts']:
+            cur_boxes = boxes_payload(c, st, name)
+            raise HTTPException(409, {'detail': 'the label file changed since it was opened: reloaded, your edits are '
+                                                'kept to re-apply', 'boxes': cur_boxes['boxes'], 'sha1': cur_boxes['sha1']})
+        if res['errors']:
+            raise HTTPException(400, '; '.join(e['error'] for e in res['errors']))
+        res['img_w'], res['img_h'] = image_size(st, name)
+        res['writable'] = True
+        res['status'] = c.edit_status()
+        res['summary'] = c.summary(ignored_ids()) if c.ready else {}
+        res['n_fixes'] = c.n_fixes()
+        return res
+
+    @r.get('/api/edits/status')
+    def edits_status():
+        return store().edit_status()
+
+    image_sets = {}
+
+    def set_of_images(st):
+        s = image_sets.get(st.tag)
+        if s is None:
+            image_sets.clear()
+            s = image_sets[st.tag] = set(st.source.list_images())
+        return s
+
+    return r

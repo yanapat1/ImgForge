@@ -1,0 +1,38 @@
+/* soft look (data-look="soft"): tokens live in tokens.css; these rules add the pressed-out panels (paired light + dark shadows),
+   the pressed-in inputs and the pill buttons. --sf-dark / --sf-light are the two shadow colours of the current theme. */
+:root[data-look="soft"] button,
+:root[data-look="soft"] .form-card,
+:root[data-look="soft"] .radio-card,
+:root[data-look="soft"] .theme-choice { border-color: transparent; }
+:root[data-look="soft"] button { border-radius: var(--r-lg); background: var(--surface); box-shadow: 4px 4px 10px var(--sf-dark), -4px -4px 10px var(--sf-light); }
+:root[data-look="soft"] button:hover:not(:disabled) { background: var(--surface); box-shadow: 6px 6px 14px var(--sf-dark), -6px -6px 14px var(--sf-light); }
+:root[data-look="soft"] button:active:not(:disabled) { background: var(--surface-2); box-shadow: inset 3px 3px 8px var(--sf-dark), inset -3px -3px 8px var(--sf-light); }
+:root[data-look="soft"] button.ghost,
+:root[data-look="soft"] button.icon-btn { background: transparent; box-shadow: none; }
+:root[data-look="soft"] button.ghost:hover:not(:disabled),
+:root[data-look="soft"] button.icon-btn:hover:not(:disabled) { background: var(--surface-3); box-shadow: none; }
+:root[data-look="soft"] button.ghost:active:not(:disabled),
+:root[data-look="soft"] button.icon-btn:active:not(:disabled) { box-shadow: none; }
+:root[data-look="soft"] button.primary,
+:root[data-look="soft"] button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+:root[data-look="soft"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:root[data-look="soft"] select,
+:root[data-look="soft"] textarea { border-color: transparent; background-color: var(--surface-2); box-shadow: inset 3px 3px 8px var(--sf-dark), inset -3px -3px 8px var(--sf-light); }
+:root[data-look="soft"] .form-card,
+:root[data-look="soft"] .radio-card,
+:root[data-look="soft"] .theme-choice { box-shadow: var(--shadow-2); }
+:root[data-look="soft"] .theme-choice[aria-pressed="true"] { box-shadow: inset 4px 4px 10px var(--sf-dark), inset -4px -4px 10px var(--sf-light), 0 0 0 2px var(--accent-line); }
+:root[data-look="soft"] dialog,
+:root[data-look="soft"] .modal { border-color: transparent; box-shadow: var(--shadow-3); }
+/* plain buttons that are not controls (card title, tag chips, the new-session tile) stay flat */
+:root[data-look="soft"] .sc-open,
+:root[data-look="soft"] .sc-tag,
+:root[data-look="soft"] .session-new { box-shadow: none; background: transparent; border-radius: var(--r); }
+:root[data-look="soft"] .sc-open:hover:not(:disabled),
+:root[data-look="soft"] .sc-tag:hover:not(:disabled),
+:root[data-look="soft"] .session-new:hover:not(:disabled) { box-shadow: none; }
+:root[data-look="soft"] .sc-open:active:not(:disabled),
+:root[data-look="soft"] .sc-tag:active:not(:disabled),
+:root[data-look="soft"] .session-new:active:not(:disabled) { box-shadow: none; }
+:root[data-look="soft"] .session-new { border: 2px dashed var(--border-strong); border-radius: var(--r-lg); }
+:root[data-look="soft"] .session-new:hover:not(:disabled) { background: var(--accent-soft); }

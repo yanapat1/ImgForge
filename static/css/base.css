@@ -1,0 +1,135 @@
+/* Base: reset, typography helpers, icons, scrollbars and every form control (buttons, selects, sliders,
+   checkboxes, segmented groups, toggle buttons), the floating-panel look and progress bars. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font: var(--fs)/1.5 var(--font);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -.005em; }
+.hidden { display: none !important; }
+.muted { color: var(--text-muted); font-weight: normal; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: .93em; }
+.hint { font-size: var(--fs-xs); color: var(--text-faint); }
+.grow { flex: 1; }
+::selection { background: var(--accent-line); color: var(--text); }
+
+/* icons: duotone. Strokes use currentColor; parts marked .f get a soft fill of the same colour */
+.ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+.ico .f, symbol .f { fill: currentColor; fill-opacity: .22; }
+.ico .s, symbol .s { fill: currentColor; stroke: none; }
+kbd { font: 500 var(--fs-xs)/1 var(--mono); padding: 2px 5px; border-radius: var(--r-sm);
+  background: var(--surface-3); border: 1px solid var(--border-strong); border-bottom-width: 2px; color: var(--text); }
+
+/* ---------------------------------------------------------------- scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px;
+  border: 3px solid transparent; background-clip: padding-box; min-height: 40px; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--border-hover); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------------------------------------------------------------- controls */
+button, select, input { font: inherit; color: var(--text); }
+button, select, input[type=number] {
+  height: var(--control-h); padding: 0 var(--s3);
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r);
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+button { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap; font-weight: 550;
+  font-size: var(--fs-sm); touch-action: manipulation; }
+button .ico { color: var(--text-muted); transition: color var(--t-fast) var(--ease); }
+button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-hover); }
+button:hover:not(:disabled) .ico { color: var(--text); }
+button:active:not(:disabled) { background: var(--pressed); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+button.primary .ico, button.primary:hover:not(:disabled) .ico { color: var(--on-accent); }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+button.ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); border-color: transparent; }
+button.icon-btn { width: var(--control-h); padding: 0; justify-content: center; }
+button.block { width: 100%; justify-content: center; }
+
+/* dropdowns: native list, custom face */
+select {
+  appearance: none; -webkit-appearance: none; cursor: pointer; max-width: 100%;
+  padding: 0 30px 0 var(--s3); font-size: var(--fs-sm);
+  background-image: var(--chev); background-repeat: no-repeat; background-position: right 8px center; background-size: 15px;
+  text-overflow: ellipsis;
+}
+select option, select optgroup { background: var(--surface-2); color: var(--text); }
+select optgroup { color: var(--text-muted); font-style: normal; }
+select:hover, input[type=number]:hover { border-color: var(--border-hover); background-color: var(--surface-3); }
+input[type=number] { width: 70px; padding: 0 var(--s2); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* sliders: thin track, filled by --fill (set from js/core/dom.js syncRanges), round thumb */
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 96px; height: var(--control-h); margin: 0;
+  background: transparent; cursor: pointer; --fill: 50%;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--surface-3) var(--fill));
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+  background: var(--text); border: 3px solid var(--accent); box-shadow: 0 0 0 3px var(--bg);
+  transition: transform var(--t-fast) var(--ease);
+}
+input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.12); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 999px; background: var(--surface-3); }
+input[type=range]::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--accent); }
+input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--text);
+  border: 3px solid var(--accent); box-shadow: 0 0 0 3px var(--bg); }
+
+/* checkboxes */
+input[type=checkbox] {
+  -webkit-appearance: none; appearance: none; width: 17px; height: 17px; margin: 0; flex: none; cursor: pointer;
+  border: 1.5px solid var(--border-hover); border-radius: var(--r-sm); background: var(--surface);
+  display: inline-grid; place-items: center;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+input[type=checkbox]:hover { border-color: var(--accent); }
+input[type=checkbox]:checked { background: var(--accent) var(--tick) center / 13px no-repeat; border-color: var(--accent); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline-offset: 1px; }
+
+label { color: var(--text-muted); white-space: nowrap; }
+.field { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.check { display: flex; align-items: center; gap: 10px; color: var(--text); cursor: pointer; padding: 5px 6px;
+  margin: 0 -6px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.check:hover { background: var(--surface-3); }
+
+/* segmented button group */
+.segmented { display: inline-flex; }
+.segmented > button { border-radius: 0; margin-left: -1px; }
+.segmented > button:first-child { border-radius: var(--r) 0 0 var(--r); margin-left: 0; }
+.segmented > button:last-child { border-radius: 0 var(--r) var(--r) 0; }
+.segmented > button:focus-visible, .segmented > button:hover { position: relative; z-index: 1; }
+
+/* toggle buttons (click again to turn off) */
+.view-btn .on-only { display: none; }
+.view-btn.active { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); position: relative; z-index: 2; }
+.view-btn.active:hover:not(:disabled) { background: var(--accent-soft-hover); border-color: var(--accent); }
+.view-btn.active .ico, .view-btn.active:hover:not(:disabled) .ico { color: var(--accent); }
+.view-btn.active .on-only { display: inline; }
+
+/* shared floating-panel look: popover, tip, overlays, modal */
+.panel { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-2); }
+
+/* progress bars */
+.bar { height: 6px; width: 200px; background: var(--surface-3); border-radius: 999px; overflow: hidden; flex: none; }
+.bar.big { width: 100%; height: 8px; margin: var(--s4) 0 var(--s2); }
+.bar > div { height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .3s var(--ease); }
+.bar.indeterminate > div { width: 30% !important; animation: slide 1.4s infinite ease-in-out; }
+@keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.busy { color: var(--accent); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .45; } }

@@ -1,0 +1,13 @@
+/* hand-drawn look (data-look="handdrawn"): tokens live in tokens.css; these rules add the pencil-sketch details */
+:root[data-look="handdrawn"] body { letter-spacing: .01em; }
+:root[data-look="handdrawn"] button,
+:root[data-look="handdrawn"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:root[data-look="handdrawn"] select,
+:root[data-look="handdrawn"] textarea,
+:root[data-look="handdrawn"] .form-card,
+:root[data-look="handdrawn"] .radio-card,
+:root[data-look="handdrawn"] .theme-choice { border-width: 1.5px; }
+:root[data-look="handdrawn"] button:not(.ghost):not(.icon-btn):hover { transform: rotate(-.4deg); }
+:root[data-look="handdrawn"] .form-card,
+:root[data-look="handdrawn"] .theme-choice { box-shadow: 2px 3px 0 var(--hd-shadow); }
+:root[data-look="handdrawn"] .theme-choice[aria-pressed="true"] { box-shadow: 3px 4px 0 var(--accent-line); }
