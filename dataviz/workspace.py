@@ -6,6 +6,7 @@ Workspace folders: one auto-named cache folder per dataset version.
 A changed dataset gets a new fingerprint, so a new folder: earlier results are never overwritten.
 """
 
+import glob
 import json
 import time
 from pathlib import Path
@@ -51,7 +52,7 @@ def resolve_workspace(root, source, fp=None, log=None):
 
 def list_workspaces(root, name):
     out = []
-    for d in sorted(Path(root).glob(f'{name}__*')):
+    for d in sorted(Path(root).glob(f'{glob.escape(name)}__*')):
         m = d / 'workspace.json'
         if m.exists():
             meta = json.loads(m.read_text())

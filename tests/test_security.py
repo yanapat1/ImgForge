@@ -74,3 +74,38 @@ def test_file_model_of_a_demoted_owner_does_not_load(pg, tmp_path):
         c.execute(text('UPDATE app.users SET is_admin = false WHERE id = :u'), {'u': admin['id']})
     with pytest.raises(PermissionError):
         runners.load_runner(mr.model(m['id']), tmp_path)
+
+
+def test_llm_client_never_follows_redirects_nor_echoes_raw_bodies():
+    """A provider URL the user typed must not become a proxy to internal pages (redirects) or echo them back."""
+    import httpx
+    from dataviz.llm import providers
+    c = providers._client({'base_url': 'http://provider.example', 'kind': 'openai_compat', 'timeout_s': 5})
+    assert c.follow_redirects is False
+    raw = httpx.Response(403, text='INTERNAL-SECRET token=abc123', request=httpx.Request('GET', 'http://x'))
+    assert providers._err_message(raw) == ''
+    js = httpx.Response(401, json={'error': {'message': 'bad key'}}, request=httpx.Request('GET', 'http://x'))
+    assert providers._err_message(js) == 'bad key'
+
+
+def test_safe_next_rejects_protocol_relative_paths():
+    """core/nav.ts safeNext under node: '/.//evil.com/x' normalises to '//evil.com/x', which must not survive."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which('node')
+    js = Path(__file__).resolve().parents[1] / 'static' / 'js' / 'core' / 'nav.js'
+    if not node or not js.exists():
+        pytest.skip('needs node and a built static/js (npm run build)')
+    script = f"""
+globalThis.location = {{ origin: 'http://h', pathname: '/login', href: 'http://h/login' }};
+const nav = await import({json.dumps(js.as_uri())});
+const out = ['/.//evil.com/x', '//evil.com', '/\\\\evil.com', 'javascript:alert(1)', 'http://evil.com/', '/s/abc/?q=1']
+  .map((n) => nav.safeNext(n));
+console.log(JSON.stringify(out));
+"""
+    r = subprocess.run([node, '--input-type=module', '-e', script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out[:5] == ['/'] * 5 and out[5] == '/s/abc/?q=1'

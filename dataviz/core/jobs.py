@@ -143,7 +143,7 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, log=None, keep=30):
+    def __init__(self, log=None, keep=200):   # shared by every user: room for their finished jobs
         self.keep = keep
         self._ids = itertools.count(1)
         self._jobs = {}            # id -> Job (recent history)

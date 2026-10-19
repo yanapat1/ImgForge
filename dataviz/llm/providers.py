@@ -53,7 +53,8 @@ def _client(p):
         with _clients_lock:
             c = _clients.get(k)
             if c is None:
-                c = _clients[k] = httpx.Client(base_url=base, follow_redirects=True,
+                c = _clients[k] = httpx.Client(base_url=base, follow_redirects=False,   # a redirect could point it at an internal host
+                                               
                                                timeout=httpx.Timeout(t, connect=min(10.0, t)),
                                                limits=httpx.Limits(max_connections=8, max_keepalive_connections=4))
     return c
@@ -106,9 +107,9 @@ def _err_message(r):
     elif isinstance(body, list) and body and isinstance(body[0], dict) and isinstance(body[0].get('error'), dict):
         msg = body[0]['error'].get('message')              # gemini sometimes answers a list
     if not msg:
-        msg = (r.text or '').strip()
+        return ''                    # only a provider's structured error text: never echo a raw body (internal pages)
     msg = re.sub(r'\s+', ' ', str(msg))
-    return msg[:300] + ('…' if len(msg) > 300 else '')
+    return msg[:200] + ('…' if len(msg) > 200 else '')
 
 
 def _fail(p, r, what):

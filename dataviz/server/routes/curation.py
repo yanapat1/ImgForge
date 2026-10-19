@@ -31,7 +31,7 @@ from collections import OrderedDict
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from ...auth import deps
+from ...auth import access, context, deps
 from ...core import config as vconfig
 from ...data import curation as cur
 from ...data.sources import Conflict
@@ -104,6 +104,10 @@ def router(state, ctx):
     @r.post('/api/curation/scan')
     def scan(body: dict | None = None):
         body = body or {}
+        if body.get('force') or body.get('model'):     # replaces the scan every member sees: not for viewers
+            b = context.bound()
+            if b is None or not access.allows(b.role, 'labeler'):
+                raise HTTPException(403, 'you can only view this session')
         c = store()
         if c.ready and not body.get('force'):
             return {**summary_payload(c), 'ready': True}

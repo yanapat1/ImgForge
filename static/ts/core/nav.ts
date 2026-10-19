@@ -35,7 +35,9 @@ export function safeNext(next: string | null | undefined): string {
   if (!next) return homeUrl();
   try {
     const u = new URL(next, location.origin + appRoot());
-    if (u.origin !== location.origin || !u.pathname.startsWith(appRoot()) || LOGIN_PATH.test(u.pathname)) return homeUrl();
+    // a pathname like //evil.com would be read back as a protocol-relative URL by location.replace
+    if (u.origin !== location.origin || /^\/[/\\]/.test(u.pathname) || !u.pathname.startsWith(appRoot())
+        || LOGIN_PATH.test(u.pathname)) return homeUrl();
     return u.pathname + u.search + u.hash;
   } catch (e) { return homeUrl(); }
 }

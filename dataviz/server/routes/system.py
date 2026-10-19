@@ -118,13 +118,15 @@ def router(state, ctx):
         size = hit[1]
         meta_path = state.cache_dir / 'workspace.json'
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        b = context.bound()
+        owner = b is not None and b.role == 'owner'
         return {
-            'name': state.cache_dir.name, 'path': str(state.cache_dir), 'created': meta.get('created'),
+            'name': state.cache_dir.name, 'path': str(state.cache_dir) if owner else None, 'created': meta.get('created'),
             'size_mb': round(size / 1e6, 1),
             'n_features': sum(1 for k in state.registry if state.feature_cached(k)) if state.ready else 0,
             'n_projections': len(state.saved_projections()),
             'others': [w for w in list_workspaces(state.cache_dir.parent, state.source.name)
-                       if w['name'] != state.cache_dir.name],
+                       if w['name'] != state.cache_dir.name] if owner else [],
         }
 
     @r.get('/api/jobs', dependencies=signed_in)
