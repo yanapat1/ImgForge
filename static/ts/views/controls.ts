@@ -238,7 +238,7 @@ export function toggleOff(view: string): boolean {
 
 // a class chip changed: run the active Inspect check again so it follows the visible classes
 const INSPECT_BTN: Record<string, string> = { suspicious: 'btn-suspicious', far: 'btn-outliers', dups: 'btn-dups', 'sel-outliers': 'btn-sel-outliers',
-  'cl-issues': 'btn-cl-issues', 'cl-low': 'btn-cl-low', 'cl-ood': 'btn-cl-ood' };
+  'cl-issues': 'btn-cl-issues', 'cl-low': 'btn-cl-low', 'cl-ood': 'btn-cl-ood', 'cl-swap': 'btn-cl-swap', 'cl-badloc': 'btn-cl-badloc' };
 export function reapplyInspect(): void {
   const id = INSPECT_BTN[S.activeView ?? ''];
   if (!id) return;
@@ -297,7 +297,8 @@ export function syncLqControls(): void {
   const colorBy = $req<HTMLSelectElement>('color-by'), sort = $req<HTMLSelectElement>('sort');
   const og = colorBy.querySelector<HTMLOptGroupElement>('optgroup[data-needs="lq"]');
   if (og) { og.hidden = !on; og.disabled = !on; }
-  if (!on && colorBy.value.startsWith('cl_')) { colorBy.value = 'class'; if (S.view) renderPlot(); }
+  const lqField = !!og?.querySelector(`option[value="${colorBy.value}"]`);     // detection colourings are not ours
+  if (!on && lqField) { colorBy.value = 'class'; if (S.view) renderPlot(); }
   const o = sort.querySelector<HTMLOptionElement>('option[value="cl-quality"]');
   if (o) { o.hidden = !on; o.disabled = !on; }
   if (!on && sort.value === 'cl-quality') sort.value = 'none';
@@ -386,6 +387,22 @@ export function clView(view: 'cl-issues' | 'cl-low' | 'cl-ood'): void {
   }
   $req<HTMLSelectElement>('sort').value = view === 'cl-ood' ? 'none' : 'cl-quality';
   setSelection(ids, `${title} · ${featureLabel(S.lq.feature)}`, { view });
+  syncIssuesBtn();
+}
+
+/** Find issues › Detection: label boxes cleanlab scores low against the Model tab's predictions, worst first. */
+export function odView(view: 'cl-swap' | 'cl-badloc'): void {
+  const P = S.P;
+  const col = view === 'cl-swap' ? P?.cl_swap : P?.cl_badloc;
+  if (!P || !col || toggleOff(view)) return;
+  const v = (id: number): number => col[id] ?? NaN;
+  const ids = viewIdsVisible().filter((id) => v(id) < 0.1).sort((a, b) => v(a) - v(b));
+  if (!ids.length) {
+    toast(view === 'cl-swap' ? 'no box looks like another class to the model' : 'no box looks badly placed to the model');
+    return;
+  }
+  $req<HTMLSelectElement>('sort').value = 'none';
+  setSelection(ids, `${view === 'cl-swap' ? 'Wrong class' : 'Badly placed'} (cleanlab detection)`, { view });
   syncIssuesBtn();
 }
 

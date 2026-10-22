@@ -103,6 +103,11 @@ export async function openModal(id: number, nav: { list: CardRef[] } | null = nu
   }
   const st = S.P?.m_status?.[id];
   if (st !== undefined && st >= 0) rows.push(['model', modelRow(id), true]);
+  const sw = S.P?.cl_swap?.[id], bl = S.P?.cl_badloc?.[id];
+  if (sw != null || bl != null) {
+    const bad = (v: number | null | undefined): string => (v == null ? '–' : v < 0.1 ? `<span class="txt-danger">${num(v, 2)}</span>` : num(v, 2));
+    rows.push(['detection', `class ${bad(sw)} · placement ${bad(bl)} <span class="muted">(cleanlab, low = suspect)</span>`, true]);
+  }
   if (g !== undefined) rows.push(['group', g === -1 ? '<span class="txt-danger">outlier</span> (fits no group)' : `group ${g}`, true]);
   rows.push(
     ['image', esc(s.image)],

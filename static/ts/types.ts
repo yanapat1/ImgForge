@@ -123,10 +123,20 @@ export interface Points {
   cl_issue?: number[];                 // 1 = cleanlab says the label is wrong
   cl_rank?: number[];                  // 0 = most likely wrong, -1 = no issue
   cl_suggested?: number[];             // class with the highest out-of-fold probability
+  // cleanlab object detection on the Model tab's predictions (GET api/models/{id}/cleanlab); 0-1, low = bad
+  cl_swap?: Array<number | null>;
+  cl_badloc?: Array<number | null>;
+  cl_image_quality?: Array<number | null>;
 }
 /** Names of the numeric Points columns (colour-by / sort / filter fields). */
 export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score' |
-  'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob';
+  'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob' | 'cl_swap' | 'cl_badloc' | 'cl_image_quality';
+
+/** GET api/models/{id}/cleanlab */
+export interface DetectionChecks {
+  cl_swap: Array<number | null>; cl_badloc: Array<number | null>; cl_image_quality: Array<number | null>;
+  images: Array<{ image: string; quality: number }>; overlooked: Array<{ image: string; pid: number; quality: number }>;
+}
 
 /** One class of the cleanlab summary (rank_classes_by_label_quality). */
 export interface LqClass { cls: number; name: string; issues: number; inverse_issues: number; noise_rate: number; quality: number }

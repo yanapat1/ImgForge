@@ -70,7 +70,7 @@ const isCb = (p: string): boolean => p === 'cbsafe' || p === 'contrast';
 
 /** Colour-by fields that are numbers (columns of the points payload): label, transform, colour scale. */
 export type ContinuousKey = 'suspicion' | 'outlier' | 'area' | 'aspect' | 'brightness' | 'blur' | 'm_score' |
-  'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob';
+  'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob' | 'cl_swap' | 'cl_badloc' | 'cl_image_quality';
 export interface ContinuousField { label: string; f: (v: number) => number; scale: ScaleName }
 export const CONTINUOUS: Record<ContinuousKey, ContinuousField> = {
   suspicion: { label: 'label suspicion', f: (v: number) => v, scale: 'alarm' },
@@ -85,6 +85,9 @@ export const CONTINUOUS: Record<ContinuousKey, ContinuousField> = {
   cl_given_prob: { label: 'P(given class)', f: (v: number) => v, scale: 'seq' },
   cl_ood_feat: { label: 'out-of-distribution', f: (v: number) => v, scale: 'alarm' },
   cl_ood_prob: { label: 'out-of-distribution (probs)', f: (v: number) => v, scale: 'alarm' },
+  cl_swap: { label: '1 − class score (detection)', f: (v: number) => 1 - v, scale: 'alarm' },
+  cl_badloc: { label: '1 − placement score', f: (v: number) => 1 - v, scale: 'alarm' },
+  cl_image_quality: { label: '1 − image label quality', f: (v: number) => 1 - v, scale: 'alarm' },
 };
 
 /** Is `k` one of the CONTINUOUS colour-by fields? */

@@ -11,6 +11,7 @@ import { pts, S } from '../core/state.js';
 import { clsColor, clsName, ERR, THEME } from '../core/theme.js';
 import { invalidateHover, renderPlot } from '../plot/render.js';
 import { openSettings } from '../settings/dialog.js';
+import type { DetectionChecks } from '../types.js';
 import type { CardRef, ClassRow, EvalFp, EvalIssue, ModelEvalFull, ModelInfo, ModelsPayload, PredictResult } from '../types-views.js';
 import { at, ax, base, cfg, customOf, tbody } from './chart-util.js';
 import { closestOf } from './ev-util.js';
@@ -80,11 +81,47 @@ function syncModelControls(): void {
     if (o) { o.hidden = !on; o.disabled = !on; }
   }
   if (!on && /^m-/.test(sort.value)) { sort.value = 'none'; renderGallery(); }
+  // cleanlab's detection checks (Find issues › Detection, three colourings): only once they are loaded
+  const od = !!pts().cl_swap;
+  $req('od-sec').classList.toggle('hidden', !od);
+  colorBy.querySelectorAll<HTMLOptionElement>('option[data-od]').forEach((o) => { o.hidden = !od; o.disabled = !od; });
+  if (!od && ['cl_swap', 'cl_badloc', 'cl_image_quality'].includes(colorBy.value)) { colorBy.value = 'class'; if (S.view) renderPlot(); }
+}
+
+// cleanlab object detection on this model's predictions: bad placement / wrong class per label box, missed objects
+let odSeq = 0;
+async function loadDetectionChecks(m: ModelInfo): Promise<void> {
+  const seq = ++odSeq;
+  try {
+    const r = await getJSON<DetectionChecks>(`api/models/${encodeURIComponent(m.id)}/cleanlab`);
+    if (seq !== odSeq || M.id !== m.id) return;
+    const P = pts();
+    P.cl_swap = r.cl_swap; P.cl_badloc = r.cl_badloc; P.cl_image_quality = r.cl_image_quality;
+    $req('od-model').textContent = `· cleanlab on ${m.name}`;
+    const n = r.overlooked.filter((o) => o.quality < 0.1).length;
+    $req('od-missed-n').textContent = n ? `${n} likely unlabelled object${n === 1 ? '' : 's'}` : 'objects nobody labelled';
+  } catch (e) {               // cleanlab missing on the server (501) or not predicted: the other model views still work
+    if (seq !== odSeq) return;
+    const P = pts();
+    delete P.cl_swap; delete P.cl_badloc; delete P.cl_image_quality;
+  }
+  invalidateHover();
+  syncModelControls();
+  if (S.view && $req<HTMLSelectElement>('color-by').value.startsWith('cl_')) renderPlot();
+}
+
+/** Find issues › Missed objects: the Model tab's list of objects the model finds where nothing is labelled. */
+export async function showMissedObjects(): Promise<void> {
+  issueKind = 'fp_bg';
+  switchTab('model');
+  await showModelTab();
 }
 
 function clearModelColumns(): void {
   const P = pts();
   delete P.m_status; delete P.m_pred; delete P.m_score;
+  delete P.cl_swap; delete P.cl_badloc; delete P.cl_image_quality;
+  odSeq++;
   invalidateHover();
   syncModelControls();
 }
@@ -107,6 +144,7 @@ export async function refreshEval(): Promise<void> {
     P.m_score = ev.gt.pred_score;
     invalidateHover();
     syncModelControls();
+    void loadDetectionChecks(m);
     drawn = false;
     renderModel();
     if (S.view && $req<HTMLSelectElement>('color-by').value.startsWith('m_')) renderPlot();

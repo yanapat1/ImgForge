@@ -21,9 +21,10 @@ import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks }
 import { bubbleAt, hoverOf, scheduleRender } from './plot/render.js';
 import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
-import { applySettings, applyUiDefaults, applyView, buildParamInputs, clView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
+import { applySettings, applyUiDefaults, applyView, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
 import { narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
+import { showMissedObjects } from './views/model.js';
 import { bindBar, bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateBarSummary, updateGroupsBadge } from './views/layout.js';
 import { closeModal, initModal, modalId, openImage, openModal, stepModal, toggleModalPreds } from './views/modal.js';
 import { imageOrder, setImagePage } from './views/image-grid.js';
@@ -336,6 +337,9 @@ function bindEvents(): void {
   $req('btn-cl-low').onclick = () => clView('cl-low');
   $req('btn-cl-ood').onclick = () => clView('cl-ood');
   $req('btn-cl-confusion').onclick = () => openConfusion();
+  $req('btn-cl-swap').onclick = () => odView('cl-swap');
+  $req('btn-cl-badloc').onclick = () => odView('cl-badloc');
+  $req('btn-cl-missed').onclick = () => { void showMissedObjects(); };
   $req('btn-sel-outliers').onclick = async () => {
     if (toggleOff('sel-outliers')) return;
     if (!S.groups) { $req<HTMLInputElement>('g-outliers').checked = true; await onGroupControls(); }

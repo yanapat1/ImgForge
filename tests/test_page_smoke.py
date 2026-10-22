@@ -566,3 +566,43 @@ def test_plot_bar_and_cleanlab_label_quality(server):
         assert page.locator('#stat-cl-kpis .kpi').count() == 3
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_cleanlab_detection_checks_from_a_model_run(server):
+    """A detector run in the Model tab also gets cleanlab's object-detection scores: Find issues shows a Detection
+    section, the plot can colour by them, and /api/models/{id}/cleanlab answers per label box."""
+    from test_models import KEY, _serve, generic_app
+    gs, gurl = _serve(generic_app())
+    try:
+        sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+        m = _send(f'{server}/api/models', {'name': 'Pets API', 'family': 'custom', 'format': 'api',
+                                          'api': {'preset': 'label', 'url': gurl, 'api_key': KEY, 'label_model': 'det'}})
+        errors = []
+        with sync_api.sync_playwright() as p:
+            browser = _browser(p)
+            page = browser.new_page(viewport={'width': 1400, 'height': 900})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.on('console', lambda m_: m_.type == 'error' and 'status of 409' not in m_.text and errors.append(f'console: {m_.text}'))
+            page.goto(f'{server}/?session={sid}')
+            page.click('#btn-compute')
+            page.wait_for_selector('#plot .main-svg', timeout=60000)
+            assert page.locator('#od-sec').is_hidden()
+            page.click('#activity [data-tab="model"]')
+            page.select_option('#m-model', m['id'])
+            page.click('#m-run')
+            page.wait_for_selector('#m-kpis .kpi', timeout=60000)
+            page.wait_for_function("!document.querySelector('#od-sec').classList.contains('hidden')", timeout=30000)
+            page.click('#activity [data-tab="explore"]')
+            page.select_option('#color-by', 'cl_badloc')
+            page.wait_for_selector('#plot .colorbar', timeout=10000)
+            page.click('#issues-btn')
+            page.click('#btn-cl-missed')
+            page.wait_for_selector('#m-issue-filter .chip[data-kind="fp_bg"]:not(.off)', timeout=10000)
+            browser.close()
+        r = _get(f"{server}/s/{sid}/api/models/{m['id']}/cleanlab")
+        n = len(_get(f'{server}/s/{sid}/api/points')['cls'])
+        assert len(r['cl_swap']) == len(r['cl_badloc']) == n and r['images']
+        assert all(v is None or 0 <= v <= 1 for v in r['cl_badloc'])
+        assert not errors, '\n'.join(errors)
+    finally:
+        gs.should_exit = True

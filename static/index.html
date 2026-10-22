@@ -403,6 +403,9 @@
                 <option value="m_status">model: found / missed / wrong</option>
                 <option value="m_pred">model: predicted class</option>
                 <option value="m_score">model: confidence</option>
+                <option value="cl_swap" data-od>cleanlab: wrong-class score</option>
+                <option value="cl_badloc" data-od>cleanlab: placement score</option>
+                <option value="cl_image_quality" data-od>cleanlab: image label quality</option>
               </optgroup>
             </select>
           </label>
@@ -463,6 +466,15 @@
                 <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Out-of-distribution</span><span class="mi-d">unlike the rest of the dataset</span></button>
               <button id="btn-cl-confusion" class="menu-item" disabled title="Which classes cleanlab thinks are mixed up (Classes view)">
                 <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-bars"/></svg><span class="mi-t">Class confusion…</span><span class="mi-d">confident joint, classes to merge</span></button>
+              <div id="od-sec" class="od-sec hidden">
+                <div class="pop-title pop-sep">Detection <span id="od-model" class="muted">· cleanlab on the Model tab's model</span></div>
+                <button id="btn-cl-swap" class="view-btn menu-item" data-view="cl-swap" aria-pressed="false" title="Label boxes the model confidently gives another class (cleanlab swap score)">
+                  <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Wrong class</span><span class="mi-d">the model sees another class there</span></button>
+                <button id="btn-cl-badloc" class="view-btn menu-item" data-view="cl-badloc" aria-pressed="false" title="Label boxes no prediction overlaps well (cleanlab bad-location score)">
+                  <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Badly placed</span><span class="mi-d">the box misses the object</span></button>
+                <button id="btn-cl-missed" class="menu-item" title="Objects the model finds where nothing is labelled (Model tab)">
+                  <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg><span class="mi-t">Missed objects…</span><span id="od-missed-n" class="mi-d">objects nobody labelled</span></button>
+              </div>
             </div>
           </div>
           <div class="popover-anchor">
