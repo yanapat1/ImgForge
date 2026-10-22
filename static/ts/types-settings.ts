@@ -35,6 +35,8 @@ export interface EmbeddingsSummary {
   path: string; n: number; label: boolean; classes: number;
   features: Array<{ key: string; name: string; dim: number }>;
   previews: Array<'image' | 'audio' | 'video' | 'text'>;
+  /** preview cells that are http(s) URLs: not shown unless config embeddings.allow_url_previews is on */
+  url_previews?: number;
   columns: Array<{ name: string; type: 'num' | 'cat' | 'text' }>;
 }
 

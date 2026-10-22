@@ -63,6 +63,7 @@ DEFAULTS = {
     'analysis': {
         'knn_k': 10,
         'duplicate_threshold': 0.97,
+        'duplicate_quantile': 0.005,
         'groups': {'min_cluster_size': 15, 'per_class': True, 'bubble_pad': 0.015},
     },
     'models': {
@@ -81,6 +82,7 @@ DEFAULTS = {
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root
     'storage': {'allowed_roots': ['.']},
+    'embeddings': {'allow_url_previews': False},
     'vectors': {'enabled': True, 'hnsw_min_rows': 50000},   # pgvector copy of every feature set; HNSW index above n rows
     's3': {'concurrency': 32, 'connect_timeout': 5, 'read_timeout': 60, 'retries': 5},
     'logging': {'level': 'info', 'http': True, 'static': False},

@@ -39,7 +39,7 @@ my-set/
 |---|---|
 | `label` | the class (optional; without it every row is in the class `all`) |
 | `id` | the row's display id (optional; else its row number) |
-| `image`, `audio`, `video` | a path inside the folder (or an http(s) URL): the row's preview. Paths that leave the folder are refused, both when checking and when serving (`api/preview/<id>/<kind>`, with Range support so media can seek) |
+| `image`, `audio`, `video` | a path inside the folder: the row's preview. Paths that leave the folder are refused, both when checking and when serving (`api/preview/<id>/<kind>`, with Range support so media can seek). An http(s) URL is allowed in the table but **not shown** unless `embeddings.allow_url_previews` is on in the config: every viewer's browser would fetch from that outside host |
 | `text` | the row's text, shown on its card and in the dialog |
 | anything else | metadata: **num** when every value is a number (colour on a scale, sort), **cat** with ≤ 50 distinct values (colour with a legend), else free **text** (shown, not coloured) |
 

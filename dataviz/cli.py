@@ -6,6 +6,7 @@ sessions.max_loaded at once). --dataset (or config.yaml dataset.path) saves that
 first admin and loads it at start.
 """
 
+import os
 import sys
 import argparse
 
@@ -41,7 +42,7 @@ The first page lists your sessions (one dataset each): local folders (read in pl
 buckets (streamed, or synced to a local cache) or a task of a labeling session (read live). Create one there, then click its card to explore it.
 
 Usage (from the project root):
-    .venv/bin/python scripts/image-tools/app.py --dataset dataset --port 5151
+    .venv/bin/python app.py --dataset dataset --port 5151
 """
 
 
@@ -114,9 +115,15 @@ def main():
     except OSError as e:
         sys.exit(f'\nPort {port} is busy ({e.strerror}). The visualizer may already be running: open '
                  f'http://localhost:{port}, or stop it with\n'
-                 f'  kill $(ps -eo pid,args | grep "[p]ython scripts/image-tools/app.py" | awk \'{{print $1}}\')\n'
+                 f'  kill $(ps -eo pid,args | grep "[p]ython .*app.py" | awk \'{{print $1}}\')\n'
                  f'or start on another port with --port {port + 1} (or change server.port in the config)')
 
+    from .paths import APP_DIR, LEGACY_ROOT
+    if PROJECT_ROOT == LEGACY_ROOT and APP_DIR.parent.name != 'scripts' and not os.environ.get('DATAVIZ_PROJECT_ROOT'):
+        vlog.get_logger('app').warning(
+            f'project root is {LEGACY_ROOT} (two folders above the app, kept because its .dataviz_cache holds '
+            f'secret.key): storage.allowed_roots "." lets users open folders anywhere under it. Move '
+            f'{LEGACY_ROOT / ".dataviz_cache"} to {APP_DIR / ".dataviz_cache"}, or set DATAVIZ_PROJECT_ROOT.')
     # only after the port is ours: never touch (or migrate) a workspace another running instance is using
     ws_root = vconfig.resolve(cfg['dataset']['workspace_root'])
     admin, admin_pw = start_database(cfg, ws_root)

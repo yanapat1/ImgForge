@@ -504,6 +504,22 @@ def outlier_scores(emb, labels, metric='cosine'):
     return scores
 
 
+def duplicate_cutoff(nbr_sim, metric='cosine', threshold=0.97, quantile=0.005):
+    """(similarity cut-off, how it was chosen) for near-duplicates in one feature space.
+
+    Cosine spaces: `threshold` is a cosine and means the same in every space. Any other metric: knn's similarity is
+    1 - d²/2 on unnormalized vectors, so a fixed number is empty in one space and everything in another; take the
+    points whose nearest neighbour is among the closest `quantile` of all points instead (a rank, not a value).
+    """
+    if metric == 'cosine' or not getattr(nbr_sim, 'size', 0) or nbr_sim.shape[1] == 0:
+        return float(threshold), 'cosine'
+    first = nbr_sim[:, 0]
+    first = first[np.isfinite(first)]
+    if not len(first):
+        return float(threshold), 'cosine'
+    return float(np.quantile(first, 1.0 - quantile)), 'rank'
+
+
 def near_duplicates(nbr_idx, nbr_sim, threshold=0.97, limit=500, exclude=None):
     """Unique (i, j, sim) pairs with similarity >= threshold, most similar first. exclude: bool per point (pairs
     touching one are dropped before the limit)."""

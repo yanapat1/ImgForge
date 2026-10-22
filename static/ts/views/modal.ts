@@ -12,7 +12,7 @@ import { galleryOrder } from './gallery.js';
 import { imageOrder, onImageEdited } from './image-grid.js';
 import { markEdited, modelEval } from './model.js';
 import { closeViewer, dirty, initViewer, refreshPreds, setBoxes, showImage, V } from './viewer.js';
-import { cardMedia, detailMedia, isRows, metaCols, metaText, rowId, stopAudio } from './preview.js';
+import { cardMedia, detailMedia, isRows, loadVisibleMedia, metaCols, metaText, rowId, stopAudio } from './preview.js';
 
 export let modalId: number | null = null;
 let predMode: { pid: number; list: number[] } | null = null;       // a model prediction with no label box (false positive) is shown
@@ -162,6 +162,7 @@ export async function openRow(id: number, nav: { list: CardRef[] } | null = null
         return `<div class="card" data-id="${n}" role="button" tabindex="0" title="${esc(rowId(n))} · ${esc(clsName(nc))}">${cardMedia(n)}` +
           `<span class="badge" style="--c:${clsColor(nc)}">${esc(clsName(nc))}</span><span class="score">${score}</span></div>`;
       }).join('') + '</div>';
+    loadVisibleMedia($req('m-row-nbrs'));
   } catch (e) {
     if (modalId === id) $req('m-row-nbrs').innerHTML = `<div class="rd-nbrs-head"><b>Nearest rows</b><span class="muted">${esc(String(e instanceof Error ? e.message : e))}</span></div>`;
   }

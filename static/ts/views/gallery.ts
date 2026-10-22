@@ -9,7 +9,7 @@ import { clearLasso } from '../plot/interactions.js';
 import { pickNumber, updateMarks } from '../plot/marks.js';
 import { updateHighlight } from '../plot/render.js';
 import { renderImageGrid } from './image-grid.js';
-import { allRows, cardMedia, isRows, rowId, syncPlaying, unit } from './preview.js';
+import { allRows, cardMedia, isRows, loadVisibleMedia, rowId, syncPlaying, unit } from './preview.js';
 
 /** Options of setSelection. `highlight: null` leaves the plot highlight alone. */
 export interface SelectionOpts {
@@ -213,6 +213,7 @@ export function renderGallery(): void {
   }
   g.scrollTop = 0;
   syncPlaying();
+  loadVisibleMedia(g);
   $req('pager').innerHTML = pages > 1
     ? `<button data-p="${S.page - 1}" aria-label="Previous page" ${S.page === 0 ? 'disabled' : ''}>${icon('chev-l')}</button>` +
       `<span class="muted">page <span class="num">${S.page + 1} / ${pages}</span></span>` +

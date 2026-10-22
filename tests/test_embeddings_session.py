@@ -110,6 +110,10 @@ def test_session_routes(emb):
         time.sleep(0.05)
     assert r['ready'] and len(r['x']) == 24 and set(r['info']['quality']) >= {'trustworthiness', 'continuity'}
 
+    # emb.npy is not unit length (euclidean): near-duplicates cut by rank, not by a cosine
+    dup = c.get(f'{base}/duplicates', params={'feature': 'byo-emb', 'threshold': 0.97}).json()
+    assert dup['cutoff']['by'] == 'rank' and dup['cutoff']['distance'] > 0
+
     out = c.post(f'{base}/export', json={'ids': [0, 1], 'feature': 'byo-emb'})
     lines = out.text.strip().splitlines()
     assert lines[0].startswith('id,row_id,class_id,class_name,') and 'snr' in lines[0] and lines[1].startswith('0,u0,0,x,')
@@ -124,3 +128,21 @@ def test_preview_path_rechecked(emb):
     st = emb['ctx'].states[sid]
     st.samples[0]['preview']['audio'] = '../../../etc/passwd'
     assert c.get(f'{base}/preview/0/audio').status_code == 404
+
+
+def test_url_previews_off_by_default(emb):
+    """A preview cell holding a URL is not handed to the page (nor redirected to) unless the config allows it."""
+    folder, c = emb['folder'], emb['c']
+    meta = (folder / 'meta.csv').read_text().splitlines()
+    meta[2] = meta[2].replace('u1,y,,', 'u1,y,https://example.test/a.wav,', 1)      # row 1 had no audio
+    (folder / 'meta.csv').write_text('\n'.join(meta) + '\n')
+    summary = c.get('/api/fs/embeddings', params={'path': str(folder)}).json()
+    assert summary['url_previews'] == 1
+    sid = save(c, folder).json()['id']
+    base = f'/s/{sid}/api'
+    assert c.get(f'{base}/points').json()['preview'][1] == ['text']
+    r = c.get(f'{base}/preview/1/audio', follow_redirects=False)
+    assert r.status_code == 404 and 'allow_url_previews' in r.text
+    emb['ctx'].states[sid].cfg['embeddings']['allow_url_previews'] = True
+    r = c.get(f'{base}/preview/1/audio', follow_redirects=False)
+    assert r.status_code in (302, 307) and r.headers['location'] == 'https://example.test/a.wav'

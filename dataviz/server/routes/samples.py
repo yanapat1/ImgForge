@@ -114,6 +114,8 @@ def router(state, ctx):
         if types is None or not ref:
             raise HTTPException(404, f'sample {sid} has no {kind} preview')
         if is_url(ref):
+            if not (state.cfg.get('embeddings') or {}).get('allow_url_previews'):
+                raise HTTPException(404, 'URL previews are off (config embeddings.allow_url_previews)')
             return RedirectResponse(ref)
         try:
             path = state.source.preview_path(ref)
@@ -311,14 +313,23 @@ def router(state, ctx):
     @r.get('/api/duplicates')
     def duplicates(threshold: float | None = None, cross_image_only: bool = True, limit: int = 500,
                    feature: str | None = None):
-        sc = scores_or_409(feature_or_400(feature))
+        key = feature_or_400(feature)
+        sc = scores_or_409(key)
+        acfg = state.cfg['analysis']
         if threshold is None:
-            threshold = float(state.cfg['analysis']['duplicate_threshold'])
+            threshold = float(acfg['duplicate_threshold'])
+        # a cosine threshold means nothing for unnormalized vectors: those spaces cut by rank (analysis.duplicate_cutoff)
+        metric = getattr(state.registry.get(key), 'metric', 'cosine')
+        quantile = float(acfg.get('duplicate_quantile', 0.005))
+        cut, how = analysis.duplicate_cutoff(sc['nbr_sim'], metric, threshold, quantile)
         # boxes a curation fix removed are dropped before the limit
-        pairs = analysis.near_duplicates(sc['nbr_idx'], sc['nbr_sim'], threshold, limit * 4, state.deleted_mask())
+        pairs = analysis.near_duplicates(sc['nbr_idx'], sc['nbr_sim'], cut, limit * 4, state.deleted_mask())
         if cross_image_only:
             pairs = [p for p in pairs if state.samples[p[0]]['image'] != state.samples[p[1]]['image']]
-        return {'pairs': [{'a': a, 'b': b, 'sim': round(s, 4)} for a, b, s in pairs[:limit]]}
+        cutoff = {'by': how, 'sim': round(cut, 6)}
+        if how == 'rank':
+            cutoff.update(quantile=quantile, distance=round(float(np.sqrt(max(0.0, 2.0 * (1.0 - cut)))), 6))
+        return {'pairs': [{'a': a, 'b': b, 'sim': round(s, 4)} for a, b, s in pairs[:limit]], 'cutoff': cutoff}
 
     @r.post('/api/export')
     def export(req: IdsRequest):

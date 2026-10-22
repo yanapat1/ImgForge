@@ -180,14 +180,16 @@ def router(state, ctx):
         need_index()
         s = state.samples
         if state.source.kind == 'embeddings':          # rows, not boxes: metadata columns instead of box geometry
+            from ...data.embedding_source import shown_previews
             types = state.index.get('meta_types') or {}
+            urls = bool((state.cfg.get('embeddings') or {}).get('allow_url_previews'))
             return json_bytes(state.payload('points', lambda: {
                 'id': list(range(len(s))),
                 'cls': state.labels,
                 'image': [x['image'] for x in s],
                 'session': [x['session'] for x in s],
                 'row_id': [x['row_id'] for x in s],
-                'preview': [sorted(x['preview']) for x in s],
+                'preview': [shown_previews(x['preview'], urls) for x in s],
                 'text': [x['preview'].get('text', '')[:300] for x in s] if any('text' in x['preview'] for x in s) else None,
                 'meta': {c: [x['meta'].get(c) for x in s] for c in types},
                 'meta_types': types,

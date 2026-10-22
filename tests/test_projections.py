@@ -47,3 +47,22 @@ def test_projection_quality():
     noise = analysis.projection_quality(x, np.random.default_rng(1).normal(size=(400, 2)))
     assert good['trustworthiness'] > noise['trustworthiness']
     assert analysis.projection_quality(x[:2], x[:2, :2]) == {}
+
+
+def test_duplicate_cutoff_cosine_and_rank():
+    rng = np.random.default_rng(0)
+    # unit vectors: the cosine threshold is used as given
+    x = _data(300)
+    idx, sim = analysis.knn(x, k=5)
+    assert analysis.duplicate_cutoff(sim, 'cosine', 0.97) == (0.97, 'cosine')
+    # small-scale unnormalized vectors (box geometry is ~0.1): 1 - d²/2 is above 0.97 for every pair, so a fixed
+    # cosine threshold calls everything a duplicate; the rank cut-off finds exactly the 3 planted near-copies
+    y = rng.normal(scale=0.02, size=(400, 4)).astype(np.float32)
+    for a, b in ((0, 1), (2, 3), (4, 5)):
+        y[b] = y[a] + 1e-6
+    idx, sim = analysis.knn(y, k=5)
+    assert len(analysis.near_duplicates(idx, sim, 0.97, limit=10_000)) > 300
+    cut, how = analysis.duplicate_cutoff(sim, 'euclidean', 0.97, quantile=6 / 400)
+    assert how == 'rank'
+    pairs = {(a, b) for a, b, _ in analysis.near_duplicates(idx, sim, cut)}
+    assert pairs == {(0, 1), (2, 3), (4, 5)}

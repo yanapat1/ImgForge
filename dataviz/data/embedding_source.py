@@ -43,6 +43,11 @@ def is_url(ref):
     return ref.startswith(('http://', 'https://'))
 
 
+def shown_previews(preview, allow_urls):
+    """The preview kinds of a row the page may load: URL ones only when config embeddings.allow_url_previews is on."""
+    return sorted(k for k, v in preview.items() if allow_urls or k == 'text' or not is_url(v))
+
+
 def _num(v):
     try:
         f = float(v)
@@ -172,15 +177,17 @@ class EmbeddingSource:
                 raise ValueError(f'{p.name}: not a numeric array ({x.dtype})')
             features.append({'key': f'byo-{p.stem}', 'name': p.stem, 'dim': int(x.shape[1])})
         previews = [c for c in PREVIEW_COLS if c in cols]
+        n_url = 0
         for c in previews:
             if c != 'text':
                 for r in rows:
                     if r.get(c):
                         self._safe_ref(r[c])
+                        n_url += is_url(r[c])
         meta_cols = [c for c in cols if c not in RESERVED]
         types = column_types(rows, meta_cols)
         labels = sorted({r.get('label', '') for r in rows}) if 'label' in cols else []
-        return {'n': n, 'features': features, 'previews': previews, 'label': 'label' in cols,
+        return {'n': n, 'features': features, 'previews': previews, 'url_previews': n_url, 'label': 'label' in cols,
                 'classes': len(labels), 'columns': [{'name': c, 'type': types[c]} for c in meta_cols]}
 
     # ------------------------------------------------------------ feature spaces

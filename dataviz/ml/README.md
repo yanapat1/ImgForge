@@ -71,6 +71,13 @@ a fixed 2000-point subset with k = 10:
 
 Use them to choose between methods for one feature space: Random Projection is the floor to beat.
 
+**Near-duplicates** (`near_duplicates`, the Inspect button and the Curation rule) need a cut-off that means the same
+in every space. For unit-length (cosine) features it is a cosine (`analysis.duplicate_threshold`, 0.97). For the
+others (HOG, box geometry, unnormalized vectors of an embeddings session) the k-NN "similarity" is `1 − d²/2` on raw
+distances, so a fixed number flags everything in a small-scale space and nothing in a large one;
+`duplicate_cutoff()` takes the points whose nearest neighbour is in the closest `analysis.duplicate_quantile` (0.5 %)
+instead, and the page names the distance that came to.
+
 To add one: an entry in `METHODS` (label, category, params, note) and a branch in `project()` or
 `_sklearn_estimator()`; a new parameter also needs a hint in `PARAM_INFO` (`static/ts/views/controls.ts`)
 and its type in `PARAM_TYPES` (`dataviz/state.py`).

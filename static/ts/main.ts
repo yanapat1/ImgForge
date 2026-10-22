@@ -381,9 +381,12 @@ function bindEvents(): void {
     if (toggleOff('dups')) return;
     try {
       const vis = new Set(viewIdsVisible());
-      const { pairs } = await getJSON<DuplicatesPayload>(`api/duplicates?threshold=${UI.duplicate_threshold}&feature=${encodeURIComponent(String(S.scoresFeature))}`);
+      const { pairs, cutoff } = await getJSON<DuplicatesPayload>(`api/duplicates?threshold=${UI.duplicate_threshold}&feature=${encodeURIComponent(String(S.scoresFeature))}`);
       const keep = pairs.filter((p) => vis.has(p.a) && vis.has(p.b));
-      setSelection([...new Set(keep.flatMap((p) => [p.a, p.b]))], `Near-duplicates (cos ≥ ${UI.duplicate_threshold}) · ${featureLabel(S.scoresFeature)}`,
+      const rule = cutoff?.by === 'rank'
+        ? `closest ${+((cutoff.quantile ?? 0) * 100).toFixed(2)}%, distance ≤ ${(cutoff.distance ?? 0).toPrecision(3)}`
+        : `cos ≥ ${UI.duplicate_threshold}`;
+      setSelection([...new Set(keep.flatMap((p) => [p.a, p.b]))], `Near-duplicates (${rule}) · ${featureLabel(S.scoresFeature)}`,
         { kind: 'pairs', pairs: keep, view: 'dups' });
     } catch (e) { toast(errText(e), 'err'); }
   };

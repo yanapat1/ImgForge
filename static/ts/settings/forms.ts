@@ -223,7 +223,8 @@ function summaryHTML(s: EmbeddingsSummary): string {
     `<span><b class="num">${s.label ? s.classes : 1}</b>${s.label ? 'classes' : 'class (no label column)'}</span></div>` +
     '<dl class="emb-dl">' +
     `<dt>Vectors</dt><dd>${s.features.map((f) => `<span class="emb-feat"><b>${esc(f.name)}</b><span class="num">${f.dim} dims</span></span>`).join('')}</dd>` +
-    `<dt>Previews</dt><dd>${prev}</dd>` +
+    `<dt>Previews</dt><dd>${prev}${s.url_previews ? `<span class="muted">${s.url_previews.toLocaleString()} ` +
+      'are web links: shown only when the server allows it (config embeddings.allow_url_previews)</span>' : ''}</dd>` +
     `<dt>Columns</dt><dd>${cols}</dd></dl></div>`;
 }
 

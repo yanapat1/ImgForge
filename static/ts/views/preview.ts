@@ -42,7 +42,8 @@ export function cardMedia(id: number): string {
   if (!isRows() || has(id, 'image')) return `<img loading="lazy" src="api/crop/${id}" alt="">`;
   if (has(id, 'video')) {
     // the first frame is the poster; it plays muted while hovered (bindMedia)
-    return `<video class="rc-video" muted playsinline loop preload="metadata" src="api/preview/${id}/video#t=0.1"></video>` +
+    // no src until the card scrolls into view (loadVisibleMedia): a page of 100 cards is not 100 requests at once
+    return `<video class="rc-video" muted playsinline loop preload="none" data-src="api/preview/${id}/video#t=0.1"></video>` +
       `<span class="rc-kind">${icon('film')}</span>`;
   }
   const meta = topMeta(id).map(([k, v]) => `<span><i>${esc(k)}</i>${esc(v)}</span>`).join('');
@@ -126,6 +127,7 @@ export function bindMedia(root: HTMLElement): void {
   }, true);
   root.addEventListener('mouseover', (e) => {
     const v = e.target instanceof Element ? e.target.closest('.card')?.querySelector<HTMLVideoElement>('video.rc-video') : null;
+    if (v && !v.getAttribute('src')) startVideo(v);
     if (v && v.paused) v.play().catch(() => {});
   });
   root.addEventListener('mouseout', (e) => {
@@ -139,6 +141,31 @@ export function bindMedia(root: HTMLElement): void {
 /** After a gallery re-render: the playing clip's cards are new elements, so mark them again. */
 export function syncPlaying(): void {
   if (playing !== null) setPlaying(playing);
+}
+
+function startVideo(v: HTMLVideoElement): void {
+  const src = v.dataset['src'];
+  if (!src || v.getAttribute('src')) return;
+  v.preload = 'metadata';                   // just the first frame (the poster) and the duration
+  v.src = src;
+}
+
+const videoObserver = typeof IntersectionObserver === 'function'
+  ? new IntersectionObserver((entries, obs) => {
+    for (const e of entries) {
+      if (!e.isIntersecting || !(e.target instanceof HTMLVideoElement)) continue;
+      startVideo(e.target);
+      obs.unobserve(e.target);
+    }
+  }, { rootMargin: '200px' })                // a little ahead of the scroll, so frames are there when seen
+  : null;
+
+/** Give the video cards under `root` their source once they come near the viewport (all at once without an observer). */
+export function loadVisibleMedia(root: HTMLElement): void {
+  for (const v of root.querySelectorAll<HTMLVideoElement>('video.rc-video[data-src]:not([src])')) {
+    if (videoObserver) videoObserver.observe(v);
+    else startVideo(v);
+  }
 }
 
 /** The header pills of an embeddings session: rows, feature spaces, classes and what the rows carry. */

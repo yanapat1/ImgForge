@@ -15,14 +15,21 @@ hover, text or image thumbnails, and any metadata column colours the plot. Forma
 
 ```bash
 npm install && npm run build                                    # compile static/ts -> static/js (once, and after TS edits; `npm run watch` while developing)
-.venv/bin/python scripts/image-tools/app.py                      # config.yaml in this folder
-.venv/bin/python scripts/image-tools/app.py --dataset dataset --port 5151
-.venv/bin/python scripts/image-tools/app.py --list-features      # feature keys
-.venv/bin/python scripts/image-tools/app.py --show-config        # effective settings
-cd scripts/image-tools && ../../.venv/bin/python -m dataviz      # same thing, as a package
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env && set -a && . ./.env && set +a      # POSTGRES_PASSWORD, DATAVIZ_SECRET_KEY, admin
+docker compose up -d postgres                # PostgreSQL + pgvector on 127.0.0.1:15432 (POSTGRES_PASSWORD from .env)
+export DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:15432/dataviz   # or your own server
+.venv/bin/python app.py                      # config.yaml in this folder
+.venv/bin/python app.py --dataset dataset --port 5151
+.venv/bin/python app.py --list-features      # feature keys
+.venv/bin/python app.py --show-config        # effective settings
+.venv/bin/python -m dataviz                  # same thing, as a package
 ```
 
-Settings live in [`config.yaml`](config.yaml) (command-line flags win).
+Settings live in [`config.yaml`](config.yaml) (command-line flags win). Relative paths in it (`storage.allowed_roots`
+`'.'`, `dataset.workspace_root`) are relative to the **project root**: this folder when cloned on its own, or two
+levels up when it sits in a bigger project as `scripts/image-tools/` (the Docker image); `DATAVIZ_PROJECT_ROOT`
+sets it explicitly.
 
 ## Accounts, sessions and sharing
 
@@ -53,7 +60,7 @@ by the first admin and private; the old files are left untouched.
 ## Layout
 
 ```
-scripts/image-tools/
+./                      (or scripts/image-tools/ inside a bigger project)
 ├── app.py              launcher: puts this folder on sys.path, calls dataviz.cli.main()
 ├── config.yaml         every setting, documented inline
 ├── requirements.txt
@@ -136,8 +143,10 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 ## Testing
 
 ```bash
-cd scripts/image-tools && DATAVIZ_TEST_DATABASE_URL=postgresql://postgres:pw@127.0.0.1:55432/postgres \
+DATAVIZ_TEST_DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:15432/postgres \
   .venv/bin/python -m pytest -q tests      # ~4 min; without the variable a pgvector container is started via docker
+                                           # (on a port docker picks, so it never collides with a running database)
+DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_page_smoke.py   # a browser of your own
 ```
 
 | Tests | Cover |
