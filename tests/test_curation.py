@@ -566,3 +566,37 @@ def test_split_leak_route_reads_the_split_folders(ds, tmp_path):
                                               'label': 'Train / val leakage', 'bulk': False}
         page = client.get('/api/curation/issues', params={'type': 'split_leak'}).json()
         assert page['items'][0]['image'] == 'ok_copy.jpg'
+
+
+def _fake_label_quality(st, suggested):
+    """cleanlab label quality for feature 'none' (as State.cached_label_quality returns it): suggested = {box: class}."""
+    n = len(st.samples)
+    sug = st.labels.astype(np.int32).copy()
+    for i, c in suggested.items():
+        sug[i] = c
+    per = {'cl_suggested': sug, 'cl_scored': np.ones(n, bool), 'cl_quality': np.full(n, .9, np.float32),
+           'cl_issue': sug != st.labels, 'cl_rank': np.full(n, -1, np.int32), 'cl_given_prob': np.full(n, .9, np.float32),
+           'cl_ood_feat': np.zeros(n, np.float32), 'pred_probs': np.eye(int(sug.max()) + 1, dtype=np.float16)[sug]}
+    st.label_quality['none'] = (st.label_quality_tag(st.label_quality_settings()), per, {})
+
+
+def test_fix_boxes_to_cleanlab_class_and_undo(ds, tmp_path):
+    """Gallery › Change to cleanlab's class: one batch over the chosen boxes (scanning first), the label files get the
+    new class tokens, undo brings the bytes back; without label quality it answers 409."""
+    from fastapi.testclient import TestClient
+    from dataviz.server.app import create_app
+    st = open_state(ds, tmp_path / 'ws3')
+    with TestClient(create_app(st)) as client:
+        assert client.post('/api/curation/fix-boxes', json={'ids': [0], 'op': 'suggested'}).status_code == 409
+        assert client.post('/api/curation/fix-boxes', json={'ids': [0], 'op': 'rename'}).status_code == 400
+        ok = [i for i, s in enumerate(st.samples) if s['image'] == 'ok.jpg']
+        target = {ok[0]: 1 - int(st.labels[ok[0]])}
+        _fake_label_quality(st, target)
+        r = client.post('/api/curation/fix-boxes', json={'ids': ok, 'op': 'suggested', 'feature': 'none'}).json()
+        assert r['applied'] == 1 and r['patch']['cls'] == {str(ok[0]): target[ok[0]]} and r['undo_id']
+        first = (ds / 'labels' / 'ok.txt').read_text().splitlines()[st.samples[ok[0]]['box_idx']]
+        assert first.split()[0] == str(target[ok[0]])
+        assert client.post('/api/curation/undo', json={'undo_id': r['undo_id']}).status_code == 200
+        assert (ds / 'labels' / 'ok.txt').read_text() == LABELS['ok']
+        d = client.post('/api/curation/fix-boxes', json={'ids': [ok[-1]], 'op': 'delete'}).json()
+        assert d['applied'] == 1 and d['patch']['deleted'] == [ok[-1]]

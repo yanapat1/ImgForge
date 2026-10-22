@@ -2,7 +2,9 @@
 
 A FiftyOne-style explorer for YOLO datasets. Every bounding box becomes a dot in a 2D projection
 (UMAP / PaCMAP / t-SNE / PCA) of a feature space you pick (OpenCLIP, SigLIP 2, DINOv2, your own YOLO
-weights, colour histogram, HOG, box geometry). Lasso dots (or describe them in words, for CLIP / SigLIP features) to see their crops, find suspicious labels,
+weights, colour histogram, HOG, box geometry — or any model you add in Settings › Models with "Use in the plot": your
+detector's backbone, a hooked layer, an ONNX output or a Hugging Face backbone). **Find issues** runs cleanlab on k-fold
+out-of-fold predicted probabilities (label issues, label quality, out-of-distribution, class confusion, label health). Lasso dots (or describe them in words, for CLIP / SigLIP features) to see their crops, find suspicious labels,
 outliers and near-duplicates, measure distances between boxes, and switch between datasets on local
 disk or in S3 / RustFS buckets.
 

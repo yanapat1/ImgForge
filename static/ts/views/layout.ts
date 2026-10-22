@@ -1,6 +1,7 @@
-// Page layout: activity bar tabs, the draggable splitter, the Groups popover and the class filter chips.
+// Page layout: activity bar tabs, the draggable splitter, the bar above the plot (its popovers) and the class filter chips.
 
 import { $, $req, esc, icon } from '../core/dom.js';
+import { arrowNav, bindPopover } from '../core/popover.js';
 import { meta, S } from '../core/state.js';
 import { clsColor } from '../core/theme.js';
 import { renderPlot, scheduleRender } from '../plot/render.js';
@@ -237,22 +238,65 @@ export function updateGroupsBadge(): void {
 }
 
 export function bindGroupsPopover(): void {
-  const btn = $req('btn-groups'), pop = $req('groups-pop');
-  const setOpen = (open: boolean): void => {
-    pop.classList.toggle('hidden', !open);
-    btn.setAttribute('aria-expanded', String(open));
-  };
-  btn.onclick = () => setOpen(pop.classList.contains('hidden'));
-  document.addEventListener('mousedown', (e) => {
-    const t = e.target;
-    if (!pop.classList.contains('hidden') && t instanceof Node && !pop.contains(t) && !btn.contains(t)) setOpen(false);
-  });
-  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { setOpen(false); btn.focus(); } });
-  btn.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+  bindPopover('btn-groups', 'groups-pop');
   for (const id of ['g-bubbles', 'g-outliers', 'g-dim']) $req(id).addEventListener('change', updateGroupsBadge);
 }
 
-// ---- hide / show the control groups above the plot (remembered per browser)
+// ---- the bar above the plot: popover triggers show what is chosen inside them
+const optText = (id: string): string => {
+  const el = $<HTMLSelectElement>(id);
+  const o = el && el.selectedOptions[0];
+  return o ? (o.textContent ?? '').replace(/^[✓\s]+/, '').trim() : '';
+};
+
+/** Trigger labels: "feature · method" and the classes shown. */
+export function updateBarSummary(): void {
+  const map = [optText('feature'), optText('method')].filter(Boolean).join(' · ');
+  // the trigger drops the feature's "(…)" detail: "Box geometry · PCA"; the title keeps it all
+  $req('map-summary').textContent = map.replace(/\s*\([^)]*\)/g, '') || 'Projection';
+  $req('map-btn').title = `Feature space and projection method${map ? `: ${map}` : ''}`;
+  const mode = $req<HTMLSelectElement>('mode').value;
+  const cls = mode === 'single' ? optText('class-a') : mode === 'compare' ? `${optText('class-a')} vs ${optText('class-b')}` : 'All classes';
+  $req('cls-summary').textContent = cls;
+  $req('cls-btn').setAttribute('aria-label', `Classes shown: ${cls}`);
+}
+
+/** The dot on the projection trigger: method parameters changed since the view was computed (Re-project applies). */
+export function setMapDirty(on: boolean): void {
+  $req('map-dirty').classList.toggle('hidden', !on);
+}
+
+export function bindBar(): void {
+  bindPopover('map-btn', 'map-pop');
+  bindPopover('cls-btn', 'cls-pop');
+  const issues = bindPopover('issues-btn', 'issues-pop');
+  arrowNav('issues-pop');
+  // picking a check closes the menu (the gallery shows the result); the run button keeps it open for its progress
+  $req('issues-pop').addEventListener('click', (e) => {
+    const b = e.target instanceof Element ? e.target.closest('button.menu-item') : null;
+    if (b && !(b as HTMLButtonElement).disabled) issues.close();
+  });
+  for (const id of ['feature', 'method', 'mode', 'class-a', 'class-b']) $req(id).addEventListener('change', updateBarSummary);
+  // "/" focuses the text search (not while typing somewhere)
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement ||
+        (t instanceof HTMLElement && t.isContentEditable)) return;
+    const q = $req<HTMLInputElement>('text-q');
+    if (q.disabled || q.offsetParent === null) return;
+    e.preventDefault();
+    q.focus();
+  });
+}
+
+/** The Find issues trigger is highlighted while one of its checks fills the gallery. */
+export function syncIssuesBtn(): void {
+  const on = !!$req('issues-pop').querySelector('.view-btn.active');
+  $req('issues-btn').classList.toggle('on', on);
+}
+
+// ---- hide / show the bar above the plot (remembered per browser)
 const CTL_KEY = 'controlsCollapsed';
 
 function ctlSummary(): string {

@@ -121,6 +121,14 @@ analysis:
     min_cluster_size: 15         # default "min size" in the page
     per_class: true              # default "per class" (false = "all points")
     bubble_pad: 0.015            # bubble margin around its dots, as a fraction of the plot size
+  label_quality:                 # Find issues › Label issues: cleanlab on k-fold out-of-fold class probabilities
+    folds: 5                     # k of the StratifiedKFold (drops to the smallest class count, at least 2)
+    classifier: logreg           # logreg | knn | mlp: trained on the feature space, never sees the boxes it scores
+    pca_dims: 256                # wider features are reduced with PCA first (speed)
+    quality_method: self_confidence   # self_confidence | normalized_margin | confidence_weighted_entropy
+    filter_by: prune_by_noise_rate    # cleanlab.filter.find_label_issues filter_by
+    ood: true                    # out-of-distribution scores (from the features and from the probabilities)
+    min_class_count: 5           # classes with fewer boxes are left out (cleanlab needs examples per class)
 
 models:                          # detectors added in the page (Settings › Models) and scored in the Model tab
   store_dir: null                # where models.json + uploaded weights live; null = dataset.workspace_root

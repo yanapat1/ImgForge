@@ -161,4 +161,6 @@ def task_types(m):
     """Task types a registry model can label without asking it (label-protocol models: the one it declares)."""
     if is_label_api(m):
         return [m.get('task_type') or 'object_detection']
+    if m.get('family') == 'hf':
+        return []                      # a backbone that only embeds (the plot's feature list): labels nothing
     return ['object_detection']

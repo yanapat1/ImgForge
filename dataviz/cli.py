@@ -24,6 +24,7 @@ from .ml import analysis
 from .models.registry import ModelRegistry
 from .models.service import ModelService
 from .ml import features as feats
+from .ml import user_features
 from .paths import PROJECT_ROOT
 from .server.app import Ctx, create_app
 from .state import State
@@ -142,7 +143,10 @@ def main():
         src = datasets.source(ds, cfg['s3'], ctx.labeling)
         if src.kind in ('local', 'labeling'):       # labeling: its session + task still exist and have boxes
             src.check()
-        state = State(src, cache_dir, registry, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
+        # the config's features + the session owner's own models that embed (Settings › Models)
+        reg = feats.FeatureRegistry(registry, user_features.OwnerModels(model_reg, ds.get('owner_id'), ctx.model_service.workdir)
+                                    if ds.get('owner_id') else None)
+        state = State(src, cache_dir, reg, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
                       pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh)
         vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
                                          + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session'}

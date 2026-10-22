@@ -1,6 +1,6 @@
 // The selection gallery (left panel): cards, sorting, paging, breakdown chips.
 
-import { $req, $qa, esc, icon } from '../core/dom.js';
+import { $, $req, $qa, esc, icon } from '../core/dom.js';
 import { pts, S, UI } from '../core/state.js';
 import type { DuplicatePair, SelEntry } from '../types.js';
 import { clsColor, clsName, ERR, errColor } from '../core/theme.js';
@@ -34,17 +34,37 @@ export function setSelection(ids: number[], title: string, { kind = 'samples', p
     b.classList.toggle('active', b.dataset['view'] === view);
     b.setAttribute('aria-pressed', String(b.dataset['view'] === view));
   });
+  $('issues-btn')?.classList.toggle('on', !!$('issues-pop')?.querySelector('.view-btn.active'));
   S.sel = ids;
   S.selKind = kind;
   S.pairs = pairs;
   S.selTitle = title;
   S.page = 0;
+  syncClFix();
   S.picked = [];
   if (highlight !== null) S.highlight = highlight ? ids.slice(0, 5000) : [];
   renderGallery();
   if (highlight !== null) updateHighlight();
   updateMarks();
   window.dispatchEvent(new CustomEvent('selection-changed'));   // the ◆ assistant's "Selection · n" chip
+}
+
+/** Boxes of the selection cleanlab would give another class (a cleanlab issue view is on screen). */
+export function clFixIds(): number[] {
+  const P = S.P;
+  if (!P?.cl_suggested || !(S.activeView === 'cl-issues' || S.activeView === 'cl-low')) return [];
+  const sug = P.cl_suggested, q = P.cl_quality ?? [];
+  return S.sel.filter((id) => q[id] != null && sug[id] !== P.cls[id]);
+}
+
+// "Change N to cleanlab's class" in the gallery head: on cleanlab's issue views, for people who may edit labels
+export function syncClFix(): void {
+  const b = $('btn-cl-fix');
+  if (!b) return;
+  const n = S.status?.my_role === 'viewer' ? 0 : clFixIds().length;
+  b.classList.toggle('hidden', !n);
+  const t = $('btn-cl-fix-t');
+  if (t) t.textContent = `Change ${n.toLocaleString()} to cleanlab's class`;
 }
 
 // narrowing the selection (breakdown chips, "in groups / outliers") keeps the previous one: a "back" chip undoes it
@@ -89,9 +109,12 @@ export function sortedSelection(): number[] {
     // mistakes first (missed, misplaced, wrong class), then found boxes least confident first
     'm-status': (a, b) => (MISTAKE_RANK[at(P.m_status, b) + 1] ?? 0) - (MISTAKE_RANK[at(P.m_status, a) + 1] ?? 0) || at(P.m_score, a) - at(P.m_score, b),
     'm-score': (a, b) => at(P.m_score, a) - at(P.m_score, b),
+    // cleanlab: lowest label quality first, unscored boxes last
+    'cl-quality': (a, b) => (P.cl_quality?.[a] ?? 2) - (P.cl_quality?.[b] ?? 2),
   };
   const cmp = by[sort];
-  const ready = sort.startsWith('m-') ? !!P.m_status : (P.suspicion || !['suspicion', 'outlier'].includes(sort));
+  const ready = sort.startsWith('m-') ? !!P.m_status : sort === 'cl-quality' ? !!P.cl_quality
+    : (P.suspicion || !['suspicion', 'outlier'].includes(sort));
   return cmp && ready ? ids.sort(cmp) : ids;
 }
 
@@ -102,6 +125,7 @@ function scoreLabel(id: number): string {
   switch ($req<HTMLSelectElement>('sort').value) {
     case 'suspicion': return P.suspicion ? `${Math.round(at(P.suspicion, id) * 100)}%` : '';
     case 'outlier': return P.outlier ? at(P.outlier, id).toFixed(3) : '';
+    case 'cl-quality': { const q = P.cl_quality?.[id]; return q == null ? '' : q.toFixed(2); }
     case 'area-asc': case 'area-desc': return `${(at(P.area, id) * 100).toFixed(2)}%`;
     case 'blur': return at(P.blur, id).toFixed(0);
     case 'dark': case 'bright': return at(P.brightness, id).toFixed(0);
@@ -114,8 +138,11 @@ function cardHTML(id: number): string {
   const P = pts();
   const c = at(P.cls, id);
   const sug = at(P.suggested, id);
-  const warn = P.suggested && sug !== c && at(P.suspicion, id) >= 0.5
-    ? `<span class="warn" title="most neighbours are ${esc(clsName(sug))}">${icon('arrow-r')}${esc(clsName(sug))}</span>` : '';
+  const clSug = P.cl_issue?.[id] ? P.cl_suggested?.[id] ?? -1 : -1;
+  const warn = clSug >= 0 && clSug !== c
+    ? `<span class="warn" title="cleanlab: likely a ${esc(clsName(clSug))} (label quality ${(P.cl_quality?.[id] ?? 0).toFixed(2)})">${icon('arrow-r')}${esc(clsName(clSug))}</span>`
+    : P.suggested && sug !== c && at(P.suspicion, id) >= 0.5
+      ? `<span class="warn" title="most neighbours are ${esc(clsName(sug))}">${icon('arrow-r')}${esc(clsName(sug))}</span>` : '';
   const score = scoreLabel(id);
   const ms = P.m_status ? at(P.m_status, id) : -1;
   const errLabel = ERR[ms]?.label ?? '';

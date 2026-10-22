@@ -1,29 +1,70 @@
-/* The plot side: control groups, groups popover, the plot area, the lasso layer, pan states, Plotly chrome
+/* The plot side: the bar above the plot and its popovers, the plot area, the lasso layer, pan states, Plotly chrome
    and the stats grid. */
 
 /* ---------------------------------------------------------------- plot side */
 #main-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .tab-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
-/* not overflow:hidden: the Groups popover hangs below this bar over the plot */
-.controls { position: relative; z-index: 3; display: flex; flex-wrap: wrap; align-items: stretch; background: var(--surface); border-bottom: 1px solid var(--border); }
-/* compact: the group title is a column on the left, so each group is one line of controls (+ its hint) */
-.ctl-group { display: grid; grid-template-columns: 70px minmax(0, 1fr); align-items: center; gap: 4px var(--s3);
-  padding: 6px var(--s4); border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border); margin-bottom: -1px; flex: 1 1 auto; }
-.ctl-group > * { grid-column: 2; }
-.ctl-group > .ctl-title { grid-column: 1; grid-row: 1 / span 2; align-self: start; line-height: 32px; }
-.ctl-group:first-of-type { padding-right: 40px; }          /* room for the hide-controls button */
-.ctl-group:last-child { border-right: none; }
-.ctl-title { font-size: var(--fs-xs); font-weight: 650; color: var(--text-faint); }
-.ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px var(--s3); }
-/* hide / show the four control groups: collapsed leaves a one-line strip with the current view */
-.ctl-toggle { position: absolute; top: 4px; right: 6px; z-index: 1; width: 26px !important; height: 26px; min-height: 0;
+/* the bar above the plot: one row of triggers (details live in popovers). Not overflow:hidden: the popovers
+   hang below it over the plot (z-index above the plot's floating tools and its wait overlay). A container query (below) turns the trigger labels into icons when it is narrow. */
+.controls { position: relative; z-index: 6; display: flex; align-items: stretch; background: var(--surface);
+  border-bottom: 1px solid var(--border); container-type: inline-size; container-name: ctlbar; }
+.ctl-bar { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 6px 40px 6px var(--s3); }
+.ctl-bar > .grow { flex: 1; min-width: 0; }
+.bar-btn { display: inline-flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 10px; max-width: 320px;
+  white-space: nowrap; }
+.bar-btn .bar-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bar-btn .chev { width: 13px; height: 13px; flex: none; color: var(--text-faint); transition: transform var(--t) var(--ease); }
+.bar-btn[aria-expanded="true"] { background: var(--surface-3); border-color: var(--border-hover); }
+.bar-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.bar-btn.on { border-color: var(--accent-line); color: var(--accent-text); background: var(--accent-soft); }
+.bar-map .bar-t { font-weight: 600; color: var(--text); }
+.dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.bar-field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+.bar-field select { max-width: 210px; }
+.bar-search { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 2px 0 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface-2); min-width: 0; }
+.bar-search:focus-within { border-color: var(--accent); }
+.bar-search > .ico { color: var(--text-faint); flex: none; }
+.bar-search .text-q { width: 18ch; border: none; background: transparent; height: calc(var(--control-h) - 2px); padding: 0 4px;
+  transition: width var(--t) var(--ease); }
+.bar-search .text-q:focus { outline: none; width: 30ch; }
+.bar-search .icon-btn { width: 26px !important; height: 26px; min-height: 0; border-color: transparent; }
+.bar-search.no-text { display: none; }
+
+/* popovers of the bar: anchored left (they open towards the plot), the last ones to the right edge */
+.popover.bar-pop { left: 0; right: auto; width: 300px; gap: var(--s2); }
+.ctl-bar > .grow ~ .popover-anchor .bar-pop { left: auto; right: 0; }
+.bar-pop .field.stack { flex-direction: column; align-items: stretch; gap: 4px; }
+.bar-pop .field.stack select { width: 100%; max-width: none; }
+.bar-pop #params .params { flex-wrap: wrap; }
+.bar-pop .hint { white-space: normal; }
+.pop-sep { margin-top: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--border); }
+.pop-title .muted { font-weight: 400; font-size: var(--fs-xs); }
+.popover.issues-pop { width: 340px; gap: 0; }
+.menu-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 0;
+  align-items: center; justify-items: start; width: 100%; height: auto; min-height: 0; padding: 5px 8px; line-height: 1.3; text-align: left;
+  border-color: transparent; background: transparent; }
+.menu-item > .ico { grid-row: 1 / span 2; }
+.menu-item:not(.active) .on-only { display: inline; visibility: hidden; }
+.menu-item .mi-t { color: var(--text); font-weight: 550; }
+.menu-item .mi-d { grid-column: 2; font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item:hover:not(:disabled) { background: var(--surface-3); }
+.menu-item:disabled .mi-t { color: var(--text-faint); }
+.lq-run { display: flex; gap: 6px; margin: 2px 0 var(--s1); }
+.lq-run > button { flex: 1; min-width: 0; }
+.lq-run > select { width: 112px; }
+.lq-info:empty { display: none; }
+.lq-info { white-space: normal; margin-bottom: var(--s1); }
+.lq-info b { color: var(--text); }
+
+/* hide / show the bar: collapsed leaves a one-line strip with the current view */
+.ctl-toggle { position: absolute; top: 6px; right: 6px; z-index: 1; width: 28px !important; height: 28px; min-height: 0;
   border-color: transparent; background: transparent; color: var(--text-muted); }
 .ctl-toggle:hover { background: var(--surface-3); color: var(--text); }
 .ctl-toggle .ico { transform: rotate(180deg); transition: transform var(--t-fast) var(--ease); }
 .ctl-mini { display: none; }
-.controls.collapsed .ctl-group { display: none; }
+.controls.collapsed .ctl-bar { display: none; }
 .controls.collapsed .ctl-toggle .ico { transform: none; }
 .controls.collapsed .ctl-mini { display: block; flex: 1; min-width: 0; height: 34px; line-height: 34px; padding: 0 40px 0 var(--s4);
   border: none; border-radius: 0; background: transparent; color: var(--text-muted); font-size: var(--fs-sm); text-align: left;
@@ -32,9 +73,29 @@
 .ctl-mini b { color: var(--text); font-weight: 600; }
 .params { display: inline-flex; gap: var(--s3); align-items: center; }
 #params label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
-#feature { max-width: 260px; }
-#saved-views { max-width: 210px; }
-#pca-info:empty, #g-info:empty { display: none; }
+#params:empty, #pca-info:empty, #g-info:empty { display: none; }
+#params:not(:has(.params:not(.hidden))) { display: none; }      /* PCA: no parameters */
+
+/* narrow bar: icons only (each trigger keeps its title / aria-label), then the search shrinks to its icon */
+@container ctlbar (max-width: 900px) {
+  .bar-field .bar-t { display: none; }
+  .bar-map { max-width: 240px; }
+  .bar-field select { max-width: 170px; }
+}
+@container ctlbar (max-width: 780px) {
+  #cls-btn .bar-t, #btn-groups .bar-t { display: none; }
+}
+@container ctlbar (max-width: 640px) {
+  #issues-btn .bar-t { display: none; }
+}
+@container ctlbar (max-width: 560px) {
+  .ctl-bar { flex-wrap: wrap; }
+  .bar-search { order: 10; flex: 1 1 100%; }
+  .bar-search .text-q, .bar-search .text-q:focus { width: 100%; flex: 1; }
+  .ctl-bar > .grow { display: none; }
+  .bar-pop, .ctl-bar > .grow ~ .popover-anchor .bar-pop { position: fixed; left: var(--s3); right: var(--s3); top: auto; width: auto;
+    max-height: 70vh; overflow-y: auto; }
+}
 
 /* one line that scrolls sideways; .open wraps it onto up to 3 lines (the chevron button at its end) */
 .class-filter { flex: none; flex-wrap: nowrap; align-items: center; padding: 5px 0 5px var(--s4); border-bottom: 1px solid var(--border);
@@ -47,11 +108,8 @@
 .cf-expand .ico { transition: transform var(--t-fast) var(--ease); }
 .class-filter.open .cf-expand .ico { transform: rotate(180deg); }
 
-/* groups popover */
+/* popovers */
 .popover-anchor { position: relative; }
-#btn-groups[aria-expanded="true"] { background: var(--surface-3); border-color: var(--border-hover); }
-#btn-groups .chev { width: 13px; height: 13px; vertical-align: 0; transition: transform var(--t) var(--ease); }
-#btn-groups[aria-expanded="true"] .chev { transform: rotate(180deg); }
 .badge-count { min-width: 19px; height: 19px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center;
   background: var(--accent); color: var(--on-accent); font-size: 11.5px; font-weight: 700; }
 .popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-popover); width: 280px; padding: var(--s3) var(--s4) var(--s4);
@@ -104,6 +162,13 @@
 .stat-card h3 .muted { font-size: var(--fs-sm); margin-left: 6px; }
 .stat-card p { margin: 4px 0 0; }
 .stat-card.wide { grid-column: 1 / -1; }
+.cl-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); padding: var(--s2) 0 var(--s3); }
+.cl-lists h4 { font-size: var(--fs-sm); margin: 0 0 var(--s2); }
+.cl-overlap { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
+.cl-overlap button { width: 100%; justify-content: space-between; height: auto; min-height: 0; padding: 4px 8px; border-color: transparent;
+  background: transparent; text-align: left; }
+.cl-overlap button:hover { background: var(--surface-3); }
+#stat-cl-kpis { margin: var(--s2) 0; }
 .stat { height: 360px; }
 .stat-card.wide .stat { height: 540px; }
 
@@ -207,3 +272,6 @@
   .knn-grid > span:first-child, .knn-grid .h.v { display: none; }
   .size-row { grid-template-columns: 110px 1fr 48px; }
 }
+
+/* box details: cleanlab's top out-of-fold probabilities */
+.lq-p { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; white-space: nowrap; }

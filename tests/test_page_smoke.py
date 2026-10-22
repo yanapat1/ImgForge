@@ -496,3 +496,123 @@ def test_accounts_signup_sharing_owner_card_and_viewer(server):
         assert code == 403
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_plot_bar_and_cleanlab_label_quality(server):
+    """The one-row bar above the plot: projection / classes / display popovers hold the old controls (same ids);
+    Find issues runs cleanlab's k-fold label-quality check, fills the gallery with its label issues, unlocks the
+    cleanlab colourings and the Classes view's confident joint. DATAVIZ_SCREENSHOTS=<dir> saves the bar at 3 widths."""
+    sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+    shots = os.environ.get('DATAVIZ_SCREENSHOTS')
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?session={sid}')
+        page.click('#btn-compute')
+        page.wait_for_selector('#plot .main-svg', timeout=60000)
+        bar = page.locator('#controls').bounding_box()
+        assert bar['height'] < 60, f'the bar should be one row, is {bar["height"]}px'
+        assert 'PCA' in page.locator('#map-summary').inner_text()
+        assert page.locator('#feature').is_hidden()                 # inside the projection popover
+        page.click('#map-btn')
+        assert page.locator('#feature').is_visible() and page.locator('#btn-apply').is_visible()
+        page.keyboard.press('Escape')
+        assert page.locator('#map-pop').is_hidden()
+        page.click('#cls-btn')
+        page.select_option('#mode', 'single')
+        page.wait_for_function("document.querySelector('#cls-summary').textContent !== 'All classes'")
+        page.select_option('#mode', 'all')
+        page.keyboard.press('Escape')
+        # the filter's name options fold into one trigger: it names the mode only when it is not "contains"
+        assert page.locator('#fb-mode').is_hidden() and page.locator('#fb-name-mode').is_hidden()
+        page.click('#fb-name-btn')
+        page.select_option('#fb-mode', 'regex')
+        page.check('#fb-neg')
+        assert page.locator('#fb-name-mode').inner_text() == 'not · regex'
+        page.select_option('#fb-mode', 'substr')
+        page.uncheck('#fb-neg')
+        page.keyboard.press('Escape')
+        if shots:
+            for w in (1400, 900, 560):
+                page.set_viewport_size({'width': w, 'height': 900})
+                page.locator('#controls').screenshot(path=f'{shots}/bar-{w}.png')
+            page.set_viewport_size({'width': 1400, 'height': 900})
+        # Find issues › cleanlab: nothing computed yet
+        page.click('#issues-btn')
+        assert page.locator('#btn-cl-issues').is_disabled()
+        assert page.locator('#color-by optgroup[data-needs="lq"]').evaluate('g => g.disabled')
+        page.on('dialog', lambda d: d.accept() if d.type == 'confirm' else (errors.append(f'dialog: {d.message}'), d.dismiss()))
+        page.click('#btn-lq-run')
+        page.wait_for_function("!document.querySelector('#btn-cl-issues').disabled", timeout=60000)
+        assert 'health' in page.locator('#lq-info').inner_text()
+        assert page.locator('#issues-pop').is_visible()           # the run button keeps the menu open for its result
+        if shots:
+            page.locator('#issues-pop').screenshot(path=f'{shots}/issues-menu.png')
+        page.keyboard.press('Escape')
+        flagged = int(page.locator('#cl-issues-n').inner_text().split()[0].replace(',', ''))
+        if flagged:                                          # an earlier test may have fixed the noisy labels
+            assert 'cleanlab' in page.locator('#gallery-title').inner_text().lower()
+        if flagged:
+            assert page.locator('#btn-cl-fix').is_visible()
+            if shots:
+                page.locator('#gallery-panel').screenshot(path=f'{shots}/gallery-fix.png')
+            page.click('#btn-cl-fix')                       # confirm() is accepted: the labels change, with undo
+            page.wait_for_function("document.querySelector('#lq-info').textContent.includes('labels changed')", timeout=15000)
+            assert page.locator('#btn-cl-fix').is_hidden()
+            page.click('#issues-btn')
+            page.click('#btn-lq-run')                        # run again on the fixed labels
+            page.wait_for_function("!document.querySelector('#btn-cl-issues').disabled", timeout=60000)
+        page.select_option('#color-by', 'cl_quality')
+        page.wait_for_selector('#plot .colorbar', timeout=10000)
+        if shots:
+            page.click('#map-btn')
+            page.screenshot(path=f'{shots}/page-map-open.png')
+            page.keyboard.press('Escape')
+        page.click('#activity [data-tab="stats"]')
+        page.wait_for_selector('#stat-cl-card:not(.hidden) #stat-cl .main-svg', timeout=20000)
+        assert page.locator('#stat-cl-kpis .kpi').count() == 3
+        browser.close()
+    assert not errors, '\n'.join(errors)
+
+
+def test_cleanlab_detection_checks_from_a_model_run(server):
+    """A detector run in the Model tab also gets cleanlab's object-detection scores: Find issues shows a Detection
+    section, the plot can colour by them, and /api/models/{id}/cleanlab answers per label box."""
+    from test_models import KEY, _serve, generic_app
+    gs, gurl = _serve(generic_app())
+    try:
+        sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+        m = _send(f'{server}/api/models', {'name': 'Pets API', 'family': 'custom', 'format': 'api',
+                                          'api': {'preset': 'label', 'url': gurl, 'api_key': KEY, 'label_model': 'det'}})
+        errors = []
+        with sync_api.sync_playwright() as p:
+            browser = _browser(p)
+            page = browser.new_page(viewport={'width': 1400, 'height': 900})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.on('console', lambda m_: m_.type == 'error' and 'status of 409' not in m_.text and errors.append(f'console: {m_.text}'))
+            page.goto(f'{server}/?session={sid}')
+            page.click('#btn-compute')
+            page.wait_for_selector('#plot .main-svg', timeout=60000)
+            assert page.locator('#od-sec').is_hidden()
+            page.click('#activity [data-tab="model"]')
+            page.select_option('#m-model', m['id'])
+            page.click('#m-run')
+            page.wait_for_selector('#m-kpis .kpi', timeout=60000)
+            page.wait_for_function("!document.querySelector('#od-sec').classList.contains('hidden')", timeout=30000)
+            page.click('#activity [data-tab="explore"]')
+            page.select_option('#color-by', 'cl_badloc')
+            page.wait_for_selector('#plot .colorbar', timeout=10000)
+            page.click('#issues-btn')
+            page.click('#btn-cl-missed')
+            page.wait_for_selector('#m-issue-filter .chip[data-kind="fp_bg"]:not(.off)', timeout=10000)
+            browser.close()
+        r = _get(f"{server}/s/{sid}/api/models/{m['id']}/cleanlab")
+        n = len(_get(f'{server}/s/{sid}/api/points')['cls'])
+        assert len(r['cl_swap']) == len(r['cl_badloc']) == n and r['images']
+        assert all(v is None or 0 <= v <= 1 for v in r['cl_badloc'])
+        assert not errors, '\n'.join(errors)
+    finally:
+        gs.should_exit = True

@@ -110,8 +110,13 @@ export type ConnForm = {
 };
 
 // ------------------------------------------------------------------ models
-export type ModelFamily = 'yolo' | 'rfdetr' | 'custom';
-export type ModelFormat = 'pt' | 'pth' | 'pkl' | 'safetensors' | 'onnx' | 'openvino' | 'api';
+export type ModelFamily = 'yolo' | 'rfdetr' | 'custom' | 'hf';
+export type ModelFormat = 'pt' | 'pth' | 'pkl' | 'safetensors' | 'onnx' | 'openvino' | 'api' | 'hf';
+/** A model used as a feature space of the plot (dataviz/ml/user_features.py): what to read out of it. */
+export interface ModelEmbed {
+  enabled: boolean; layer: string; pool: 'avg' | 'cls' | 'flatten'; output: string;
+  imgsz: number | string | null; batch_size: number | string | null;
+}
 export type ApiPreset = 'serving' | 'generic' | 'label';
 export type BoxFormat = 'xyxy' | 'xywh' | 'cxcywh';
 
@@ -131,6 +136,7 @@ export type ModelDraft = {
   name: string; family: ModelFamily; format: ModelFormat; path: string; variant: string; arch: string; adapter: string;
   imgsz: number | string; conf: number | string; iou: number | string; task_type: string;
   api: ModelApi;
+  embed: ModelEmbed;
 };
 /** A saved model as GET api/models lists it (a draft's fields may be missing). */
 export type ModelItem = {
@@ -139,6 +145,7 @@ export type ModelItem = {
   imgsz?: number | string | null; conf?: number | string | null; iou?: number | string | null; task_type?: string;
   api?: Partial<Omit<ModelApi, 'mapping'>> & { mapping?: Partial<ModelMapping> };
   predicted?: boolean; exists?: boolean;
+  embed?: Partial<ModelEmbed>;
 };
 /** GET api/models/discover → found[] */
 export interface FoundModel { name: string; family: ModelFamily; format: ModelFormat; path: string; size?: number; mtime: number }
@@ -161,7 +168,7 @@ export interface CustomSpec {
 export interface ModelSpec {
   custom: CustomSpec;
   matrix: Record<ModelFamily, ModelFormat[]>;
-  families: string[]; formats: string[]; rfdetr_variants: string[];
+  families: string[]; formats: string[]; rfdetr_variants: string[]; embed_pools?: string[];
   defaults: { conf: number; match_iou: number };
 }
 export interface ServingEntry { provider: string; model_type: string; model_name: string; backend?: string; imgsz: number | string; classes: number | string; versions: string[] }

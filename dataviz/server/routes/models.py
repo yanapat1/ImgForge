@@ -13,6 +13,7 @@ import asyncio
 import shutil
 from pathlib import Path
 
+import numpy as np
 import orjson
 from PIL import Image, ImageDraw
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -35,7 +36,7 @@ def eval_overview(ctx, split='val', conf_mode='best', conf=0.25, iou=None, focus
     dataset compared, one (focus) model explained with the dataset, and the findings. Blocking."""
     reg, svc = ctx.models, ctx.model_service
     st = ctx.current()
-    lb = insights.leaderboard(svc, st, owned(reg.models), split, conf_mode, conf, iou)
+    lb = insights.leaderboard(svc, st, [m for m in owned(reg.models) if m.get('family') != 'hf'], split, conf_mode, conf, iou)
     fid = focus if focus in lb['per_class']['models'] else lb['best']
     ins = insights.dataset_insights(svc, st, owned(reg.model, fid), split, conf_mode, conf, iou) if fid else None
     _, src = svc.splits(st)
@@ -90,7 +91,7 @@ def router(state, ctx):
     @r.get('/api/models/spec')
     def spec():
         return {'custom': schema.CUSTOM_SPEC, 'matrix': mreg.MATRIX, 'families': mreg.FAMILIES,
-                'formats': mreg.FORMATS, 'rfdetr_variants': mreg.RFDETR_VARIANTS,
+                'formats': mreg.FORMATS, 'rfdetr_variants': mreg.RFDETR_VARIANTS, 'embed_pools': mreg.EMBED_POOLS,
                 'defaults': {'conf': svc.cfg.get('default_conf', 0.25), 'match_iou': svc.cfg.get('match_iou', 0.5)}}
 
     @r.get('/api/models/adapter_template.py')
@@ -108,6 +109,7 @@ def router(state, ctx):
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e))
         svc.forget(m['id'])
+        refresh_features()
         log.info(f'saved model [bold]{vlog.esc(m["name"])}[/] ({m["family"]} · {m["format"]})')
         return public(m)
 
@@ -116,6 +118,7 @@ def router(state, ctx):
         m = model_or_404(mid)
         svc.forget(mid)
         owned(reg.delete, mid)
+        refresh_features()
         svc.remove_upload(m)
         log.info(f'removed model {vlog.esc(m["name"])}')
         return {'ok': True}
@@ -214,6 +217,35 @@ def router(state, ctx):
             log.warning(f'test {vlog.esc(m["name"])} failed: {vlog.esc(e)}')
             raise HTTPException(400, f'{type(e).__name__}: {e}')
 
+    def refresh_features():
+        """A saved / removed model changes the feature list of its owner's open sessions now, not in a few seconds."""
+        for st in list(ctx.states.values()):
+            fn = getattr(st.registry, 'refresh', None)
+            if fn:
+                fn()
+
+    @r.post('/api/models/{mid}/test-embed', dependencies=[Depends(deps.require_bound('labeler'))])
+    async def test_embed(mid: str, user=Depends(current_user)):
+        """Embed the first 4 boxes of the open session with this model: the embedding size and the time it took."""
+        import time
+        from ...ml import user_features
+        m = model_or_404(mid)
+        st = ctx.current()
+        g.need_index()
+        try:
+            spec = user_features.spec_for(m, svc.fingerprint(m), svc.workdir, bool(user.get('is_admin')))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        ids = list(range(min(4, len(st.samples))))
+        paths = st.crop_paths()[:len(ids)]
+        t0 = time.time()
+        try:
+            emb = await run_io(spec.fn, paths, [st.samples[i] for i in ids], lambda *a, **k: None)
+        except Exception as e:  # noqa: BLE001 - shown in the form
+            raise HTTPException(400, f'{type(e).__name__}: {e}')
+        return {'ok': True, 'dim': int(emb.shape[1]) if emb.ndim == 2 else 0, 'n': len(ids),
+                'ms': round((time.time() - t0) * 1000), 'key': spec.key}
+
     @r.post('/api/models/{mid}/predict', dependencies=[Depends(deps.require_bound('labeler'))])
     def run_predict(mid: str):
         m = model_or_404(mid)
@@ -231,6 +263,23 @@ def router(state, ctx):
         if res is None:
             raise HTTPException(409, f'{m["name"]}: run predictions first')
         return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
+
+    @r.get('/api/models/{mid}/cleanlab', dependencies=viewer)
+    async def cleanlab(mid: str, limit: int = 300):
+        """cleanlab object-detection checks of this model's predictions: per box bad-location / swapped-class /
+        image-quality scores (aligned with box ids, null = not scored), worst images, overlooked objects."""
+        m = model_or_404(mid)
+        g.need_index()
+        try:
+            res = await run_io(svc.cleanlab, ctx.current(), m)
+        except ImportError:
+            raise HTTPException(501, 'cleanlab is not installed on the server (pip install cleanlab)')
+        if res is None:
+            raise HTTPException(409, f'{m["name"]}: run predictions first')
+        per, summary = res
+        out = {k: np.round(v, 4) for k, v in per.items()}
+        out.update({'images': summary['images'][:limit], 'overlooked': summary['overlooked'][:limit]})
+        return json_bytes(orjson.dumps(out, option=orjson.OPT_SERIALIZE_NUMPY))
 
     @r.get('/api/eval/overview', dependencies=viewer)
     async def overview(split: str = 'val', conf_mode: str = 'best', conf: float = 0.25, iou: float | None = None,

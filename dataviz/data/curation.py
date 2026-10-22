@@ -9,7 +9,9 @@ Rules work on the raw label text (nothing silently clamped, unlike the indexer):
     splits     split_leak (a val / test image is a copy of a train one: same bytes, or boxes near-identical in a feature)
     dataset    class_imbalance, rare_class
     embedding  likely_mislabel, outlier, near_dup          (when k-NN scores of a feature exist)
+               cl_label_issue, cl_ood                       (when cleanlab label quality of a feature exists)
     model      model_wrong_cls, model_missing_label, model_missed   (when a model was evaluated)
+               cl_badloc, cl_swap, cl_overlooked            (cleanlab object detection on its predictions)
 
 Speed: label files are read in parallel (raw bytes), parsed once, and every box rule is a numpy
 expression over all boxes of the dataset at once; within-image IoU pairs are generated per box count
@@ -59,9 +61,14 @@ TYPES = {
     'likely_mislabel': ('embedding', 'warn', 'Likely mislabel', True),
     'outlier': ('embedding', 'info', 'Outlier', False),
     'near_dup': ('embedding', 'info', 'Near-duplicate boxes', False),
+    'cl_label_issue': ('embedding', 'warn', 'Label issue (cleanlab)', True),
+    'cl_ood': ('embedding', 'info', 'Out-of-distribution (cleanlab)', False),
     'model_wrong_cls': ('model', 'warn', 'Model says another class', True),
     'model_missing_label': ('model', 'warn', 'Model finds an unlabelled object', False),
     'model_missed': ('model', 'warn', 'Model sees nothing at a label', False),
+    'cl_swap': ('model', 'warn', 'Wrong class (cleanlab)', True),
+    'cl_badloc': ('model', 'warn', 'Badly placed box (cleanlab)', False),
+    'cl_overlooked': ('model', 'warn', 'Overlooked object (cleanlab)', False),
 }
 TYPE_ORDER = {t: i for i, t in enumerate(TYPES)}
 SEV_RANK = {'error': 0, 'warn': 1, 'info': 2}
@@ -80,6 +87,8 @@ DEFAULTS = {
     'near_dup': 0.97,           # near_dup: cosine similarity
     'leak_sim': 0.95,           # split_leak: cosine between boxes of a train and a val image (below near_dup: the
                                 # same scene re-shot is already a leak, not only the same pixels)
+    'cl_ood_z': 3.0,            # cl_ood: z-score of cleanlab's out-of-distribution score (features)
+    'cl_od_max': 0.1,           # cl_badloc / cl_swap / cl_overlooked: cleanlab score below this (0-1, low = bad)
     'limit_per_type': 20000,    # items kept per embedding / model type
     'model_min_score': 0.5,
     'pair_vector_max': 64,      # images with more boxes than this get a per-image IoU matrix
@@ -288,7 +297,7 @@ class Curation:
         self.n_classes = 0
         self.class_names = []
         self.scores = None        # k-NN scores used for the embedding rules (feature key, dict)
-        self.model_raw = None     # (model name, label_issues list) of the last scan with a model
+        self.model_raw = None     # (model name, label_issues, fp boxes, cleanlab od) of the last scan with a model
         self.patch_cls = {}       # box id -> class since the index was built
         self.splits = {}          # image base name -> 'train' | 'val' | 'test' (models.split_source), for split_leak
         self._flat = None
@@ -677,6 +686,22 @@ class Curation:
                 return k, sc
         return None
 
+    def _pick_label_quality(self):
+        """(feature, per-box arrays) of the cleanlab label quality computed for the k-NN scores' feature (else the
+        default one), None when there is none for the current labels."""
+        st = self.state
+        if not hasattr(st, 'cached_label_quality'):
+            return None
+        keys = [k for k in ((self.scores or (None,))[0], st.default_feature) if k]
+        for k in dict.fromkeys(keys):
+            try:
+                hit = st.cached_label_quality(k)
+            except Exception:  # noqa: BLE001 - the other rules still run
+                hit = None
+            if hit is not None and len(hit[0]['cl_quality']) == len(st.samples):
+                return k, hit[0]
+        return None
+
     def _derive(self):
         """Dataset, embedding and model items from the current files + patched labels."""
         st, cfg = self.state, self.cfg
@@ -703,6 +728,9 @@ class Curation:
         deleted = self._deleted()
         if self.scores is not None:
             out += self._embedding_items(self.scores, loc, deleted)
+        lq = self._pick_label_quality()
+        if lq is not None:
+            out += self._cleanlab_items(lq, loc, deleted)
         if self.model_raw is not None:
             out += self._model_items(self.model_raw, loc, deleted)
         if self.splits:
@@ -773,6 +801,59 @@ class Curation:
             n += 1
             if n >= lim:
                 break
+        return out
+
+    def _cleanlab_items(self, lq, loc, deleted):
+        key, per = lq
+        lab, cfg, lim = self.state.labels, self.cfg, self.cfg['limit_per_type']
+        out = []
+        issue, rank, sug = per['cl_issue'], per['cl_rank'], per['cl_suggested']
+        cand = np.nonzero(issue & ~deleted)[0]
+        cand = cand[np.argsort(rank[cand], kind='stable')][:lim]
+        for sid in cand:
+            g, q, gp = int(sug[sid]), float(per['cl_quality'][sid]), float(per['cl_given_prob'][sid])
+            fixes = (lambda ln, g=g: [{'op': 'set_class', 'line': ln, 'cls': g, 'label': f'Change to {self._cname(g)}'},
+                                      {'op': 'delete', 'line': ln, 'label': 'Delete box'}]) if g != lab[sid] else \
+                (lambda ln: [{'op': 'delete', 'line': ln, 'label': 'Delete box'}])
+            out.append(self._box_item('cl_label_issue', int(sid), loc,
+                                      f'{self._cname(lab[sid])} box: a {key} classifier that never saw it gives '
+                                      f'{self._cname(lab[sid])} {gp * 100:.0f}% and {self._cname(g)} '
+                                      f'{float(per["pred_probs"][sid][g]) * 100:.0f}% (label quality {q:.2f})', fixes))
+        o = np.asarray(per['cl_ood_feat'], np.float64)
+        ok = np.isfinite(o) & ~deleted
+        if ok.sum() >= 5 and o[ok].std() > 0:
+            z = np.zeros_like(o)
+            z[ok] = (o[ok] - o[ok].mean()) / o[ok].std()
+            cand = np.nonzero(ok & (z >= cfg['cl_ood_z']))[0]
+            cand = cand[np.argsort(-z[cand], kind='stable')][:lim]
+            for sid in cand:
+                out.append(self._box_item('cl_ood', int(sid), loc, f'{self._cname(lab[sid])} box unlike the rest of the '
+                                          f'dataset (cleanlab out-of-distribution, z = {z[sid]:.1f}, {key})',
+                                          lambda ln: [{'op': 'delete', 'line': ln, 'label': 'Delete box'}]))
+        return out
+
+    def _cleanlab_model_items(self, name, od, loc, deleted):
+        per, overlooked = od
+        lab, cfg, lim = self.state.labels, self.cfg, self.cfg['limit_per_type']
+        out = []
+        for typ, arr, text in (('cl_swap', per['cl_swap'], 'probably has the wrong class'),
+                               ('cl_badloc', per['cl_badloc'], 'is probably drawn in the wrong place')):
+            a = np.asarray(arr, np.float64)
+            cand = np.nonzero(np.isfinite(a) & (a < cfg['cl_od_max']) & ~deleted)[0]
+            cand = cand[np.argsort(a[cand], kind='stable')][:lim]
+            for sid in cand:
+                out.append(self._box_item(typ, int(sid), loc, f'{self._cname(lab[sid])} box {text} '
+                                          f'(cleanlab on {name}, score {a[sid]:.2f})',
+                                          lambda ln: [{'op': 'delete', 'line': ln, 'label': 'Delete box'}]))
+        for it in overlooked[:lim]:
+            if it['quality'] >= cfg['cl_od_max']:
+                continue
+            x = self._item('cl_overlooked', None, it['image'], None,
+                           f'{name} finds a {self._cname(it["cls"])} ({it["score"]:.2f}) the labels miss '
+                           f'(cleanlab overlooked score {it["quality"]:.2f})', boxes=[it['box']] if it.get('box') else [])
+            x['id'] = f'cl_overlooked|{it["image"]}|{it["pid"]}'
+            x['pred'] = {'pid': it['pid'], 'cls': it['cls'], 'score': it['score']}
+            out.append(x)
         return out
 
     def _split_of(self, image):
@@ -847,9 +928,9 @@ class Curation:
         return out
 
     def _model_items(self, model_raw, loc, deleted):
-        name, issues, fp_boxes = model_raw
+        name, issues, fp_boxes, *rest = model_raw
         lab = self.state.labels
-        out = []
+        out = self._cleanlab_model_items(name, rest[0], loc, deleted) if rest and rest[0] else []
         for it in issues:
             kind = it.get('kind')
             if kind == 'wrong_cls':
@@ -942,6 +1023,26 @@ class Curation:
                 if name in self.files]
 
     # ------------------------------------------------------------ fixes
+    def box_fix_items(self, ops_by_box):
+        """fix() items for per-box ops ({box id: {'op': ..., ...}} without the line): each box's label file, its line
+        and the sha1 the file had at the scan. Returns (items, box ids that have no label line: removed or unknown)."""
+        with self.lock:
+            deleted = self._deleted()
+            loc = {}
+            for name, fi in self.files.items():
+                if fi['ids'] is None:
+                    continue
+                for k, b in enumerate(fi['boxes']):
+                    loc[fi['ids'][k]] = (name, b[0])
+            per, missing = {}, []
+            for sid, op in ops_by_box.items():
+                if sid not in loc or (0 <= sid < len(deleted) and deleted[sid]):
+                    missing.append(sid)
+                    continue
+                name, ln = loc[sid]
+                per.setdefault(name, []).append({**op, 'line': ln})
+            return [{'label': n, 'expect_sha1': self.files[n]['sha1'], 'ops': ops} for n, ops in per.items()], missing
+
     def fix(self, items, summary_text=''):
         """Apply op lists to label files. items: [{label | image, expect_sha1, ops}].
 
@@ -1372,7 +1473,22 @@ def model_issues(svc, state, m, conf=None, match_iou=None, min_score=0.5, limit=
             if wh:
                 x1, y1, x2, y2 = (float(v) for v in d.p_box[it['pid']])
                 boxes[it['pid']] = [round(x1 / wh[0], 5), round(y1 / wh[1], 5), round(x2 / wh[0], 5), round(y2 / wh[1], 5)]
-    return m.get('name') or m.get('id'), issues, boxes
+    od = None
+    try:
+        got = svc.cleanlab(state, m)
+    except Exception:  # noqa: BLE001 - cleanlab missing or failed: the other model rules still run
+        got = None
+    if got is not None:
+        per, summary = got
+        over = []
+        for it in summary['overlooked'][:limit]:
+            wh, pid = sizes.get(it['image']), it['pid']
+            x1, y1, x2, y2 = (float(v) for v in d.p_box[pid])
+            over.append({**it, 'cls': int(d.p_cls[pid]), 'score': float(d.p_score[pid]),
+                         'box': [round(x1 / wh[0], 5), round(y1 / wh[1], 5), round(x2 / wh[0], 5), round(y2 / wh[1], 5)]
+                         if wh else None})
+        od = (per, over)
+    return m.get('name') or m.get('id'), issues, boxes, od
 
 
 def thumbnail(source, name, max_w=360):

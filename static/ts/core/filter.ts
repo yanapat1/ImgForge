@@ -39,7 +39,8 @@ export function emptyFilter(): FilterSpec {
   return {
     scope: 'image', name: { mode: 'substr', q: '', neg: false }, cls: { mode: 'any', ids: [] },
     nbox: [null, null], area: [null, null], aspect: [null, null], brightness: [null, null], blur: [null, null],
-    session: [], tags: [], m_status: [], suspicion_min: null, outlier_min: null, issues: [], clip: { q: '', k: 500 },
+    session: [], tags: [], m_status: [], suspicion_min: null, outlier_min: null, cl_quality_max: null, cl_issue: false,
+    issues: [], clip: { q: '', k: 500 },
   };
 }
 
@@ -62,6 +63,8 @@ export function normalizeFilter(raw: unknown): FilterSpec {
     session: arr(f.session).map(String), tags: arr(f.tags).map(String), m_status: arr(f.m_status).map(Number),
     suspicion_min: num(f.suspicion_min),
     outlier_min: num(f.outlier_min),
+    cl_quality_max: num(f.cl_quality_max),
+    cl_issue: !!f.cl_issue,
     issues: arr(f.issues).map(String),
     clip: { q: String(clip.q || ''), k: Math.max(1, Math.min(20000, +(clip.k as number) || 500)) },
   };
@@ -73,7 +76,8 @@ const hasRange = (r: Range): boolean => r[0] !== null || r[1] !== null;
 export function filterActive(F: FilterSpec): boolean {
   return !!(F.name.q.trim() || F.cls.ids.length || hasRange(F.nbox) || hasRange(F.area) || hasRange(F.aspect) ||
     hasRange(F.brightness) || hasRange(F.blur) || F.session.length || F.tags.length || F.m_status.length ||
-    F.suspicion_min !== null || F.outlier_min !== null || F.issues.length || F.clip.q.trim());
+    F.suspicion_min !== null || F.outlier_min !== null || F.cl_quality_max !== null || F.cl_issue || F.issues.length ||
+    F.clip.q.trim());
 }
 
 // ---------------------------------------------------------------- per-payload aggregates
@@ -207,7 +211,8 @@ export function bgCanPass(F: FilterSpec): boolean {
   const none = (r: Range): boolean => r[0] === null && r[1] === null;
   return (!F.cls.ids.length || F.cls.mode === 'none') && (F.nbox[0] === null || F.nbox[0] <= 0) &&
     none(F.area) && none(F.aspect) && none(F.brightness) && none(F.blur) && !F.session.length && !F.tags.length &&
-    !F.m_status.length && F.suspicion_min === null && F.outlier_min === null && !F.issues.length && !F.clip.q.trim();
+    !F.m_status.length && F.suspicion_min === null && F.outlier_min === null && F.cl_quality_max === null && !F.cl_issue &&
+    !F.issues.length && !F.clip.q.trim();
 }
 
 // ---------------------------------------------------------------- run
@@ -270,6 +275,9 @@ export function runFilter(F: FilterSpec, P: Points, agg: Agg, ext: FilterExt = {
   if (F.m_status.length && MS) { msOk = new Uint8Array(8); for (const s of F.m_status) if (s >= -1 && s < 7) msOk[s + 1] = 1; }
   const sus = F.suspicion_min !== null && P.suspicion ? P.suspicion : null, susMin = F.suspicion_min ?? 0;
   const out = F.outlier_min !== null && P.outlier ? P.outlier : null, outMin = F.outlier_min ?? 0;
+  // cleanlab (only while its label quality is loaded): unscored boxes never pass these
+  const clq = F.cl_quality_max !== null && P.cl_quality ? P.cl_quality : null, clqMax = F.cl_quality_max ?? 1;
+  const cli = F.cl_issue && P.cl_issue ? P.cl_issue : null;
   const issues = F.issues.length ? { box: ext.issueBox || null, img: ext.issueImg || null } : null;
   const clip = F.clip.q.trim() ? ext.clipMask || null : null;
   const imageScope = F.scope !== 'box';
@@ -302,6 +310,8 @@ export function runFilter(F: FilterSpec, P: Points, agg: Agg, ext: FilterExt = {
     if (msOk && !msOk[MS![i]! + 1]) continue;
     if (sus && !(sus[i]! >= susMin)) continue;
     if (out && !(out[i]! >= outMin)) continue;
+    if (clq) { const v = clq[i]; if (v == null || !(v <= clqMax)) continue; }
+    if (cli && !cli[i]) continue;
     if (issues && !((issues.box && issues.box[i]) || (issues.img && issues.img[j]))) continue;
     if (clip && !clip[i]) continue;
     if (clsOk && !clsOk[CLS[i]!]) continue;

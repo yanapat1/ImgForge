@@ -34,6 +34,7 @@ from .data import sources
 from .data.indexer import build_index
 from .ml import analysis
 from .ml import features as feats
+from .ml import label_quality as lqual
 from .workspace import resolve_workspace, find_workspace, _now
 
 # Defaults; the real values come from config.yaml in this folder (State.cfg).
@@ -96,6 +97,7 @@ class State:
         self.fingerprint = None
         self.features = {}
         self.scores = {}
+        self.label_quality = {}                         # feature -> (cache tag, per-box arrays, summary)
         self.projections = OrderedDict()
         self.groups_cache = OrderedDict()
         self._feature_locks = defaultdict(threading.Lock)
@@ -170,6 +172,7 @@ class State:
                     pass
         self.features.clear()
         self.scores.clear()
+        self.label_quality.clear()
         self.projections.clear()
         self.groups_cache.clear()
         self.payloads.clear()
@@ -380,6 +383,69 @@ class State:
     def request_scores(self, key):
         spec = self.registry[key]
         return self.submit(f'scores:{self.tag}:{key}', f'Scores · {spec.label}', lambda job: bool(self.get_scores(key, job)))
+
+    # ------------------------------------------------------------ label quality (cleanlab, k-fold pred_probs)
+    def label_quality_settings(self, **override):
+        return lqual.settings(self.cfg['analysis'].get('label_quality'), **override)
+
+    def label_quality_tag(self, settings):
+        """Cache tag: settings + the current labels and removed boxes (a curation relabel recomputes)."""
+        dm = self.deleted_mask()
+        h = hashlib.sha1(np.ascontiguousarray(self.labels).tobytes())
+        if dm is not None:
+            h.update(np.packbits(dm).tobytes())
+        return f'{lqual.settings_hash(settings)}{h.hexdigest()[:8]}'
+
+    def _lq_file(self, key, tag):
+        return self.scores_dir / f'lq_{feats.cache_name(key)}_{self.fingerprint[:8]}_{tag}.npz'
+
+    def cached_label_quality(self, key, **override):
+        """(per-box arrays, summary) when computed for the current labels and settings, else None (memory, then disk)."""
+        if not self.ready:
+            return None
+        s = self.label_quality_settings(**override)
+        tag = self.label_quality_tag(s)
+        hit = self.label_quality.get(key)
+        if hit is not None and hit[0] == tag:
+            return hit[1], hit[2]
+        path = self._lq_file(key, tag)
+        if not path.exists():
+            return None
+        z = np.load(path)
+        per = {k: z[k] for k in lqual.PER_BOX if k in z}
+        summary = json.loads(path.with_suffix('.json').read_text())
+        self.label_quality[key] = (tag, per, summary)
+        return per, summary
+
+    def get_label_quality(self, key, job=None, **override):
+        if job is not None:
+            self.wait_index(job)
+        hit = self.cached_label_quality(key, **override)
+        if hit is not None:
+            return hit
+        emb = self.get_features(key, job)
+        if emb is None:
+            return None
+        s = self.label_quality_settings(**override)
+        tag = self.label_quality_tag(s)
+        dm = self.deleted_mask()
+        if job:
+            job.progress(stage='label quality: k-fold predicted probabilities')
+        per, summary = self.pools.run('heavy', compute.do_label_quality, emb, self.labels, s, list(self.classes),
+                                      None if dm is None else ~dm, progress=job.progress if job else None)
+        summary['feature'] = key
+        self.scores_dir.mkdir(exist_ok=True)
+        path = self._lq_file(key, tag)
+        np.savez(path, **per)
+        path.with_suffix('.json').write_text(json.dumps(summary))
+        self.label_quality[key] = (tag, per, summary)
+        return per, summary
+
+    def request_label_quality(self, key, **override):
+        spec = self.registry[key]
+        tag = self.label_quality_tag(self.label_quality_settings(**override))
+        return self.submit(f'lq:{self.tag}:{key}:{tag}', f'Label quality · {spec.label}',
+                           lambda job: bool(self.get_label_quality(key, job, **override)))
 
     def _projection_file(self, key):
         h = hashlib.sha1(f'{key}|{self.fingerprint}'.encode()).hexdigest()[:16]

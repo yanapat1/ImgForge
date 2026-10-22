@@ -80,6 +80,11 @@ def image_boxes_px(state, name, w, h):
     return out
 
 
+def _num(v, nd=4):
+    v = float(v)
+    return round(v, nd) if np.isfinite(v) else None
+
+
 def router(state, ctx):
     r = APIRouter(dependencies=[Depends(deps.require_bound('viewer'))])     # every route: the open session
     g = guards(state)
@@ -236,6 +241,19 @@ def router(state, ctx):
             s['suggested'] = int(sc['suggested'][sid])
             s['suggested_name'] = state.classes[int(sc['suggested'][sid])]
             s['outlier'] = float(sc['outlier'][sid])
+        lq = state.cached_label_quality(key)
+        if lq is not None and lq[0]['cl_scored'][sid]:
+            per = lq[0]
+            probs = per['pred_probs'][sid].astype(np.float32)
+            top = np.argsort(-probs)[:3]
+            sug = int(per['cl_suggested'][sid])
+            s['label_quality'] = {
+                'quality': round(float(per['cl_quality'][sid]), 4), 'issue': bool(per['cl_issue'][sid]),
+                'rank': int(per['cl_rank'][sid]), 'given_prob': round(float(per['cl_given_prob'][sid]), 4),
+                'suggested': sug, 'suggested_name': state.classes[sug] if sug < len(state.classes) else str(sug),
+                'ood_feat': _num(per['cl_ood_feat'][sid]), 'ood_prob': _num(per['cl_ood_prob'][sid]),
+                'top': [{'cls': int(c), 'name': state.classes[int(c)] if c < len(state.classes) else str(c),
+                         'p': round(float(probs[c]), 4)} for c in top if probs[c] > 0]}
         return s
 
     @r.get('/api/similar/{sid}')
@@ -301,19 +319,30 @@ def router(state, ctx):
         need_index()
         key = feature_or_400(req.feature)
         sc = state.scores.get(key)
+        lq = state.cached_label_quality(key)
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(['id', 'class_id', 'class_name', 'image', 'label', 'box_idx', 'x1', 'y1', 'x2', 'y2',
-                    'feature', 'suspicion', 'suggested_class', 'outlier'])
+                    'feature', 'suspicion', 'suggested_class', 'outlier']
+                   + (['cl_quality', 'cl_issue', 'cl_suggested_class', 'cl_given_prob', 'cl_ood'] if lq else []))
         for sid in req.ids:
             s = sample_or_404(sid)
             extra = [key, round(float(sc['suspicion'][sid]), 3), state.classes[int(sc['suggested'][sid])],
                      round(float(sc['outlier'][sid]), 4)] if sc else [key, '', '', '']
             w.writerow([sid, s['cls'], s['cls_name'],
                         state.source.image_ref(s['image']), state.source.label_ref(s['label']),
-                        s['box_idx'], *s['bbox'], *extra])
+                        s['box_idx'], *s['bbox'], *extra, *(_lq_row(lq[0], sid) if lq else [])])
         return Response(buf.getvalue(), media_type='text/csv',
                         headers={'Content-Disposition': 'attachment; filename="selection.csv"'})
+
+    def _lq_row(per, sid):
+        if not per['cl_scored'][sid]:
+            return ['', '', '', '', '']
+        sug = int(per['cl_suggested'][sid])
+        ood = _num(per['cl_ood_feat'][sid])
+        return [round(float(per['cl_quality'][sid]), 4), int(per['cl_issue'][sid]),
+                state.classes[sug] if sug < len(state.classes) else sug, round(float(per['cl_given_prob'][sid]), 4),
+                '' if ood is None else ood]
 
     @r.get('/api/tags')
     def get_tags():

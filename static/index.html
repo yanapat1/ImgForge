@@ -189,6 +189,7 @@
             <option value="none">selection order</option>
             <option value="suspicion">suspicion ↓</option>
             <option value="outlier">outlier ↓</option>
+            <option value="cl-quality" hidden disabled>cleanlab label quality ↑</option>
             <option value="group-out">outliers (no group) first</option>
             <option value="area-asc">box area ↑</option>
             <option value="area-desc">box area ↓</option>
@@ -207,6 +208,7 @@
         <button id="btn-tag" title="Save selection under a tag"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Tag…</button>
         <select id="tag-list" aria-label="Load a saved tag"><option value="">Load tag…</option></select>
         <button id="btn-ai-check" class="gem-btn hidden" data-llm="label_check" title="Ask the AI to check the labels of the selected boxes"><svg class="ico gem-mark" aria-hidden="true"><use href="static/assets/icons.svg#i-gem"/></svg>Check labels</button>
+        <button id="btn-cl-fix" class="primary hidden" title="Change these labels to the class cleanlab's k-fold probabilities suggest (label files are edited, with undo)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span id="btn-cl-fix-t">Change to cleanlab's class</span></button>
         <button id="btn-export" title="Download selection as CSV"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-download"/></svg>CSV</button>
         <span class="grow"></span>
         <button id="btn-clear" class="ghost" title="Clear the selection"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg>Clear</button>
@@ -224,7 +226,7 @@
     </div>
     <div class="side-scroll">
       <table id="class-table" class="class-table">
-        <thead><tr><th>class</th><th class="r">boxes</th><th class="r">%</th><th class="r" title="boxes whose nearest neighbours mostly have another class">suspicious</th></tr></thead>
+        <thead><tr><th>class</th><th class="r">boxes</th><th class="r">%</th><th class="r" title="boxes whose nearest neighbours mostly have another class">suspicious</th><th class="r cl-col hidden" title="labels cleanlab flags as wrong (k-fold predicted probabilities)">cleanlab</th></tr></thead>
         <tbody></tbody>
       </table>
       <p class="muted hint side-hint">Click a class to load its boxes into the gallery.</p>
@@ -354,110 +356,154 @@
   <!-- RIGHT: plot + controls -->
   <section id="main-panel">
     <div id="tab-embed" class="tab-body" role="tabpanel">
+      <!-- the bar above the plot: one row of triggers, details in popovers (core/popover.ts, views/layout.ts) -->
       <div id="controls" class="controls">
         <button id="ctl-toggle" class="icon-btn ctl-toggle" aria-expanded="true" aria-controls="controls"
                 aria-label="Hide controls" title="Hide controls (more room for the plot)">
           <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
-        <button id="ctl-mini" class="ctl-mini" title="Show controls: projection, view, search, inspect"></button>
-        <div class="ctl-group">
-          <span class="ctl-title">Projection</span>
-          <div class="ctl-row">
-            <label class="field" title="What each box is turned into before projecting">Features
-              <select id="feature"></select>
-            </label>
-            <label class="field">Method
-              <select id="method"></select>
-            </label>
-            <span id="params"></span>
-            <button id="btn-apply" class="primary"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Re-project</button>
-            <select id="saved-views" aria-label="Saved views" title="Every projection already computed for this dataset — loads instantly"><option value="">Saved views…</option></select>
-          </div>
-          <span id="pca-info" class="muted num hint"></span>
-        </div>
-
-        <div class="ctl-group">
-          <span class="ctl-title">View</span>
-          <div class="ctl-row">
-            <label class="field">Classes
-              <select id="mode">
-                <option value="all">All classes</option>
-                <option value="single">One class</option>
-                <option value="compare">Compare 2 classes</option>
-              </select>
-            </label>
-            <label id="lbl-a" class="field">Class <select id="class-a"></select></label>
-            <label id="lbl-b" class="field">vs <select id="class-b"></select></label>
-            <label class="field">Color by
-              <select id="color-by">
-                <option value="class">class</option>
-                <option value="group">group</option>
-                <option value="suggested">kNN-suggested class</option>
-                <option value="session">session</option>
-                <option value="suspicion">label suspicion</option>
-                <option value="outlier">outlier score</option>
-                <option value="area">box area (log)</option>
-                <option value="aspect">aspect ratio (log)</option>
-                <option value="brightness">brightness</option>
-                <option value="blur">sharpness (log)</option>
-                <optgroup label="Model (Model tab)" data-needs="model" hidden disabled>
-                  <option value="m_status">model: found / missed / wrong</option>
-                  <option value="m_pred">model: predicted class</option>
-                  <option value="m_score">model: confidence</option>
-                </optgroup>
-              </select>
-            </label>
-            <label class="field" title="Dot size">Dot <input id="dot-size" type="range" min="2" max="12" value="5"></label>
-            <label class="dist-toggle" title="Pick 2+ thumbnails (ctrl+click): lines between their dots show the feature-space distance">
-              <input type="checkbox" id="show-dist" checked> Distances</label>
-          </div>
-        </div>
-
-        <div class="ctl-group">
-          <span class="ctl-title">Search</span>
-          <form id="text-search" class="ctl-row" role="search">
-            <input id="text-q" type="search" class="text-q" placeholder="Describe boxes, e.g. person on a bike at night"
-                   aria-label="Search boxes by text" autocomplete="off">
-            <button id="text-go" type="submit" title="Closest boxes to the text, in the current feature space">
-              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Search</button>
-          </form>
-        </div>
-
-        <div class="ctl-group">
-          <span class="ctl-title">Inspect</span>
-          <div class="ctl-row">
-            <div class="segmented" role="group" aria-label="Find problems">
-              <button id="btn-suspicious" class="view-btn" data-view="suspicious" aria-pressed="false" title="Boxes whose nearest neighbours mostly have another class">
-                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Suspicious labels</button>
-              <button id="btn-outliers" class="view-btn" data-view="far" aria-pressed="false" title="Boxes far from their class centre">
-                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Far from class</button>
-              <button id="btn-dups" class="view-btn" data-view="dups" aria-pressed="false" title="Near-identical boxes in different images">
-                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Near-duplicates</button>
+        <button id="ctl-mini" class="ctl-mini" title="Show controls: projection, colour, classes, search, issues"></button>
+        <div class="ctl-bar">
+          <div class="popover-anchor">
+            <button id="map-btn" class="bar-btn bar-map" aria-haspopup="true" aria-expanded="false" aria-controls="map-pop"
+                    title="Feature space and projection method">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg><span id="map-summary" class="bar-t">Projection</span><span id="map-dirty" class="dirty-dot hidden" title="parameters changed: Re-project to apply"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+            <div id="map-pop" class="popover panel hidden bar-pop map-pop" role="group" aria-label="Projection">
+              <div class="pop-title">Projection</div>
+              <label class="field stack" title="What each box is turned into before projecting (your own models: Settings › Models)">Features
+                <select id="feature"></select></label>
+              <label class="field stack">Method <select id="method"></select></label>
+              <span id="params"></span>
+              <span id="pca-info" class="muted num hint"></span>
+              <button id="btn-apply" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Re-project</button>
+              <label class="field stack">Saved views
+                <select id="saved-views" title="Every projection already computed for this dataset — loads instantly"><option value="">Saved views…</option></select></label>
             </div>
-            <div class="popover-anchor">
-              <button id="btn-groups" aria-haspopup="true" aria-expanded="false" aria-controls="groups-pop" title="Density groups: bubbles, outliers">
-                <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Groups
-                <span id="groups-badge" class="badge-count num hidden"></span>
-                <svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg>
-              </button>
-              <div id="groups-pop" class="popover panel hidden" role="group" aria-label="Group options">
-                <div class="pop-title">Density groups</div>
-                <label class="check" title="Draw a bubble around every group of dots"><input type="checkbox" id="g-bubbles"> Draw bubbles</label>
-                <label class="check" title="Mark dots that belong to no group with a red cross"><input type="checkbox" id="g-outliers"> Mark outliers</label>
-                <label class="check" title="Fade dots that are inside a group, so outliers stand out"><input type="checkbox" id="g-dim"> Dim grouped dots</label>
-                <div class="pop-grid">
-                  <label class="field" for="g-mode" title="Per class: each bubble holds one class; a dot that fits no group of its own class is an outlier">Grouping</label>
-                  <select id="g-mode">
-                    <option value="class">per class</option>
-                    <option value="all">all points</option>
-                  </select>
-                  <label class="field" for="g-min" title="Smallest number of dots that counts as a group">Min size</label>
-                  <input id="g-min" type="number" min="3" max="500" value="15">
-                </div>
-                <button id="btn-sel-outliers" class="view-btn block" data-view="sel-outliers" aria-pressed="false" title="Show every outlier dot in the gallery">
-                  <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Select all outliers</button>
+          </div>
+          <label class="bar-field" title="Colour the dots by">
+            <span class="bar-t">Color</span>
+            <select id="color-by" aria-label="Colour dots by">
+              <option value="class">class</option>
+              <option value="group">group</option>
+              <option value="suggested">kNN-suggested class</option>
+              <option value="session">session</option>
+              <option value="suspicion">label suspicion</option>
+              <option value="outlier">outlier score</option>
+              <option value="area">box area (log)</option>
+              <option value="aspect">aspect ratio (log)</option>
+              <option value="brightness">brightness</option>
+              <option value="blur">sharpness (log)</option>
+              <optgroup label="Label quality (cleanlab)" data-needs="lq" hidden disabled>
+                <option value="cl_issue">cleanlab: label issue</option>
+                <option value="cl_quality">cleanlab: label quality</option>
+                <option value="cl_suggested">cleanlab: suggested class</option>
+                <option value="cl_given_prob">cleanlab: P(given class)</option>
+                <option value="cl_ood_feat">cleanlab: out-of-distribution</option>
+                <option value="cl_ood_prob">cleanlab: out-of-distribution (probs)</option>
+              </optgroup>
+              <optgroup label="Model (Model tab)" data-needs="model" hidden disabled>
+                <option value="m_status">model: found / missed / wrong</option>
+                <option value="m_pred">model: predicted class</option>
+                <option value="m_score">model: confidence</option>
+                <option value="cl_swap" data-od>cleanlab: wrong-class score</option>
+                <option value="cl_badloc" data-od>cleanlab: placement score</option>
+                <option value="cl_image_quality" data-od>cleanlab: image label quality</option>
+              </optgroup>
+            </select>
+          </label>
+          <div class="popover-anchor">
+            <button id="cls-btn" class="bar-btn" aria-haspopup="true" aria-expanded="false" aria-controls="cls-pop"
+                    title="Which classes the plot shows">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg><span id="cls-summary" class="bar-t">All classes</span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+            <div id="cls-pop" class="popover panel hidden bar-pop" role="group" aria-label="Classes shown">
+              <div class="pop-title">Classes shown</div>
+              <label class="field stack">Show
+                <select id="mode">
+                  <option value="all">All classes</option>
+                  <option value="single">One class</option>
+                  <option value="compare">Compare 2 classes</option>
+                </select>
+              </label>
+              <label id="lbl-a" class="field stack">Class <select id="class-a"></select></label>
+              <label id="lbl-b" class="field stack">vs <select id="class-b"></select></label>
+              <p class="hint muted">With all classes, the chips under the bar hide or isolate classes (double-click).</p>
+            </div>
+          </div>
+          <form id="text-search" class="bar-search" role="search">
+            <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>
+            <input id="text-q" type="search" class="text-q" placeholder="Describe boxes… ( / )"
+                   aria-label="Search boxes by text" autocomplete="off">
+            <button id="text-go" type="submit" class="icon-btn ghost" aria-label="Search"
+                    title="Closest boxes to the text, in the current feature space"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-arrow-r"/></svg></button>
+          </form>
+          <span class="grow"></span>
+          <div class="popover-anchor">
+            <button id="issues-btn" class="bar-btn" aria-haspopup="true" aria-expanded="false" aria-controls="issues-pop"
+                    title="Find label problems: neighbours, cleanlab, duplicates">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-alert"/></svg><span class="bar-t">Find issues</span><span id="issues-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+            <div id="issues-pop" class="popover panel hidden bar-pop issues-pop" role="group" aria-label="Find issues">
+              <div class="pop-title">Nearest neighbours <span class="muted">· k-NN in this feature space</span></div>
+              <button id="btn-suspicious" class="view-btn menu-item" data-view="suspicious" aria-pressed="false" title="Boxes whose nearest neighbours mostly have another class">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Suspicious labels</span><span class="mi-d">neighbours mostly another class</span></button>
+              <button id="btn-outliers" class="view-btn menu-item" data-view="far" aria-pressed="false" title="Boxes far from their class centre">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Far from class</span><span class="mi-d">far from the class centre</span></button>
+              <button id="btn-dups" class="view-btn menu-item" data-view="dups" aria-pressed="false" title="Near-identical boxes in different images">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Near-duplicates</span><span class="mi-d">near-identical boxes, other images</span></button>
+              <div class="pop-title pop-sep">cleanlab <span class="muted">· k-fold predicted probabilities</span></div>
+              <div id="lq-run" class="lq-run">
+                <button id="btn-lq-run" type="button" class="block" title="Train a classifier on the other folds for every box, then let cleanlab find the labels its out-of-fold probabilities disagree with">
+                  <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-play"/></svg><span id="btn-lq-run-t">Run label-quality check</span></button>
+                <select id="lq-clf" aria-label="Classifier for the k-fold probabilities" title="Classifier trained on each k-1 folds">
+                  <option value="logreg" title="logistic regression">logistic</option>
+                  <option value="knn">kNN</option>
+                  <option value="mlp" title="a small multi-layer perceptron">MLP</option>
+                </select>
+              </div>
+              <div id="lq-info" class="lq-info hint muted"></div>
+              <button id="btn-cl-issues" class="view-btn menu-item" data-view="cl-issues" aria-pressed="false" disabled title="Labels cleanlab flags as wrong, most likely first">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Label issues</span><span id="cl-issues-n" class="mi-d">run the check first</span></button>
+              <button id="btn-cl-low" class="view-btn menu-item" data-view="cl-low" aria-pressed="false" disabled title="Lowest label quality first, flagged or not">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Lowest label quality</span><span class="mi-d">all boxes, worst first</span></button>
+              <button id="btn-cl-ood" class="view-btn menu-item" data-view="cl-ood" aria-pressed="false" disabled title="Boxes unlike the rest of the dataset (cleanlab out-of-distribution score)">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Out-of-distribution</span><span class="mi-d">unlike the rest of the dataset</span></button>
+              <button id="btn-cl-confusion" class="menu-item" disabled title="Which classes cleanlab thinks are mixed up (Classes view)">
+                <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-bars"/></svg><span class="mi-t">Class confusion…</span><span class="mi-d">confident joint, classes to merge</span></button>
+              <div id="od-sec" class="od-sec hidden">
+                <div class="pop-title pop-sep">Detection <span id="od-model" class="muted">· cleanlab on the Model tab's model</span></div>
+                <button id="btn-cl-swap" class="view-btn menu-item" data-view="cl-swap" aria-pressed="false" title="Label boxes the model confidently gives another class (cleanlab swap score)">
+                  <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Wrong class</span><span class="mi-d">the model sees another class there</span></button>
+                <button id="btn-cl-badloc" class="view-btn menu-item" data-view="cl-badloc" aria-pressed="false" title="Label boxes no prediction overlaps well (cleanlab bad-location score)">
+                  <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Badly placed</span><span class="mi-d">the box misses the object</span></button>
+                <button id="btn-cl-missed" class="menu-item" title="Objects the model finds where nothing is labelled (Model tab)">
+                  <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg><span class="mi-t">Missed objects…</span><span id="od-missed-n" class="mi-d">objects nobody labelled</span></button>
               </div>
             </div>
-            <span id="g-info" class="muted num hint"></span>
+          </div>
+          <div class="popover-anchor">
+            <button id="btn-groups" class="bar-btn" aria-haspopup="true" aria-expanded="false" aria-controls="groups-pop"
+                    title="Display: dot size, distances, density groups (bubbles, outliers)">
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg><span class="bar-t">Display</span><span id="groups-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+            <div id="groups-pop" class="popover panel hidden bar-pop" role="group" aria-label="Display options">
+              <div class="pop-title">Dots</div>
+              <label class="field" title="Dot size">Size <input id="dot-size" type="range" min="2" max="12" value="5"></label>
+              <label class="check dist-toggle" title="Pick 2+ thumbnails (ctrl+click): lines between their dots show the feature-space distance">
+                <input type="checkbox" id="show-dist" checked> Distances between picked boxes</label>
+              <div class="pop-title pop-sep">Density groups</div>
+              <label class="check" title="Draw a bubble around every group of dots"><input type="checkbox" id="g-bubbles"> Draw bubbles</label>
+              <label class="check" title="Mark dots that belong to no group with a red cross"><input type="checkbox" id="g-outliers"> Mark outliers</label>
+              <label class="check" title="Fade dots that are inside a group, so outliers stand out"><input type="checkbox" id="g-dim"> Dim grouped dots</label>
+              <div class="pop-grid">
+                <label class="field" for="g-mode" title="Per class: each bubble holds one class; a dot that fits no group of its own class is an outlier">Grouping</label>
+                <select id="g-mode">
+                  <option value="class">per class</option>
+                  <option value="all">all points</option>
+                </select>
+                <label class="field" for="g-min" title="Smallest number of dots that counts as a group">Min size</label>
+                <input id="g-min" type="number" min="3" max="500" value="15">
+              </div>
+              <button id="btn-sel-outliers" class="view-btn block" data-view="sel-outliers" aria-pressed="false" title="Show every outlier dot in the gallery">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Select all outliers</button>
+              <span id="g-info" class="muted num hint"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -468,10 +514,18 @@
             <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>
             <input id="fb-q" type="search" placeholder="Filter by image name…" aria-label="Filter by image name"
                    aria-describedby="fb-err" autocomplete="off" spellcheck="false">
-            <select id="fb-mode" aria-label="How the name is matched" title="contains: plain text · wildcard: cam1* or img_??.jpg · regex: /^cam[12]_/ · related: shares words or numbers">
-              <option value="substr">contains</option><option value="glob">wildcard</option><option value="regex">regex</option><option value="fuzzy">related</option>
-            </select>
-            <label class="fb-neg" title="Keep the images whose name does NOT match"><input type="checkbox" id="fb-neg"> not</label>
+            <div class="popover-anchor">
+              <button id="fb-name-btn" type="button" class="fb-opt-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-name-pop"
+                      aria-label="How the name is matched" title="How the name is matched: contains · wildcard · regex · related, or NOT">
+                <span id="fb-name-mode" class="fb-opt-t hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+              <div id="fb-name-pop" class="popover panel hidden fb-pop fb-name-pop" role="group" aria-label="Name matching">
+                <div class="pop-title">Match the image name</div>
+                <select id="fb-mode" aria-label="How the name is matched">
+                  <option value="substr">contains the text</option><option value="glob">wildcard: cam1* or img_??.jpg</option><option value="regex">regex: /^cam[12]_/</option><option value="fuzzy">related: shares words or numbers</option>
+                </select>
+                <label class="check fb-neg" title="Keep the images whose name does NOT match"><input type="checkbox" id="fb-neg"> Keep the names that do <b>not</b> match</label>
+              </div>
+            </div>
           </div>
           <div class="popover-anchor">
             <button id="fb-cls-btn" class="fb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-cls-pop" title="Images that contain some / all / none of the chosen classes">
@@ -570,6 +624,19 @@
           <h3>Labelled class vs kNN-majority class <span id="stat-confusion-sub" class="muted"></span></h3>
           <p class="muted hint">Rows: the label. Columns: what the nearest neighbours say. Click a cell to load those boxes into the gallery.</p>
           <div id="stat-confusion" class="stat"></div>
+        </section>
+        <section id="stat-cl-card" class="stat-card wide hidden">
+          <h3>cleanlab: given label vs estimated true label <span id="stat-cl-sub" class="muted"></span></h3>
+          <p class="muted hint">The confident joint from k-fold out-of-fold probabilities. Off-diagonal cells are likely label
+            errors; click one to load those boxes. Pairs that swap both ways may be one class.</p>
+          <div id="stat-cl-kpis" class="kpis"></div>
+          <div id="stat-cl" class="stat"></div>
+          <div class="cl-lists">
+            <div><h4>Classes by label quality</h4><table id="cl-class-table" class="class-table"><thead><tr><th>class</th>
+              <th class="r" title="share of its labels cleanlab estimates are wrong">noise</th><th class="r">quality</th>
+              <th class="r" title="labelled this class, probably another">issues</th></tr></thead><tbody></tbody></table></div>
+            <div><h4>Classes mixed up most <span class="muted">· merge?</span></h4><ul id="cl-overlap" class="cl-overlap"></ul></div>
+          </div>
         </section>
       </div>
     </div>

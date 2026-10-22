@@ -93,8 +93,21 @@ export async function openModal(id: number, nav: { list: CardRef[] } | null = nu
       ['class distance', num(s.outlier, 4)],
       ['features', esc(featureLabel(s.feature ?? null))]);
   }
+  const lq = s.label_quality;
+  if (lq) {
+    const flag = lq.issue ? ` · <span class="txt-danger">label issue</span> (#${lq.rank + 1})` : '';
+    const bars = lq.top.map((t) => `<span class="lq-p" title="out-of-fold probability"><span class="dot" style="background:${clsColor(t.cls)}"></span>` +
+      `${esc(t.name)} <b class="num">${Math.round(t.p * 100)}%</b></span>`).join('');
+    rows.push(['cleanlab', `quality ${num(lq.quality, 3)}${flag}`, true], ['k-fold probs', bars, true]);
+    if (lq.ood_feat != null) rows.push(['out-of-distr.', num(lq.ood_feat, 3)]);
+  }
   const st = S.P?.m_status?.[id];
   if (st !== undefined && st >= 0) rows.push(['model', modelRow(id), true]);
+  const sw = S.P?.cl_swap?.[id], bl = S.P?.cl_badloc?.[id];
+  if (sw != null || bl != null) {
+    const bad = (v: number | null | undefined): string => (v == null ? '–' : v < 0.1 ? `<span class="txt-danger">${num(v, 2)}</span>` : num(v, 2));
+    rows.push(['detection', `class ${bad(sw)} · placement ${bad(bl)} <span class="muted">(cleanlab, low = suspect)</span>`, true]);
+  }
   if (g !== undefined) rows.push(['group', g === -1 ? '<span class="txt-danger">outlier</span> (fits no group)' : `group ${g}`, true]);
   rows.push(
     ['image', esc(s.image)],

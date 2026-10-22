@@ -115,9 +115,48 @@ export interface Points {
   m_status?: number[];
   m_pred?: number[];
   m_score?: number[];
+  // cleanlab label quality of the current feature (GET api/label-quality, set by loadLabelQuality); null = not scored
+  cl_quality?: Array<number | null>;
+  cl_given_prob?: Array<number | null>;
+  cl_ood_feat?: Array<number | null>;
+  cl_ood_prob?: Array<number | null>;
+  cl_issue?: number[];                 // 1 = cleanlab says the label is wrong
+  cl_rank?: number[];                  // 0 = most likely wrong, -1 = no issue
+  cl_suggested?: number[];             // class with the highest out-of-fold probability
+  // cleanlab object detection on the Model tab's predictions (GET api/models/{id}/cleanlab); 0-1, low = bad
+  cl_swap?: Array<number | null>;
+  cl_badloc?: Array<number | null>;
+  cl_image_quality?: Array<number | null>;
 }
 /** Names of the numeric Points columns (colour-by / sort / filter fields). */
-export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score';
+export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score' |
+  'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob' | 'cl_swap' | 'cl_badloc' | 'cl_image_quality';
+
+/** GET api/models/{id}/cleanlab */
+export interface DetectionChecks {
+  cl_swap: Array<number | null>; cl_badloc: Array<number | null>; cl_image_quality: Array<number | null>;
+  images: Array<{ image: string; quality: number }>; overlooked: Array<{ image: string; pid: number; quality: number }>;
+}
+
+/** One class of the cleanlab summary (rank_classes_by_label_quality). */
+export interface LqClass { cls: number; name: string; issues: number; inverse_issues: number; noise_rate: number; quality: number }
+/** Dataset-level cleanlab results of one feature space. */
+export interface LqSummary {
+  n: number; classes: number; class_counts: number[]; settings: Record<string, unknown>; note?: string;
+  class_ids?: number[]; confident_joint?: number[][]; health_score?: number; n_issues?: number;
+  class_ranking?: LqClass[];
+  overlapping_classes?: Array<{ a: number; b: number; a_name: string; b_name: string; n: number; joint: number }>;
+  imbalance?: number; oof_accuracy?: number | null; oof_log_loss?: number | null; folds_used?: number;
+  left_out_classes?: number[]; feature?: string;
+}
+/** GET / POST api/label-quality (ready). */
+export interface LabelQualityReady {
+  ready: true; feature: string; quality: Array<number | null>; issue: number[]; rank: number[]; suggested: number[];
+  given_prob: Array<number | null>; ood_feat: Array<number | null>; ood_prob: Array<number | null>; summary: LqSummary;
+}
+/** Not computed (GET) or computing (POST: job_id). */
+export interface LabelQualityPending { ready: false; feature: string; job_id?: number }
+export type LabelQualityResult = LabelQualityReady | LabelQualityPending;
 
 /** GET api/scores?feature=… (ready) */
 export interface ScoresReady { ready: true; feature: string; suspicion: number[]; suggested: number[]; outlier: number[] }
@@ -163,6 +202,10 @@ export interface Sample {
   same_image: number[];
   // with scores:
   feature?: string; suspicion?: number; suggested?: number; suggested_name?: string; outlier?: number;
+  label_quality?: {
+    quality: number; issue: boolean; rank: number; given_prob: number; suggested: number; suggested_name: string;
+    ood_feat: number | null; ood_prob: number | null; top: Array<{ cls: number; name: string; p: number }>;
+  };
   [k: string]: unknown;
 }
 /** GET api/similar/{id} and POST api/text-search items. */
@@ -214,6 +257,7 @@ export interface FilterSpec {
   nbox: Range; area: Range; aspect: Range; brightness: Range; blur: Range;
   session: string[]; tags: string[]; m_status: number[];
   suspicion_min: number | null; outlier_min: number | null;
+  cl_quality_max: number | null; cl_issue: boolean;      // cleanlab: label quality at most, only label issues
   issues: string[];
   clip: { q: string; k: number };
 }
@@ -232,6 +276,7 @@ export interface AppState {
   viewPos?: Map<number, number>;       // point id -> index in view
   viewReq: ProjectionRequest | null;   // request that produced `view`
   scoresFeature: string | null;
+  lq?: { feature: string; summary: LqSummary } | null;   // cleanlab label quality loaded into P.cl_* (null = none)
   hidden: Set<number>;                 // hidden class ids (All mode)
   sel: number[];
   selKind: 'samples' | 'pairs';

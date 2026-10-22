@@ -21,17 +21,18 @@ import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks }
 import { bubbleAt, hoverOf, scheduleRender } from './plot/render.js';
 import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
-import { applySettings, applyUiDefaults, applyView, buildParamInputs, exportCSV, loadView, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, saveSettings, SETTING_IDS, toggleOff, topBy, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
+import { applySettings, applyUiDefaults, applyView, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
 import { narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
-import { bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateGroupsBadge } from './views/layout.js';
+import { showMissedObjects } from './views/model.js';
+import { bindBar, bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateBarSummary, updateGroupsBadge } from './views/layout.js';
 import { closeModal, initModal, modalId, openImage, openModal, stepModal, toggleModalPreds } from './views/modal.js';
 import { imageOrder, setImagePage } from './views/image-grid.js';
 import { loadViewerPrefs, viewerKey } from './views/viewer.js';
 import { renderHome } from './views/home.js';
 import { bindUserButton, mountUserMenu } from './views/usermenu.js';
 // filters + curation (WP-D)
-import { initCuration } from './views/curation.js';
+import { fixToSuggested, initCuration } from './views/curation.js';
 import { initFilterBar } from './views/filter-bar.js';
 
 declare const Plotly: typeof import('plotly.js');
@@ -200,6 +201,8 @@ async function init(st: Status): Promise<void> {
   updateGroupsBadge();
   updateModeControls();
   updateMethodControls();
+  updateBarSummary();
+  syncLqControls();
   bindControlsToggle();                // after the selects hold their values: the collapsed strip names them
   renderGallery();
   void refreshTagList();
@@ -326,6 +329,18 @@ function bindEvents(): void {
   $req<HTMLInputElement>('show-dist').onchange = () => updateMarks();
   for (const id of ['g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min']) $req(id).onchange = () => { void onGroupControls(); };
   bindGroupsPopover();
+  bindBar();
+  $req('params').addEventListener('input', updateMapDirty);
+  // Find issues › cleanlab
+  $req('btn-lq-run').onclick = async () => { if (await runLabelQuality()) clView('cl-issues'); };
+  $req('btn-cl-issues').onclick = () => clView('cl-issues');
+  $req('btn-cl-low').onclick = () => clView('cl-low');
+  $req('btn-cl-ood').onclick = () => clView('cl-ood');
+  $req('btn-cl-confusion').onclick = () => openConfusion();
+  $req('btn-cl-fix').onclick = () => { void fixToSuggested(); };
+  $req('btn-cl-swap').onclick = () => odView('cl-swap');
+  $req('btn-cl-badloc').onclick = () => odView('cl-badloc');
+  $req('btn-cl-missed').onclick = () => { void showMissedObjects(); };
   $req('btn-sel-outliers').onclick = async () => {
     if (toggleOff('sel-outliers')) return;
     if (!S.groups) { $req<HTMLInputElement>('g-outliers').checked = true; await onGroupControls(); }
@@ -438,7 +453,7 @@ function bindEvents(): void {
       t.click();
     }
     if (e.key === 'Escape' && $req('modal').classList.contains('hidden') && $req('settings').classList.contains('hidden') &&
-        !t?.closest('#groups-pop')) {
+        !t?.closest('.popover')) {
       if (S.picked.length) clearPicked();
       else if (S.lasso) setSelection([], 'No selection');
     }
