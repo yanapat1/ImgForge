@@ -371,6 +371,30 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
     raise ValueError(f'unknown projection method {method!r}')
 
 
+def projection_quality(emb, xy, k=10, sample=2000):
+    """How faithful a 2D map is, on a fixed random subset (trustworthiness is O(n^2)).
+
+    trustworthiness: are 2D neighbours real neighbours (1 = no false neighbours appear in the map)?
+    continuity: are real neighbours kept close in 2D (1 = none torn apart)?
+    knn_preserved: mean share of each point's k nearest neighbours that are also its k nearest in 2D.
+    """
+    n = len(emb)
+    k = min(k, (n - 1) // 2)
+    if k < 1:
+        return {}
+    from sklearn.manifold import trustworthiness
+    from sklearn.neighbors import NearestNeighbors
+    idx = np.sort(np.random.default_rng(0).choice(n, sample, replace=False)) if n > sample else np.arange(n)
+    x = np.asarray(emb[idx], np.float32)
+    y = np.asarray(xy[idx], np.float32)
+    hi = NearestNeighbors(n_neighbors=k + 1).fit(x).kneighbors(x, return_distance=False)[:, 1:]
+    lo = NearestNeighbors(n_neighbors=k + 1).fit(y).kneighbors(y, return_distance=False)[:, 1:]
+    kept = np.mean([len(np.intersect1d(a, b, assume_unique=True)) for a, b in zip(hi, lo)]) / k
+    return {'trustworthiness': round(float(trustworthiness(x, y, n_neighbors=k)), 4),
+            'continuity': round(float(trustworthiness(y, x, n_neighbors=k)), 4),
+            'knn_preserved': round(float(kept), 4), 'k': int(k), 'n': int(len(idx))}
+
+
 def _knn_gpu(emb, k, progress):
     """Exact k-NN on the GPU: chunked fp32 matmul + topk. Same formula as the numpy path (TF32 is not used), so
     neighbour sets are identical up to ties / last-ulp rounding. Chunk rows are sized from the free VRAM and

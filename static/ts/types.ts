@@ -129,7 +129,9 @@ export type ScoresResult = ScoresReady | NotReady;
 export interface ProjectionRequest {
   feature: string; method: string; params: Record<string, number>; classes: number[] | null;
 }
-export interface ProjectionInfo { explained_variance?: number[]; [k: string]: unknown }
+/** `quality`: see dataviz/ml/analysis.py `projection_quality` (absent on projections saved before it existed). */
+export interface ProjectionQuality { trustworthiness: number; continuity: number; knn_preserved: number; k: number; n: number }
+export interface ProjectionInfo { explained_variance?: number[]; quality?: ProjectionQuality; [k: string]: unknown }
 /** POST api/projection (ready): a 2D layout of the boxes `id`. */
 export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; info: ProjectionInfo | null }
 export type ProjectionResult = ProjectionReady | NotReady;

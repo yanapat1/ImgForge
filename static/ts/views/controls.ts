@@ -172,9 +172,15 @@ export async function loadView(): Promise<void> {
     S.viewReq = req;
     S.groups = null;
     invalidateHover();
-    const ev = r.info && r.info.explained_variance;
-    $req('pca-info').textContent = ev
-      ? `explained variance: PC1 ${((ev[0] ?? 0) * 100).toFixed(1)}%, PC2 ${((ev[1] ?? 0) * 100).toFixed(1)}%` : '';
+    const ev = r.info?.explained_variance, q = r.info?.quality;
+    const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
+    $req('pca-info').textContent = [
+      ev ? `explained variance: PC1 ${pct(ev[0] ?? 0)}, PC2 ${pct(ev[1] ?? 0)}` : '',
+      q ? `map quality (${q.n.toLocaleString()} pts, k=${q.k}): trustworthiness ${q.trustworthiness.toFixed(3)} · ` +
+        `continuity ${q.continuity.toFixed(3)} · neighbours kept ${pct(q.knn_preserved)}` : '',
+    ].filter(Boolean).join('  ·  ');
+    $req('pca-info').title = q ? 'trustworthiness: no false neighbours in 2D (1 = best) · continuity: true neighbours ' +
+      'not torn apart (1 = best) · neighbours kept: share of each point\'s k nearest that stay its k nearest in 2D' : '';
     await refreshGroups();
     renderPlot();
     renderGallery();
@@ -216,7 +222,6 @@ export function updateModeControls(): void {
 export function updateMethodControls(): void {
   const m = $req<HTMLSelectElement>('method').value;
   for (const k of Object.keys(status().methods)) $req(`params-${k}`).classList.toggle('hidden', k !== m);
-  $req('pca-info').classList.toggle('hidden', m !== 'pca');
 }
 
 export function viewIdsVisible(): number[] {

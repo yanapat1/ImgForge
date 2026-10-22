@@ -42,7 +42,7 @@ distances *between* clusters are only loosely meaningful (PaCMAP / Isomap keep t
 | `kpca` | Kernel PCA (RBF) | sklearn | `gamma` (0 = 1 / dims) | Fitted on 3000 points, the rest `transform`ed. |
 | `isomap` | Isomap | sklearn | `n_neighbors` | Geodesic distances on the k-NN graph; fitted on 3000, rest `transform`ed. |
 | `lle` | Locally Linear Embedding | sklearn | `n_neighbors` | Each point stays the same mix of its neighbours; fitted on 3000, rest `transform`ed. |
-| `spectral` | Spectral Embedding (Laplacian eigenmaps) | sklearn | `n_neighbors` | Fitted on 5000; no `transform`, so the rest are placed by their neighbours. |
+| `spectral` | Spectral Embedding (Laplacian eigenmaps) | sklearn | `n_neighbors` | Fitted on 5000; no `transform`, so the rest are placed by their neighbours. Clusters with no k-NN links between them collapse to one point each: raise `n_neighbors`. |
 
 ### Other
 
@@ -58,6 +58,18 @@ Every sklearn method except PCA, SVD, ICA and random projection runs on the firs
 cannot handle every point (`FIT_MAX`) are fitted on a fixed random subset (seed 0); points outside it are
 `transform`ed when the estimator supports it, else placed at the inverse-distance mean of their 5 nearest
 fitted points (`_place_by_neighbours`). Timings for 6000 points × 512 dims on CPU: under 5 s each.
+
+Every new projection also gets **map-quality numbers** (`projection_quality()`, run in `core/workers.py
+do_project` and saved in the projection's `info`), shown under the Projection controls. They are measured on
+a fixed 2000-point subset with k = 10:
+
+| Metric | 1.0 means | Low means |
+|---|---|---|
+| trustworthiness | every 2D neighbour is a real neighbour | the map invents neighbours (unrelated points look close) |
+| continuity | every real neighbour stays close in 2D | the map tears neighbourhoods apart |
+| neighbours kept | each point's k nearest are also its k nearest in 2D | local detail is lost |
+
+Use them to choose between methods for one feature space: Random Projection is the floor to beat.
 
 To add one: an entry in `METHODS` (label, category, params, note) and a branch in `project()` or
 `_sklearn_estimator()`; a new parameter also needs a hint in `PARAM_INFO` (`static/ts/views/controls.ts`)
