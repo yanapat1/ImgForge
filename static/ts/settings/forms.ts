@@ -34,7 +34,7 @@ export const SECTIONS: Record<SectionId, [string, string]> = {
   datasets: ['Sessions', 'One dataset each: local folders are read in place; S3 / RustFS datasets stream or keep a local cache; a labeling task is read live'],
   connections: ['Connections', 'S3 / RustFS buckets, FTP and SFTP servers, PostgreSQL and SQL Server databases, model servers'],
   labeling: ['Labeling', 'Drawing, name tags, committing and the keyboard shortcuts of the labeling page'],
-  models: ['Models', 'YOLO, RF-DETR or custom detectors (files or HTTP APIs), scored against the labels in the Model tab'],
+  models: ['Models', 'YOLO, RF-DETR or custom detectors (files or HTTP APIs), scored in the Model tab — and your own backbones as feature spaces of the plot'],
   llm: ['AI assistant', 'Connect an LLM (OpenAI, Claude, Gemini, vLLM, Ollama…) and choose which AI features to show'],
   appearance: ['Appearance', 'Theme for the page and every plot'],
   plot: ['Plot', 'Drawing and measuring on the embedding plot'],

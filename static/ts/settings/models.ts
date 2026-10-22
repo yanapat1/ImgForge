@@ -191,7 +191,7 @@ function embedHTML(m: ModelDraft): string {
   const g: string[] = [];
   if (!hf) {
     g.push(`<label class="fld full"><span class="check" style="margin:0"><input type="checkbox" data-f="model.embed.enabled" data-act-change="model-rerender" ${e.enabled ? 'checked' : ''}> ` +
-      'Offer this model under <b>Features › My models</b>: its embedding of every box is projected, searched and scored like DINOv2 or CLIP</span></label>');
+      '<span>Offer this model under <b>Features › My models</b>: its embedding of every box is projected, searched and scored like DINOv2 or CLIP</span></span></label>');
   }
   if (on) {
     if (exported) {
