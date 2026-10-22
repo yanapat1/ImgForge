@@ -2,27 +2,27 @@
    press-down buttons, the yellow press state and the heavy uppercase section titles */
 :root[data-look="brutalist"] body { font-weight: 500; }
 :root[data-look="brutalist"] :is(h1, h2, h3, h4) { font-weight: 800; letter-spacing: -.01em; }
-:root[data-look="brutalist"] button,
-:root[data-look="brutalist"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-:root[data-look="brutalist"] select,
-:root[data-look="brutalist"] textarea,
+:where(:root[data-look="brutalist"]) button,
+:where(:root[data-look="brutalist"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:where(:root[data-look="brutalist"]) select,
+:where(:root[data-look="brutalist"]) textarea,
 :root[data-look="brutalist"] .form-card,
 :root[data-look="brutalist"] .radio-card,
 :root[data-look="brutalist"] .theme-choice { border-width: 2px; border-color: var(--border-strong); }
-:root[data-look="brutalist"] button { font-weight: 700; box-shadow: 3px 3px 0 var(--bd-shadow); transition: transform .06s, box-shadow .06s; }
-:root[data-look="brutalist"] button:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--bd-shadow); }
-:root[data-look="brutalist"] button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--bd-shadow);
+:where(:root[data-look="brutalist"]) button { font-weight: 700; box-shadow: 3px 3px 0 var(--bd-shadow); transition: transform .06s, box-shadow .06s; }
+:where(:root[data-look="brutalist"]) button:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--bd-shadow); }
+:where(:root[data-look="brutalist"]) button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--bd-shadow);
   background: var(--pressed); }
-:root[data-look="brutalist"] button.ghost,
-:root[data-look="brutalist"] button.icon-btn { box-shadow: none; border-color: transparent; }
-:root[data-look="brutalist"] button.ghost:hover:not(:disabled),
-:root[data-look="brutalist"] button.icon-btn:hover:not(:disabled) { transform: none; box-shadow: none; border-color: var(--border-strong); }
-:root[data-look="brutalist"] button.ghost:active:not(:disabled),
-:root[data-look="brutalist"] button.icon-btn:active:not(:disabled) { transform: none; }
-:root[data-look="brutalist"] button.primary,
-:root[data-look="brutalist"] button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--border-strong); }
-:root[data-look="brutalist"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
-:root[data-look="brutalist"] textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
+:where(:root[data-look="brutalist"]) button.ghost,
+:where(:root[data-look="brutalist"]) button.icon-btn { box-shadow: none; border-color: transparent; }
+:where(:root[data-look="brutalist"]) button.ghost:hover:not(:disabled),
+:where(:root[data-look="brutalist"]) button.icon-btn:hover:not(:disabled) { transform: none; box-shadow: none; border-color: var(--border-strong); }
+:where(:root[data-look="brutalist"]) button.ghost:active:not(:disabled),
+:where(:root[data-look="brutalist"]) button.icon-btn:active:not(:disabled) { transform: none; }
+:where(:root[data-look="brutalist"]) button.primary,
+:where(:root[data-look="brutalist"]) button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--border-strong); }
+:where(:root[data-look="brutalist"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+:where(:root[data-look="brutalist"]) textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 :root[data-look="brutalist"] .form-card,
 :root[data-look="brutalist"] .radio-card,
 :root[data-look="brutalist"] .theme-choice { box-shadow: var(--shadow-2); }

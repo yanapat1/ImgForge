@@ -5,15 +5,15 @@
   margin-top: var(--s5); padding-bottom: 6px; border-bottom: 1px solid var(--border-strong); }
 :root[data-look="editorial"] .sec-sub2 { font-family: var(--font-display); font-size: var(--fs-sm); text-transform: none; letter-spacing: 0;
   color: var(--text-muted); }
-:root[data-look="editorial"] button { font-weight: 600; }
-:root[data-look="editorial"] button.primary { font-weight: 650; }
-:root[data-look="editorial"] button.ghost:hover:not(:disabled) { background: transparent; text-decoration: underline;
+:where(:root[data-look="editorial"]) button { font-weight: 600; }
+:where(:root[data-look="editorial"]) button.primary { font-weight: 650; }
+:where(:root[data-look="editorial"]) button.ghost:hover:not(:disabled) { background: transparent; text-decoration: underline;
   text-decoration-color: var(--accent-line); text-underline-offset: 4px; }
-:root[data-look="editorial"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-:root[data-look="editorial"] select,
-:root[data-look="editorial"] textarea { background-color: var(--surface); }
-:root[data-look="editorial"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
-:root[data-look="editorial"] textarea:focus { border-color: var(--text); }
+:where(:root[data-look="editorial"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:where(:root[data-look="editorial"]) select,
+:where(:root[data-look="editorial"]) textarea { background-color: var(--surface); }
+:where(:root[data-look="editorial"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+:where(:root[data-look="editorial"]) textarea:focus { border-color: var(--text); }
 :root[data-look="editorial"] .form-card,
 :root[data-look="editorial"] .radio-card,
 :root[data-look="editorial"] .theme-choice { box-shadow: none; background: var(--surface); }

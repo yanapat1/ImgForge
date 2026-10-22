@@ -3,19 +3,19 @@
 :root[data-look="terminal"] body { letter-spacing: 0; }
 :root[data-look="terminal"] :is(h1, h2, h3, h4) { font-weight: 700; letter-spacing: 0; }
 :root[data-look="terminal"] ::selection { background: var(--accent); color: var(--on-accent); }
-:root[data-look="terminal"] button { box-shadow: none; font-weight: 600; background: var(--surface-2); border-color: var(--border-strong); }
-:root[data-look="terminal"] button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--accent-line); color: var(--accent-text); }
-:root[data-look="terminal"] button:active:not(:disabled) { background: var(--pressed); }
-:root[data-look="terminal"] button.ghost,
-:root[data-look="terminal"] button.icon-btn { background: transparent; border-color: transparent; }
-:root[data-look="terminal"] button.ghost:hover:not(:disabled),
-:root[data-look="terminal"] button.icon-btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
-:root[data-look="terminal"] button.primary,
-:root[data-look="terminal"] button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-:root[data-look="terminal"] button.primary:hover:not(:disabled) { background: var(--accent-hover); }
-:root[data-look="terminal"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-:root[data-look="terminal"] select,
-:root[data-look="terminal"] textarea { background-color: var(--bg); border-color: var(--border-strong); }
+:where(:root[data-look="terminal"]) button { box-shadow: none; font-weight: 600; background: var(--surface-2); border-color: var(--border-strong); }
+:where(:root[data-look="terminal"]) button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--accent-line); color: var(--accent-text); }
+:where(:root[data-look="terminal"]) button:active:not(:disabled) { background: var(--pressed); }
+:where(:root[data-look="terminal"]) button.ghost,
+:where(:root[data-look="terminal"]) button.icon-btn { background: transparent; border-color: transparent; }
+:where(:root[data-look="terminal"]) button.ghost:hover:not(:disabled),
+:where(:root[data-look="terminal"]) button.icon-btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
+:where(:root[data-look="terminal"]) button.primary,
+:where(:root[data-look="terminal"]) button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+:where(:root[data-look="terminal"]) button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+:where(:root[data-look="terminal"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:where(:root[data-look="terminal"]) select,
+:where(:root[data-look="terminal"]) textarea { background-color: var(--bg); border-color: var(--border-strong); }
 :root[data-look="terminal"] .form-card,
 :root[data-look="terminal"] .radio-card,
 :root[data-look="terminal"] .theme-choice { box-shadow: none; background: var(--surface); }
