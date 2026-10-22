@@ -404,8 +404,8 @@ def test_review_card_label_page_review_all_and_every_theme(server, tmp_path):
         probe = """() => { const m = document.querySelector('.lp-review i.manual'), b = document.querySelector('.lp-review i.bulk');
             const a = getComputedStyle(m), c = getComputedStyle(b);
             return [a.backgroundColor, a.backgroundImage, c.backgroundColor, c.backgroundImage, getComputedStyle(document.querySelector('.lp-chk.bulk')).color]; }"""
-        looks = ['default', 'handdrawn', 'glass', 'brutalist', 'terminal', 'soft']
-        palettes = ['default', 'cbsafe', 'contrast', 'dracula', 'dusk', 'mono', 'nord', 'paper', 'sepia', 'solarized']
+        looks = ['default', 'editorial', 'blueprint', 'brutalist', 'terminal', 'soft']
+        palettes = ['default', 'cbsafe', 'contrast', 'fjord', 'ember', 'orchid']
         for theme in ('dark', 'light'):
             for pal in palettes:
                 for look in looks:

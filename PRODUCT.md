@@ -24,7 +24,7 @@ Find and fix in one place. The loop goes embed → spot the problem on the plot 
 ## Capabilities and Constraints
 - Screens: sign-in, Sessions home, visualizer (`/s/<id>/`), labeling page. All share one `index.html`.
 - Front end: strict TypeScript in `static/ts` built with esbuild. Plain CSS in cascade-ordered files. Plotly is the only UI library. Colours exist only as CSS tokens, and the plot reads them from the CSS.
-- Existing fact, not a confirmed commitment: light/dark themes plus selectable style sheets (brutalist, glass, handdrawn, soft, terminal).
+- Existing fact, not a confirmed commitment: light/dark themes, six selectable styles (Instrument, Editorial, Blueprint, Brutalist, Terminal, Soft) and six colour palettes (Default, Colour-blind safe, High contrast, Fjord, Ember, Orchid).
 - Terminology: session, visualize vs label session, owner / Viewer / Labeler, connection, curation scan, fix / undo, job.
 
 ## Brand Commitments

@@ -385,19 +385,29 @@ button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color
 
 /* ---------------------------------------------------------------- sign-in page (#login, views/login.ts) */
 .login-wrap { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: var(--s6) var(--s4); background: var(--bg); }
-.login-card { width: min(400px, 100%); padding: var(--s6) var(--s6) var(--s5); display: flex; flex-direction: column; gap: var(--s4);
-  background: var(--surface); box-shadow: var(--shadow-3); }
-.login-brand { display: flex; align-items: center; gap: var(--s3); justify-content: center; }
-.login-brand .brand-mark { width: 36px; height: 36px; color: var(--accent); }
-.login-brand h1 { font-size: var(--fs-xl); }
-.login-tabs { display: flex; width: 100%; }
-.login-tabs > button { flex: 1; justify-content: center; height: 34px; }
-.login-tabs > button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); position: relative; z-index: 2; }
-/* only one tab left (sign-up off): it is a heading, not a choice */
-.login-tabs.single > button { border-radius: var(--r); }
-.login-form { display: flex; flex-direction: column; gap: var(--s3); }
-.login-form .fld input { height: 38px; }
-.login-form button.primary { height: 38px; margin-top: var(--s1); }
+/* the card is a <main>: flex none + display flex undo layout.css's visualizer grid on `main` (flex: 1 stretched it full width) */
+.login-card { flex: none; width: min(380px, 100%); padding: 28px; display: flex; flex-direction: column; gap: var(--s5);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-3); }
+.login-brand { display: flex; align-items: center; gap: 10px; }
+.login-brand .brand-mark { width: 28px; height: 28px; flex: none; color: var(--accent); }
+.login-brand h1 { font-size: var(--fs-lg); font-weight: 650; }
+/* Sign in / Create account: a segmented track with the chosen side raised. #login outranks the looks' button rules,
+   so the tabs read as one control in every look */
+#login .login-tabs { display: flex; width: 100%; padding: 3px; gap: 3px; background: var(--surface-3); border-radius: var(--r-md); }
+#login .login-tabs > button { flex: 1; justify-content: center; height: 32px; margin: 0; padding: 0 var(--s3); border: 1px solid transparent;
+  border-radius: var(--r); background: transparent; box-shadow: none; transform: none; color: var(--text-muted); font-weight: 600; }
+#login .login-tabs > button:hover:not([aria-selected="true"]) { color: var(--text); background: transparent; }
+#login .login-tabs > button[aria-selected="true"] { background: var(--surface); border-color: var(--border); color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+/* only one tab left (sign-up off): it is the form's heading, not a choice */
+#login .login-tabs.single { padding: 0; background: none; }
+#login .login-tabs.single > button { justify-content: flex-start; height: auto; padding: 0; border: none; background: none; box-shadow: none;
+  font: 650 var(--fs-xl)/1.25 var(--font-display); color: var(--text); cursor: default; }
+.login-form { display: flex; flex-direction: column; gap: var(--s4); }
+.login-form .fld { color: var(--text); font-weight: 550; gap: 6px; }
+.login-form .fld .help { font-weight: 400; }
+.login-form .fld input { height: 40px; font-size: var(--fs); }
+.login-form button.primary { height: 40px; margin-top: var(--s1); justify-content: center; }
 .pw-wrap { position: relative; display: block; }
 .pw-wrap input { padding-right: 40px !important; }
 .pw-eye { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 32px !important; height: 32px !important; }

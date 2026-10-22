@@ -130,15 +130,17 @@
 .swatch.dark { background: #1e242d; } .swatch.dark i { background: #28303b; }
 .swatch.light { background: #f7f9fb; } .swatch.light i { background: #ffffff; border-right: 1px solid #dce1e8; }
 .swatch.default { background: linear-gradient(135deg, #f7f9fb 50%, #1e242d 50%); } .swatch.default i { background: transparent; }
-.swatch.handdrawn { background: #f6f1e7; border: 1.5px solid #b9ab91; } .swatch.handdrawn i { background: #4f7a63; border-right: 1.5px solid #b9ab91; }
-.swatch.glass { background: linear-gradient(135deg, #1b2027 50%, #e9ebf3 50%); border-color: #4b5461; } .swatch.glass i { background: linear-gradient(135deg, #8b7cf6, #6aa8f5); }
-.swatch.brutalist { background: #fff8e1; border: 2px solid #111111; box-shadow: 3px 3px 0 #111111; border-radius: 0; } .swatch.brutalist i { background: #d92d12; border-right: 2px solid #111111; }
-.swatch.terminal { background: #0b0f0c; border: 1px solid #2f5a41; border-radius: 2px; } .swatch.terminal i { background: #3dff8f; border-right: 1px solid #2f5a41; }
-.swatch.soft { background: #e4e9f0; border-color: transparent; box-shadow: 4px 4px 10px rgba(150, 165, 190, .55), -4px -4px 10px rgba(255, 255, 255, .9); } .swatch.soft i { background: #3f6fc8; }
+.swatch.editorial { background: #f4f1ea; border-color: #bdb3a1; border-radius: 3px; } .swatch.editorial i { background: #fbf9f4; border-right: 1px solid #bdb3a1; box-shadow: inset 0 -12px 0 -10px #17605c; }
+.swatch.blueprint { background: linear-gradient(rgba(92, 203, 255, .16) 1px, transparent 1px) 0 0 / 8px 8px, linear-gradient(90deg, rgba(92, 203, 255, .16) 1px, transparent 1px) 0 0 / 8px 8px, #0b1828;
+  border-color: #2f5379; border-radius: 1px; } .swatch.blueprint i { background: #0f2034; border-right: 1px dashed #5ccbff; }
+.swatch.brutalist { background: #efede6; border: 2px solid #0d0d0d; box-shadow: 3px 3px 0 #0d0d0d; border-radius: 0; } .swatch.brutalist i { background: #c43c00; border-right: 2px solid #0d0d0d; }
+.swatch.terminal { background: #090c0a; border: 1px solid #2c5039; border-radius: 2px; } .swatch.terminal i { background: #0d120f; border-right: 1px solid #2c5039; box-shadow: inset 0 -10px 0 -7px #4be38a; }
+.swatch.soft { background: #eceaf3; border-color: transparent; border-radius: 14px; box-shadow: 0 2px 4px rgba(60, 50, 110, .06), 0 8px 18px rgba(60, 50, 110, .12); } .swatch.soft i { background: #5b48d6; border-radius: 12px; margin: 8px; }
 .swatch.pal { background: var(--sw-bg); } .swatch.pal i { background: var(--sw-sf); border-left: 10px solid var(--sw-ac); }
 .sec-sub2 { margin: var(--s3) 0 var(--s2); font-size: var(--fs-xs); color: var(--text-faint); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .swatch.system { background: linear-gradient(135deg, #f7f9fb 50%, #1e242d 50%); } .swatch.system i { background: transparent; }
 .theme-choice span { display: flex; align-items: center; gap: 6px; justify-content: center; }
+.theme-choice .swatch i { align-self: stretch; }   /* the span rule above centres items, which collapsed the empty <i> to 0 height */
 .kv { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px var(--s3); font-size: var(--fs-sm); }
 .kv dt { color: var(--text-muted); }
 .kv dd { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }

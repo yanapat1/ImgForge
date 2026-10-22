@@ -11,12 +11,14 @@ body {
   text-rendering: optimizeLegibility;
 }
 h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -.005em; }
+h1, h2, h3, h4 { font-family: var(--font-display); }
 .hidden { display: none !important; }
 .muted { color: var(--text-muted); font-weight: normal; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: .93em; }
 .hint { font-size: var(--fs-xs); color: var(--text-faint); }
 .grow { flex: 1; }
 ::selection { background: var(--accent-line); color: var(--text); }
+input, textarea { caret-color: var(--accent); }
 
 /* icons: duotone. Strokes use currentColor; parts marked .f get a soft fill of the same colour */
 .ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7;

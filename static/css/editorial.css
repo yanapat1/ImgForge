@@ -1,0 +1,26 @@
+/* editorial look (data-look="editorial"): tokens live in tokens.css; these rules add the printed-page details
+   (serif headings with a rule under section titles, hairline cards without shadows, underlined ghost buttons) */
+:root[data-look="editorial"] :is(h1, h2, h3, h4) { font-weight: 600; letter-spacing: 0; }
+:root[data-look="editorial"] .sec-sub { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 600; color: var(--text);
+  margin-top: var(--s5); padding-bottom: 6px; border-bottom: 1px solid var(--border-strong); }
+:root[data-look="editorial"] .sec-sub2 { font-family: var(--font-display); font-size: var(--fs-sm); text-transform: none; letter-spacing: 0;
+  color: var(--text-muted); }
+:root[data-look="editorial"] button { font-weight: 600; }
+:root[data-look="editorial"] button.primary { font-weight: 650; }
+:root[data-look="editorial"] button.ghost:hover:not(:disabled) { background: transparent; text-decoration: underline;
+  text-decoration-color: var(--accent-line); text-underline-offset: 4px; }
+:root[data-look="editorial"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:root[data-look="editorial"] select,
+:root[data-look="editorial"] textarea { background-color: var(--surface); }
+:root[data-look="editorial"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+:root[data-look="editorial"] textarea:focus { border-color: var(--text); }
+:root[data-look="editorial"] .form-card,
+:root[data-look="editorial"] .radio-card,
+:root[data-look="editorial"] .theme-choice { box-shadow: none; background: var(--surface); }
+:root[data-look="editorial"] .theme-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+:root[data-look="editorial"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-look="editorial"] a { text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+/* accounts: a ruled sign-in card and dialogs that sit on the page like a plate */
+:root[data-look="editorial"] .login-card,
+:root[data-look="editorial"] .ui-dlg { border: 1px solid var(--border-strong); box-shadow: var(--shadow-3); }
