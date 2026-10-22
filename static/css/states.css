@@ -50,4 +50,4 @@ html[data-role="viewer"] #cur-fixall, html[data-role="viewer"] .cur-fixes, html[
 /* ---------------------------------------------------------------- an embeddings session (main.ts html.no-boxes) */
 /* rows with metadata instead of boxes in images: no curation, models, box filters or image viewer (the server answers
    409 for those routes anyway) */
-html.no-boxes .needs-boxes { display: none !important; }
+html.no-boxes .needs-boxes, html.no-boxes #activity .act-sep { display: none !important; }

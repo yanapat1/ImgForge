@@ -7,6 +7,12 @@ weights, colour histogram, HOG, box geometry). Lasso dots (or describe them in w
 outliers and near-duplicates, measure distances between boxes, and switch between datasets on local
 disk or in S3 / RustFS buckets.
 
+Not only images: an **embeddings session** plots vectors you computed anywhere (audio, video, text, sensors,
+tables) from a folder of `.npy` files plus a `meta.csv`. Rows show as playable audio cards, videos that play on
+hover, text or image thumbnails, and any metadata column colours the plot. Format:
+[`dataviz/data/README.md`](dataviz/data/README.md#embeddings-folders-any-modality); try it with
+`python examples/make_embeddings_demo.py` and *New visualize session › Embeddings folder*.
+
 ```bash
 npm install && npm run build                                    # compile static/ts -> static/js (once, and after TS edits; `npm run watch` while developing)
 .venv/bin/python scripts/image-tools/app.py                      # config.yaml in this folder
@@ -106,6 +112,8 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | change text search (prompt, tokenizer, k) | `dataviz/ml/features.py` `TextEncoder` / `prompt()`, `state.py` `text_search()`; page: `static/ts/main.ts` (`#text-search`) |
 | change train / val leakage detection | `dataviz/data/curation.py` `_leak_items` (`leak_sim`); splits: `models.split_source` → `models/splits.py` |
 | change the model A-vs-B compare | `dataviz/models/insights.py` `compare()`, `static/ts/views/eval.ts` (`loadCompare` / `renderCompare`) |
+| change how an embeddings row looks (card, hover tip, dialog) or add a preview kind | `static/ts/views/preview.ts`, row dialog `views/modal.ts` `openRow`; server: `dataviz/data/embedding_source.py` (`PREVIEW_COLS`, MIME types), `routes/samples.py` `/api/preview` |
+| hide or show a control per session kind | `dataviz/server/deps.py` `capabilities()` → `html.no-boxes` (`static/ts/main.ts`) hides every `.needs-boxes` element (`static/css/states.css`) |
 | change the image browser (no selection) | `static/ts/views/image-grid.ts`; server lists / thumbnails: `dataviz/server/routes/samples.py` (`/api/images`, `/api/img/*`) |
 | change the image viewer (box toggles, right-click copy) | `static/ts/views/viewer.ts`, the dialog around it `views/modal.ts` |
 | change the box editor in the visualizer | `static/ts/views/box-editor.ts`; ops + save path: `dataviz/data/curation.py` (`apply_ops` `set_box` / `add`, `Curation.edit`) |
