@@ -46,3 +46,8 @@
 /* no box editor, no curation fixes / undo / ignore, no tag writes: the server refuses them anyway (403) */
 html[data-role="viewer"] #btn-tag, html[data-role="viewer"] #vw-edit, html[data-role="viewer"] #vw-editbar,
 html[data-role="viewer"] #cur-fixall, html[data-role="viewer"] .cur-fixes, html[data-role="viewer"] #cur-toast-undo { display: none !important; }
+
+/* ---------------------------------------------------------------- an embeddings session (main.ts html.no-boxes) */
+/* rows with metadata instead of boxes in images: no curation, models, box filters or image viewer (the server answers
+   409 for those routes anyway) */
+html.no-boxes .needs-boxes { display: none !important; }

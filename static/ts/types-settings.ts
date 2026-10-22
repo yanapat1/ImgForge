@@ -8,7 +8,7 @@ export type StatusKind = 'busy' | 'ok' | 'err' | '';
 export interface StatusLine { kind: StatusKind; text: string }
 
 export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace' | 'account' | 'users';
-export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'labeling' | 'conn' | 'model' | 'llm-form' | 'llm-add';
+export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'labeling' | 'embeddings' | 'conn' | 'model' | 'llm-form' | 'llm-add';
 
 /** openSettings options (the Sessions home opens the dialog in solo mode). */
 export interface OpenSettingsOpts {
@@ -19,7 +19,7 @@ export interface OpenSettingsOpts {
 }
 
 // ------------------------------------------------------------------ browsing
-export interface FolderEntry { name: string; yolo?: boolean }
+export interface FolderEntry { name: string; yolo?: boolean; embeddings?: boolean }
 export interface YoloInfo { images: number; labels: number; classes: boolean; bytes?: number }
 /** GET api/fs/browse, POST api/connections/browse */
 export interface BrowseResult {
@@ -28,6 +28,14 @@ export interface BrowseResult {
   folders: FolderEntry[];
   yolo?: boolean;
   info?: YoloInfo | null;
+  embeddings?: boolean;
+}
+/** GET api/fs/embeddings: what an embeddings session on that folder would hold (data/embedding_source.py check). */
+export interface EmbeddingsSummary {
+  path: string; n: number; label: boolean; classes: number;
+  features: Array<{ key: string; name: string; dim: number }>;
+  previews: Array<'image' | 'audio' | 'video' | 'text'>;
+  columns: Array<{ name: string; type: 'num' | 'cat' | 'text' }>;
 }
 
 // ------------------------------------------------------------------ connections
@@ -63,8 +71,9 @@ export interface ConnTestResult {
 // ------------------------------------------------------------------ datasets (sessions)
 export interface DatasetItem {
   id: string; name: string;
-  kind: 's3' | 'local' | 'labeling';
+  kind: 's3' | 'local' | 'labeling' | 'embeddings';
   uri?: string;
+  modality?: string[];
   mode?: 'stream' | 'cache' | undefined;
   connection_id?: string; connection?: string | null;
   bucket?: string; prefix?: string; path?: string;
@@ -95,6 +104,12 @@ export type LocalForm = {
   form: 'local';
   id?: string | undefined; path?: string | undefined; name?: string | undefined;
   browse?: BrowseResult | null | undefined;
+  status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
+};
+export type EmbeddingsForm = {
+  form: 'embeddings';
+  id?: string | undefined; path?: string | undefined; name?: string | undefined;
+  browse?: BrowseResult | null | undefined; summary?: EmbeddingsSummary | null | undefined;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
 export type LabelingForm = {
@@ -210,7 +225,7 @@ export type LlmForm = {
   lastTest: { ok: boolean; sig: string } | null; saveStatus: StatusLine | null;
 };
 
-export type SetForm = S3Form | LocalForm | LabelingForm | ConnForm | ModelForm | LlmForm;
+export type SetForm = S3Form | LocalForm | EmbeddingsForm | LabelingForm | ConnForm | ModelForm | LlmForm;
 
 // ------------------------------------------------------------------ the dialog state
 export interface SetState {

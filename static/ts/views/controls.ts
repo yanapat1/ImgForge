@@ -289,9 +289,9 @@ export async function onGroupControls(): Promise<void> {
 export function renderFeatureSelect(selected?: string): void {
   const sel = $req<HTMLSelectElement>('feature');
   const cur = selected || sel.value;
-  const groups = { deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
+  const groups = { provided: 'Your vectors', deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
   const features = status().features ?? [];
-  sel.innerHTML = Object.entries(groups).map(([g, title]) =>
+  sel.innerHTML = Object.entries(groups).filter(([g]) => features.some((f) => f.group === g)).map(([g, title]) =>
     `<optgroup label="${title}">` + features.filter((f) => f.group === g).map((f) =>
       `<option value="${esc(f.key)}" title="${esc(f.note || '')}">${f.cached ? '✓ ' : '  '}${esc(f.label)}</option>`
     ).join('') + '</optgroup>').join('');

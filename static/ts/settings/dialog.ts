@@ -8,7 +8,7 @@ import { setBar, waitJob } from '../core/jobs.js';
 import { vizUrl } from '../core/nav.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
 import { updateMarks } from '../plot/marks.js';
-import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
+import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, EmbeddingsSummary, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
   SectionId, SetAction, SetChange, SetState } from '../types-settings.js';
 import { connDefaults, connEditable, connKind, connTestText, dd, fillWorkspaceSec, formOf, renderAppearanceSec, renderConnsSec, renderDatasetsSec, renderPlotSec,
   renderWorkspaceSec, rowAttr, SECTIONS, setDisabled, statusHTML, VIZ_TASKS } from './forms.js';
@@ -98,7 +98,7 @@ export function renderSettings(): void {
   count('snav-nms', SET.models.length);
   count('snav-nllm', SET.llm ? SET.llm.providers.length : 0);
   const [title, sub] = SET.solo ? [SET.form && 'id' in SET.form && SET.form.id ? 'Edit session' : 'New session',
-    'One YOLO dataset: a folder on this machine, an S3 / RustFS prefix, or a task of a labeling session'] : SECTIONS[SET.sec];
+    'One dataset: a YOLO folder or S3 / RustFS prefix, a task of a labeling session, or a folder of embeddings (vectors + a meta table)'] : SECTIONS[SET.sec];
   $req('sec-title').innerHTML = `${esc(title)}<span class="sub">${esc(sub)}</span>`;
   const body = $req('settings-body');
   body.innerHTML = (SET.error ? `<div class="status-line err">${icon('alert')}${esc(SET.error)}</div>` : '') + RENDERERS[SET.sec]();
@@ -128,6 +128,7 @@ function editDataset(id: string): void {
   if (!d) return;
   if (d.kind === 's3') newS3Form(d);
   else if (d.kind === 'labeling') void newLabelingForm(d);
+  else if (d.kind === 'embeddings') { SET.view = 'embeddings'; SET.sec = 'datasets'; SET.form = { form: 'embeddings', id: d.id, path: d.path, name: d.name }; renderSettings(); void embBrowse(d.path); }
   else { SET.view = 'local'; SET.sec = 'datasets'; SET.form = { form: 'local', id: d.id, path: d.path, name: d.name }; renderSettings(); void localBrowse(d.path); }
 }
 
@@ -177,6 +178,27 @@ async function localBrowse(path: string | null | undefined): Promise<void> {
     f.status = null;
   } catch (e) { f.status = { kind: 'err', text: errText(e) }; }
   renderSettings();
+}
+
+// embeddings folder: browse like a local folder; a folder that looks right is checked by the server (row counts,
+// vector shapes, preview paths), so the form shows exactly what the session will hold before it is saved
+async function embBrowse(path: string | null | undefined): Promise<void> {
+  const f = formOf('embeddings');
+  f.status = { kind: 'busy', text: 'reading folder…' };
+  f.summary = null;
+  renderSettings();
+  try {
+    f.browse = await getJSON<BrowseResult>(`api/fs/browse?path=${encodeURIComponent(path || '')}`);
+    f.path = f.browse.path;
+    f.status = null;
+    if (f.browse.embeddings) {
+      f.status = { kind: 'busy', text: 'checking the vectors and meta table…' };
+      renderSettings();
+      f.summary = await getJSON<EmbeddingsSummary>(`api/fs/embeddings?path=${encodeURIComponent(f.browse.path)}`);
+      f.status = null;
+    }
+  } catch (e) { f.status = { kind: 'err', text: errText(e) }; }
+  if (SET.form === f) renderSettings();
 }
 
 function newS3Form(d: DatasetItem | null): void {
@@ -242,6 +264,18 @@ const SET_ACTIONS: Record<string, SetAction> = {
   'new-s3': () => newS3Form(null),
   'new-local': () => { SET.view = 'local'; SET.form = { form: 'local', path: '', name: '' }; renderSettings(); void localBrowse(''); },
   'new-labeling': () => newLabelingForm(null),
+  'new-embeddings': () => { SET.view = 'embeddings'; SET.form = { form: 'embeddings', path: '', name: '' }; renderSettings(); void embBrowse(''); },
+  'emb-go': () => embBrowse(formOf('embeddings').path),
+  'emb-up': () => embBrowse(formOf('embeddings').browse?.parent),
+  'emb-crumb': (b) => embBrowse('/' + dd(b, 'to')),
+  'emb-folder': (b) => {
+    const br = formOf('embeddings').browse;
+    if (br) void embBrowse(`${br.path.replace(/\/$/, '')}/${dd(b, 'name')}`);
+  },
+  'save-embeddings': (b) => {
+    const f = formOf('embeddings');
+    return saveDataset(f, 'saving…', () => postJSON<{ id: string }>('api/datasets', { id: f.id, kind: 'embeddings', path: f.summary?.path, name: f.name }), !!b.dataset.open);
+  },
   'test-conn': testConn,
   'go-prefix': () => { if (formOf('s3').bucket) void s3Browse(); },
   's3-crumb': (b) => { formOf('s3').prefix = dd(b, 'to'); void s3Browse(); },

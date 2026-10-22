@@ -106,6 +106,25 @@
 .folder.yolo .ico { color: var(--accent); }
 .folders .none { padding: var(--s3); color: var(--text-faint); font-size: var(--fs-sm); }
 
+/* ---- embeddings folder: what the session will hold (forms.ts summaryHTML), checked by the server before saving */
+.emb-summary { display: flex; flex-direction: column; gap: var(--s3); padding: var(--s3) var(--s4); border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2); }
+.emb-figs { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); color: var(--text-muted); font-size: var(--fs-sm); }
+.emb-figs b { margin-right: 6px; font-size: var(--fs-xl); font-weight: 650; color: var(--text); }
+.emb-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--s2) var(--s4); margin: 0; align-items: baseline; }
+.emb-dl dt { color: var(--text-muted); font-size: var(--fs-sm); }
+.emb-dl dd { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.emb-feat, .emb-col { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); background: var(--surface); font-size: var(--fs-xs); color: var(--text); max-width: 100%; }
+.emb-feat .num { color: var(--text-muted); }
+.emb-col i { font: 600 11px var(--mono); font-style: normal; color: var(--text-faint); }
+.emb-col.num i { color: var(--accent-text); }
+.emb-col.prev { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); }
+.emb-col .ico { width: 14px; height: 14px; }
+.emb-format summary { cursor: pointer; color: var(--text-muted); font-size: var(--fs-sm); }
+.emb-format pre { margin: var(--s2) 0; padding: var(--s3); overflow-x: auto; font-size: var(--fs-xs); line-height: 1.6; white-space: pre;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-muted); }
+
 /* load-mode radio cards */
 .radio-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); }
 .radio-card { display: flex; gap: var(--s3); padding: var(--s3) var(--s4); border: 1px solid var(--border-strong); border-radius: var(--r-lg);

@@ -12,6 +12,7 @@ import { galleryOrder } from './gallery.js';
 import { imageOrder, onImageEdited } from './image-grid.js';
 import { markEdited, modelEval } from './model.js';
 import { closeViewer, dirty, initViewer, refreshPreds, setBoxes, showImage, V } from './viewer.js';
+import { cardMedia, detailMedia, isRows, metaCols, metaText, rowId, stopAudio } from './preview.js';
 
 export let modalId: number | null = null;
 let predMode: { pid: number; list: number[] } | null = null;       // a model prediction with no label box (false positive) is shown
@@ -65,6 +66,7 @@ function openDialog(): void {
 const mayLeave = (): boolean => !dirty() || confirm('Discard the unsaved box changes?');
 
 export async function openModal(id: number, nav: { list: CardRef[] } | null = null): Promise<void> {
+  if (isRows()) { void openRow(id, nav); return; }
   if (!mayLeave()) return;
   openDialog();
   cardNav = nav;
@@ -109,6 +111,60 @@ export async function openModal(id: number, nav: { list: CardRef[] } | null = nu
     ['other boxes', s.same_image.length],
   );
   $req('modal-meta').innerHTML = metaHtml(rows);
+}
+
+// ---- an embeddings session's row: its preview (image / video / audio / text), metadata, and its nearest neighbours
+export async function openRow(id: number, nav: { list: CardRef[] } | null = null): Promise<void> {
+  openDialog();
+  stopAudio();                               // the dialog has its own player
+  cardNav = nav;
+  modalId = id;
+  predMode = null;
+  imageMode = null;
+  sampleImage = null;
+  $req('modal').classList.add('rows');
+  $req('m-group').classList.toggle('hidden', !S.groups);
+  $req('m-similar').classList.remove('hidden');
+  $req('m-prev').setAttribute('aria-label', 'Previous row');
+  $req('m-next').setAttribute('aria-label', 'Next row');
+  const P = S.P;
+  const c = P?.cls[id] ?? 0;
+  $req('modal-title').innerHTML = `<span class="chip"><span class="dot" style="background:${clsColor(c)}"></span>${esc(clsName(c))}</span>` +
+    `<span class="num">${esc(rowId(id))}</span><span class="muted num">#${id}</span>`;
+  $req('m-row-media').innerHTML = detailMedia(id);
+  // a small image (a 64 px digit, an icon) is shown big with its real pixels, not blurred by smoothing
+  const im = $req('m-row-media').querySelector<HTMLImageElement>('img.rd-image');
+  im?.addEventListener('load', () => im.classList.toggle('tiny', Math.max(im.naturalWidth, im.naturalHeight) < 240), { once: true });
+  $req('m-row-nbrs').innerHTML = '<div class="rd-nbrs-head"><b>Nearest rows</b><span class="muted">loading…</span></div>';
+  const feature = S.viewReq ? S.viewReq.feature : '';
+  const g = S.groups ? S.groups.of.get(id) : undefined;
+  const rows: MetaRow[] = [['class', `${esc(clsName(c))} (${c})`], ['row id', esc(rowId(id))]];
+  const sug = P?.suggested?.[id];
+  if (P?.suspicion && sug !== undefined) {
+    rows.push(['kNN suggests', `${esc(clsName(sug))} · ${Math.round((P.suspicion[id] ?? 0) * 100)}% neighbours disagree`, true],
+      ['class distance', num(P.outlier?.[id], 4)], ['features', esc(featureLabel(feature || null))]);
+  }
+  if (g !== undefined) rows.push(['group', g === -1 ? '<span class="txt-danger">outlier</span> (fits no group)' : `group ${g}`, true]);
+  for (const [col, t] of metaCols()) rows.push([esc(col), esc(metaText(P?.meta?.[col]?.[id])), t === 'text']);
+  $req('modal-meta').innerHTML = metaHtml(rows);
+  // the neighbours in feature space, as cards: the quickest way to see why a row sits where it does
+  try {
+    const fkey = String(S.scoresFeature ?? feature);
+    const r = await getJSON<{ id: number[]; sim: number[] }>(`api/similar/${id}?k=12&feature=${encodeURIComponent(fkey)}`);
+    if (modalId !== id) return;
+    const euclid = S.status?.features?.find((f) => f.key === fkey)?.metric === 'euclidean';
+    $req('m-row-nbrs').innerHTML = `<div class="rd-nbrs-head"><b>Nearest rows</b><span class="muted">${esc(featureLabel(S.scoresFeature ?? feature))}</span></div>` +
+      '<div class="rd-cards">' + r.id.map((n, i) => {
+        const nc = P?.cls[n] ?? 0;
+        // similarity = 1 - d²/2 (ml/analysis.py knn): a cosine for unit-length vectors, else shown as the distance
+        const s = r.sim[i] ?? 0;
+        const score = euclid ? `d ${Math.sqrt(Math.max(0, 2 * (1 - s))).toPrecision(3)}` : s.toFixed(2);
+        return `<div class="card" data-id="${n}" role="button" tabindex="0" title="${esc(rowId(n))} · ${esc(clsName(nc))}">${cardMedia(n)}` +
+          `<span class="badge" style="--c:${clsColor(nc)}">${esc(clsName(nc))}</span><span class="score">${score}</span></div>`;
+      }).join('') + '</div>';
+  } catch (e) {
+    if (modalId === id) $req('m-row-nbrs').innerHTML = `<div class="rd-nbrs-head"><b>Nearest rows</b><span class="muted">${esc(String(e instanceof Error ? e.message : e))}</span></div>`;
+  }
 }
 
 function modelRow(id: number): string {
@@ -223,6 +279,8 @@ export function closeModal(): void {
   if (!mayLeave()) return;
   closeViewer();
   $req('modal').classList.add('hidden');
+  $req('modal').classList.remove('rows');
+  $req('m-row-media').innerHTML = '';             // stops a playing clip
   modalId = null;
   predMode = null;
   imageMode = null;

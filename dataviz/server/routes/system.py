@@ -85,7 +85,7 @@ def router(state, ctx):
             'default_feature': st.default_feature,
             'startup': {'feature': st.default_feature, 'method': st.startup_method, 'cached': st.embedding_cached()},
             'features': [{'key': s.key, 'label': s.label, 'group': s.group, 'note': s.note, 'text': bool(s.text_model),
-                          'cached': st.feature_cached(s.key)} for s in st.registry.values()],
+                          'metric': s.metric, 'cached': st.feature_cached(s.key)} for s in st.registry.values()],
             'caps': capabilities(st),
             'dataset': {'id': st.dataset_id, 'name': st.source.name, 'uri': st.source.uri,
                         'kind': st.source.kind, 'mode': getattr(st.source, 'mode', None),
