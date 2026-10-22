@@ -69,7 +69,8 @@ const CB_CLASS: Record<ThemeName, string[]> = {
 const isCb = (p: string): boolean => p === 'cbsafe' || p === 'contrast';
 
 /** Colour-by fields that are numbers (columns of the points payload): label, transform, colour scale. */
-export type ContinuousKey = 'suspicion' | 'outlier' | 'area' | 'aspect' | 'brightness' | 'blur' | 'm_score';
+export type ContinuousKey = 'suspicion' | 'outlier' | 'area' | 'aspect' | 'brightness' | 'blur' | 'm_score' |
+  'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob';
 export interface ContinuousField { label: string; f: (v: number) => number; scale: ScaleName }
 export const CONTINUOUS: Record<ContinuousKey, ContinuousField> = {
   suspicion: { label: 'label suspicion', f: (v: number) => v, scale: 'alarm' },
@@ -79,6 +80,11 @@ export const CONTINUOUS: Record<ContinuousKey, ContinuousField> = {
   brightness: { label: 'brightness', f: (v: number) => v, scale: 'grey' },
   blur: { label: 'log10 sharpness', f: (v: number) => Math.log10(v + 1), scale: 'seq' },
   m_score: { label: 'model confidence', f: (v: number) => v, scale: 'seq' },
+  // cleanlab (out-of-fold probabilities): drawn so that bright = suspicious, like label suspicion
+  cl_quality: { label: '1 − label quality', f: (v: number) => 1 - v, scale: 'alarm' },
+  cl_given_prob: { label: 'P(given class)', f: (v: number) => v, scale: 'seq' },
+  cl_ood_feat: { label: 'out-of-distribution', f: (v: number) => v, scale: 'alarm' },
+  cl_ood_prob: { label: 'out-of-distribution (probs)', f: (v: number) => v, scale: 'alarm' },
 };
 
 /** Is `k` one of the CONTINUOUS colour-by fields? */

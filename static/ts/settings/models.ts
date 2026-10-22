@@ -1,12 +1,14 @@
 // Settings › Models: the saved models (list + models found in the project) and the add / edit form:
 // 1 name + family · 2 file format · 3 where it comes from (server path, upload, or an HTTP API) · 4 options,
-// plus, for Custom models and generic APIs, the exact output structure the model has to produce.
+// plus, for Custom models and generic APIs, the exact output structure the model has to produce, and 5 the plot:
+// any file model (or a Hugging Face backbone) can embed the boxes as a feature space, before the projection.
 
 import { api, errText, getJSON, postJSON } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
-import type { CustomSpec, FoundModel, LabelModelEntry, ModelApi, ModelBrowse, ModelDraft, ModelFamily, ModelForm, ModelFormat, ModelItem, ModelSpec,
+import type { CustomSpec, FoundModel, ModelEmbed, LabelModelEntry, ModelApi, ModelBrowse, ModelDraft, ModelFamily, ModelForm, ModelFormat, ModelItem, ModelSpec,
   ServingEntry, SetAction, SetChange } from '../types-settings.js';
+import { refreshStatus } from '../views/controls.js';
 import { modelsChanged } from '../views/model.js';
 import { SET, renderSettings } from './dialog.js';
 import { dd, fmtBytes, formOf, rowAttr, setDisabled, statusHTML, tagc } from './forms.js';
@@ -15,13 +17,17 @@ const FAMILIES: Record<ModelFamily, [string, string]> = {
   yolo: ['YOLO', 'ultralytics detect models (YOLOv5u / v8 / 11 / 26 …). Class names come from the weights.'],
   rfdetr: ['RF-DETR', 'Roboflow RF-DETR nano … 2xlarge: rfdetr checkpoints, or this repo’s train_rfdetr.py runs.'],
   custom: ['Custom', 'Any other detector. It must give boxes in the structure shown below, or use a small Python adapter.'],
+  hf: ['Hugging Face', 'An image backbone (e.g. facebook/dinov2-base, or your fine-tuned folder): embeds boxes for the plot, does not detect.'],
 };
 const FORMATS: Record<ModelFormat, [string, string]> = {
   pt: ['.pt', 'PyTorch checkpoint / TorchScript'], pth: ['.pth', 'PyTorch weights / state dict'],
   pkl: ['.pkl', 'pickled model (trusted files only)'], safetensors: ['.safetensors', 'weights only: needs the architecture'],
   onnx: ['ONNX', '.onnx graph (onnxruntime, GPU if available)'], openvino: ['OpenVINO', 'folder with .xml + .bin (CPU)'],
   api: ['API', 'a model served over HTTP'],
+  hf: ['Hugging Face', 'hub id (owner/name) or a model folder'],
 };
+const POOLS: Array<[string, string]> = [['avg', 'average (feature map / tokens)'], ['cls', 'first token (CLS)'], ['flatten', 'flatten everything']];
+const blankEmbed = (): ModelDraft['embed'] => ({ enabled: false, layer: '', pool: 'avg', output: '', imgsz: '', batch_size: '' });
 const VARIANT_HELP = 'auto = read from the checkpoint (this repo’s runs store it) or the file name';
 
 const isFormat = (x: string): x is ModelFormat => x in FORMATS;
@@ -47,15 +53,18 @@ export function renderModelsSec(): string {
     const a = m.api;
     const tags = [tagc(FAMILIES[m.family][0], 'on'), tagc(FORMATS[m.format][0])];
     if (isApi && a?.preset === 'label') tags.push(tagc(`labeling API · ${(m.task_type || 'object_detection').replace('_', ' ')}`));
-    if (viz) tags.push(m.predicted ? tagc('run on this dataset', 'ok', 'check') : tagc('not run on this dataset'));
+    if (viz && m.family !== 'hf') tags.push(m.predicted ? tagc('run on this dataset', 'ok', 'check') : tagc('not run on this dataset'));
     if (m.exists === false) tags.push(tagc('file not found', 'bad', 'alert'));
+    const embeds = m.family === 'hf' || !!m.embed?.enabled;
+    if (embeds) tags.push(tagc('feature space in the plot', 'ok', 'scatter'));
     if (isApi && a?.has_key) tags.push(tagc('API key stored', '', 'check'));
     const where = isApi ? (a?.preset === 'serving' ? `${a.url} · ${a.provider}/${a.model_type}/${a.model_name}` : a?.url) : m.path;
     return `<div class="ds-card" data-mid="${esc(m.id)}"><div class="ds-icon${isApi ? ' s3' : ''}">${icon(isApi ? 'cloud' : 'model')}</div>` +
       `<div class="ds-main"><div class="ds-title">${esc(m.name)}</div><div class="ds-uri" title="${esc(where)}">${esc(where)}</div>` +
       `<div class="ds-meta">${tags.join('')}</div></div><div class="ds-actions">` +
-      `<button data-act="test-model" title="Load it and predict one image">${icon('plug')}Test</button>` +
-      (m.predicted || !viz ? '' : `<button class="primary" data-act="run-model" title="Predict every image of the open dataset">${icon('play')}Run</button>`) +
+      (m.family === 'hf' ? '' : `<button data-act="test-model" title="Load it and predict one image">${icon('plug')}Test</button>`) +
+      (embeds && viz ? `<button data-act="test-embed" title="Embed four boxes of this dataset: the embedding size and speed">${icon('scatter')}Test embeddings</button>` : '') +
+      (m.predicted || !viz || m.family === 'hf' ? '' : `<button class="primary" data-act="run-model" title="Predict every image of the open dataset">${icon('play')}Run</button>`) +
       `<button class="icon-btn ghost" data-act="edit-model" aria-label="Edit" title="Edit">${icon('edit')}</button>` +
       `<button class="icon-btn ghost" data-act="remove-model" aria-label="Remove" title="Remove (uploaded files are deleted, files elsewhere are not)">${icon('trash')}</button>` +
       `</div><div class="ds-progress" id="mst-${esc(m.id)}"></div></div>`;
@@ -67,14 +76,14 @@ export function renderModelsSec(): string {
     `<div class="ds-actions"><button data-act="add-found" data-i="${i}">${icon('plus')}Add</button></div></div>`).join('');
   return `<section><div class="sec-actions"><button class="primary" data-act="new-model">${icon('plus')}Add model</button>` +
     '<span class="sec-note">Models are shared by every dataset and by the labeling page (link one to a task, then activate it there); ' +
-    'predictions are cached per dataset. Use them in the <b>Model</b> tab.</span></div>' +
+    'predictions are cached per dataset. Use them in the <b>Model</b> tab, and (with “Use in the plot”) as a feature space under <b>Features › My models</b>.</span></div>' +
     cards + (found ? `<h4 class="m-found-h">Found in this project</h4>${found}` : '') + '</section>';
 }
 
 // ---------------------------------------------------------------- form
 function blankModel(): ModelDraft {
   return { name: '', family: 'yolo', format: 'pt', path: '', variant: '', arch: '', adapter: '', imgsz: '', conf: '', iou: '',
-    task_type: 'object_detection',
+    task_type: 'object_detection', embed: blankEmbed(),
     api: { preset: 'serving', url: '', version: 'v1', provider: '', model_type: '', model_name: '', headers: '', api_key: '', label_model: '',
       auth_header: 'Authorization', send: 'multipart', field: 'file',
       mapping: { detections: 'detections', box: 'box', score: 'score', class_id: 'class_id', class_name: 'class_name', box_format: 'xyxy', normalized: false } } };
@@ -86,10 +95,11 @@ function openForm(m: ModelItem | null | undefined): void {
   const base = blankModel();
   const ma = m?.api;
   const model: ModelDraft = m ? { ...base, ...m, imgsz: m.imgsz ?? '', conf: m.conf ?? '', iou: m.iou ?? '',
+    embed: { ...base.embed, ...(m.embed ?? {}), imgsz: m.embed?.imgsz ?? '', batch_size: m.embed?.batch_size ?? '' },
     api: { ...base.api, ...(ma ?? {}), api_key: '', mapping: { ...base.api.mapping, ...(ma?.mapping ?? {}) } } } : base;
   SET.form = { form: 'model', model, source: 'path', hasKey: !!(ma && ma.has_key) };
   renderSettings();
-  if (model.format !== 'api') void browse(model.path ? model.path.replace(/\/[^/]*$/, '') : '');
+  if (model.format !== 'api' && model.format !== 'hf') void browse(model.path ? model.path.replace(/\/[^/]*$/, '') : '');
 }
 
 async function browse(path: string | null | undefined): Promise<void> {
@@ -129,13 +139,14 @@ function renderModelForm(): string {
     (['pkl', 'pt', 'pth'].includes(m.format) ? '<p class="sec-note">.pkl and full PyTorch checkpoints run code when loaded: only add files you trust. ' +
       'Files must be inside the project (or config <code>models.allowed_roots</code>) or uploaded here.</p>' : '');
   // 3 source
-  const s3 = m.format === 'api' ? apiHTML(m.api, f) : sourceHTML(f);
+  const s3 = m.format === 'api' ? apiHTML(m.api, f) : m.format === 'hf' ? hfHTML(m) : sourceHTML(f);
   // 4 options
   const s4 = optionsHTML(m);
   const needSpec = m.family === 'custom' || (m.format === 'api' && m.api.preset === 'generic');
   return '<section>' + step(1, 'Name and model family', s1, !!m.name) + step(2, 'File format', s2, true) +
-    step(3, m.format === 'api' ? 'API endpoint' : 'Model file', s3, m.format === 'api' ? !!m.api.url : !!m.path) +
-    step(4, 'Options', s4) + (needSpec && spec ? step('?', 'Required model output', specHTML(spec.custom, m)) : '') +
+    step(3, m.format === 'api' ? 'API endpoint' : m.format === 'hf' ? 'Hugging Face model' : 'Model file', s3, m.format === 'api' ? !!m.api.url : !!m.path) +
+    (m.family === 'hf' ? '' : step(4, 'Options', s4)) + (m.format === 'api' ? '' : step(m.family === 'hf' ? 4 : 5, 'Use in the plot (embeddings)', embedHTML(m), m.family === 'hf' || m.embed.enabled)) +
+    (needSpec && spec ? step('?', 'Required model output', specHTML(spec.custom, m)) : '') +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-model">${icon('check')}${editing ? 'Save' : 'Add'}</button>` +
     `<button class="primary" data-act="save-model" data-test="1">${icon('plug')}${editing ? 'Save' : 'Add'} &amp; test</button></div></section>`;
@@ -164,6 +175,38 @@ function sourceHTML(f: ModelForm): string {
         `${tagc(fmtBytes(x.size))}${x.format ? tagc(FORMATS[x.format][0], 'on') : ''}</button>`).join('') +
       (!b.folders.length && !files.length ? '<div class="none">nothing here</div>' : '') + '</div></div>' : '') +
     statusHTML(f.status || (m.path ? { kind: 'ok', text: `selected: ${m.path}` } : { kind: '', text: 'Pick the weights file (or an OpenVINO folder).' }));
+}
+
+function hfHTML(m: ModelDraft): string {
+  return '<div class="form-grid">' + `<label class="fld full mono">Hub id or folder<input type="text" data-f="model.path" value="${esc(m.path || '')}" placeholder="facebook/dinov2-base"></label>` +
+    '</div><p class="sec-note">A hub id is downloaded on first use (safetensors only, no remote code), so anyone may add one. A folder on the server ' +
+    '(your fine-tuned <code>save_pretrained</code> output) needs an admin. Image size, mean and std come from its preprocessor config.</p>';
+}
+
+// 5: the model as a feature space of the plot (projected with UMAP / PaCMAP / t-SNE / PCA, scored by k-NN and cleanlab)
+function embedHTML(m: ModelDraft): string {
+  const e: ModelEmbed = m.embed, hf = m.family === 'hf';
+  const exported = m.format === 'onnx' || m.format === 'openvino';
+  const on = hf || e.enabled;
+  const g: string[] = [];
+  if (!hf) {
+    g.push(`<label class="fld full"><span class="check" style="margin:0"><input type="checkbox" data-f="model.embed.enabled" data-act-change="model-rerender" ${e.enabled ? 'checked' : ''}> ` +
+      'Offer this model under <b>Features › My models</b>: its embedding of every box is projected, searched and scored like DINOv2 or CLIP</span></label>');
+  }
+  if (on) {
+    if (exported) {
+      g.push(fld('Graph output', 'model.embed.output', e.output, { mono: true, ph: '0 or e.g. embeddings',
+        help: 'the output (name or number) holding the embedding; export one if the graph only has detections' }));
+    } else if (!hf) {
+      g.push(fld('Layer', 'model.embed.layer', e.layer, { mono: true, ph: m.family === 'rfdetr' ? 'backbone' : m.family === 'yolo' ? 'empty = YOLO embed()' : 'e.g. backbone or model.9',
+        help: m.family === 'custom' ? 'a module path to hook; empty = the model output (or adapter embed())' : 'module path to hook (model.named_modules()); empty = the default' }));
+    }
+    g.push(sel('Pooling', 'model.embed.pool', e.pool, POOLS, 'how a feature map or a token sequence becomes one vector'));
+    g.push(fld('Crop size (px)', 'model.embed.imgsz', e.imgsz, { type: 'number', ph: hf ? 'from the preprocessor' : '224', help: 'box crops are resized to this' }));
+    g.push(fld('Batch size', 'model.embed.batch_size', e.batch_size, { type: 'number', ph: 'auto' }));
+  }
+  return `<div class="form-grid">${g.join('')}</div>` + (on ? '<p class="sec-note">Changing the weights or these settings computes a new feature space; ' +
+    'after saving, pick it in the plot’s projection menu. The k-NN checks and cleanlab’s label-quality check then run on your embeddings.</p>' : '');
 }
 
 function apiHTML(a: ModelApi, f: ModelForm): string {
@@ -217,7 +260,7 @@ function optionsHTML(m: ModelDraft): string {
   if (m.family === 'rfdetr' && m.format !== 'api') {
     g.push(sel('Size (variant)', 'model.variant', m.variant || '', [['', 'auto'], ...(SET.spec?.rfdetr_variants ?? []).map((v): [string, string] => [v, v])], VARIANT_HELP));
   }
-  if (m.format !== 'api') {
+  if (m.format !== 'api' && m.format !== 'hf') {
     g.push(fld('Input size (px)', 'model.imgsz', m.imgsz, { type: 'number', ph: m.family === 'custom' ? '640' : 'auto',
       help: m.family === 'custom' ? 'square letterbox the model expects' : 'auto = training size from the weights' }));
   }
@@ -274,10 +317,23 @@ async function testModel(id: string, el: HTMLElement): Promise<boolean> {
   } catch (e) { el.innerHTML = statusHTML({ kind: 'err', text: errText(e) }); return false; }
 }
 
+/** POST api/models/{id}/test-embed: embed 4 boxes of the open dataset. */
+async function testEmbed(id: string, el: HTMLElement): Promise<boolean> {
+  if (!onDataset()) { el.innerHTML = statusHTML({ kind: 'err', text: 'open a visualize session to test embeddings on its boxes' }); return false; }
+  el.innerHTML = statusHTML({ kind: 'busy', text: 'loading the model and embedding four boxes (a hub model downloads first)…' });
+  try {
+    const r = await postJSON<{ dim: number; n: number; ms: number }>(`api/models/${encodeURIComponent(id)}/test-embed`, {});
+    el.innerHTML = statusHTML({ kind: 'ok', text: `works · ${r.dim}-dimensional embeddings · ${r.n} boxes in ${r.ms} ms · pick it under Features › My models` });
+    return true;
+  } catch (e) { el.innerHTML = statusHTML({ kind: 'err', text: errText(e) }); return false; }
+}
+
 /** The model as POSTed: the api block only for HTTP models. */
 function payload(): Omit<ModelDraft, 'api'> & { api?: ModelApi } {
-  const { api: a, ...rest } = formOf('model').model;
-  return rest.format === 'api' ? { ...rest, api: a } : rest;
+  const { api: a, embed, ...rest } = formOf('model').model;
+  const num = (v: unknown): number | null => (v === '' || v == null || !Number.isFinite(+v) ? null : +v);
+  const e = { ...embed, imgsz: num(embed.imgsz), batch_size: num(embed.batch_size) };
+  return rest.format === 'api' ? { ...rest, embed: e, api: a } : { ...rest, embed: e };
 }
 
 /** POST api/models/upload */
@@ -404,11 +460,16 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
     try { saved = await postJSON<ModelItem>('api/models', payload()); } catch (e) { f.saveStatus = { kind: 'err', text: errText(e) }; renderSettings(); return; }
     await loadModelsData();
     void modelsChanged();
+    if (onDataset()) void refreshStatus();         // the plot's feature list (My models) follows
     SET.view = 'list';
     SET.form = null;
     renderSettings();
-    if (b.dataset.test) { const el = $(`mst-${saved.id}`); if (el) void testModel(saved.id, el); }
+    if (b.dataset.test) {
+      const el = $(`mst-${saved.id}`);
+      if (el) void (saved.family === 'hf' ? testEmbed(saved.id, el) : testModel(saved.id, el));
+    }
   },
+  'test-embed': (b) => { const id = rowAttr(b, '[data-mid]', 'mid'); void testEmbed(id, $req(`mst-${id}`)); },
   'test-model': (b) => { const id = rowAttr(b, '[data-mid]', 'mid'); void testModel(id, $req(`mst-${id}`)); },
   'run-model': async (b) => {
     const id = rowAttr(b, '[data-mid]', 'mid'), el = $req(`mst-${id}`);
@@ -438,6 +499,7 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
     try { await api(`api/models/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); } catch (e) { alert(errText(e)); }
     await loadModelsData();
     void modelsChanged();
+    if (onDataset()) void refreshStatus();
     renderSettings();
   },
 };

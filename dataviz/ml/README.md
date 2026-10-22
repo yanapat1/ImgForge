@@ -10,6 +10,8 @@ files it is given — which is why `core/workers.py` can run these functions in 
 |---|---|
 | `features.py` | The **feature registry** (`build_registry`): deep models from `config.yaml features.models` (DINOv2, CLIP / OpenCLIP, SigLIP 2 via Hugging Face), your newest YOLO `best.pt` backbones, and fast CPU features (colour histogram, HOG, box geometry). Each `FeatureSpec` has `fn(crop_paths, samples, progress) → (N, D)` and a `metric`. Plus the `.npy` cache helpers. |
 | `analysis.py` | `project()` (UMAP / PaCMAP / LocalMAP / t-SNE / PCA), `knn()`, `label_suspicion()`, `outlier_scores()`, `near_duplicates()`, `find_groups()` (HDBSCAN + bubble polygons). `METHODS` = the methods offered in the page. |
+| `label_quality.py` | cleanlab on **k-fold out-of-fold predicted probabilities**: `oof_pred_probs()` (StratifiedKFold; logreg / kNN / MLP on the feature space, PCA-reduced), `cleanlab_report()` (label quality, label issues + rank, suggested class, out-of-distribution scores, confident joint, class ranking, overlapping classes, health score), `run()` (both, leaving out removed boxes and classes under `min_class_count`), `od_report()` (cleanlab object detection on a detector's predictions: bad location, swapped class, overlooked objects). |
+| `user_features.py` | Settings › Models entries as feature spaces (`model:<id>:<hash>`): YOLO `embed()`, a forward hook on a torch layer, an adapter `embed()`, an ONNX / OpenVINO output, or a Hugging Face backbone. `OwnerModels` lists a session owner's embedding models for `features.FeatureRegistry`. |
 
 ## How the code is written
 

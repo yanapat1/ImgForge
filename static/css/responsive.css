@@ -6,8 +6,6 @@
 }
 @media (max-width: 1100px) {
   .stats-grid { grid-template-columns: minmax(0, 1fr); }
-  .ctl-group { border-right: none; border-bottom: 1px solid var(--border); flex: 1 1 100%; }
-  .ctl-group:last-child { border-bottom: none; }
 }
 @media (max-width: 900px) {
   :root { --header-h: auto; }
@@ -28,8 +26,7 @@
 }
 @media (max-width: 600px) {
   .segmented { flex-wrap: wrap; }
-  #feature, #saved-views { max-width: 100%; }
-  .gallery-head, .gallery, .ctl-group { padding-left: var(--s3); padding-right: var(--s3); }
+  .gallery-head, .gallery { padding-left: var(--s3); padding-right: var(--s3); }
 }
 
 @media (prefers-reduced-motion: reduce) {

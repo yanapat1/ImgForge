@@ -88,7 +88,7 @@ EMPTY_FILTER = {
     'scope': 'image', 'name': {'mode': 'substr', 'q': '', 'neg': False}, 'cls': {'mode': 'any', 'ids': []},
     'nbox': [None, None], 'area': [None, None], 'aspect': [None, None], 'brightness': [None, None],
     'blur': [None, None], 'session': [], 'tags': [], 'm_status': [], 'suspicion_min': None, 'outlier_min': None,
-    'issues': [], 'clip': {'q': '', 'k': 500},
+    'cl_quality_max': None, 'cl_issue': False, 'issues': [], 'clip': {'q': '', 'k': 500},
 }
 
 FILTER_SYSTEM = '''You turn a request into a filter for an object-detection dataset viewer. Answer JSON only:
@@ -96,8 +96,8 @@ FILTER_SYSTEM = '''You turn a request into a filter for an object-detection data
 <filter> has exactly this shape (the empty filter keeps everything):
 {"scope": "image", "name": {"mode": "substr", "q": "", "neg": false}, "cls": {"mode": "any", "ids": []},
  "nbox": [null, null], "area": [null, null], "aspect": [null, null], "brightness": [null, null], "blur": [null, null],
- "session": [], "tags": [], "m_status": [], "suspicion_min": null, "outlier_min": null, "issues": [],
- "clip": {"q": "", "k": 500}}
+ "session": [], "tags": [], "m_status": [], "suspicion_min": null, "outlier_min": null,
+ "cl_quality_max": null, "cl_issue": false, "issues": [], "clip": {"q": "", "k": 500}}
 Fields:
 - scope: "image" keeps whole images that have a matching box, "box" keeps only the matching boxes.
 - name: image file name match; mode substr | glob | regex | fuzzy; neg true = does NOT match.
@@ -107,6 +107,8 @@ Fields:
 - blur: [min, max] laplacian variance of the box (low = blurry, < 50 is blurry). Ranges use null for "no limit".
 - tags: tag names from the list (a box must have one). issues: curation issue types from the list.
 - suspicion_min / outlier_min: 0-1 scores (likely mislabel / outlier), null = off.
+- cl_quality_max: 0-1 cleanlab label quality at most (low = probably mislabelled), null = off; cl_issue: true keeps only
+  the labels cleanlab flags as wrong. Both need the label-quality check to have run (Find issues).
 - clip: text search by image content ("q": a short visual description, "k": how many hits) - only when the request
   describes what is visible and no other field can express it.
 - Leave session and m_status empty. Use only class ids, tags and issue types that exist below.'''
@@ -155,7 +157,8 @@ def clean_filter(spec, classes, tags=(), issues=()):
     out['tags'] = [str(t) for t in f.get('tags') or [] if str(t) in tset] if isinstance(f.get('tags'), list) else []
     iset = {str(t) for t in issues}
     out['issues'] = [str(t) for t in f.get('issues') or [] if str(t) in iset] if isinstance(f.get('issues'), list) else []
-    for k in ('suspicion_min', 'outlier_min'):
+    out['cl_issue'] = f.get('cl_issue') is True
+    for k in ('suspicion_min', 'outlier_min', 'cl_quality_max'):
         try:
             v = float(f.get(k)) if f.get(k) is not None else None
             out[k] = v if v is not None and math.isfinite(v) else None

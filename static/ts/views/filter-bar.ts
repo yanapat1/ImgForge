@@ -5,10 +5,11 @@
 
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
+import { bindPopover } from '../core/popover.js';
 import type { Agg, FilterExt, FilterResult } from '../core/filter.js';
 import { buildAgg, emptyFilter, filterActive, idMask, normalizeFilter, prepareTokens, refreshAgg, runFilter } from '../core/filter.js';
 import { waitJob } from '../core/jobs.js';
-import { meta, pts, S } from '../core/state.js';
+import { featureLabel, meta, pts, S } from '../core/state.js';
 import { clsColor, clsName, ERR } from '../core/theme.js';
 import { applyFilterMask } from '../plot/render.js';
 import type { ClsMode, FilterSpec, NameMode, Tags } from '../types.js';
@@ -185,6 +186,8 @@ function activeChips(): Array<[string, string]> {
   if (F.m_status.length) out.push(['m_status', `model: ${F.m_status.map((s) => (s < 0 ? 'not scored' : ERR[s]?.label)).join(', ')}`]);
   if (F.suspicion_min !== null) out.push(['suspicion_min', `suspicion ≥ ${F.suspicion_min}`]);
   if (F.outlier_min !== null) out.push(['outlier_min', `outlier ≥ ${F.outlier_min}`]);
+  if (F.cl_quality_max !== null) out.push(['cl_quality_max', `cleanlab quality ≤ ${F.cl_quality_max}`]);
+  if (F.cl_issue) out.push(['cl_issue', 'cleanlab label issues']);
   if (F.issues.length) out.push(['issues', `issue: ${F.issues.map((t) => FB.issueTypes[t]?.label || t).join(', ')}`]);
   if (F.clip.q.trim()) out.push(['clip', `text “${F.clip.q.trim()}” (top ${F.clip.k})`]);
   return out;
@@ -286,6 +289,9 @@ function renderMore(): void {
     `<label class="check"><input type="checkbox" data-k="m_status" value="${s}" ${F.m_status.includes(s) ? 'checked' : ''}> ${s < 0 ? 'not scored' : ERR[s]?.label}</label>`).join('') + '</div>' : '';
   const scores = P.suspicion ? `<div class="fb-range"><span id="fb-l-sus">Label suspicion ≥</span><input type="number" min="0" max="1" step="0.05" data-k="suspicion_min" value="${num(F.suspicion_min)}" aria-labelledby="fb-l-sus"></div>` +
     `<div class="fb-range"><span id="fb-l-out">Outlier score ≥</span><input type="number" min="0" step="0.01" data-k="outlier_min" value="${num(F.outlier_min)}" aria-labelledby="fb-l-out"></div>` : '';
+  const cl = P.cl_quality ? `<div class="fb-lbl">cleanlab <span class="muted">(${esc(S.lq ? featureLabel(S.lq.feature) : '')})</span></div>` +
+    `<div class="fb-range"><span id="fb-l-clq">Label quality ≤</span><input type="number" min="0" max="1" step="0.05" data-k="cl_quality_max" value="${num(F.cl_quality_max)}" aria-labelledby="fb-l-clq"></div>` +
+    `<div class="fb-checks"><label class="check"><input type="checkbox" data-k="cl_issue" ${F.cl_issue ? 'checked' : ''}> only label issues</label></div>` : '';
   const types = Object.entries(FB.issueTypes);
   const issues = `<div class="fb-lbl">Curation issues</div>` + (types.length ? '<div class="fb-checks">' + types.map(([t, v]) =>
     `<label class="check"><input type="checkbox" data-k="issues" value="${t}" ${F.issues.includes(t) ? 'checked' : ''}> ${esc(v.label)} <span class="muted num">${fmt(v.n)}</span></label>`).join('') + '</div>'
@@ -293,7 +299,7 @@ function renderMore(): void {
   const f = S.status && S.status.features && S.status.features.find((x) => x.key === $req<HTMLSelectElement>('feature').value);
   const clip = f && f.text ? `<div class="fb-lbl" id="fb-l-clip">Text (${esc(f.label)})</div><div class="fb-clip"><input type="search" data-k="clip" value="${esc(F.clip.q)}" placeholder="e.g. person on a bike" aria-labelledby="fb-l-clip">` +
     `<input type="number" min="1" max="20000" data-k="clip_k" value="${F.clip.k}" aria-label="How many boxes" title="How many closest boxes"></div>` : '';
-  $req('fb-more-pop').innerHTML = `<div class="pop-title">More filters</div>${rows}${sess}${tagHtml}${model}${scores}${issues}${clip}` +
+  $req('fb-more-pop').innerHTML = `<div class="pop-title">More filters</div>${rows}${sess}${tagHtml}${model}${scores}${cl}${issues}${clip}` +
     '<button type="button" class="ghost fb-clear" data-clear="more">Clear these filters</button>';
 }
 
@@ -306,7 +312,9 @@ function onMoreInput(e: Event): void {
     const v = el.value === '' ? null : +el.value;
     const i = +el.dataset.i;
     if (i === 0 || i === 1) F[k][i] = v !== null && Number.isFinite(v) ? v : null;
-  } else if (k === 'suspicion_min' || k === 'outlier_min') {
+  } else if (k === 'cl_issue') {
+    F.cl_issue = el instanceof HTMLInputElement && el.checked;
+  } else if (k === 'suspicion_min' || k === 'outlier_min' || k === 'cl_quality_max') {
     F[k] = el.value === '' || !Number.isFinite(+el.value) ? null : +el.value;
   } else if (k === 'session') {
     if (el instanceof HTMLSelectElement) F.session = [...el.selectedOptions].map((o) => o.value);
@@ -324,21 +332,6 @@ function onMoreInput(e: Event): void {
     F.clip.k = Math.max(1, Math.min(20000, +el.value || 500));
   }
   scheduleFilter();
-}
-
-function bindPopover(btnId: string, popId: string, onOpen?: () => void): void {
-  const btn = $req(btnId), pop = $req(popId);
-  const setOpen = (open: boolean): void => {
-    if (open && onOpen) onOpen();
-    pop.classList.toggle('hidden', !open);
-    btn.setAttribute('aria-expanded', String(open));
-  };
-  btn.addEventListener('click', () => setOpen(pop.classList.contains('hidden')));
-  document.addEventListener('mousedown', (e) => {
-    const t = e.target;
-    if (!pop.classList.contains('hidden') && t instanceof Node && !pop.contains(t) && !btn.contains(t)) setOpen(false);
-  });
-  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); btn.focus(); } });
 }
 
 function renderPresets(): void {

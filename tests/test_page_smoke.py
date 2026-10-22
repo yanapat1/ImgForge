@@ -496,3 +496,64 @@ def test_accounts_signup_sharing_owner_card_and_viewer(server):
         assert code == 403
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_plot_bar_and_cleanlab_label_quality(server):
+    """The one-row bar above the plot: projection / classes / display popovers hold the old controls (same ids);
+    Find issues runs cleanlab's k-fold label-quality check, fills the gallery with its label issues, unlocks the
+    cleanlab colourings and the Classes view's confident joint. DATAVIZ_SCREENSHOTS=<dir> saves the bar at 3 widths."""
+    sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+    shots = os.environ.get('DATAVIZ_SCREENSHOTS')
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?session={sid}')
+        page.click('#btn-compute')
+        page.wait_for_selector('#plot .main-svg', timeout=60000)
+        bar = page.locator('#controls').bounding_box()
+        assert bar['height'] < 60, f'the bar should be one row, is {bar["height"]}px'
+        assert 'PCA' in page.locator('#map-summary').inner_text()
+        assert page.locator('#feature').is_hidden()                 # inside the projection popover
+        page.click('#map-btn')
+        assert page.locator('#feature').is_visible() and page.locator('#btn-apply').is_visible()
+        page.keyboard.press('Escape')
+        assert page.locator('#map-pop').is_hidden()
+        page.click('#cls-btn')
+        page.select_option('#mode', 'single')
+        page.wait_for_function("document.querySelector('#cls-summary').textContent !== 'All classes'")
+        page.select_option('#mode', 'all')
+        page.keyboard.press('Escape')
+        if shots:
+            for w in (1400, 900, 560):
+                page.set_viewport_size({'width': w, 'height': 900})
+                page.locator('#controls').screenshot(path=f'{shots}/bar-{w}.png')
+            page.set_viewport_size({'width': 1400, 'height': 900})
+        # Find issues › cleanlab: nothing computed yet
+        page.click('#issues-btn')
+        assert page.locator('#btn-cl-issues').is_disabled()
+        assert page.locator('#color-by optgroup[data-needs="lq"]').evaluate('g => g.disabled')
+        page.on('dialog', lambda d: (errors.append(f'dialog: {d.message}'), d.dismiss()))
+        page.click('#btn-lq-run')
+        page.wait_for_function("!document.querySelector('#btn-cl-issues').disabled", timeout=60000)
+        assert 'health' in page.locator('#lq-info').inner_text()
+        assert page.locator('#issues-pop').is_visible()           # the run button keeps the menu open for its result
+        if shots:
+            page.locator('#issues-pop').screenshot(path=f'{shots}/issues-menu.png')
+        page.keyboard.press('Escape')
+        flagged = int(page.locator('#cl-issues-n').inner_text().split()[0].replace(',', ''))
+        if flagged:                                          # an earlier test may have fixed the noisy labels
+            assert 'cleanlab' in page.locator('#gallery-title').inner_text().lower()
+        page.select_option('#color-by', 'cl_quality')
+        page.wait_for_selector('#plot .colorbar', timeout=10000)
+        if shots:
+            page.click('#map-btn')
+            page.screenshot(path=f'{shots}/page-map-open.png')
+            page.keyboard.press('Escape')
+        page.click('#activity [data-tab="stats"]')
+        page.wait_for_selector('#stat-cl-card:not(.hidden) #stat-cl .main-svg', timeout=20000)
+        assert page.locator('#stat-cl-kpis .kpi').count() == 3
+        browser.close()
+    assert not errors, '\n'.join(errors)

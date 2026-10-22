@@ -86,6 +86,12 @@ function hoverText(id: number): string {
   if (Pt.suggested && Pt.suggested[id] !== Pt.cls[id]) {
     t += `<br>neighbours say: ${esc(clsName(Pt.suggested[id] ?? -1))} (${Math.round((Pt.suspicion?.[id] ?? NaN) * 100)}%)`;
   }
+  const q = Pt.cl_quality?.[id];
+  if (q != null) {
+    const g = Pt.cl_suggested?.[id] ?? -1;
+    t += `<br>cleanlab: quality ${q.toFixed(2)}` + (Pt.cl_issue?.[id] ? ` · <b style="color:${THEME.danger}">label issue</b>` : '') +
+      (g >= 0 && g !== Pt.cls[id] ? ` → ${esc(clsName(g))}` : '');
+  }
   if (Pt.m_status && (Pt.m_status[id] ?? -1) >= 0) {
     const st = Pt.m_status[id] ?? -1, pc = Pt.m_pred?.[id] ?? -1, sc = Pt.m_score?.[id] ?? NaN;
     t += `<br>model: <b style="color:${errColor(st)}">${ERR[st]?.label}</b>` +
@@ -163,8 +169,17 @@ function categorical(colorBy: string): Categorical {
     const sessions = [...idx.keys()];
     return { key: (id) => idx.get(Pt.session[id] ?? '') ?? -1, label: (k) => sessions[k], color: clsColor };
   }
-  const sug = Pt.suggested, ms = Pt.m_status, mp = Pt.m_pred;
+  const sug = Pt.suggested, ms = Pt.m_status, mp = Pt.m_pred, cli = Pt.cl_issue, cls = Pt.cl_suggested;
   if (colorBy === 'suggested' && sug) return { key: (id) => at(sug, id), label: clsName, color: clsColor };
+  if (colorBy === 'cl_suggested' && cls) {
+    return { key: (id) => (Pt.cl_quality?.[id] == null ? -1 : at(cls, id)),
+      label: (k) => (k < 0 ? 'not scored' : `cleanlab: ${clsName(k)}`), color: (k) => (k < 0 ? THEME.ungrouped : clsColor(k)) };
+  }
+  if (colorBy === 'cl_issue' && cli) {
+    return { key: (id) => (Pt.cl_quality?.[id] == null ? -1 : at(cli, id)),
+      label: (k) => (k < 0 ? 'not scored' : k ? 'cleanlab: label issue' : 'label looks right'),
+      color: (k) => (k < 0 ? THEME.ungrouped : k ? THEME.danger : THEME.muted) };
+  }
   if (colorBy === 'm_status' && ms) {
     return { key: (id) => at(ms, id), label: (k) => (k < 0 ? 'not scored (other split)' : `model: ${ERR[k]?.label}`), color: errColor };
   }

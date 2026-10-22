@@ -46,7 +46,7 @@ const cname = (c: number): string => clsName(c) ?? String(c);
 // ---------------------------------------------------------------- data
 export async function loadModels(): Promise<void> {
   const r = await getJSON<ModelsPayload>('api/models');
-  M.list = r.models;
+  M.list = r.models.filter((m) => m.family !== 'hf');      // Hugging Face backbones only embed (the plot's feature list)
   const saved = store.get(userKey('dataviz.model'));
   if (!M.list.some((m) => m.id === M.id)) {
     const pick = M.list.find((m) => m.id === saved) || M.list.find((m) => m.predicted) || M.list[0];

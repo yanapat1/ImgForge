@@ -1,18 +1,19 @@
 // The projection controls: method parameters, saved views, remembered UI settings, loading a view
-// (projection + scores, waiting on their jobs) and the Inspect actions.
+// (projection + scores, waiting on their jobs), cleanlab label quality and the Find issues actions.
 
 import { api, errMessage, getJSON, postJSON } from '../core/api.js';
 import { $, $req, esc, syncRanges } from '../core/dom.js';
 import { hideWait, showWait, waitJob } from '../core/jobs.js';
+import { toast } from '../core/toast.js';
 import { featureLabel, S, status, UI } from '../core/state.js';
 import { refreshGroups } from '../plot/groups.js';
 import { invalidateHover, renderPlot, visibleIndices } from '../plot/render.js';
-import type { PointsColumn, ProjectionRequest, ProjectionResult, SavedView, ScoresResult, Status, Tags, UiDefaults } from '../types.js';
+import type { LabelQualityReady, LabelQualityResult, PointsColumn, ProjectionRequest, ProjectionResult, SavedView, ScoresResult, Status, Tags, UiDefaults } from '../types.js';
 import type { ProjectionsPayload, SettingHook } from '../types-views.js';
 import { at } from './chart-util.js';
 import { galleryOrder, renderGallery, setSelection, sortedSelection } from './gallery.js';
-import { setCollapsed, setLeftWidth, syncClassFilter, updateGroupsBadge } from './layout.js';
-import { invalidateStats, renderClassTable, renderStats } from './stats.js';
+import { setCollapsed, setLeftWidth, setMapDirty, syncClassFilter, syncIssuesBtn, updateBarSummary, updateGroupsBadge } from './layout.js';
+import { invalidateStats, renderClassTable, renderStats, showConfusion } from './stats.js';
 
 /** [label, hint, step] of a method parameter's number input. */
 const PARAM_INFO: Record<string, [string, string, number]> = {
@@ -165,10 +166,14 @@ export async function loadView(): Promise<void> {
     }
     await ensureScores(req.feature, seq);
     if (seq !== viewSeq) return;
+    await loadLabelQuality(req.feature);
+    if (seq !== viewSeq) return;
     hideWait();
     S.view = r;
     S.viewPos = new Map(r.id.map((id, i): [number, number] => [id, i]));
     S.viewReq = req;
+    setMapDirty(false);
+    updateBarSummary();
     S.groups = null;
     invalidateHover();
     const ev = r.info && r.info.explained_variance;
@@ -232,7 +237,8 @@ export function toggleOff(view: string): boolean {
 }
 
 // a class chip changed: run the active Inspect check again so it follows the visible classes
-const INSPECT_BTN: Record<string, string> = { suspicious: 'btn-suspicious', far: 'btn-outliers', dups: 'btn-dups', 'sel-outliers': 'btn-sel-outliers' };
+const INSPECT_BTN: Record<string, string> = { suspicious: 'btn-suspicious', far: 'btn-outliers', dups: 'btn-dups', 'sel-outliers': 'btn-sel-outliers',
+  'cl-issues': 'btn-cl-issues', 'cl-low': 'btn-cl-low', 'cl-ood': 'btn-cl-ood' };
 export function reapplyInspect(): void {
   const id = INSPECT_BTN[S.activeView ?? ''];
   if (!id) return;
@@ -244,11 +250,147 @@ export function topBy(field: PointsColumn, n: number, title: string, view: strin
   const col = S.P?.[field];
   if (!col || toggleOff(view)) return;
   const sus = S.P?.suspicion;
-  const ids = viewIdsVisible().filter((id) => field !== 'suspicion' || (sus?.[id] ?? 0) > 0);
-  ids.sort((a, b) => at(col, b) - at(col, a));
+  const v = (id: number): number => col[id] ?? NaN;
+  const ids = viewIdsVisible().filter((id) => (field !== 'suspicion' || (sus?.[id] ?? 0) > 0) && Number.isFinite(v(id)));
+  ids.sort((a, b) => v(b) - v(a));
   $req<HTMLSelectElement>('sort').value = field;
   setSelection(ids.slice(0, n), `${title} · ${featureLabel(S.scoresFeature)}`, { view });
 }
+
+// ---- method parameters edited but not applied yet: the dot on the projection trigger
+export function updateMapDirty(): void {
+  const r = S.viewReq;
+  if (!r) { setMapDirty(false); return; }
+  const cur = currentRequest();
+  setMapDirty(cur.method === r.method && cur.feature === r.feature && !sameParams(cur.params, r.params));
+}
+
+// ---- cleanlab label quality: k-fold out-of-fold class probabilities of the current feature, then cleanlab
+const LQ_COLS = ['cl_quality', 'cl_given_prob', 'cl_ood_feat', 'cl_ood_prob', 'cl_issue', 'cl_rank', 'cl_suggested'] as const;
+let lqSeq = 0;
+let lqRunning: string | null = null;        // feature whose check runs now: a view load leaves its columns alone
+
+function setLabelQuality(r: LabelQualityReady | null): void {
+  const P = S.P;
+  if (!P) return;
+  if (r) {
+    P.cl_quality = r.quality; P.cl_given_prob = r.given_prob; P.cl_ood_feat = r.ood_feat; P.cl_ood_prob = r.ood_prob;
+    P.cl_issue = r.issue; P.cl_rank = r.rank; P.cl_suggested = r.suggested;
+    S.lq = { feature: r.feature, summary: r.summary };
+  } else {
+    for (const k of LQ_COLS) delete P[k];
+    S.lq = null;
+  }
+  invalidateHover();
+  invalidateStats();
+  syncLqControls();
+  if (S.view && $req<HTMLSelectElement>('color-by').value.startsWith('cl_')) renderPlot();
+  if (!$req('tab-stats').classList.contains('hidden')) { renderClassTable(); renderStats(); }
+  if (S.sel.length) renderGallery();
+}
+
+/** Colour-by / sort / Find issues entries that need label quality follow whether it is loaded. */
+export function syncLqControls(): void {
+  const on = !!S.lq;
+  const colorBy = $req<HTMLSelectElement>('color-by'), sort = $req<HTMLSelectElement>('sort');
+  const og = colorBy.querySelector<HTMLOptGroupElement>('optgroup[data-needs="lq"]');
+  if (og) { og.hidden = !on; og.disabled = !on; }
+  if (!on && colorBy.value.startsWith('cl_')) { colorBy.value = 'class'; if (S.view) renderPlot(); }
+  const o = sort.querySelector<HTMLOptionElement>('option[value="cl-quality"]');
+  if (o) { o.hidden = !on; o.disabled = !on; }
+  if (!on && sort.value === 'cl-quality') sort.value = 'none';
+  for (const id of ['btn-cl-issues', 'btn-cl-low', 'btn-cl-ood', 'btn-cl-confusion']) $req<HTMLButtonElement>(id).disabled = !on;
+  const sm = S.lq?.summary;
+  $req('cl-issues-n').textContent = sm ? `${(sm.n_issues ?? 0).toLocaleString()} labels flagged` : 'run the check first';
+  $req('btn-cl-ood').classList.toggle('hidden', on && !S.P?.cl_ood_feat?.some((v) => v != null));
+  $req('btn-lq-run-t').textContent = on ? 'Run again' : 'Run label-quality check';
+  const clf = sm?.settings?.['classifier'];
+  if (typeof clf === 'string') $req<HTMLSelectElement>('lq-clf').value = clf;
+  $req('lq-info').innerHTML = sm ? lqInfo(sm) : '';
+}
+
+function lqInfo(sm: LabelQualityReady['summary']): string {
+  if (sm.note) return esc(sm.note);
+  const pct = (v: number | null | undefined): string => (v == null ? '–' : `${(v * 100).toFixed(1)}%`);
+  const left = sm.left_out_classes?.length ? ` · ${sm.left_out_classes.length} small class(es) left out` : '';
+  return `${esc(featureLabel(sm.feature ?? S.scoresFeature))}: health <b>${pct(sm.health_score)}</b> · ` +
+    `held-out accuracy ${pct(sm.oof_accuracy)} · ${sm.folds_used ?? 0} folds${left}`;
+}
+
+/** Load the label quality of `feature` when it is computed already (never starts the job). */
+export async function loadLabelQuality(feature: string): Promise<void> {
+  if (S.lq?.feature === feature || lqRunning === feature) return;
+  const seq = ++lqSeq;
+  try {
+    const r = await getJSON<LabelQualityResult>(`api/label-quality?feature=${encodeURIComponent(feature)}`);
+    if (seq === lqSeq) setLabelQuality(r.ready ? r : null);
+  } catch (e) { if (seq === lqSeq) setLabelQuality(null); }
+}
+
+/** Compute it (a background job with progress in the plot), for the feature on screen. */
+export async function runLabelQuality(): Promise<boolean> {
+  const feature = S.viewReq?.feature ?? $req<HTMLSelectElement>('feature').value;
+  const body = { feature, classifier: $req<HTMLSelectElement>('lq-clf').value };
+  const btn = $req<HTMLButtonElement>('btn-lq-run');
+  btn.disabled = true;
+  const seq = ++lqSeq;
+  lqRunning = feature;
+  try {
+    let r = await postJSON<LabelQualityResult>('api/label-quality', body);
+    while (!r.ready && r.job_id != null) {
+      await waitJob(r.job_id, (j) => showWait(j));
+      r = await postJSON<LabelQualityResult>('api/label-quality', body);
+    }
+    hideWait();
+    // the run is the newest answer for its feature, even if a view load asked (and got "not computed") meanwhile
+    if (seq === lqSeq || (r.ready && r.feature === (S.viewReq?.feature ?? feature))) { lqSeq++; setLabelQuality(r.ready ? r : null); }
+    return r.ready && !!S.lq;
+  } catch (e) {
+    hideWait();
+    alert(errMessage(e));
+    return false;
+  } finally { btn.disabled = false; lqRunning = null; }
+}
+
+/** Find issues › cleanlab: label issues (most likely wrong first), lowest quality, out-of-distribution. */
+export function clView(view: 'cl-issues' | 'cl-low' | 'cl-ood'): void {
+  const P = S.P;
+  if (!P || !S.lq || toggleOff(view)) return;
+  const q = P.cl_quality ?? [], rank = P.cl_rank ?? [], ood = P.cl_ood_feat ?? [];
+  let ids = viewIdsVisible().filter((id) => q[id] != null);
+  let title: string;
+  if (view === 'cl-issues') {
+    ids = ids.filter((id) => (rank[id] ?? -1) >= 0).sort((a, b) => (rank[a] ?? 0) - (rank[b] ?? 0));
+    title = 'Label issues (cleanlab)';
+  } else if (view === 'cl-low') {
+    ids = ids.sort((a, b) => (q[a] ?? 1) - (q[b] ?? 1)).slice(0, UI.check_list_size);
+    title = 'Lowest label quality (cleanlab)';
+  } else {
+    ids = ids.filter((id) => ood[id] != null).sort((a, b) => (ood[b] ?? 0) - (ood[a] ?? 0)).slice(0, UI.check_list_size);
+    title = 'Out-of-distribution (cleanlab)';
+  }
+  if (!ids.length) {              // an empty selection would show every image instead: say so
+    toast(view === 'cl-issues' ? 'cleanlab found no label issues among the classes shown' : 'nothing to show for the classes shown');
+    return;
+  }
+  $req<HTMLSelectElement>('sort').value = view === 'cl-ood' ? 'none' : 'cl-quality';
+  setSelection(ids, `${title} · ${featureLabel(S.lq.feature)}`, { view });
+  syncIssuesBtn();
+}
+
+/** Boxes labelled `given` that cleanlab would call `suggested` (a confident-joint cell). */
+export function selectConfusion(given: number, suggested: number): void {
+  const P = S.P;
+  if (!P?.cl_suggested) return;
+  const sug = P.cl_suggested, q = P.cl_quality ?? [];
+  const ids = viewIdsVisible().filter((id) => P.cls[id] === given && sug[id] === suggested && q[id] != null)
+    .sort((a, b) => (q[a] ?? 1) - (q[b] ?? 1));
+  $req<HTMLSelectElement>('sort').value = 'cl-quality';
+  const name = (c: number): string => S.meta?.classes[c] ?? String(c);
+  setSelection(ids, `Labelled ${name(given)}, cleanlab says ${name(suggested)}`);
+}
+
+export function openConfusion(): void { showConfusion(); }
 
 export async function refreshTagList(): Promise<void> {
   const tags = await getJSON<Tags>('api/tags');
@@ -283,14 +425,15 @@ export async function onGroupControls(): Promise<void> {
 export function renderFeatureSelect(selected?: string): void {
   const sel = $req<HTMLSelectElement>('feature');
   const cur = selected || sel.value;
-  const groups = { deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
+  const groups = { model: 'My models (Settings › Models)', deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
   const features = status().features ?? [];
-  sel.innerHTML = Object.entries(groups).map(([g, title]) =>
+  sel.innerHTML = Object.entries(groups).filter(([g]) => features.some((f) => f.group === g)).map(([g, title]) =>
     `<optgroup label="${title}">` + features.filter((f) => f.group === g).map((f) =>
       `<option value="${esc(f.key)}" title="${esc(f.note || '')}">${f.cached ? '✓ ' : '  '}${esc(f.label)}</option>`
     ).join('') + '</optgroup>').join('');
   sel.value = cur;
   updateTextSearch();
+  updateBarSummary();
 }
 
 // text search needs a feature with a text tower (OpenCLIP / SigLIP)
@@ -299,7 +442,8 @@ export function updateTextSearch(): void {
   const ok = !!(f && f.text);
   $req<HTMLInputElement>('text-q').disabled = !ok;
   $req<HTMLButtonElement>('text-go').disabled = !ok;
-  $req('text-search').title = ok ? '' : 'Text search needs an OpenCLIP / SigLIP feature';
+  // the bar shows the search box only when this feature can do it (an OpenCLIP / SigLIP feature)
+  $req('text-search').classList.toggle('no-text', !ok);
 }
 
 export async function refreshStatus(): Promise<void> {
