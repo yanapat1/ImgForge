@@ -52,7 +52,7 @@ export interface LLMStatePayload {
 export interface LLMState extends LLMStatePayload { loaded: boolean }
 
 // ------------------------------------------------------------------ status / meta (GET api/status, api/meta)
-export interface MethodSpec { label: string; params: Record<string, unknown>; [k: string]: unknown }
+export interface MethodSpec { label: string; category?: string; note?: string; params: Record<string, unknown>; [k: string]: unknown }
 export interface FeatureSpec { key: string; label: string; group: string; note: string; text: boolean; cached: boolean }
 /** Set when the dataset changed after the cache shown was built (dataviz/state.py `State.stale`). */
 export interface DatasetStale { cached: string | null; current: string | null; built: string | null; [k: string]: unknown }

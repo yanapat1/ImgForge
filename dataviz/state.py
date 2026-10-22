@@ -39,7 +39,7 @@ from .workspace import resolve_workspace, find_workspace, _now
 # Defaults; the real values come from config.yaml in this folder (State.cfg).
 PALETTE = vconfig.DEFAULTS['ui']['palette']
 KNN_K = vconfig.DEFAULTS['analysis']['knn_k']
-PARAM_TYPES = {'n_neighbors': int, 'min_dist': float, 'perplexity': float}
+PARAM_TYPES = {'n_neighbors': int, 'min_dist': float, 'perplexity': float, 'gamma': float}
 
 
 def normalize_params(method, params):

@@ -19,6 +19,7 @@ const PARAM_INFO: Record<string, [string, string, number]> = {
   n_neighbors: ['nbrs', 'neighbours each point looks at: larger = more global structure', 1],
   min_dist: ['min_dist', 'smaller = tighter clusters', 0.05],
   perplexity: ['perplexity', '~ number of close neighbours each point considers', 1],
+  gamma: ['gamma', 'RBF kernel width: larger = more local; 0 = auto (1 / dims)', 0.1],
 };
 
 export function buildParamInputs(): void {

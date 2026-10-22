@@ -179,7 +179,13 @@ async function init(st: Status): Promise<void> {
   $req('class-a').innerHTML = opts;
   $req('class-b').innerHTML = opts;
   if (meta.classes.length > 1) $req<HTMLSelectElement>('class-b').value = '1';
-  $req('method').innerHTML = Object.entries(st.methods).map(([k, m]) => `<option value="${k}" title="${esc(m.note || '')}">${m.label}</option>`).join('');
+  // grouped by category (Linear / Non-linear / Other) in the server's order
+  const byCat = new Map<string, string[]>();
+  for (const [k, m] of Object.entries(st.methods)) {
+    const cat = m.category || 'Other';
+    byCat.set(cat, [...(byCat.get(cat) ?? []), `<option value="${k}" title="${esc(m.note || '')}">${m.label}</option>`]);
+  }
+  $req('method').innerHTML = [...byCat].map(([cat, opts]) => `<optgroup label="${esc(cat)}">${opts.join('')}</optgroup>`).join('');
   buildParamInputs();
   renderFeatureSelect(st.default_feature);
   // always start on the one startup view (config startup.feature + startup.method, all classes, default params)

@@ -46,7 +46,7 @@ index:
 
 startup:
   feature: openclip-h14          # the only view loaded at start (best class separation); any key under features.models / simple / yolo:<run>
-  method: umap                   # umap | pacmap | localmap | tsne | pca (only this one is compiled at warm-up)
+  method: umap                   # any key of dataviz/ml/analysis.py METHODS, e.g. umap | pacmap | tsne | pca | isomap (only this one is compiled at warm-up)
   precompute: []                 # also compute these in the background at start, e.g. [openclip-h14, hog]
 
 features:
@@ -112,6 +112,11 @@ projections:                     # default parameters (the page can change them 
   localmap: {n_neighbors: 10}
   tsne:     {perplexity: 30}
   pca:      {}
+  kpca:     {gamma: 0}           # RBF width; 0 = auto (1 / dims)
+  isomap:   {n_neighbors: 10}
+  lle:      {n_neighbors: 10}
+  spectral: {n_neighbors: 10}
+  # also offered, no parameters: svd, ica, fa (linear) · mds, random, trees (other)
   tsne_threads: 8                # the box shows 128 CPUs but is shared: more threads made t-SNE 20x slower
 
 analysis:

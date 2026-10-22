@@ -1,7 +1,8 @@
 # Dataset Visualizer
 
 A FiftyOne-style explorer for YOLO datasets. Every bounding box becomes a dot in a 2D projection
-(UMAP / PaCMAP / t-SNE / PCA) of a feature space you pick (OpenCLIP, SigLIP 2, DINOv2, your own YOLO
+(15 methods, grouped Linear: PCA / SVD / ICA / FA · Non-linear: UMAP / PaCMAP / t-SNE / Isomap / LLE / … ·
+Other: MDS / random projection / random trees — see [`dataviz/ml/README.md`](dataviz/ml/README.md)) of a feature space you pick (OpenCLIP, SigLIP 2, DINOv2, your own YOLO
 weights, colour histogram, HOG, box geometry). Lasso dots (or describe them in words, for CLIP / SigLIP features) to see their crops, find suspicious labels,
 outliers and near-duplicates, measure distances between boxes, and switch between datasets on local
 disk or in S3 / RustFS buckets.
@@ -92,7 +93,7 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | I want to … | Go to |
 |---|---|
 | add a feature model | `config.yaml` `features.models` (code: `dataviz/ml/features.py` `model_spec`) |
-| add a projection method | `dataviz/ml/analysis.py` `METHODS` + `project()`; page params: `static/ts/views/controls.ts` `PARAM_INFO` |
+| add a projection method | `dataviz/ml/analysis.py` `METHODS` (with its `category`) + `project()` / `_sklearn_estimator()`; page params: `static/ts/views/controls.ts` `PARAM_INFO` |
 | add an API endpoint | the matching `dataviz/server/routes/*.py` (`router(state, ctx)` factory) |
 | support another storage backend | `dataviz/data/sources.py` (implement the source interface), `connections.py` `source()` |
 | change colours / theme | `static/css/tokens.css`, `static/css/palettes.css` for the named palettes (+ `ui.palette` / `ui.palette_light` in `config.yaml`) |

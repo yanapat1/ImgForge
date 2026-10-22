@@ -54,6 +54,10 @@ DEFAULTS = {
         'localmap': {'n_neighbors': 10},
         'tsne': {'perplexity': 30},
         'pca': {},
+        'kpca': {'gamma': 0},
+        'isomap': {'n_neighbors': 10},
+        'lle': {'n_neighbors': 10},
+        'spectral': {'n_neighbors': 10},
         'tsne_threads': 8,
     },
     'analysis': {
