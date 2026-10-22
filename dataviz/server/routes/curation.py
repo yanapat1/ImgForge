@@ -186,6 +186,50 @@ def router(state, ctx):
             raise HTTPException(400, str(e))
         return {**res, 'summary': c.summary(ignored_ids()), 'n_fixes': c.n_fixes()}
 
+    @r.post('/api/curation/fix-boxes', dependencies=labeler)
+    def fix_boxes(body: dict):
+        """Fix chosen boxes in one batch (with undo): op 'suggested' sets each to the class cleanlab suggests (label
+        quality of `feature`), 'delete' removes them. Scans first when the dataset was not scanned yet."""
+        st = ctx.current()
+        op = body.get('op')
+        if op not in ('suggested', 'delete'):
+            raise HTTPException(400, "op must be 'suggested' or 'delete'")
+        try:
+            ids = sorted({int(i) for i in body.get('ids') or []})[:50000]
+        except (TypeError, ValueError):
+            raise HTTPException(400, 'ids must be box ids')
+        if not st.ready:
+            raise HTTPException(503, 'dataset index is still being built')
+        ids = [i for i in ids if 0 <= i < len(st.samples)]
+        if op == 'suggested':
+            feature = body.get('feature') or st.default_feature
+            lq = st.cached_label_quality(feature) if feature in st.registry else None
+            if lq is None:
+                raise HTTPException(409, 'run the label-quality check first (Find issues)')
+            per = lq[0]
+            ops = {i: {'op': 'set_class', 'cls': int(per['cl_suggested'][i])} for i in ids
+                   if per['cl_scored'][i] and int(per['cl_suggested'][i]) != int(st.labels[i])}
+            text = f'Change {len(ops)} box{"es" if len(ops) != 1 else ""} to cleanlab\'s class'
+        else:
+            ops = {i: {'op': 'delete'} for i in ids}
+            text = f'Delete {len(ops)} box{"es" if len(ops) != 1 else ""}'
+        c = store()
+        if not c.ready:
+            c.scan(None, feature=body.get('feature'), splits=split_map(st))
+        items, missing = c.box_fix_items(ops)
+        if not items:
+            return {'applied': 0, 'files': 0, 'conflicts': [], 'errors': [], 'undo_id': None, 'missing': missing,
+                    'patch': {'cls': {}, 'deleted': []}, 'summary': c.summary(ignored_ids()), 'n_fixes': c.n_fixes()}
+        try:
+            res = c.fix(items, text)
+        except PermissionError as e:
+            raise HTTPException(403, str(e))
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
+        except (ValueError, Conflict) as e:
+            raise HTTPException(400, str(e))
+        return {**res, 'missing': missing, 'summary': c.summary(ignored_ids()), 'n_fixes': c.n_fixes()}
+
     @r.post('/api/curation/undo', dependencies=labeler)
     def undo(body: dict):
         c = store()

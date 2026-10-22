@@ -32,7 +32,7 @@ import { loadViewerPrefs, viewerKey } from './views/viewer.js';
 import { renderHome } from './views/home.js';
 import { bindUserButton, mountUserMenu } from './views/usermenu.js';
 // filters + curation (WP-D)
-import { initCuration } from './views/curation.js';
+import { fixToSuggested, initCuration } from './views/curation.js';
 import { initFilterBar } from './views/filter-bar.js';
 
 declare const Plotly: typeof import('plotly.js');
@@ -337,6 +337,7 @@ function bindEvents(): void {
   $req('btn-cl-low').onclick = () => clView('cl-low');
   $req('btn-cl-ood').onclick = () => clView('cl-ood');
   $req('btn-cl-confusion').onclick = () => openConfusion();
+  $req('btn-cl-fix').onclick = () => { void fixToSuggested(); };
   $req('btn-cl-swap').onclick = () => odView('cl-swap');
   $req('btn-cl-badloc').onclick = () => odView('cl-badloc');
   $req('btn-cl-missed').onclick = () => { void showMissedObjects(); };

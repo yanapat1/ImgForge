@@ -13,7 +13,7 @@ import type { CurFix, CurIds, CurInfo, CurIssuesPage, CurItem, CurOp, CurPatch, 
 import { labelsChanged, SETTING_HOOKS } from './controls.js';
 import { closestOf } from './ev-util.js';
 import { onDataPatched, setIssueFilter, setIssueTypes } from './filter-bar.js';
-import { renderGallery, setSelection } from './gallery.js';
+import { clFixIds, renderGallery, setSelection, syncClFix } from './gallery.js';
 import { switchTab } from './layout.js';
 
 const ROW = 132;            // px per issue row (fixed: the list is virtualised)
@@ -64,6 +64,7 @@ export function applyPatch(patch: CurPatch | null | undefined): void {
     S.highlight = S.highlight.filter((id) => !del[id]);
   }
   onDataPatched();            // filter: class bitsets / box counts, then the mask (which also hides deleted boxes)
+  syncClFix();
   renderPlot();               // class colours / legend counts changed: one full render
   renderGallery();
 }
@@ -319,6 +320,19 @@ export function afterEdit(r: CurResult, text: string): void {
 }
 
 export const showToast = (text: string): void => toast(text);
+
+/** Gallery › "Change N to cleanlab's class": one fix batch (backup + undo) over the shown cleanlab issues. */
+export async function fixToSuggested(): Promise<void> {
+  const ids = clFixIds();
+  if (!ids.length || !S.lq) return;
+  if (!confirm(`Change ${ids.length} label${ids.length === 1 ? '' : 's'} to the class cleanlab suggests?\n\n` +
+    'The label files are edited (a backup is kept): undo from the message that follows or in Curation › History.')) return;
+  try {
+    const r = await postJSON<CurResult>('api/curation/fix-boxes', { ids, op: 'suggested', feature: S.lq.feature });
+    afterFix(r, `Changed to cleanlab's class`);
+    if (C.info) void loadSummary();
+  } catch (e) { toast(`Fix failed: ${errText(e)}`); }
+}
 
 // called after every undo (the viewer reloads the boxes of the image it shows)
 export const UNDO_HOOKS: Array<(r: CurResult) => void> = [];

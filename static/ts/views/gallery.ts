@@ -40,12 +40,31 @@ export function setSelection(ids: number[], title: string, { kind = 'samples', p
   S.pairs = pairs;
   S.selTitle = title;
   S.page = 0;
+  syncClFix();
   S.picked = [];
   if (highlight !== null) S.highlight = highlight ? ids.slice(0, 5000) : [];
   renderGallery();
   if (highlight !== null) updateHighlight();
   updateMarks();
   window.dispatchEvent(new CustomEvent('selection-changed'));   // the ◆ assistant's "Selection · n" chip
+}
+
+/** Boxes of the selection cleanlab would give another class (a cleanlab issue view is on screen). */
+export function clFixIds(): number[] {
+  const P = S.P;
+  if (!P?.cl_suggested || !(S.activeView === 'cl-issues' || S.activeView === 'cl-low')) return [];
+  const sug = P.cl_suggested, q = P.cl_quality ?? [];
+  return S.sel.filter((id) => q[id] != null && sug[id] !== P.cls[id]);
+}
+
+// "Change N to cleanlab's class" in the gallery head: on cleanlab's issue views, for people who may edit labels
+export function syncClFix(): void {
+  const b = $('btn-cl-fix');
+  if (!b) return;
+  const n = S.status?.my_role === 'viewer' ? 0 : clFixIds().length;
+  b.classList.toggle('hidden', !n);
+  const t = $('btn-cl-fix-t');
+  if (t) t.textContent = `Change ${n.toLocaleString()} to cleanlab's class`;
 }
 
 // narrowing the selection (breakdown chips, "in groups / outliers") keeps the previous one: a "back" chip undoes it

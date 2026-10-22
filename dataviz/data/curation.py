@@ -1023,6 +1023,26 @@ class Curation:
                 if name in self.files]
 
     # ------------------------------------------------------------ fixes
+    def box_fix_items(self, ops_by_box):
+        """fix() items for per-box ops ({box id: {'op': ..., ...}} without the line): each box's label file, its line
+        and the sha1 the file had at the scan. Returns (items, box ids that have no label line: removed or unknown)."""
+        with self.lock:
+            deleted = self._deleted()
+            loc = {}
+            for name, fi in self.files.items():
+                if fi['ids'] is None:
+                    continue
+                for k, b in enumerate(fi['boxes']):
+                    loc[fi['ids'][k]] = (name, b[0])
+            per, missing = {}, []
+            for sid, op in ops_by_box.items():
+                if sid not in loc or (0 <= sid < len(deleted) and deleted[sid]):
+                    missing.append(sid)
+                    continue
+                name, ln = loc[sid]
+                per.setdefault(name, []).append({**op, 'line': ln})
+            return [{'label': n, 'expect_sha1': self.files[n]['sha1'], 'ops': ops} for n, ops in per.items()], missing
+
     def fix(self, items, summary_text=''):
         """Apply op lists to label files. items: [{label | image, expect_sha1, ops}].
 

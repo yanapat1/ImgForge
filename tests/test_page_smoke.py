@@ -544,7 +544,7 @@ def test_plot_bar_and_cleanlab_label_quality(server):
         page.click('#issues-btn')
         assert page.locator('#btn-cl-issues').is_disabled()
         assert page.locator('#color-by optgroup[data-needs="lq"]').evaluate('g => g.disabled')
-        page.on('dialog', lambda d: (errors.append(f'dialog: {d.message}'), d.dismiss()))
+        page.on('dialog', lambda d: d.accept() if d.type == 'confirm' else (errors.append(f'dialog: {d.message}'), d.dismiss()))
         page.click('#btn-lq-run')
         page.wait_for_function("!document.querySelector('#btn-cl-issues').disabled", timeout=60000)
         assert 'health' in page.locator('#lq-info').inner_text()
@@ -555,6 +555,16 @@ def test_plot_bar_and_cleanlab_label_quality(server):
         flagged = int(page.locator('#cl-issues-n').inner_text().split()[0].replace(',', ''))
         if flagged:                                          # an earlier test may have fixed the noisy labels
             assert 'cleanlab' in page.locator('#gallery-title').inner_text().lower()
+        if flagged:
+            assert page.locator('#btn-cl-fix').is_visible()
+            if shots:
+                page.locator('#gallery-panel').screenshot(path=f'{shots}/gallery-fix.png')
+            page.click('#btn-cl-fix')                       # confirm() is accepted: the labels change, with undo
+            page.wait_for_function("document.querySelector('#lq-info').textContent.includes('labels changed')", timeout=15000)
+            assert page.locator('#btn-cl-fix').is_hidden()
+            page.click('#issues-btn')
+            page.click('#btn-lq-run')                        # run again on the fixed labels
+            page.wait_for_function("!document.querySelector('#btn-cl-issues').disabled", timeout=60000)
         page.select_option('#color-by', 'cl_quality')
         page.wait_for_selector('#plot .colorbar', timeout=10000)
         if shots:
