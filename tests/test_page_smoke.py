@@ -262,8 +262,10 @@ def test_label_page_import_and_model_activation(server, tmp_path):
             page.click('.lbm-import [data-x="go"]')
             page.wait_for_selector('.lbm-import .status-line.ok', timeout=15000)
             assert 'Imported 1 shape' in page.locator('.lbm-import .status-line.ok').inner_text()
-            page.click('.lbm-import [data-x="close"]')
-            page.wait_for_load_state('load')                       # the page reloads to show the import
+            # the page reloads to show the import: wait for that navigation itself (wait_for_load_state alone returns
+            # at once on the old, loaded page, and the reload then lands in the middle of the next steps)
+            with page.expect_navigation(timeout=30000):
+                page.click('.lbm-import [data-x="close"]')
             page.wait_for_selector('#lb-model-btn', timeout=30000)
             # link the Settings › Models model; it is off until activated
             page.click('#lb-model-btn')
