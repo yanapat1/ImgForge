@@ -1,5 +1,6 @@
 // Runs before the first paint (a classic blocking <script> in <head>): applies the saved theme
-// (localStorage "theme" = system | light | dark, "look" = default | handdrawn | glass | brutalist | terminal | soft, "palette" = default | dracula | nord | ...)
+// (localStorage "theme" = system | light | dark, "look" = default | editorial | blueprint | brutalist | terminal | soft,
+// "palette" = default | cbsafe | contrast | fjord | ember | orchid; retired names map to their replacement, as in core/theme.ts)
 // so the page never flashes the wrong colours; these are this browser's mirror of the signed-in user's prefs
 // (core/auth.ts syncs them from /api/me/prefs once the app is loaded). Then it picks the screen (html[data-screen]):
 // 'login' (path ends in /login), 'viz' (path /s/<session id>/), 'label' (?label=<pid>), else the Sessions 'home'.
@@ -13,6 +14,8 @@
   var m = 'system'; try { m = localStorage.getItem('theme') || 'system'; } catch (e) {}
   var look = 'default'; try { look = localStorage.getItem('look') || 'default'; } catch (e) {}
   var pal = 'default'; try { pal = localStorage.getItem('palette') || 'default'; } catch (e) {}
+  look = ({ handdrawn: 'editorial', glass: 'soft' } as Record<string, string>)[look] || look;
+  pal = ({ nord: 'fjord', solarized: 'fjord', sepia: 'ember', dusk: 'orchid', dracula: 'orchid', mono: 'default', paper: 'default' } as Record<string, string>)[pal] || pal;
   var t = m === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : m;
   var html = document.documentElement;
   html.setAttribute('data-theme', t);

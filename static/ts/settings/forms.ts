@@ -408,8 +408,8 @@ export function renderAppearanceSec(): string {
   };
   const palGroups = [...new Set(PALETTES.map((p) => p.group))].map((g) =>
     `<h4 class="sec-sub2">${g}</h4><div class="theme-choices">${PALETTES.filter((p) => p.group === g).map(palChoice).join('')}</div>`).join('');
-  return '<section><h3 class="sec-sub">Style</h3><div class="theme-choices">' + styleChoice('default', 'Default', 'monitor') +
-    styleChoice('handdrawn', 'Hand-drawn', 'edit') + styleChoice('glass', 'Glass', 'layers') +
+  return '<section><h3 class="sec-sub">Style</h3><div class="theme-choices">' + styleChoice('default', 'Instrument', 'monitor') +
+    styleChoice('editorial', 'Editorial', 'edit') + styleChoice('blueprint', 'Blueprint', 'layers') +
     styleChoice('brutalist', 'Brutalist', 'box') + styleChoice('terminal', 'Terminal', 'server') + styleChoice('soft', 'Soft', 'circle') + '</div>' +
     '<h3 class="sec-sub">Mode</h3><div class="theme-choices">' + choice('system', 'System', 'monitor') + choice('light', 'Light', 'sun') +
     choice('dark', 'Dark', 'moon') + '</div><h3 class="sec-sub">Palette</h3>' + palGroups +

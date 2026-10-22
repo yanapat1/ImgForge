@@ -1,5 +1,7 @@
-/* brutalist look (data-look="brutalist"): tokens live in tokens.css; these rules add the ink borders, hard shadows and the press-down buttons */
+/* brutalist look (data-look="brutalist"): tokens live in tokens.css; these rules add the ink borders, hard shadows, the
+   press-down buttons, the yellow press state and the heavy uppercase section titles */
 :root[data-look="brutalist"] body { font-weight: 500; }
+:root[data-look="brutalist"] :is(h1, h2, h3, h4) { font-weight: 800; letter-spacing: -.01em; }
 :root[data-look="brutalist"] button,
 :root[data-look="brutalist"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 :root[data-look="brutalist"] select,
@@ -9,7 +11,8 @@
 :root[data-look="brutalist"] .theme-choice { border-width: 2px; border-color: var(--border-strong); }
 :root[data-look="brutalist"] button { font-weight: 700; box-shadow: 3px 3px 0 var(--bd-shadow); transition: transform .06s, box-shadow .06s; }
 :root[data-look="brutalist"] button:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--bd-shadow); }
-:root[data-look="brutalist"] button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--bd-shadow); background: var(--pressed); }
+:root[data-look="brutalist"] button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--bd-shadow);
+  background: var(--pressed); }
 :root[data-look="brutalist"] button.ghost,
 :root[data-look="brutalist"] button.icon-btn { box-shadow: none; border-color: transparent; }
 :root[data-look="brutalist"] button.ghost:hover:not(:disabled),
@@ -17,15 +20,19 @@
 :root[data-look="brutalist"] button.ghost:active:not(:disabled),
 :root[data-look="brutalist"] button.icon-btn:active:not(:disabled) { transform: none; }
 :root[data-look="brutalist"] button.primary,
-:root[data-look="brutalist"] button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+:root[data-look="brutalist"] button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--border-strong); }
+:root[data-look="brutalist"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+:root[data-look="brutalist"] textarea:focus { box-shadow: 3px 3px 0 var(--accent); }
 :root[data-look="brutalist"] .form-card,
 :root[data-look="brutalist"] .radio-card,
 :root[data-look="brutalist"] .theme-choice { box-shadow: var(--shadow-2); }
-:root[data-look="brutalist"] .theme-choice[aria-pressed="true"] { background: var(--accent-soft); outline: 3px solid var(--accent); outline-offset: 2px; box-shadow: var(--shadow-2); }
+:root[data-look="brutalist"] .theme-choice[aria-pressed="true"] { background: var(--accent-soft); outline: 3px solid var(--accent); outline-offset: 2px;
+  box-shadow: var(--shadow-2); }
 :root[data-look="brutalist"] dialog,
-:root[data-look="brutalist"] .modal { border: 2px solid var(--border-strong); box-shadow: var(--shadow-3); }
+:root[data-look="brutalist"] .modal-box { border: 2px solid var(--border-strong); box-shadow: var(--shadow-3); }
 :root[data-look="brutalist"] :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-:root[data-look="brutalist"] .sec-sub { color: var(--text); font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+:root[data-look="brutalist"] .sec-sub { color: var(--text); font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+:root[data-look="brutalist"] .sec-sub2 { color: var(--text); font-weight: 800; }
 /* plain buttons that are not controls (card title, tag chips, the new-session tile) stay flat */
 :root[data-look="brutalist"] .sc-open,
 :root[data-look="brutalist"] .sc-tag,

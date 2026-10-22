@@ -140,24 +140,27 @@ const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 export type ThemeMode = string;
 export function themeMode(): ThemeMode { try { return localStorage.getItem('theme') || 'system'; } catch (e) { return 'system'; } }
 
-export const LOOKS: readonly string[] = ['default', 'handdrawn', 'glass', 'brutalist', 'terminal', 'soft'];
-export function lookName(): string { try { const l = localStorage.getItem('look'); return l !== null && LOOKS.includes(l) ? l : 'default'; } catch (e) { return 'default'; } }
+export const LOOKS: readonly string[] = ['default', 'editorial', 'blueprint', 'brutalist', 'terminal', 'soft'];
+// looks and palettes that were retired, mapped to their closest replacement (also in theme-boot.ts for the first paint)
+const OLD_LOOKS: Record<string, string> = { handdrawn: 'editorial', glass: 'soft' };
+const OLD_PALETTES: Record<string, string> = { nord: 'fjord', solarized: 'fjord', sepia: 'ember', dusk: 'orchid', dracula: 'orchid', mono: 'default', paper: 'default' };
+export function lookName(): string {
+  try { const l = localStorage.getItem('look'); const v = l !== null ? OLD_LOOKS[l] ?? l : 'default'; return LOOKS.includes(v) ? v : 'default'; } catch (e) { return 'default'; }
+}
 
 // colour palettes (css/palettes.css): label + [page, surface, accent] swatch colours per tone for the Settings picker
 export interface PaletteSpec { id: string; label: string; group: string; dark?: [string, string, string]; light?: [string, string, string] }
 export const PALETTES: readonly PaletteSpec[] = [
   { id: 'default', label: 'Default', group: 'Standard' },
-  { id: 'dracula', label: 'Dracula', group: 'Programmer', dark: ['#21222c', '#2f3241', '#bd93f9'], light: ['#efeadb', '#fffbeb', '#644ac9'] },
-  { id: 'nord', label: 'Nord', group: 'Programmer', dark: ['#2b303b', '#353c4a', '#88c0d0'], light: ['#e5e9f0', '#f8f9fb', '#4a6c97'] },
-  { id: 'solarized', label: 'Solarized', group: 'Programmer', dark: ['#00252e', '#073642', '#4aa3df'], light: ['#eee8d5', '#fdf6e3', '#1f6fb0'] },
   { id: 'cbsafe', label: 'Colour-blind safe', group: 'Accessible', dark: ['#181c22', '#262c36', '#56b4e9'], light: ['#eceff3', '#ffffff', '#0072b2'] },
   { id: 'contrast', label: 'High contrast', group: 'Accessible', dark: ['#000000', '#141414', '#ffd60a'], light: ['#ffffff', '#f2f2f2', '#0033cc'] },
-  { id: 'sepia', label: 'Warm sepia', group: 'Comfortable', dark: ['#241d14', '#352b1d', '#e0a45c'], light: ['#ecdfc2', '#f6ecd6', '#a05a14'] },
-  { id: 'dusk', label: 'Soft dusk', group: 'Comfortable', dark: ['#1c1a28', '#2b2840', '#b8a4ea'], light: ['#e6e3ef', '#f5f3fa', '#6550b5'] },
-  { id: 'mono', label: 'Mono', group: 'Minimal', dark: ['#0f0f0f', '#1e1e1e', '#f2f2f2'], light: ['#f1f1f1', '#ffffff', '#111111'] },
-  { id: 'paper', label: 'Paper', group: 'Minimal', dark: ['#151515', '#222222', '#7ea4ff'], light: ['#f7f7f6', '#ffffff', '#2858d0'] },
+  { id: 'fjord', label: 'Fjord', group: 'Mood', dark: ['#20262f', '#2e3643', '#7fc8d6'], light: ['#e4e9ef', '#f6f8fb', '#2c6a80'] },
+  { id: 'ember', label: 'Ember', group: 'Mood', dark: ['#1d1814', '#2d2620', '#e9a35a'], light: ['#efe5d3', '#faf4e8', '#94500f'] },
+  { id: 'orchid', label: 'Orchid', group: 'Mood', dark: ['#1e1820', '#2d2531', '#e59ad0'], light: ['#f1eaf0', '#fcf8fb', '#9a2d78'] },
 ];
-export function paletteName(): string { try { const p = localStorage.getItem('palette'); return p !== null && PALETTES.some((x) => x.id === p) ? p : 'default'; } catch (e) { return 'default'; } }
+export function paletteName(): string {
+  try { const p = localStorage.getItem('palette'); const v = p !== null ? OLD_PALETTES[p] ?? p : 'default'; return PALETTES.some((x) => x.id === v) ? v : 'default'; } catch (e) { return 'default'; }
+}
 
 function resolveTheme(mode: ThemeMode): string { return mode === 'system' ? (darkQuery.matches ? 'dark' : 'light') : mode; }
 
