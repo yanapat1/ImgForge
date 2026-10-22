@@ -267,7 +267,6 @@ button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color
 .lw-step .fld textarea { font-family: var(--font); }
 .lw-big input[type=text] { height: 44px; font-size: var(--fs-lg); }
 .status-line.warn { color: var(--warn-text); }
-.status-line.warn .ico { color: var(--warn); }
 .status-line.busy { color: var(--text-muted); }
 
 /* step 2: source tabs */
