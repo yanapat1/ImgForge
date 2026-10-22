@@ -12,6 +12,12 @@ class ProjectionRequest(BaseModel):
     classes: list[int] | None = None
 
 
+class LabelQualityRequest(BaseModel):
+    feature: str | None = None
+    folds: int | None = None              # None = config analysis.label_quality
+    classifier: str | None = None         # logreg | knn | mlp
+
+
 class GroupsRequest(ProjectionRequest):
     min_cluster_size: int = 15
     per_class: bool = True

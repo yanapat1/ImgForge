@@ -13,6 +13,7 @@ import asyncio
 import shutil
 from pathlib import Path
 
+import numpy as np
 import orjson
 from PIL import Image, ImageDraw
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -231,6 +232,23 @@ def router(state, ctx):
         if res is None:
             raise HTTPException(409, f'{m["name"]}: run predictions first')
         return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
+
+    @r.get('/api/models/{mid}/cleanlab', dependencies=viewer)
+    async def cleanlab(mid: str, limit: int = 300):
+        """cleanlab object-detection checks of this model's predictions: per box bad-location / swapped-class /
+        image-quality scores (aligned with box ids, null = not scored), worst images, overlooked objects."""
+        m = model_or_404(mid)
+        g.need_index()
+        try:
+            res = await run_io(svc.cleanlab, ctx.current(), m)
+        except ImportError:
+            raise HTTPException(501, 'cleanlab is not installed on the server (pip install cleanlab)')
+        if res is None:
+            raise HTTPException(409, f'{m["name"]}: run predictions first')
+        per, summary = res
+        out = {k: np.round(v, 4) for k, v in per.items()}
+        out.update({'images': summary['images'][:limit], 'overlooked': summary['overlooked'][:limit]})
+        return json_bytes(orjson.dumps(out, option=orjson.OPT_SERIALIZE_NUMPY))
 
     @r.get('/api/eval/overview', dependencies=viewer)
     async def overview(split: str = 'val', conf_mode: str = 'best', conf: float = 0.25, iou: float | None = None,

@@ -60,6 +60,9 @@ DEFAULTS = {
         'knn_k': 10,
         'duplicate_threshold': 0.97,
         'groups': {'min_cluster_size': 15, 'per_class': True, 'bubble_pad': 0.015},
+        # cleanlab on k-fold out-of-fold class probabilities (Find issues › Label issues), see ml/label_quality.py
+        'label_quality': {'folds': 5, 'classifier': 'logreg', 'pca_dims': 256, 'quality_method': 'self_confidence',
+                          'filter_by': 'prune_by_noise_rate', 'ood': True, 'min_class_count': 5},
     },
     'models': {
         'store_dir': None,                 # models.json + uploads; None = dataset.workspace_root

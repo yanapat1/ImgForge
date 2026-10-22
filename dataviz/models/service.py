@@ -30,6 +30,7 @@ class ModelService:
         self._preds = OrderedDict()      # (tag, mid, fp) -> (preds, Data, unmatched)
         self._ap = OrderedDict()         # (tag, mid, fp, split) -> ap_stats
         self._splits = {}                # tag -> (splits, source)
+        self._cleanlab = OrderedDict()   # (tag, mid, fp, edit_seq) -> cleanlab object-detection report
 
     # ------------------------------------------------------------ lookups
     def model(self, mid):
@@ -181,6 +182,31 @@ class ModelService:
                      'gt': int(out['p_gt'][p])} for p in fps],
             'issues': evaluate.label_issues(d, out, min_score=max(issues_min, conf)),
         }
+
+    def cleanlab(self, state, m, min_score=0.05):
+        """cleanlab.object_detection on this model's predictions (ml/label_quality.od_report): per box bad-location /
+        swapped-class / image quality, plus overlooked objects. None when the model has not predicted yet."""
+        from ..ml import label_quality
+        got = self.data(state, m)
+        if got is None:
+            return None
+        _, d, _ = got
+        key = (state.tag, m['id'], self.fingerprint(m), getattr(state, 'edit_seq', 0))
+        with self._lock:
+            if key in self._cleanlab:
+                return self._cleanlab[key]
+        gts, preds = [], []
+        for i in range(len(d.images)):
+            gts.append([(int(sid), int(d.gt_cls[sid]), *map(float, d.gt_box[sid])) for sid in d.gt_by_img[i]])
+            p = [int(q) for q in d.p_by_img[i] if d.p_cls[q] >= 0 and d.p_score[q] >= min_score]
+            preds.append([(q, int(d.p_cls[q]), float(d.p_score[q]), *map(float, d.p_box[q])) for q in p])
+        per, summary = label_quality.od_report(d.images, gts, preds, d.n_gt, d.nc)
+        res = (per, summary)
+        with self._lock:
+            self._cleanlab[key] = res
+            while len(self._cleanlab) > 4:
+                self._cleanlab.popitem(last=False)
+        return res
 
     def pred(self, state, m, pid):
         got = self.data(state, m)

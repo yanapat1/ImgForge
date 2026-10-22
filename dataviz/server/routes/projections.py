@@ -1,6 +1,7 @@
 """
-The embedding plot's data: k-NN scores per feature, 2D projections (computed as background jobs,
-answered with {ready: false, job_id} until done), density groups (bubbles), and the saved-views list.
+The embedding plot's data: k-NN scores per feature, cleanlab label quality (k-fold predicted probabilities), 2D
+projections (computed as background jobs, answered with {ready: false, job_id} until done), density groups
+(bubbles), and the saved-views list.
 """
 
 import numpy as np
@@ -10,7 +11,7 @@ from ...auth import deps
 from ...ml import analysis
 from ...state import normalize_params, projection_key
 from ..deps import guards, json_bytes
-from ..models import ProjectionRequest, GroupsRequest
+from ..models import ProjectionRequest, GroupsRequest, LabelQualityRequest
 
 
 def router(state, ctx):
@@ -51,6 +52,42 @@ def router(state, ctx):
         return json_bytes(state.payload(f'scores|{key}', lambda: {
             'ready': True, 'feature': key, 'suspicion': np.round(sc['suspicion'], 3),
             'suggested': sc['suggested'], 'outlier': np.round(sc['outlier'], 4)}))
+
+    def lq_payload(key, per, summary, tag):
+        def r3(a):
+            return np.round(a.astype(np.float32), 3)
+        return json_bytes(state.payload(f'lq|{key}|{tag}', lambda: {
+            'ready': True, 'feature': key, 'quality': r3(per['cl_quality']), 'issue': per['cl_issue'].astype(np.int8),
+            'rank': per['cl_rank'], 'suggested': per['cl_suggested'], 'given_prob': r3(per['cl_given_prob']),
+            'ood_feat': r3(per['cl_ood_feat']), 'ood_prob': r3(per['cl_ood_prob']), 'summary': summary}))
+
+    def lq_overrides(folds=None, classifier=None):
+        try:
+            return {k: v for k, v in state.label_quality_settings(folds=folds, classifier=classifier).items()
+                    if (k == 'folds' and folds is not None) or (k == 'classifier' and classifier is not None)}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @r.get('/api/label-quality')
+    def label_quality(feature: str | None = None, folds: int | None = None, classifier: str | None = None):
+        """cleanlab results of a feature space when computed ({ready: false} otherwise; POST computes)."""
+        key = feature_or_400(feature)
+        need_index()
+        ov = lq_overrides(folds, classifier)
+        hit = state.cached_label_quality(key, **ov)
+        if hit is None:
+            return {'ready': False, 'feature': key}
+        return lq_payload(key, *hit, state.label_quality_tag(state.label_quality_settings(**ov)))
+
+    @r.post('/api/label-quality')
+    def label_quality_run(req: LabelQualityRequest):
+        key = feature_or_400(req.feature)
+        need_index()
+        ov = lq_overrides(req.folds, req.classifier)
+        hit = state.cached_label_quality(key, **ov)
+        if hit is None:
+            return {'ready': False, 'feature': key, 'job_id': state.request_label_quality(key, **ov).id}
+        return lq_payload(key, *hit, state.label_quality_tag(state.label_quality_settings(**ov)))
 
     @r.post('/api/projection')
     def projection(req: ProjectionRequest):
