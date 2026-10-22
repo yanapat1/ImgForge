@@ -137,3 +137,71 @@ def test_owner_models_list_only_embedding_models(reg, tmp_path):
     mine.refresh()
     assert mine() == {}                                    # ... or until a save refreshes it
     assert list(uf.OwnerModels(reg, bob['id'], tmp_path)())[0].startswith('model:')
+
+
+# ---------------------------------------------------------------- imported embeddings (a file, one row per box)
+
+@pytest.fixture
+def viz(pg, tmp_path):
+    from authutil import account
+    from vizutil import make_yolo, viz_session
+    ds = make_yolo(tmp_path / 'ds', boxes=(('a1', '0 0.5 0.5 0.4 0.4\n1 0.3 0.3 0.2 0.2\n'), ('a2', '1 0.5 0.5 0.2 0.2\n')))
+    alice, bob = account('alice'), account('bob')
+    return {'tmp': tmp_path, 'S': viz_session(alice['id'], 'S', ds), 'alice': alice, 'bob': bob}
+
+
+def test_import_embeddings_npy_and_npz(viz):
+    from dataviz.data.sources import LocalSource
+    from dataviz.state import State
+    from vizutil import _Job, geom_registry
+    st = State(LocalSource(viz['tmp'] / 'ds'), None, geom_registry(), default_feature='geom',
+               workspace_root=viz['tmp'] / 'ws')
+    st._index_job(_Job())
+    n = len(st.samples)
+    key = st.import_features('my clip', np.arange(n * 4, dtype=np.float32).reshape(n, 4) + 1)
+    assert key.startswith('import:my-clip:') and key in st.registry and st.registry[key].group == 'imported'
+    emb = st.get_features(key)
+    assert emb.shape == (n, 4)
+    np.testing.assert_allclose(np.linalg.norm(emb, axis=1), 1, atol=1e-5)
+    # rows placed by image + box_idx, in any order
+    rows = sorted(st.samples, key=lambda s: -s['id'])
+    k2 = st.import_features('placed', {'v': np.eye(n, 3, dtype=np.float32)[[s['id'] for s in rows]] + 0.1,
+                                       'image': np.array([s['image'] for s in rows]),
+                                       'box_idx': np.array([s['box_idx'] for s in rows])})
+    np.testing.assert_allclose(st.get_features(k2)[0], feats.l2_normalize(np.eye(n, 3, dtype=np.float32)[:1] + 0.1)[0], atol=1e-5)
+    for bad, why in ((np.ones((n + 1, 4)), 'expected'), (np.full((n, 4), np.nan), 'NaN'),
+                     ({'v': np.ones((1, 4)), 'id': np.array([0])}, 'no row'), ({'v': np.ones((n, 4))}, 'box ids')):
+        with pytest.raises(ValueError, match=why):
+            st.import_features('bad', bad)
+    st.remove_imported(key)
+    assert key not in st.registry and k2 in st.registry
+
+
+def test_import_route_for_labelers_only(viz):
+    import io
+    from authutil import client, login
+    from conftest import wait_job
+    from dataviz.data import sessions
+    from vizutil import make_viz_app
+    _, app = make_viz_app(viz['tmp'] / 'ws')
+    sessions.set_sharing(viz['S'], 'private', [{'user_id': viz['bob']['id'], 'role': 'viewer'}], viz['alice']['id'])
+    a, b = client(app), client(app)
+    assert login(a, 'alice').status_code == 200 and login(b, 'bob').status_code == 200
+    base = f'/s/{viz["S"]}/api'
+    n = len(a.get(f'{base}/points').json()['cls'])
+    buf = io.BytesIO()
+    np.save(buf, np.random.default_rng(0).normal(size=(n, 8)).astype(np.float32))
+    up = {'file': ('vecs.npy', buf.getvalue(), 'application/octet-stream')}
+    assert b.post(f'{base}/features/import', files=up).status_code == 403
+    assert a.post(f'{base}/features/import', files={'file': ('x.npy', b'not numpy', 'application/octet-stream')}).status_code == 400
+    r = a.post(f'{base}/features/import', files=up, data={'name': 'Vecs'}).json()
+    assert r['label'] == 'Vecs · imported'
+    feats_ = {f['key']: f for f in a.get(f'{base}/status').json()['features']}
+    assert feats_[r['key']]['group'] == 'imported' and feats_[r['key']]['cached']
+    p = a.post(f'{base}/projection', json={'feature': r['key'], 'method': 'pca', 'params': {}}).json()
+    if not p['ready']:
+        assert wait_job(a, p['job_id'])['status'] == 'done'
+        p = a.post(f'{base}/projection', json={'feature': r['key'], 'method': 'pca', 'params': {}}).json()
+    assert p['ready'] and len(p['id']) == n
+    assert a.delete(f'{base}/features/import/{r["key"]}').json() == {'ok': True}
+    assert a.delete(f'{base}/features/import/{r["key"]}').status_code == 404

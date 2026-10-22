@@ -75,6 +75,8 @@
 #params label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
 #params:empty, #pca-info:empty, #g-info:empty { display: none; }
 #params:not(:has(.params:not(.hidden))) { display: none; }      /* PCA: no parameters */
+.feat-import { display: flex; flex-direction: column; gap: 4px; }
+#feat-import-st:empty { display: none; }
 
 /* narrow bar: icons only (each trigger keeps its title / aria-label), then the search shrinks to its icon */
 @container ctlbar (max-width: 900px) {

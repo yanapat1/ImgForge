@@ -377,6 +377,12 @@
               <button id="btn-apply" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Re-project</button>
               <label class="field stack">Saved views
                 <select id="saved-views" title="Every projection already computed for this dataset — loads instantly"><option value="">Saved views…</option></select></label>
+              <div id="feat-import" class="feat-import pop-sep">
+                <button id="btn-feat-import" type="button" class="block" title="Embeddings computed elsewhere: an (N, D) .npy in box id order (the id column of the CSV export), or an .npz with v + id (or image + box_idx)">
+                  <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-upload"/></svg>Import embeddings…</button>
+                <input id="feat-import-file" type="file" accept=".npy,.npz" hidden>
+                <span id="feat-import-st" class="hint muted"></span>
+              </div>
             </div>
           </div>
           <label class="bar-field" title="Colour the dots by">

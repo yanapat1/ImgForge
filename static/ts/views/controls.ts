@@ -257,6 +257,33 @@ export function topBy(field: PointsColumn, n: number, title: string, view: strin
   setSelection(ids.slice(0, n), `${title} · ${featureLabel(S.scoresFeature)}`, { view });
 }
 
+// ---- Projection › Import embeddings…: a file of vectors (one per box) becomes a feature space of this session
+export function bindFeatureImport(): void {
+  const file = $req<HTMLInputElement>('feat-import-file'), st = $req('feat-import-st');
+  $req('feat-import').classList.toggle('hidden', S.status?.my_role === 'viewer');
+  $req('btn-feat-import').onclick = () => file.click();
+  file.onchange = async () => {
+    const f = file.files?.[0];
+    file.value = '';
+    if (!f) return;
+    const name = prompt('Name of this feature space', f.name.replace(/\.[^.]+$/, ''));
+    if (name === null) return;
+    const body = new FormData();
+    body.append('file', f);
+    body.append('name', name);
+    st.textContent = `uploading ${(f.size / 1e6).toFixed(1)} MB…`;
+    try {
+      const r: { key: string; label: string } = await (await api('api/features/import', { method: 'POST', body })).json();
+      st.textContent = `imported: ${r.label}`;
+      await refreshStatus();
+      renderFeatureSelect(r.key);
+      $req<HTMLSelectElement>('feature').value = r.key;
+      updateBarSummary();
+      void loadView();
+    } catch (e) { st.textContent = errMessage(e); }
+  };
+}
+
 // ---- method parameters edited but not applied yet: the dot on the projection trigger
 export function updateMapDirty(): void {
   const r = S.viewReq;
@@ -453,7 +480,7 @@ export async function onGroupControls(): Promise<void> {
 export function renderFeatureSelect(selected?: string): void {
   const sel = $req<HTMLSelectElement>('feature');
   const cur = selected || sel.value;
-  const groups = { model: 'My models (Settings › Models)', deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
+  const groups = { model: 'My models (Settings › Models)', imported: 'Imported embeddings', deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
   const features = status().features ?? [];
   sel.innerHTML = Object.entries(groups).filter(([g]) => features.some((f) => f.group === g)).map(([g, title]) =>
     `<optgroup label="${title}">` + features.filter((f) => f.group === g).map((f) =>

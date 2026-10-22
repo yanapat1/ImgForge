@@ -4,8 +4,10 @@ projections (computed as background jobs, answered with {ready: false, job_id} u
 (bubbles), and the saved-views list.
 """
 
+import io
+
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from ...auth import deps
 from ...ml import analysis
@@ -88,6 +90,35 @@ def router(state, ctx):
         if hit is None:
             return {'ready': False, 'feature': key, 'job_id': state.request_label_quality(key, **ov).id}
         return lq_payload(key, *hit, state.label_quality_tag(state.label_quality_settings(**ov)))
+
+    @r.post('/api/features/import', dependencies=[Depends(deps.require_bound('labeler'))])
+    async def import_features(file: UploadFile = File(...), name: str = Form('')):
+        """Embeddings computed elsewhere as a feature space of this session: an (N, D) .npy in box id order, or an
+        .npz with v + id (or image + box_idx). Loaded without pickle."""
+        need_index()
+        data = await file.read(state.IMPORT_MAX_BYTES + 1)
+        if len(data) > state.IMPORT_MAX_BYTES:
+            raise HTTPException(413, 'file too large (2 GB at most)')
+        try:
+            z = np.load(io.BytesIO(data), allow_pickle=False)
+            arr = {k: z[k] for k in z.files} if hasattr(z, 'files') else z
+        except (ValueError, OSError, EOFError) as e:
+            raise HTTPException(400, f'not a .npy / .npz file ({e})')
+        label = (name or (file.filename or 'embeddings').rsplit('.', 1)[0]).strip()
+        try:
+            key = state.import_features(label, arr)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {'key': key, 'label': state.registry[key].label}
+
+    @r.delete('/api/features/import/{key:path}', dependencies=[Depends(deps.require_bound('labeler'))])
+    def remove_imported(key: str):
+        need_index()
+        try:
+            state.remove_imported(key)
+        except KeyError:
+            raise HTTPException(404, f'no imported feature {key!r}')
+        return {'ok': True}
 
     @r.post('/api/projection')
     def projection(req: ProjectionRequest):

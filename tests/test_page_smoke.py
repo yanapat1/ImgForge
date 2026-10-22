@@ -498,7 +498,7 @@ def test_accounts_signup_sharing_owner_card_and_viewer(server):
     assert not errors, '\n'.join(errors)
 
 
-def test_plot_bar_and_cleanlab_label_quality(server):
+def test_plot_bar_and_cleanlab_label_quality(server, tmp_path):
     """The one-row bar above the plot: projection / classes / display popovers hold the old controls (same ids);
     Find issues runs cleanlab's k-fold label-quality check, fills the gallery with its label issues, unlocks the
     cleanlab colourings and the Classes view's confident joint. DATAVIZ_SCREENSHOTS=<dir> saves the bar at 3 widths."""
@@ -544,7 +544,7 @@ def test_plot_bar_and_cleanlab_label_quality(server):
         page.click('#issues-btn')
         assert page.locator('#btn-cl-issues').is_disabled()
         assert page.locator('#color-by optgroup[data-needs="lq"]').evaluate('g => g.disabled')
-        page.on('dialog', lambda d: d.accept() if d.type == 'confirm' else (errors.append(f'dialog: {d.message}'), d.dismiss()))
+        page.on('dialog', lambda d: d.accept() if d.type in ('confirm', 'prompt') else (errors.append(f'dialog: {d.message}'), d.dismiss()))
         page.click('#btn-lq-run')
         page.wait_for_function("!document.querySelector('#btn-cl-issues').disabled", timeout=60000)
         assert 'health' in page.locator('#lq-info').inner_text()
@@ -574,6 +574,15 @@ def test_plot_bar_and_cleanlab_label_quality(server):
         page.click('#activity [data-tab="stats"]')
         page.wait_for_selector('#stat-cl-card:not(.hidden) #stat-cl .main-svg', timeout=20000)
         assert page.locator('#stat-cl-kpis .kpi').count() == 3
+        # Projection › Import embeddings…: an (N, D) .npy becomes a feature space and is projected
+        import numpy as np
+        n = len(_get(f'{server}/s/{sid}/api/points')['cls'])
+        np.save(tmp_path / 'vecs.npy', np.random.default_rng(0).normal(size=(n, 16)).astype(np.float32))
+        page.click('#activity [data-tab="explore"]')
+        page.click('#map-btn')
+        page.set_input_files('#feat-import-file', str(tmp_path / 'vecs.npy'))
+        page.wait_for_function("document.querySelector('#map-summary').textContent.startsWith('vecs')", timeout=30000)
+        page.wait_for_selector('#plot .main-svg', timeout=60000)
         browser.close()
     assert not errors, '\n'.join(errors)
 
