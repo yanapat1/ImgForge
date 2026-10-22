@@ -269,6 +269,7 @@ export function updateMapDirty(): void {
 const LQ_COLS = ['cl_quality', 'cl_given_prob', 'cl_ood_feat', 'cl_ood_prob', 'cl_issue', 'cl_rank', 'cl_suggested'] as const;
 let lqSeq = 0;
 let lqRunning: string | null = null;        // feature whose check runs now: a view load leaves its columns alone
+let lqStale: string | null = null;         // feature whose results were dropped because the labels changed
 
 function setLabelQuality(r: LabelQualityReady | null): void {
   const P = S.P;
@@ -277,6 +278,7 @@ function setLabelQuality(r: LabelQualityReady | null): void {
     P.cl_quality = r.quality; P.cl_given_prob = r.given_prob; P.cl_ood_feat = r.ood_feat; P.cl_ood_prob = r.ood_prob;
     P.cl_issue = r.issue; P.cl_rank = r.rank; P.cl_suggested = r.suggested;
     S.lq = { feature: r.feature, summary: r.summary };
+    lqStale = null;
   } else {
     for (const k of LQ_COLS) delete P[k];
     S.lq = null;
@@ -306,7 +308,16 @@ export function syncLqControls(): void {
   $req('btn-lq-run-t').textContent = on ? 'Run again' : 'Run label-quality check';
   const clf = sm?.settings?.['classifier'];
   if (typeof clf === 'string') $req<HTMLSelectElement>('lq-clf').value = clf;
-  $req('lq-info').innerHTML = sm ? lqInfo(sm) : '';
+  const stale = !sm && lqStale !== null && lqStale === (S.viewReq?.feature ?? null);
+  $req('lq-info').innerHTML = sm ? lqInfo(sm) : stale ? 'The labels changed since the last check: run it again.' : '';
+}
+
+/** A curation fix / undo / image edit changed labels: the cleanlab results were for the old ones, drop them. */
+export function labelsChanged(): void {
+  if (!S.lq) return;
+  lqStale = S.lq.feature;
+  lqSeq++;                                   // an answer in flight is for the old labels too
+  setLabelQuality(null);
 }
 
 function lqInfo(sm: LabelQualityReady['summary']): string {

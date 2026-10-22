@@ -29,9 +29,16 @@
 .fb-name input[type=search] { flex: 1; min-width: 60px; height: 100%; border: none; background: transparent; outline: none; padding: 0;
   font-size: var(--fs-sm); }
 .fb-name input[aria-invalid=true] { color: var(--danger-text); }
-.fb-name select { height: 24px; border-color: transparent; background-color: var(--surface-3); font-size: var(--fs-xs); padding-right: 26px; }
-.fb-neg { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); padding: 0 4px; cursor: pointer; }
-.fb-neg input { width: 15px; height: 15px; }
+/* how the name matches (contains / wildcard / regex / related, NOT): a small trigger in the field; it names the mode
+   only when it is not the default "contains" */
+.fb-opt-btn { display: inline-flex; align-items: center; gap: 4px; height: 24px; min-height: 0; padding: 0 6px; border-color: transparent;
+  background: transparent; color: var(--text-muted); font-size: var(--fs-xs); }
+.fb-opt-btn:hover, .fb-opt-btn[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
+.fb-opt-btn.on { background: var(--accent-soft); color: var(--accent-text); }
+.fb-opt-btn .chev { width: 12px; height: 12px; transition: transform var(--t) var(--ease); }
+.fb-opt-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.fb-pop.fb-name-pop { width: 280px; left: auto; right: -4px; gap: var(--s2); }
+.fb-name-pop select { width: 100%; }
 .fb-btn .chev { width: 13px; height: 13px; vertical-align: 0; transition: transform var(--t) var(--ease); }
 .fb-btn[aria-expanded="true"] { background: var(--surface-3); border-color: var(--border-hover); }
 .fb-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }

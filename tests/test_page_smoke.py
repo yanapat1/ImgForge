@@ -526,6 +526,15 @@ def test_plot_bar_and_cleanlab_label_quality(server):
         page.wait_for_function("document.querySelector('#cls-summary').textContent !== 'All classes'")
         page.select_option('#mode', 'all')
         page.keyboard.press('Escape')
+        # the filter's name options fold into one trigger: it names the mode only when it is not "contains"
+        assert page.locator('#fb-mode').is_hidden() and page.locator('#fb-name-mode').is_hidden()
+        page.click('#fb-name-btn')
+        page.select_option('#fb-mode', 'regex')
+        page.check('#fb-neg')
+        assert page.locator('#fb-name-mode').inner_text() == 'not · regex'
+        page.select_option('#fb-mode', 'substr')
+        page.uncheck('#fb-neg')
+        page.keyboard.press('Escape')
         if shots:
             for w in (1400, 900, 560):
                 page.set_viewport_size({'width': w, 'height': 900})

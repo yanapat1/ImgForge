@@ -252,11 +252,23 @@ function clearKey(k: string): void {
 
 // ---------------------------------------------------------------- UI
 
+// the name field's options trigger says the mode only when it is not the default ("contains", matching)
+const MODE_SHORT: Record<NameMode, string> = { substr: 'contains', glob: 'wildcard', regex: 'regex', fuzzy: 'related' };
+function syncNameOpt(): void {
+  const { mode, neg } = FB.F.name;
+  const t = [neg ? 'not' : '', mode !== 'substr' ? MODE_SHORT[mode] : ''].filter(Boolean).join(' · ');
+  const el = $req('fb-name-mode');
+  el.textContent = t;
+  el.classList.toggle('hidden', !t);
+  $req('fb-name-btn').classList.toggle('on', !!t);
+}
+
 function syncInputs(): void {
   const F = FB.F;
   $req<HTMLInputElement>('fb-q').value = F.name.q;
   $req<HTMLSelectElement>('fb-mode').value = F.name.mode;
   $req<HTMLInputElement>('fb-neg').checked = F.name.neg;
+  syncNameOpt();
   for (const b of $req('fb-cls-mode').querySelectorAll<HTMLElement>('button')) b.setAttribute('aria-pressed', String(b.dataset.m === F.cls.mode));
   for (const b of $req('fb-scope').querySelectorAll<HTMLElement>('button')) b.setAttribute('aria-pressed', String(b.dataset.scope === F.scope));
   for (const ch of $req('fb-cls-chips').querySelectorAll<HTMLElement>('.chip')) {
@@ -365,9 +377,11 @@ export function initFilterBar(): void {
   q.addEventListener('input', () => { FB.F.name.q = q.value; scheduleFilter(); });
   q.addEventListener('keydown', (e) => { if (e.key === 'Escape' && q.value) { e.stopPropagation(); q.value = ''; FB.F.name.q = ''; runNow(true); } });
   const mode = $req<HTMLSelectElement>('fb-mode');
-  mode.addEventListener('change', () => { FB.F.name.mode = NAME_MODES.find((m) => m === mode.value) ?? FB.F.name.mode; runNow(true); });
+  mode.addEventListener('change', () => { FB.F.name.mode = NAME_MODES.find((m) => m === mode.value) ?? FB.F.name.mode; syncNameOpt(); runNow(true); });
   const neg = $req<HTMLInputElement>('fb-neg');
-  neg.addEventListener('change', () => { FB.F.name.neg = neg.checked; runNow(true); });
+  neg.addEventListener('change', () => { FB.F.name.neg = neg.checked; syncNameOpt(); runNow(true); });
+  bindPopover('fb-name-btn', 'fb-name-pop');
+  syncNameOpt();
   $req('fb-cls-mode').addEventListener('click', (e) => {
     const b = closestOf(e, 'button[data-m]');
     const m = CLS_MODES.find((x) => x === b?.dataset.m);

@@ -10,7 +10,7 @@ import { pts, S } from '../core/state.js';
 import { clsColor, clsName } from '../core/theme.js';
 import { invalidateHover, renderPlot } from '../plot/render.js';
 import type { CurFix, CurIds, CurInfo, CurIssuesPage, CurItem, CurOp, CurPatch, CurResult, PredictResult } from '../types-views.js';
-import { SETTING_HOOKS } from './controls.js';
+import { labelsChanged, SETTING_HOOKS } from './controls.js';
 import { closestOf } from './ev-util.js';
 import { onDataPatched, setIssueFilter, setIssueTypes } from './filter-bar.js';
 import { renderGallery, setSelection } from './gallery.js';
@@ -58,6 +58,7 @@ export function applyPatch(patch: CurPatch | null | undefined): void {
   for (const id of patch.restored || []) { del[id] = 0; n++; }
   if (!n) return;
   invalidateHover();
+  labelsChanged();
   if (patch.deleted && patch.deleted.length && S.sel.length) {
     S.sel = S.sel.filter((id) => !del[id]);
     S.highlight = S.highlight.filter((id) => !del[id]);

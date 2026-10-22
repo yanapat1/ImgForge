@@ -397,6 +397,7 @@
                 <option value="cl_suggested">cleanlab: suggested class</option>
                 <option value="cl_given_prob">cleanlab: P(given class)</option>
                 <option value="cl_ood_feat">cleanlab: out-of-distribution</option>
+                <option value="cl_ood_prob">cleanlab: out-of-distribution (probs)</option>
               </optgroup>
               <optgroup label="Model (Model tab)" data-needs="model" hidden disabled>
                 <option value="m_status">model: found / missed / wrong</option>
@@ -500,10 +501,18 @@
             <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>
             <input id="fb-q" type="search" placeholder="Filter by image name…" aria-label="Filter by image name"
                    aria-describedby="fb-err" autocomplete="off" spellcheck="false">
-            <select id="fb-mode" aria-label="How the name is matched" title="contains: plain text · wildcard: cam1* or img_??.jpg · regex: /^cam[12]_/ · related: shares words or numbers">
-              <option value="substr">contains</option><option value="glob">wildcard</option><option value="regex">regex</option><option value="fuzzy">related</option>
-            </select>
-            <label class="fb-neg" title="Keep the images whose name does NOT match"><input type="checkbox" id="fb-neg"> not</label>
+            <div class="popover-anchor">
+              <button id="fb-name-btn" type="button" class="fb-opt-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-name-pop"
+                      aria-label="How the name is matched" title="How the name is matched: contains · wildcard · regex · related, or NOT">
+                <span id="fb-name-mode" class="fb-opt-t hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+              <div id="fb-name-pop" class="popover panel hidden fb-pop fb-name-pop" role="group" aria-label="Name matching">
+                <div class="pop-title">Match the image name</div>
+                <select id="fb-mode" aria-label="How the name is matched">
+                  <option value="substr">contains the text</option><option value="glob">wildcard: cam1* or img_??.jpg</option><option value="regex">regex: /^cam[12]_/</option><option value="fuzzy">related: shares words or numbers</option>
+                </select>
+                <label class="check fb-neg" title="Keep the images whose name does NOT match"><input type="checkbox" id="fb-neg"> Keep the names that do <b>not</b> match</label>
+              </div>
+            </div>
           </div>
           <div class="popover-anchor">
             <button id="fb-cls-btn" class="fb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-cls-pop" title="Images that contain some / all / none of the chosen classes">
