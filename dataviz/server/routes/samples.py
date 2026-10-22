@@ -12,7 +12,7 @@ from collections import OrderedDict
 import numpy as np
 from PIL import Image, ImageDraw
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from ...data import sources
 from ...data.curation import parse_label
@@ -89,6 +89,8 @@ def router(state, ctx):
     def crop(sid: int):
         s = sample_or_404(sid)
         path = state.cache_dir / 'crops' / f'{sid:06d}.jpg'
+        if not path.is_file():                    # an embeddings row without an image preview
+            raise HTTPException(404, f'sample {sid} has no image')
         cut = None
         if s.get('img_w') and s.get('img_h'):     # a box at the image edge: its crop is part black, send that part transparent
             from ...data.indexer import crop_outside_transparent
@@ -101,12 +103,34 @@ def router(state, ctx):
         cut.save(buf, 'WEBP', quality=90)
         return Response(buf.getvalue(), media_type='image/webp', headers={'Cache-Control': 'max-age=86400'})
 
+    @r.get('/api/preview/{sid}/{kind}')
+    def preview(sid: int, kind: str):
+        """An embeddings row's own audio / video / image file (Range requests work, so media can seek), or a redirect
+        to its URL. The path was checked to stay inside the session folder when indexed and is checked again here."""
+        from ...data.embedding_source import AUDIO_TYPES, IMAGE_TYPES, VIDEO_TYPES, is_url
+        s = sample_or_404(sid)
+        types = {'audio': AUDIO_TYPES, 'video': VIDEO_TYPES, 'image': IMAGE_TYPES}.get(kind)
+        ref = (s.get('preview') or {}).get(kind)
+        if types is None or not ref:
+            raise HTTPException(404, f'sample {sid} has no {kind} preview')
+        if is_url(ref):
+            return RedirectResponse(ref)
+        try:
+            path = state.source.preview_path(ref)
+        except (AttributeError, ValueError) as e:
+            raise HTTPException(404, str(e)) from e
+        if not path.is_file():
+            raise HTTPException(404, f'{ref} is missing')
+        return FileResponse(path, media_type=types.get(path.suffix.lower(), 'application/octet-stream'),
+                            headers={'Cache-Control': 'private, max-age=3600'})
+
     image_cache = OrderedDict()
     image_lock = threading.Lock()
 
     @r.get('/api/image/{sid}')
     def full_image(sid: int, max_w: int = 1280, all_boxes: bool = True, model: str | None = None, conf: float = 0.25):
         """The image with its label boxes (this one outlined white); with `model`, its predictions dashed on top."""
+        g.boxes_only()
         s = sample_or_404(sid)
         m = None
         if model and ctx.models is not None:
@@ -303,6 +327,19 @@ def router(state, ctx):
         sc = state.scores.get(key)
         buf = io.StringIO()
         w = csv.writer(buf)
+        if state.source.kind == 'embeddings':          # the row's own id, label, previews and metadata columns
+            cols = list((state.index or {}).get('meta_types') or {})
+            prev = [k for k in ('image', 'audio', 'video', 'text') if any(k in state.samples[i].get('preview', {}) for i in req.ids)]
+            w.writerow(['id', 'row_id', 'class_id', 'class_name', *prev, *cols, 'feature', 'suspicion', 'suggested_class',
+                        'outlier'])
+            for sid in req.ids:
+                s = sample_or_404(sid)
+                extra = [key, round(float(sc['suspicion'][sid]), 3), state.classes[int(sc['suggested'][sid])],
+                         round(float(sc['outlier'][sid]), 4)] if sc else [key, '', '', '']
+                w.writerow([sid, s['row_id'], s['cls'], s['cls_name'], *[s['preview'].get(k, '') for k in prev],
+                            *['' if s['meta'].get(c) is None else s['meta'][c] for c in cols], *extra])
+            return Response(buf.getvalue(), media_type='text/csv',
+                            headers={'Content-Disposition': 'attachment; filename="selection.csv"'})
         w.writerow(['id', 'class_id', 'class_name', 'image', 'label', 'box_idx', 'x1', 'y1', 'x2', 'y2',
                     'feature', 'suspicion', 'suggested_class', 'outlier'])
         for sid in req.ids:

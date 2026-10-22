@@ -47,8 +47,8 @@ def eval_overview(ctx, split='val', conf_mode='best', conf=0.25, iou=None, focus
 
 def router(state, ctx):
     r = APIRouter(dependencies=[Depends(deps.current_user)])
-    viewer = [Depends(deps.require_bound('viewer'))]
     g = guards(state)
+    viewer = [Depends(deps.require_bound('viewer')), Depends(g.boxes_only)]   # predictions need boxes
     reg, svc = ctx.models, ctx.model_service
 
     def need():
@@ -214,7 +214,7 @@ def router(state, ctx):
             log.warning(f'test {vlog.esc(m["name"])} failed: {vlog.esc(e)}')
             raise HTTPException(400, f'{type(e).__name__}: {e}')
 
-    @r.post('/api/models/{mid}/predict', dependencies=[Depends(deps.require_bound('labeler'))])
+    @r.post('/api/models/{mid}/predict', dependencies=[Depends(deps.require_bound('labeler')), Depends(g.boxes_only)])
     def run_predict(mid: str):
         m = model_or_404(mid)
         st = ctx.current()

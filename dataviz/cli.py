@@ -142,10 +142,15 @@ def main():
         src = datasets.source(ds, cfg['s3'], ctx.labeling)
         if src.kind in ('local', 'labeling'):       # labeling: its session + task still exist and have boxes
             src.check()
-        state = State(src, cache_dir, registry, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
+        # an embeddings session offers only its own vector files, never the image models
+        reg = src.feature_registry() if src.kind == 'embeddings' else registry
+        if not reg:
+            raise ValueError(f'{src.uri} has no .npy vector files')
+        state = State(src, cache_dir, reg, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
                       pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh)
         vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
-                                         + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session'}
+                                         + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session',
+                                            'embeddings': ' · vectors + metadata'}
                                          .get(src.kind, ' · read in place') + '[/]')
         state.start(precompute=cfg['startup']['precompute'], auto_compute=cfg['startup'].get('auto_compute', False))
         return state

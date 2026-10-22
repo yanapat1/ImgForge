@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse
 from ...auth import access, deps
 from ...core import logging as vlog
 from ...data import connections, sessions, sources
+from ...data.embedding_source import EmbeddingSource
 from ...workspace import find_workspace
 
 VIEWER = deps.require_session('viewer', param='did', kind='viz', what='visualize session')
@@ -123,6 +124,8 @@ def router(state, ctx):
                             'n_classes': len(classes) if classes else None, 'classes': classes[:8],
                             'last_opened': meta.get('last_opened'), 'workspace': folder.name}
             out['cover'] = min(N_COVER, meta.get('n_boxes') or 0) if (folder / 'crops').is_dir() else 0
+            if meta.get('modality'):
+                out['modality'] = meta['modality']
         if out.get('my_role') not in (None, 'owner'):          # members see the data, not where it sits on the server
             out.pop('path', None)
             (out.get('mirror') or {}).pop('path', None)
@@ -184,7 +187,8 @@ def router(state, ctx):
             elif have != 'owner':
                 raise HTTPException(403, 'only the owner of this session can do that')
         try:
-            check = check_labeling(user) if body.get('kind') == 'labeling' else None
+            check = check_labeling(user) if body.get('kind') == 'labeling' else \
+                (lambda ds: EmbeddingSource(ds['path']).check()) if body.get('kind') == 'embeddings' else None
             ds = await run_io(reg.upsert_dataset, body, user['id'], check, roots())
             if ds['kind'] == 'local':
                 await run_io(sources.LocalSource(ds['path']).check)
@@ -400,6 +404,16 @@ def router(state, ctx):
             out['parent'] = None
         out['roots'] = [str(x) for x in rs]
         return out
+
+    @r.get('/api/fs/embeddings')
+    async def check_embeddings(path: str, user=Depends(deps.current_user)):
+        """What an embeddings session on `path` would hold (rows, feature spaces, columns), or 400 with why not."""
+        need_registry()
+        try:
+            where = connections.check_local(path, roots() or [])
+            return {'path': where, **await run_io(EmbeddingSource(where).check)}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     @r.get('/api/fs/browse')
     async def browse_folder(path: str = '', images: int = 0, user=Depends(deps.current_user)):

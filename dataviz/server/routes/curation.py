@@ -42,7 +42,8 @@ IGNORE_KEY = 'curation_ignored'
 
 
 def router(state, ctx):
-    r = APIRouter(dependencies=[Depends(deps.require_bound('viewer'))])     # every route: the open session
+    # every route: the open session, which must have boxes
+    r = APIRouter(dependencies=[Depends(deps.require_bound('viewer')), Depends(guards(state).boxes_only)])
     labeler = [Depends(deps.require_bound('labeler'))]
     need_index = guards(state).need_index
     stores = OrderedDict()          # State.tag -> Curation, one per loaded session

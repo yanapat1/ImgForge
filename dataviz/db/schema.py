@@ -169,7 +169,7 @@ sessions = Table(
 viz_sessions = Table(
     'viz_sessions', metadata,
     Column('session_id', String(36), ForeignKey('app.sessions.id', ondelete='CASCADE'), primary_key=True),
-    Column('source_kind', String(12), nullable=False),            # local | s3 | labeling
+    Column('source_kind', String(12), nullable=False),            # local | s3 | labeling | embeddings
     Column('path', Text),
     Column('connection_id', String(36), ForeignKey('app.connections.id', ondelete='RESTRICT')),
     Column('bucket', String(255)),
@@ -178,7 +178,7 @@ viz_sessions = Table(
     Column('project_id', String(36), ForeignKey('app.sessions.id', ondelete='SET NULL')),   # gone: card shows broken
     Column('task_id', String(36)),
     Column('only_done', Boolean, nullable=False, server_default=text('false')),
-    CheckConstraint("source_kind IN ('local', 's3', 'labeling')", name='source_kind'),
+    CheckConstraint("source_kind IN ('local', 's3', 'labeling', 'embeddings')", name='source_kind'),   # 0002
     schema='app')
 
 label_projects = Table(
