@@ -12,6 +12,7 @@ import queue
 import hashlib
 import threading
 from collections import OrderedDict
+from collections.abc import Mapping
 from pathlib import Path
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
@@ -541,6 +542,35 @@ def build_registry(project_root, extra_yolo=(), cfg=None):
         label, fn, metric, note = SIMPLE[key]
         specs.append(FeatureSpec(key, label, 'simple', fn, metric=metric, note=note))
     return {s.key: s for s in specs}
+
+
+class FeatureRegistry(Mapping):
+    """The config's feature spaces (`base`, shared by every session) plus `extra()` ones resolved on use: the
+    session owner's own models (ml/user_features.OwnerModels). A plain dict everywhere else: registry[key], `in`,
+    .get, .values, .items."""
+
+    def __init__(self, base, extra=None):
+        self.base = base
+        self.extra = extra or dict
+
+    def __getitem__(self, key):
+        if key in self.base:
+            return self.base[key]
+        return self.extra()[key]
+
+    def __iter__(self):
+        yield from self.base
+        yield from (k for k in self.extra() if k not in self.base)
+
+    def __len__(self):
+        return len(self.base) + sum(1 for k in self.extra() if k not in self.base)
+
+    def __contains__(self, key):
+        return key in self.base or key in self.extra()
+
+    def refresh(self):
+        if hasattr(self.extra, 'refresh'):
+            self.extra.refresh()
 
 
 def cache_name(key):

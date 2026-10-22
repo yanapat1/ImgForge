@@ -1,14 +1,16 @@
 """
 Saved models (Settings › Models in the page), per user, in app.models (PostgreSQL).
 
-    row: {id, owner_id, name, config: {family: yolo|rfdetr|custom, format: pt|pth|pkl|safetensors|onnx|openvino|api,
-          path, variant, arch, adapter, imgsz, conf, iou, task_type, api: {...minus secrets}, created},
+    row: {id, owner_id, name, config: {family: yolo|rfdetr|custom|hf, format: pt|pth|pkl|safetensors|onnx|openvino|api|hf,
+          path, variant, arch, adapter, imgsz, conf, iou, task_type, api: {...minus secrets},
+          embed: {enabled, layer, pool, output, imgsz, batch_size}, created},
           secrets: Fernet-encrypted {api_key, headers}}      (the format db/legacy.py imports models.json into)
 
 A model dict (models() / model()) is the old models.json entry: config + id / name / owner_id, the secrets put
 back into `api`. Every user sees and uses only their own models (owner_id=...); owner_id None is an internal
 lookup (a labeling task runs its project owner's model, ModelService scores a model by id). public() masks the
-secrets. `env:` in an API key or header is refused unless the acting user is an admin: otherwise anyone could
+secrets. `embed` makes a model a feature space of the plot too (ml/user_features.py); family hf (a Hugging Face
+backbone: hub id or local folder) only embeds, it is not a detector (task_type 'embedding'). `env:` in an API key or header is refused unless the acting user is an admin: otherwise anyone could
 make the server send its environment secrets to a URL they control.
 
 API presets: serving (this repo's serving/ app), generic (any JSON endpoint), label (a dataviz-label/1 server, the
@@ -29,9 +31,11 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import db
 
-FAMILIES = ('yolo', 'rfdetr', 'custom')
-FORMATS = ('pt', 'pth', 'pkl', 'safetensors', 'onnx', 'openvino', 'api')
-FIELDS = ('name', 'family', 'format', 'path', 'variant', 'arch', 'adapter', 'imgsz', 'conf', 'iou', 'api', 'task_type')
+FAMILIES = ('yolo', 'rfdetr', 'custom', 'hf')
+FORMATS = ('pt', 'pth', 'pkl', 'safetensors', 'onnx', 'openvino', 'api', 'hf')
+FIELDS = ('name', 'family', 'format', 'path', 'variant', 'arch', 'adapter', 'imgsz', 'conf', 'iou', 'api', 'task_type',
+          'embed')
+EMBED_POOLS = ('avg', 'cls', 'flatten')
 TASK_TYPES = ('object_detection', 'segmentation', 'keypoints', 'classification')
 PRESETS = ('serving', 'generic', 'label')
 API_FIELDS = ('preset', 'url', 'version', 'provider', 'model_type', 'model_name', 'headers', 'api_key', 'auth_header',
@@ -43,6 +47,7 @@ MATRIX = {
     'yolo': ['pt', 'pth', 'pkl', 'safetensors', 'onnx', 'openvino', 'api'],
     'rfdetr': ['pt', 'pth', 'pkl', 'safetensors', 'onnx', 'openvino', 'api'],
     'custom': ['pt', 'pth', 'pkl', 'safetensors', 'onnx', 'openvino', 'api'],
+    'hf': ['hf'],
 }
 EXT = {'.pt': 'pt', '.pth': 'pth', '.pkl': 'pkl', '.pickle': 'pkl', '.safetensors': 'safetensors', '.onnx': 'onnx',
        '.xml': 'openvino', '.torchscript': 'pt'}
@@ -72,6 +77,23 @@ def _mask_headers(h):
         if sep and k.strip():
             out.append(f'{k.strip()}: ••••')
     return '\n'.join(out)
+
+
+def _embed(body):
+    """The `embed` settings of a model, validated (None = not set)."""
+    if not isinstance(body, dict):
+        return None
+    pool = body.get('pool') or 'avg'
+    if pool not in EMBED_POOLS:
+        raise ValueError(f'embedding pooling must be one of {", ".join(EMBED_POOLS)}')
+    out = {'enabled': bool(body.get('enabled')), 'layer': str(body.get('layer') or '').strip()[:200], 'pool': pool,
+           'output': str(body.get('output') or '').strip()[:200]}
+    for k in ('imgsz', 'batch_size'):
+        v = body.get(k)
+        out[k] = int(v) if v not in (None, '') else None
+        if out[k] is not None and not 1 <= out[k] <= 4096:
+            raise ValueError(f'embedding {k} must be between 1 and 4096')
+    return out
 
 
 def _acting_admin():
@@ -157,7 +179,24 @@ class ModelRegistry:
             raise ValueError(f'format must be one of {", ".join(FORMATS)}')
         if m['format'] not in MATRIX[m['family']]:
             raise ValueError(f'{m["family"]} models cannot be {m["format"]}')
-        if m['format'] == 'api':
+        if 'embed' in body:
+            m['embed'] = _embed(body['embed'])
+            if m['embed'] is None:
+                m.pop('embed')
+        if m['format'] == 'hf':
+            from ..ml.user_features import check_hf_path
+            path = str(m.get('path') or '').strip()
+            if not path:
+                raise ValueError('Hugging Face model id (owner/name) or folder is required')
+            if check_hf_path(path):
+                m['path'] = path                # a hub id: downloaded as safetensors, no remote code: anyone may
+            elif not admin:
+                raise ValueError('only admins can load a model folder from this server: use a Hugging Face id')
+            else:
+                m['path'] = self.check_path(path)
+            m.pop('api', None)
+            m['embed'] = {**(m.get('embed') or _embed({})), 'enabled': True}
+        elif m['format'] == 'api':
             api = {k: v for k, v in (body.get('api') or {}).items() if k in API_FIELDS}
             old = base.get('api') or {}
             if not api.get('api_key'):                      # blank key in the form = keep the saved one
@@ -189,6 +228,8 @@ class ModelRegistry:
         # only a dataviz-label/1 server labels other task types; weights and the other APIs give boxes
         if m['format'] == 'api' and m['api']['preset'] == 'label':
             m['task_type'] = m.get('task_type') if m.get('task_type') in TASK_TYPES else 'object_detection'
+        elif m['family'] == 'hf':
+            m['task_type'] = 'embedding'         # a backbone: the plot's feature list, not the Model tab
         else:
             m['task_type'] = 'object_detection'
         if m['family'] == 'rfdetr' and m.get('variant') and m['variant'] not in RFDETR_VARIANTS:

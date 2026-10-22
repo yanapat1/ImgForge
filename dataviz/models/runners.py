@@ -467,6 +467,9 @@ def _trusted_owner(m):
 
 
 def load_runner(m, workdir):
+    if m['family'] == 'hf':
+        raise ValueError(f'{m.get("name")!r} is a Hugging Face backbone: it embeds boxes (the plot\'s feature list), '
+                         'it does not detect')
     if m['format'] != 'api' and not _trusted_owner(m):
         raise PermissionError(f'model {m.get("name")!r} loads files on the server and its owner is not an admin')
     if m['format'] == 'api':
