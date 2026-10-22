@@ -21,7 +21,7 @@ import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks }
 import { bubbleAt, hoverOf, scheduleRender } from './plot/render.js';
 import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
-import { applySettings, applyUiDefaults, applyView, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
+import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
 import { narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
 import { showMissedObjects } from './views/model.js';
@@ -330,6 +330,7 @@ function bindEvents(): void {
   for (const id of ['g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min']) $req(id).onchange = () => { void onGroupControls(); };
   bindGroupsPopover();
   bindBar();
+  bindFeatureImport();
   $req('params').addEventListener('input', updateMapDirty);
   // Find issues › cleanlab
   $req('btn-lq-run').onclick = async () => { if (await runLabelQuality()) clView('cl-issues'); };

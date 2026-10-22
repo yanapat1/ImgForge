@@ -126,8 +126,18 @@ def _compact(labels, pred_probs):
     return present, remap[labels], p
 
 
-def cleanlab_report(labels, pred_probs, emb=None, cfg=None, progress=_noop, class_names=None, x=None):
-    """Per box (dict of arrays, aligned with labels) + summary (JSON-able) from out-of-fold pred_probs."""
+def ood_from_knn(nbr_sim):
+    """cleanlab's feature out-of-distribution score (OutOfDistribution: exp(-mean k-NN distance / its median)) from
+    k-NN similarities computed already (analysis.knn, self excluded), as 1 − score: high = unlike the rest. The k-NN
+    is the expensive part (sklearn's exact search took 2 of the 2.3 minutes at 50k boxes); the page has it anyway."""
+    d = np.clip(1.0 - np.asarray(nbr_sim, np.float64), 0, None).mean(1)
+    scale = max(float(np.median(d)) if len(d) else 0.0, 100 * np.finfo(np.float64).eps)
+    return (1.0 - np.exp(-d / scale)).astype(np.float32)
+
+
+def cleanlab_report(labels, pred_probs, emb=None, cfg=None, progress=_noop, class_names=None, x=None, nbr_sim=None):
+    """Per box (dict of arrays, aligned with labels) + summary (JSON-able) from out-of-fold pred_probs.
+    nbr_sim: (N, k) k-NN similarities of these boxes for the feature OOD score (None: computed from x / emb)."""
     from cleanlab import count, dataset, filter as cl_filter, rank
     s = settings(cfg)
     labels = np.asarray(labels, np.int64)
@@ -164,11 +174,12 @@ def cleanlab_report(labels, pred_probs, emb=None, cfg=None, progress=_noop, clas
     if s['ood']:
         from cleanlab.outlier import OutOfDistribution
         progress(stage='cleanlab: out-of-distribution scores')
-        if emb is not None or x is not None:
+        if nbr_sim is None and (emb is not None or x is not None):
             feats = x if x is not None else _reduce(emb, s['pca_dims'], s['seed'])
-            k = int(min(10, max(1, n - 1)))
-            out['cl_ood_feat'] = (1.0 - OutOfDistribution(params={'k': k}).fit_score(features=feats, verbose=False)
-                                  ).astype(np.float32)
+            feats = feats / np.maximum(np.linalg.norm(feats, axis=1, keepdims=True), 1e-12)
+            _, nbr_sim = analysis.knn(np.ascontiguousarray(feats, np.float32), k=int(min(10, max(1, n - 1))))
+        if nbr_sim is not None:
+            out['cl_ood_feat'] = ood_from_knn(nbr_sim)
         out['cl_ood_prob'] = (1.0 - OutOfDistribution().fit_score(pred_probs=p, labels=lab, verbose=False)
                               ).astype(np.float32)
     progress(stage='cleanlab: class statistics')
@@ -193,9 +204,10 @@ def cleanlab_report(labels, pred_probs, emb=None, cfg=None, progress=_noop, clas
     return out, summary
 
 
-def run(emb, labels, cfg=None, progress=_noop, class_names=None, keep=None):
+def run(emb, labels, cfg=None, progress=_noop, class_names=None, keep=None, nbr_sim=None):
     """Everything for one feature space: out-of-fold probs, then cleanlab. keep: bool per box (None = all).
-    Boxes left out (removed by a curation fix, or in a class under min_class_count) get NaN / False / -1."""
+    Boxes left out (removed by a curation fix, or in a class under min_class_count) get NaN / False / -1.
+    nbr_sim: (N, k) k-NN similarities of every box (State's scores) for the feature OOD score."""
     s = settings(cfg)
     labels = np.asarray(labels, np.int64)
     n_all = len(labels)
@@ -213,7 +225,8 @@ def run(emb, labels, cfg=None, progress=_noop, class_names=None, keep=None):
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')            # cleanlab's "may not flag all issues in class k" notes
-        per, summary = cleanlab_report(lab, probs, cfg=s, progress=progress, class_names=class_names, x=x)
+        per, summary = cleanlab_report(lab, probs, cfg=s, progress=progress, class_names=class_names, x=x,
+                                       nbr_sim=None if nbr_sim is None else np.asarray(nbr_sim)[idx])
     small = [int(c) for c in np.flatnonzero((counts > 0) & (counts < s['min_class_count']))]
     summary.update({'oof_accuracy': fit['accuracy'], 'oof_log_loss': fit['log_loss'], 'folds_used': fit['folds'],
                     'class_counts': counts.tolist(), 'n_total': int(n_all), 'left_out_classes': small})

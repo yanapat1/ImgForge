@@ -83,7 +83,10 @@ class State:
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.tag = uuid.uuid4().hex[:6]                 # job keys of this dataset never collide with the last one
-        self.registry = registry
+        # the config's features (+ the owner's models, cli.py) + the embeddings imported into this session
+        self.registry = registry if isinstance(registry, feats.FeatureRegistry) else feats.FeatureRegistry(registry)
+        self.registry.add(self.imported_features)
+        self._imports = None                            # (fingerprint, {key: FeatureSpec}) of features/imports.json
         self.default_feature = default_feature if default_feature in registry else next(iter(registry))
         self.jobs = jobs or JobManager()
         self.pools = pools or compute.InlinePools()      # main() passes worker-process pools
@@ -322,6 +325,99 @@ class State:
                 return emb
         return None
 
+    # ------------------------------------------------------------ imported embeddings (a file, one row per box)
+    IMPORT_MAX_BYTES = 2 << 30
+
+    def _imports_path(self):
+        return self.features_dir / 'imports.json'
+
+    def imported_features(self):
+        """{key: FeatureSpec} of the embeddings imported into this dataset version (features/imports.json)."""
+        if not self.ready or self.cache_dir is None:
+            return {}
+        if self._imports is not None and self._imports[0] == self.fingerprint:
+            return self._imports[1]
+        try:
+            entries = json.loads(self._imports_path().read_text())
+        except (OSError, ValueError):
+            entries = []
+        specs = {}
+        for e in entries:
+            if e.get('fingerprint') != self.fingerprint:
+                continue
+
+            def missing(*_, name=e['name'], **__):
+                raise RuntimeError(f'the imported embeddings {name!r} are gone from the cache: import the file again')
+            specs[e['key']] = feats.FeatureSpec(e['key'], f'{e["name"]} · imported', 'imported', missing, metric='cosine',
+                                                note=f'imported {e["dim"]}-dimensional embeddings ({e["created"]})')
+        self._imports = (self.fingerprint, specs)
+        return specs
+
+    def import_features(self, name, data):
+        """Store embeddings for every box of this dataset as a feature space; returns its key.
+
+        data: an (N, D) array in box id order (sample ids, the `id` column of the CSV export), or a dict with `v`
+        (M, D) plus `id` (M,) box ids or `image` + `box_idx` (M,) to place each row (every box needs a row)."""
+        self._require_index()
+        n = len(self.samples)
+        if isinstance(data, dict):
+            v = np.asarray(data.get('v'))
+            if v.ndim != 2:
+                raise ValueError('the file needs an array "v" of shape (rows, dims)')
+            if 'id' in data:
+                ids = np.asarray(data['id']).astype(np.int64).ravel()
+            elif 'image' in data and 'box_idx' in data:
+                where = {(s['image'], s['box_idx']): s['id'] for s in self.samples}
+                imgs, bix = np.asarray(data['image']).astype(str).ravel(), np.asarray(data['box_idx']).astype(np.int64).ravel()
+                ids = np.asarray([where.get((i, int(b)), -1) for i, b in zip(imgs, bix)], np.int64)
+            else:
+                raise ValueError('with "v", also give "id" (box ids) or "image" + "box_idx" for every row')
+            if len(ids) != len(v):
+                raise ValueError(f'{len(v)} rows in "v" but {len(ids)} box references')
+            if (ids < 0).any() or (ids >= n).any():
+                raise ValueError(f'{int(((ids < 0) | (ids >= n)).sum())} rows point at no box of this dataset')
+            emb = np.full((n, v.shape[1]), np.nan, np.float32)
+            emb[ids] = v
+        else:
+            emb = np.asarray(data, np.float32)
+            if emb.ndim != 2 or len(emb) != n:
+                raise ValueError(f'expected {n:,} rows (one per box, in box id order), got shape {tuple(emb.shape)}')
+        if emb.shape[1] < 2 or emb.shape[1] > 16384:
+            raise ValueError(f'{emb.shape[1]} dimensions: expected 2 to 16384')
+        bad = ~np.isfinite(emb).all(1)
+        if bad.any():
+            raise ValueError(f'{int(bad.sum()):,} boxes have no row or a NaN / inf value')
+        emb = feats.l2_normalize(emb)
+        slug = re.sub(r'[^A-Za-z0-9_-]+', '-', str(name or 'embeddings')).strip('-')[:40] or 'embeddings'
+        key = f'import:{slug}:{hashlib.sha1(emb.tobytes()).hexdigest()[:8]}'
+        self.features_dir.mkdir(parents=True, exist_ok=True)
+        feats.save_cached(self.features_dir, key, self.fingerprint, emb)
+        feats.vectors_store(self.fingerprint, key, emb, self.cfg)
+        try:
+            entries = json.loads(self._imports_path().read_text())
+        except (OSError, ValueError):
+            entries = []
+        entries = [e for e in entries if e.get('key') != key]
+        entries.append({'key': key, 'name': str(name or slug)[:80], 'dim': int(emb.shape[1]), 'n': n,
+                        'fingerprint': self.fingerprint, 'created': _now()})
+        self._write_json(self._imports_path(), entries)
+        self._imports = None
+        self.features.pop(key, None)
+        return key
+
+    def remove_imported(self, key):
+        try:
+            entries = json.loads(self._imports_path().read_text())
+        except (OSError, ValueError):
+            entries = []
+        if not any(e.get('key') == key for e in entries):
+            raise KeyError(key)
+        self._write_json(self._imports_path(), [e for e in entries if e.get('key') != key])
+        self._imports = None
+        self.features.pop(key, None)
+        self.scores.pop(key, None)
+        self.label_quality.pop(key, None)
+
     def request_features(self, key):
         spec = self.registry[key]
         return self.submit(f'features:{self.tag}:{key}', f'Features · {spec.label}',
@@ -431,8 +527,10 @@ class State:
         dm = self.deleted_mask()
         if job:
             job.progress(stage='label quality: k-fold predicted probabilities')
+        sc = self.get_scores(key, job)                  # its k-NN gives the out-of-distribution score for free
         per, summary = self.pools.run('heavy', compute.do_label_quality, emb, self.labels, s, list(self.classes),
-                                      None if dm is None else ~dm, progress=job.progress if job else None)
+                                      None if dm is None else ~dm, None if sc is None else sc['nbr_sim'],
+                                      progress=job.progress if job else None)
         summary['feature'] = key
         self.scores_dir.mkdir(exist_ok=True)
         path = self._lq_file(key, tag)

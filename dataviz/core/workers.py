@@ -50,9 +50,9 @@ def do_scores(emb, labels, metric, k, progress=_noop):
             'outlier': outlier}
 
 
-def do_label_quality(emb, labels, settings, class_names, keep=None, progress=_noop):
+def do_label_quality(emb, labels, settings, class_names, keep=None, nbr_sim=None, progress=_noop):
     from ..ml import label_quality
-    return label_quality.run(emb, labels, settings, progress, class_names=class_names, keep=keep)
+    return label_quality.run(emb, labels, settings, progress, class_names=class_names, keep=keep, nbr_sim=nbr_sim)
 
 
 def do_groups(xy, labels, min_cluster_size, per_class, pad_frac=0.015, progress=_noop):

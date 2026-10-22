@@ -545,13 +545,24 @@ def build_registry(project_root, extra_yolo=(), cfg=None):
 
 
 class FeatureRegistry(Mapping):
-    """The config's feature spaces (`base`, shared by every session) plus `extra()` ones resolved on use: the
-    session owner's own models (ml/user_features.OwnerModels). A plain dict everywhere else: registry[key], `in`,
-    .get, .values, .items."""
+    """The config's feature spaces (`base`, shared by every session) plus extra ones resolved on use, each from a
+    provider callable -> {key: FeatureSpec}: the session owner's own models (ml/user_features.OwnerModels) and the
+    embeddings imported into the session (State.imported_features). A plain dict everywhere else: registry[key],
+    `in`, .get, .values, .items."""
 
     def __init__(self, base, extra=None):
         self.base = base
-        self.extra = extra or dict
+        self.extras = [extra] if extra else []
+
+    def add(self, provider):
+        self.extras.append(provider)
+
+    def extra(self):
+        out = {}
+        for p in self.extras:
+            for k, v in p().items():
+                out.setdefault(k, v)
+        return out
 
     def __getitem__(self, key):
         if key in self.base:
@@ -569,8 +580,9 @@ class FeatureRegistry(Mapping):
         return key in self.base or key in self.extra()
 
     def refresh(self):
-        if hasattr(self.extra, 'refresh'):
-            self.extra.refresh()
+        for p in self.extras:
+            if hasattr(p, 'refresh'):
+                p.refresh()
 
 
 def cache_name(key):
