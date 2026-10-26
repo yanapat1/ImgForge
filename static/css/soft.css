@@ -1,27 +1,33 @@
 /* soft look (data-look="soft"): tokens live in tokens.css; these rules add the tactile details: borderless raised cards on
-   layered diffuse shadows (--shadow-1/2/3), pill buttons, filled inputs that keep a 1px edge, a tonal selected state */
-:root[data-look="soft"] button { border-radius: 999px; padding-inline: 14px; box-shadow: var(--shadow-1); border-color: transparent;
-  background: var(--surface); transition: background var(--t-fast) var(--ease), box-shadow var(--t) var(--ease); }
-:root[data-look="soft"] button:hover:not(:disabled) { background: var(--surface); border-color: transparent; box-shadow: var(--shadow-2); }
-:root[data-look="soft"] button:active:not(:disabled) { background: var(--surface-3); box-shadow: none; }
-:root[data-look="soft"] button.icon-btn { padding: 0; }
-:root[data-look="soft"] button.ghost,
-:root[data-look="soft"] button.icon-btn { background: transparent; box-shadow: none; }
-:root[data-look="soft"] button.ghost:hover:not(:disabled),
-:root[data-look="soft"] button.icon-btn:hover:not(:disabled) { background: var(--surface-3); box-shadow: none; }
-:root[data-look="soft"] button.primary,
-:root[data-look="soft"] button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
-:root[data-look="soft"] button.primary:hover:not(:disabled) { background: var(--accent-hover); }
-:root[data-look="soft"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-:root[data-look="soft"] select,
-:root[data-look="soft"] textarea { background-color: var(--surface-2); border-color: var(--border); border-radius: var(--r); }
-:root[data-look="soft"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
-:root[data-look="soft"] textarea:focus { background-color: var(--surface); border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+   layered diffuse shadows (--shadow-1/2/3), tonal buttons with a pill primary action, filled inputs that keep a 1px edge, a tonal selected state */
+/* controls: tonal fills instead of borders; only the primary action is a pill. :where() keeps these at element weight, so a
+   component's own class (.tile, .snav, .folder, ...) keeps its shape and padding */
+:where(:root[data-look="soft"]) button { border-color: transparent; background: var(--surface-3);
+  transition: background-color var(--t-fast) var(--ease), box-shadow var(--t) var(--ease), color var(--t-fast) var(--ease); }
+:where(:root[data-look="soft"]) button:hover:not(:disabled) { border-color: transparent; background: var(--pressed); }
+:where(:root[data-look="soft"]) button:active:not(:disabled) { background: var(--border-strong); }
+:where(:root[data-look="soft"]) button.ghost,
+:where(:root[data-look="soft"]) button.icon-btn { background: transparent; }
+:where(:root[data-look="soft"]) button.ghost:hover:not(:disabled),
+:where(:root[data-look="soft"]) button.icon-btn:hover:not(:disabled) { background: var(--surface-3); }
+:where(:root[data-look="soft"]) button.primary { border-radius: 999px; padding-inline: var(--s4); box-shadow: var(--shadow-1); }
+:where(:root[data-look="soft"]) button.primary,
+:where(:root[data-look="soft"]) button.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+:where(:root[data-look="soft"]) button.primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--shadow-2); }
+/* choice tiles (new dataset, AI providers, ...): borderless raised cards that lift on hover */
+:root[data-look="soft"] .tile { border-color: transparent; background: var(--surface); box-shadow: var(--shadow-2);
+  transition: box-shadow var(--t) var(--ease), transform var(--t) var(--ease); }
+:root[data-look="soft"] .tile:hover:not(:disabled) { border-color: transparent; background: var(--surface); box-shadow: var(--shadow-3), 0 0 0 2px var(--accent-line);
+  transform: translateY(-1px); }
+:root[data-look="soft"] .tile:active:not(:disabled) { transform: none; box-shadow: var(--shadow-1); }
+:where(:root[data-look="soft"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:where(:root[data-look="soft"]) select,
+:where(:root[data-look="soft"]) textarea { background-color: var(--surface-2); border-color: var(--border); border-radius: var(--r); }
+:where(:root[data-look="soft"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+:where(:root[data-look="soft"]) textarea:focus { background-color: var(--surface); border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 :root[data-look="soft"] .form-card,
 :root[data-look="soft"] .radio-card,
 :root[data-look="soft"] .theme-choice { border-color: transparent; background: var(--surface); box-shadow: var(--shadow-2); }
-:root[data-look="soft"] .theme-choice,
-:root[data-look="soft"] .radio-card { border-radius: var(--r-lg); padding: var(--s3); }
 :root[data-look="soft"] .theme-choice[aria-pressed="true"] { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); }
 :root[data-look="soft"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-look="soft"] .sec-sub { color: var(--text); }

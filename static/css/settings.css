@@ -31,6 +31,8 @@
 .ds-card.active { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 .ds-icon { width: 44px; height: 44px; border-radius: var(--r-md); display: grid; place-items: center; background: var(--surface-3); color: var(--text-muted); }
 .ds-icon .ico { width: 24px; height: 24px; }
+/* base.css greys every icon inside a button (button .ico); the tile's icon takes its badge colour instead */
+.ds-icon .ico, button:hover:not(:disabled) .ds-icon .ico { color: inherit; }
 .ds-icon.s3 { background: var(--accent-soft); color: var(--accent); }
 .ds-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ds-title { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; font-weight: 650; }
@@ -40,8 +42,7 @@
   font-weight: 600; background: var(--surface-3); color: var(--text-muted); white-space: nowrap; }
 .tagc .ico { width: 12px; height: 12px; vertical-align: 0; stroke-width: 2.2; }
 .tagc.on { background: var(--accent-soft); color: var(--accent-text); }
-.tagc.ok { background: rgba(60, 170, 100, .14); color: #3f9a62; }
-:root:not([data-theme="light"]) .tagc.ok { color: #7fd6a0; }
+.tagc.ok { background: var(--ok-soft); color: var(--ok-text); }
 .tagc.bad { background: var(--danger-soft); color: var(--danger-text); }
 .ds-actions { display: flex; gap: 6px; align-items: center; }
 .ds-progress { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--s3); font-size: var(--fs-xs); color: var(--text-muted); }
@@ -81,8 +82,7 @@
 .fld .help { font-size: var(--fs-xs); color: var(--text-faint); }
 .fld.mono input, input.txt.mono { font-family: var(--mono); font-size: var(--fs-xs); }
 .status-line { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); min-height: 22px; color: var(--text-muted); }
-.status-line.ok { color: #3f9a62; }
-:root:not([data-theme="light"]) .status-line.ok { color: #7fd6a0; }
+.status-line.ok { color: var(--ok-text); }
 .status-line.err { color: var(--danger-text); }
 .status-line .ico { width: 15px; height: 15px; }
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent);
