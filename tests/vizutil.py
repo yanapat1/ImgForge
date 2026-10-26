@@ -19,14 +19,14 @@ def make_yolo(root, classes=('cat', 'dog'), boxes=(('a', '0 0.5 0.5 0.4 0.4\n1 0
     return root
 
 
-def viz_session(owner_id, name, path, visibility='private'):
-    """A visualizer session (app.sessions + app.viz_sessions, a local folder) -> its id."""
+def viz_session(owner_id, name, path, visibility='private', kind='local'):
+    """A visualizer session (app.sessions + app.viz_sessions, a local or embeddings folder) -> its id."""
     from dataviz import db
     from dataviz.data import sessions
     with db.begin() as c:
         sid = sessions.create('viz', owner_id, name, visibility=visibility, conn=c)['id']
-        c.execute(text("INSERT INTO app.viz_sessions(session_id, source_kind, path) VALUES (:s, 'local', :p)"),
-                  {'s': sid, 'p': str(path)})
+        c.execute(text("INSERT INTO app.viz_sessions(session_id, source_kind, path) VALUES (:s, :k, :p)"),
+                  {'s': sid, 'k': kind, 'p': str(path)})
     return sid
 
 
@@ -55,6 +55,7 @@ def make_viz_app(root, max_loaded=4):
     """(ctx, app): the real app with sign-in; ctx.builds counts the States built, each indexed at once."""
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
+    from dataviz.data.embedding_source import EmbeddingSource
     from dataviz.data.sources import LocalSource
     from dataviz.server.app import Ctx, create_app
     from dataviz.state import State
@@ -62,12 +63,19 @@ def make_viz_app(root, max_loaded=4):
     cfg['logging']['http'] = False
     cfg['sessions']['max_loaded'] = max_loaded
     registry = geom_registry()
-    ctx = Ctx(None, registry=registry, cfg=cfg, jobs=JobManager())
+    from dataviz.data import connections
+    ctx = Ctx(None, registry=registry, datasets=connections.Registry(root), cfg=cfg, jobs=JobManager())
     ctx.builds = []
 
     def build(ds, **kw):
-        st = State(LocalSource(ds['path'], name=ds.get('name')), None, registry, default_feature='geom',
-                   jobs=ctx.jobs, cfg=cfg, workspace_root=root, dataset_id=ds['id'])
+        if ds.get('kind') == 'embeddings':          # its own vector files are its feature spaces (as in cli.py)
+            src = EmbeddingSource(ds['path'], name=ds.get('name'))
+            reg = src.feature_registry()
+            st = State(src, None, reg, default_feature=next(iter(reg)), jobs=ctx.jobs, cfg=cfg, workspace_root=root,
+                       dataset_id=ds['id'])
+        else:
+            st = State(LocalSource(ds['path'], name=ds.get('name')), None, registry, default_feature='geom',
+                       jobs=ctx.jobs, cfg=cfg, workspace_root=root, dataset_id=ds['id'])
         st._index_job(_Job())
         ctx.builds.append(ds['id'])
         return st

@@ -293,9 +293,22 @@ def _image_present(image):
         return False
 
 
+def _published(name, port):
+    """The host port docker mapped to `port` of container `name`, or None (not running / not published)."""
+    r = _docker('port', name, f'{port}/tcp', timeout=20)
+    for line in r.stdout.split():                       # '0.0.0.0:49153' (and '[::]:49153')
+        tail = line.rsplit(':', 1)[-1]
+        if tail.isdigit():
+            return int(tail)
+    return None
+
+
 @contextmanager
-def docker_db(name, image, env, host_port, port, ready, timeout, pull_timeout=600):
-    """Start (or reuse) a container; yields the host that answers `ready(host, port)`. Skips with a reason."""
+def docker_db(name, image, env, port, ready, timeout, pull_timeout=600):
+    """Start (or reuse) a container; yields the (host, port) that answers `ready(host, port)`. Skips with a reason.
+
+    The host port is picked by docker (`-p <port>`), never a fixed number: two test databases, or a test database
+    next to a dev one, used to fight over the same port and one of them skipped its tests."""
     if not shutil.which('docker'):
         pytest.skip('docker CLI is not installed')
     try:
@@ -303,10 +316,12 @@ def docker_db(name, image, env, host_port, port, ready, timeout, pull_timeout=60
             pytest.skip('docker daemon is not reachable')
     except (OSError, subprocess.TimeoutExpired):
         pytest.skip('docker daemon is not reachable')
-    for h in ('127.0.0.1', '172.17.0.1'):               # a container left from an earlier run
-        if ready(h, host_port, quick=True):
-            yield h, host_port
-            return
+    left = _published(name, port)                       # a container of this name left from an earlier run
+    if left:
+        for h in ('127.0.0.1', '172.17.0.1'):
+            if ready(h, left, quick=True):
+                yield h, left
+                return
     if not _image_present(image):
         try:
             r = _docker('pull', image, timeout=pull_timeout)
@@ -315,7 +330,7 @@ def docker_db(name, image, env, host_port, port, ready, timeout, pull_timeout=60
         if r.returncode != 0:
             pytest.skip(f'docker pull {image} failed: {r.stderr.strip()[-300:]}')
     _docker('rm', '-f', name, timeout=60)
-    cmd = ['run', '-d', '--name', name, '-p', f'{host_port}:{port}']        # no --rm: logs survive a crash
+    cmd = ['run', '-d', '--name', name, '-p', str(port)]        # no --rm: logs survive a crash; docker picks the port
     for k, v in env.items():
         cmd += ['-e', f'{k}={v}']
     r = _docker(*cmd, image, timeout=120)
@@ -323,7 +338,8 @@ def docker_db(name, image, env, host_port, port, ready, timeout, pull_timeout=60
         pytest.skip(f'docker run {image} failed: {r.stderr.strip()[-300:]}')
     try:
         ip = _docker('inspect', '-f', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', name).stdout.strip()
-        candidates = [('127.0.0.1', host_port), ('172.17.0.1', host_port)] + ([(ip, port)] if ip else [])
+        host_port = _published(name, port)
+        candidates = ([('127.0.0.1', host_port), ('172.17.0.1', host_port)] if host_port else []) + ([(ip, port)] if ip else [])
         deadline = time.time() + timeout
         found = None
         while time.time() < deadline and found is None:
@@ -374,7 +390,7 @@ def mssql_ready(host, port, quick=False):
 
 @pytest.fixture(scope='session')
 def pg_conn():
-    with docker_db('lbl_test_pg', 'postgres:16', {'POSTGRES_PASSWORD': 'pw'}, 55432, 5432, pg_ready, 90) as (host, port):
+    with docker_db('lbl_test_pg', 'postgres:16', {'POSTGRES_PASSWORD': 'pw'}, 5432, pg_ready, 90) as (host, port):
         yield {'id': 'pg', 'kind': 'postgres', 'name': 'pg', 'host': host, 'port': port, 'database': 'postgres',
                'username': 'postgres', 'secret_key': 'pw', 'schema': 'lbltest', 'table_prefix': 'lbl_'}
 
@@ -382,7 +398,7 @@ def pg_conn():
 @pytest.fixture(scope='session')
 def mssql_conn():
     with docker_db('lbl_test_mssql', 'mcr.microsoft.com/mssql/server:2022-latest',
-                   {'ACCEPT_EULA': 'Y', 'MSSQL_SA_PASSWORD': MSSQL_PW}, 51433, 1433, mssql_ready, 180,
+                   {'ACCEPT_EULA': 'Y', 'MSSQL_SA_PASSWORD': MSSQL_PW}, 1433, mssql_ready, 180,
                    pull_timeout=900) as (host, port):
         yield {'id': 'ms', 'kind': 'mssql', 'name': 'mssql', 'host': host, 'port': port, 'database': 'lbltest',
                'username': 'sa', 'secret_key': MSSQL_PW, 'schema': '', 'table_prefix': 'lbl_'}

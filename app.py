@@ -2,9 +2,9 @@
 """
 Dataset visualizer for YOLO datasets — launcher. The code lives in the dataviz/ package (see README.md).
 
-Usage (from the project root):
-    .venv/bin/python scripts/image-tools/app.py --dataset dataset --port 5151
-    .venv/bin/python scripts/image-tools/app.py --help
+Usage:
+    .venv/bin/python app.py --dataset dataset --port 5151
+    .venv/bin/python app.py --help
 """
 
 import os

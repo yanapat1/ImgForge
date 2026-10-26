@@ -52,14 +52,19 @@ export interface LLMStatePayload {
 export interface LLMState extends LLMStatePayload { loaded: boolean }
 
 // ------------------------------------------------------------------ status / meta (GET api/status, api/meta)
-export interface MethodSpec { label: string; params: Record<string, unknown>; [k: string]: unknown }
-export interface FeatureSpec { key: string; label: string; group: string; note: string; text: boolean; cached: boolean }
+export interface MethodSpec { label: string; category?: string; note?: string; params: Record<string, unknown>; [k: string]: unknown }
+export interface FeatureSpec { key: string; label: string; group: string; note: string; text: boolean; cached: boolean; metric?: string }
 /** Set when the dataset changed after the cache shown was built (dataviz/state.py `State.stale`). */
 export interface DatasetStale { cached: string | null; current: string | null; built: string | null; [k: string]: unknown }
 
 export interface DatasetInfo {
   id: string; name: string; uri: string; kind: string; mode: string | null; index_job: number | null; stale: DatasetStale | null;
+  /** embeddings sessions: the preview kinds its rows carry ('image' | 'audio' | 'video' | 'text', or ['vector']) */
+  modality?: string[] | null;
 }
+/** What the page may offer for the open session (server/deps.py `capabilities`): an embeddings session has rows with
+ *  metadata instead of boxes in images, so no curation, no models and no image viewer. */
+export interface Caps { boxes: boolean; images: boolean; curation: boolean; models: boolean; meta: boolean }
 /** Page defaults from config.yaml `ui` (+ analysis.groups / duplicate_threshold). */
 export interface UiDefaults {
   page_size: number; similar_k: number; check_list_size: number; duplicate_threshold: number;
@@ -72,6 +77,7 @@ export interface Status {
   jobs: Job[];
   active: Job[];
   dataset: DatasetInfo | null;         // null on the Sessions home
+  caps?: Caps;
   llm: LLMStatePayload | null;
   // only with an open session:
   default_feature?: string;
@@ -127,6 +133,12 @@ export interface Points {
   cl_swap?: Array<number | null>;
   cl_badloc?: Array<number | null>;
   cl_image_quality?: Array<number | null>;
+  // embeddings sessions (rows, not boxes): the row's own id, which previews it has, its text and metadata columns
+  row_id?: string[];
+  preview?: string[][];
+  text?: string[] | null;
+  meta?: Record<string, Array<number | string | null>>;
+  meta_types?: Record<string, 'num' | 'cat' | 'text'>;
 }
 /** Names of the numeric Points columns (colour-by / sort / filter fields). */
 export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score' |
@@ -168,7 +180,9 @@ export type ScoresResult = ScoresReady | NotReady;
 export interface ProjectionRequest {
   feature: string; method: string; params: Record<string, number>; classes: number[] | null;
 }
-export interface ProjectionInfo { explained_variance?: number[]; [k: string]: unknown }
+/** `quality`: see dataviz/ml/analysis.py `projection_quality` (absent on projections saved before it existed). */
+export interface ProjectionQuality { trustworthiness: number; continuity: number; knn_preserved: number; k: number; n: number }
+export interface ProjectionInfo { explained_variance?: number[]; quality?: ProjectionQuality; [k: string]: unknown }
 /** POST api/projection (ready): a 2D layout of the boxes `id`. */
 export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; info: ProjectionInfo | null }
 export type ProjectionResult = ProjectionReady | NotReady;

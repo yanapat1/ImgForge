@@ -6,6 +6,7 @@ sessions.max_loaded at once). --dataset (or config.yaml dataset.path) saves that
 first admin and loads it at start.
 """
 
+import os
 import sys
 import argparse
 
@@ -42,7 +43,7 @@ The first page lists your sessions (one dataset each): local folders (read in pl
 buckets (streamed, or synced to a local cache) or a task of a labeling session (read live). Create one there, then click its card to explore it.
 
 Usage (from the project root):
-    .venv/bin/python scripts/image-tools/app.py --dataset dataset --port 5151
+    .venv/bin/python app.py --dataset dataset --port 5151
 """
 
 
@@ -115,9 +116,15 @@ def main():
     except OSError as e:
         sys.exit(f'\nPort {port} is busy ({e.strerror}). The visualizer may already be running: open '
                  f'http://localhost:{port}, or stop it with\n'
-                 f'  kill $(ps -eo pid,args | grep "[p]ython scripts/image-tools/app.py" | awk \'{{print $1}}\')\n'
+                 f'  kill $(ps -eo pid,args | grep "[p]ython .*app.py" | awk \'{{print $1}}\')\n'
                  f'or start on another port with --port {port + 1} (or change server.port in the config)')
 
+    from .paths import APP_DIR, LEGACY_ROOT
+    if PROJECT_ROOT == LEGACY_ROOT and APP_DIR.parent.name != 'scripts' and not os.environ.get('DATAVIZ_PROJECT_ROOT'):
+        vlog.get_logger('app').warning(
+            f'project root is {LEGACY_ROOT} (two folders above the app, kept because its .dataviz_cache holds '
+            f'secret.key): storage.allowed_roots "." lets users open folders anywhere under it. Move '
+            f'{LEGACY_ROOT / ".dataviz_cache"} to {APP_DIR / ".dataviz_cache"}, or set DATAVIZ_PROJECT_ROOT.')
     # only after the port is ours: never touch (or migrate) a workspace another running instance is using
     ws_root = vconfig.resolve(cfg['dataset']['workspace_root'])
     admin, admin_pw = start_database(cfg, ws_root)
@@ -143,13 +150,18 @@ def main():
         src = datasets.source(ds, cfg['s3'], ctx.labeling)
         if src.kind in ('local', 'labeling'):       # labeling: its session + task still exist and have boxes
             src.check()
-        # the config's features + the session owner's own models that embed (Settings › Models)
-        reg = feats.FeatureRegistry(registry, user_features.OwnerModels(model_reg, ds.get('owner_id'), ctx.model_service.workdir)
-                                    if ds.get('owner_id') else None)
+        if src.kind == 'embeddings':                 # an embeddings session offers only its own vector files, never the image models
+            reg = src.feature_registry()
+            if not reg:
+                raise ValueError(f'{src.uri} has no .npy vector files')
+        else:                                        # the config's features + the session owner's own models that embed (Settings › Models)
+            reg = feats.FeatureRegistry(registry, user_features.OwnerModels(model_reg, ds.get('owner_id'), ctx.model_service.workdir)
+                                        if ds.get('owner_id') else None)
         state = State(src, cache_dir, reg, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
                       pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh)
         vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
-                                         + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session'}
+                                         + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session',
+                                            'embeddings': ' · vectors + metadata'}
                                          .get(src.kind, ' · read in place') + '[/]')
         state.start(precompute=cfg['startup']['precompute'], auto_compute=cfg['startup'].get('auto_compute', False))
         return state

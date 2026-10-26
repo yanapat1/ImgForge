@@ -49,9 +49,11 @@ DEFAULT_PORTS = {'ftp': 21, 'sftp': 22, 'postgres': 5432, 'mssql': 1433}
 SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')      # blank in an update = keep the stored one
 _BOOL_FIELDS = ('verify_ssl', 'tls', 'passive', 'encrypt')
 DS_FIELDS = ('name', 'kind', 'path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
-DS_KINDS = ('local', 's3', 'labeling')          # labeling: one task of a labeling session, read live (labeling_source)
+# labeling: one task of a labeling session, read live (labeling_source); embeddings: a folder of .npy vectors + a
+# metadata table (embedding_source)
+DS_KINDS = ('local', 's3', 'labeling', 'embeddings')
 _DS_KIND_FIELDS = {'local': ('path',), 's3': ('connection_id', 'bucket', 'prefix', 'mode'),
-                   'labeling': ('project_id', 'task_id', 'only_done')}
+                   'labeling': ('project_id', 'task_id', 'only_done'), 'embeddings': ('path',)}
 _SRC_COLS = ('path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
 _JSONB_CFG = bindparam('cfg', type_=JSONB)
 OUTSIDE = 'that folder is outside the folders this server allows (storage.allowed_roots)'
@@ -323,7 +325,7 @@ class Registry:
         ds = {k: body[k] for k in DS_FIELDS if body.get(k) is not None}
         kind = ds.get('kind')
         if kind not in DS_KINDS:
-            raise ValueError('kind must be local, s3 or labeling')
+            raise ValueError('kind must be local, s3, labeling or embeddings')
         for k in set(DS_FIELDS) - {'name', 'kind', *_DS_KIND_FIELDS[kind]}:
             ds.pop(k, None)                              # a kind's fields only (an edit may switch kinds)
         old = None
@@ -335,7 +337,7 @@ class Registry:
         owner = old['owner_id'] if old else owner_id
         if not owner:
             raise ValueError('a session needs an owner (sign in first)')
-        if kind == 'local':
+        if kind in ('local', 'embeddings'):
             if not ds.get('path'):
                 raise ValueError('path is required')
             ds['path'] = check_local(ds['path'], roots) if roots is not None else \
@@ -355,7 +357,7 @@ class Registry:
             if not ds.get('project_id') or not ds.get('task_id'):
                 raise ValueError('pick the labeling session and its task')
             ds['only_done'] = ds.get('only_done') in (True, 1, '1', 'true', 'on')
-        ds['name'] = (ds.get('name') or '').strip() or (Path(ds['path']).name if kind == 'local' else
+        ds['name'] = (ds.get('name') or '').strip() or (Path(ds['path']).name if kind in ('local', 'embeddings') else
                                                          'labeling session' if kind == 'labeling' else
                                                          (ds['prefix'].rsplit('/', 1)[-1] or ds['bucket']))
         typed = ds['name']
@@ -420,6 +422,9 @@ class Registry:
         (ctx.labeling), for kind labeling."""
         if ds['kind'] == 'local':
             return sources.LocalSource(ds['path'], name=ds.get('name'))
+        if ds['kind'] == 'embeddings':
+            from .embedding_source import EmbeddingSource
+            return EmbeddingSource(ds['path'], name=ds.get('name'))
         if ds['kind'] == 'labeling':
             if labeling is None:
                 raise ValueError('labeling sessions are not enabled in this server')

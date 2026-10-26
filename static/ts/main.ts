@@ -30,6 +30,7 @@ import { closeModal, initModal, modalId, openImage, openModal, stepModal, toggle
 import { imageOrder, setImagePage } from './views/image-grid.js';
 import { loadViewerPrefs, viewerKey } from './views/viewer.js';
 import { renderHome } from './views/home.js';
+import { allRows, bindMedia, isRows, metaCols, rowsPills, tipMedia, unit } from './views/preview.js';
 import { bindUserButton, mountUserMenu } from './views/usermenu.js';
 // filters + curation (WP-D)
 import { fixToSuggested, initCuration } from './views/curation.js';
@@ -156,6 +157,10 @@ async function init(st: Status): Promise<void> {
   S.status = st;
   // a viewer of a shared session: no box editor, no curation fixes, no tag writes (css/states.css .needs-labeler)
   document.documentElement.dataset['role'] = st.my_role || 'owner';
+  // an embeddings session (rows + metadata): no boxes, images or models; css/states.css hides every .needs-boxes
+  const caps = st.caps ?? { boxes: true, images: true, curation: true, models: true, meta: false };
+  document.documentElement.classList.toggle('no-boxes', !caps.boxes);
+  if (!caps.boxes) adaptToRows(points);
   loadViewerPrefs();
   const sessions = [...new Set(points.session)].sort();
   S.sessionIdx = new Map(sessions.map((s, i) => [s, i]));
@@ -163,9 +168,9 @@ async function init(st: Status): Promise<void> {
   const ds: Partial<DatasetInfo> = st.dataset || {};
   const src = ds.kind === 's3' ? (ds.mode === 'cache' ? 'S3 · cached' : 'S3 · stream') : ds.kind === 'labeling' ? 'labeling' : 'local';
   $req('ds-info').innerHTML = `<button id="ds-switch" class="pill name" title="${esc(meta.dataset_uri || '')}\nclick: datasets & sources">` +
-    `${icon(ds.kind === 's3' ? 'cloud' : ds.kind === 'labeling' ? 'tag' : 'folder')}<b>${esc(meta.dataset)}</b><span class="src">${src}</span></button>` +
-    pill(Number(meta.n_images).toLocaleString(), 'images') +
-    pill(Number(meta.n_samples).toLocaleString(), 'boxes') + pill(meta.classes.length, 'classes') +
+    `${icon(ds.kind === 's3' ? 'cloud' : ds.kind === 'labeling' ? 'tag' : isRows() ? 'vectors' : 'folder')}<b>${esc(meta.dataset)}</b><span class="src">${isRows() ? 'embeddings' : src}</span></button>` +
+    (isRows() ? rowsPills(Number(meta.n_samples), meta.classes.length)
+      : pill(Number(meta.n_images).toLocaleString(), 'images') + pill(Number(meta.n_samples).toLocaleString(), 'boxes') + pill(meta.classes.length, 'classes')) +
     (ds.stale ? `<button id="ds-refresh" class="pill stale" title="The dataset files changed after this cache was built (${esc(staleBuilt(ds))}). Click to re-index and recompute features for the new files.">${icon('refresh')}<b>Dataset changed</b>Update cache</button>` : '');
   if (ds.stale) {
     const refresh = $req<HTMLButtonElement>('ds-refresh');
@@ -180,7 +185,13 @@ async function init(st: Status): Promise<void> {
   $req('class-a').innerHTML = opts;
   $req('class-b').innerHTML = opts;
   if (meta.classes.length > 1) $req<HTMLSelectElement>('class-b').value = '1';
-  $req('method').innerHTML = Object.entries(st.methods).map(([k, m]) => `<option value="${k}" title="${esc(m.note || '')}">${m.label}</option>`).join('');
+  // grouped by category (Linear / Non-linear / Other) in the server's order
+  const byCat = new Map<string, string[]>();
+  for (const [k, m] of Object.entries(st.methods)) {
+    const cat = m.category || 'Other';
+    byCat.set(cat, [...(byCat.get(cat) ?? []), `<option value="${k}" title="${esc(m.note || '')}">${m.label}</option>`]);
+  }
+  $req('method').innerHTML = [...byCat].map(([cat, opts]) => `<optgroup label="${esc(cat)}">${opts.join('')}</optgroup>`).join('');
   buildParamInputs();
   renderFeatureSelect(st.default_feature);
   // always start on the one startup view (config startup.feature + startup.method, all classes, default params)
@@ -194,7 +205,7 @@ async function init(st: Status): Promise<void> {
   // ---- filters + curation: register their remembered settings before applySettings, re-apply the curation
   // edits of this server session (deleted boxes) before the first render
   initFilterBar();
-  await initCuration();
+  if (caps.curation) await initCuration();      // an embeddings session has no label files to fix
   // ---- end filters + curation
   applyUiDefaults(st.ui || {});        // config defaults first, then the user's last-used settings on top
   try { applySettings(await getJSON('api/settings')); } catch (e) { /* first run */ }
@@ -218,11 +229,41 @@ async function init(st: Status): Promise<void> {
   else showIdle();
 }
 
+// an embeddings session: the controls that read box geometry / images go, its metadata columns come in
+function adaptToRows(points: Points): void {
+  // modules that read box geometry (filters, stats) see zeros instead of missing columns; their controls are hidden
+  const zeros = (): number[] => new Array<number>(points.id.length).fill(0);
+  points.area = points.area ?? zeros();
+  points.aspect = points.aspect ?? zeros();
+  points.brightness = points.brightness ?? zeros();
+  points.blur = points.blur ?? zeros();
+  const cols = metaCols();
+  const colorBy = $req<HTMLSelectElement>('color-by');
+  for (const v of ['session', 'area', 'aspect', 'brightness', 'blur']) colorBy.querySelector(`option[value="${v}"]`)?.remove();
+  colorBy.querySelector('optgroup[data-needs="model"]')?.remove();
+  const usable = cols.filter(([, t]) => t !== 'text');
+  if (usable.length) {
+    colorBy.insertAdjacentHTML('beforeend', '<optgroup label="Columns">' + usable.map(([c, t]) =>
+      `<option value="meta:${esc(c)}">${esc(c)}${t === 'num' ? ' (scale)' : ''}</option>`).join('') + '</optgroup>');
+  }
+  const sort = $req<HTMLSelectElement>('sort');
+  for (const v of ['area-asc', 'area-desc', 'blur', 'dark', 'bright', 'm-status', 'm-score']) sort.querySelector(`option[value="${v}"]`)?.remove();
+  const img = sort.querySelector<HTMLOptionElement>('option[value="image"]');
+  if (img) img.textContent = 'row id';
+  const nums = cols.filter(([, t]) => t === 'num');
+  if (nums.length) sort.insertAdjacentHTML('beforeend', nums.map(([c]) => `<option value="meta:${esc(c)}">${esc(c)} ↓</option>`).join(''));
+  $req('stat-counts-h').textContent = 'Rows per class';
+  const q = $req<HTMLInputElement>('fb-q');
+  q.placeholder = 'Filter by row id…';
+  q.setAttribute('aria-label', 'Filter by row id');
+  bindMedia($req('gallery'));
+}
+
 function showIdle(): void {
   const key = $req<HTMLSelectElement>('feature').value;
   const f = (status().features ?? []).find((x) => x.key === key);
-  $req('idle-note').textContent = `${f ? f.label : key} features + ${$req<HTMLSelectElement>('method').selectedOptions[0]?.textContent} ` +
-    `for ${Number(metaOf().n_samples).toLocaleString()} boxes` + (f && f.cached ? ' (features cached, only the projection runs)' : '');
+  $req('idle-note').textContent = `${f ? f.label : key} ${isRows() ? 'vectors' : 'features'} + ${$req<HTMLSelectElement>('method').selectedOptions[0]?.textContent} ` +
+    `for ${Number(metaOf().n_samples).toLocaleString()} ${unit(2)}` + (f && f.cached ? ' (features cached, only the projection runs)' : '');
   $req('plot-idle').classList.remove('hidden');
   $req('btn-compute').onclick = () => { void loadView(); };
   $req('btn-stats-compute').onclick = () => {
@@ -273,8 +314,8 @@ function bindEvents(): void {
     const p = ev.points && ev.points[0];
     if (!p || OVERLAY.has(p.data.name) || typeof p.customdata !== 'number') return;
     const id = p.customdata;
-    const img = tip.querySelector('img'), label = tip.querySelector('div');
-    if (img) img.src = `api/crop/${id}`;
+    const media = tip.querySelector('.tip-media'), label = tip.querySelector('.tip-label');
+    if (media) media.innerHTML = tipMedia(id);
     if (label) label.innerHTML = hoverOf(id);
     const e = ev.event;
     tip.style.left = `${Math.min(e.clientX + 16, window.innerWidth - 180)}px`;
@@ -356,9 +397,12 @@ function bindEvents(): void {
     if (toggleOff('dups')) return;
     try {
       const vis = new Set(viewIdsVisible());
-      const { pairs } = await getJSON<DuplicatesPayload>(`api/duplicates?threshold=${UI.duplicate_threshold}&feature=${encodeURIComponent(String(S.scoresFeature))}`);
+      const { pairs, cutoff } = await getJSON<DuplicatesPayload>(`api/duplicates?threshold=${UI.duplicate_threshold}&feature=${encodeURIComponent(String(S.scoresFeature))}`);
       const keep = pairs.filter((p) => vis.has(p.a) && vis.has(p.b));
-      setSelection([...new Set(keep.flatMap((p) => [p.a, p.b]))], `Near-duplicates (cos ≥ ${UI.duplicate_threshold}) · ${featureLabel(S.scoresFeature)}`,
+      const rule = cutoff?.by === 'rank'
+        ? `closest ${+((cutoff.quantile ?? 0) * 100).toFixed(2)}%, distance ≤ ${(cutoff.distance ?? 0).toPrecision(3)}`
+        : `cos ≥ ${UI.duplicate_threshold}`;
+      setSelection([...new Set(keep.flatMap((p) => [p.a, p.b]))], `Near-duplicates (${rule}) · ${featureLabel(S.scoresFeature)}`,
         { kind: 'pairs', pairs: keep, view: 'dups' });
     } catch (e) { toast(errText(e), 'err'); }
   };
@@ -371,7 +415,7 @@ function bindEvents(): void {
   $req('btn-ai-check').onclick = () => { void checkLabelsAI(); };      // ◆ hidden unless label_check is on (core/llm.js)
   $req('btn-tag').onclick = async () => {
     if (!S.sel.length || document.documentElement.dataset['role'] === 'viewer') return;
-    const tag = prompt(`Tag ${S.sel.length} boxes as:`, 'relabel');
+    const tag = prompt(`Tag ${S.sel.length} ${unit(S.sel.length)} as:`, 'relabel');
     if (!tag) return;
     await postJSON('api/tags', { tag, ids: S.sel });
     void refreshTagList();
@@ -411,10 +455,18 @@ function bindEvents(): void {
       return;
     }
     const c = +(chip.dataset.c ?? NaN);
-    narrowSelection(S.sel.filter((id) => pts().cls[id] === c), `${S.selTitle} › ${clsName(c)}`);
+    const browsing = isRows() && !S.sel.length;          // "All rows": the chips narrow every row
+    narrowSelection((browsing ? allRows() : S.sel).filter((id) => pts().cls[id] === c),
+      `${browsing ? 'All rows' : S.selTitle} › ${clsName(c)}`);
   };
 
   initModal();
+  // an embeddings row's dialog: its neighbour cards open that row (their play buttons play, see preview.bindMedia)
+  bindMedia($req('m-row-nbrs'));
+  $req('m-row-nbrs').addEventListener('click', (e) => {
+    const card = closestOf(e, '.card[data-id]');
+    if (card) void openModal(cardId(card));
+  });
   $req('m-close').onclick = closeModal;
   $req('m-preds').onclick = toggleModalPreds;
   $req('m-group').onclick = () => { const id = modalId; closeModal(); if (id !== null) selectGroupOf(id); };

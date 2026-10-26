@@ -113,7 +113,7 @@
   --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
   --ok: #0072b2;
   --ok-soft: rgba(0, 114, 178, 0.1);
-  --ok-text: #0072b2;
+  --ok-text: #00659e;
   --warn: #8a5a00;
   --warn-soft: rgba(138, 90, 0, 0.1);
   --warn-text: #8a5a00;
@@ -126,7 +126,7 @@
   --lb-st-todo: #596577;
   --lb-st-progress: #8a5a00;
   --lb-st-done: #0072b2;
-  --lb-ok-text: #0072b2;
+  --lb-ok-text: #00659e;
   --gem-1: #0072b2;
   --gem-2: #075e90;
   --gem-3: #8a5a00;
@@ -245,7 +245,7 @@
   --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");
   --ok: #0072b2;
   --ok-soft: rgba(0, 114, 178, 0.1);
-  --ok-text: #0072b2;
+  --ok-text: #00659e;
   --warn: #7a4f00;
   --warn-soft: rgba(122, 79, 0, 0.1);
   --warn-text: #7a4f00;
@@ -258,7 +258,7 @@
   --lb-st-todo: #333333;
   --lb-st-progress: #7a4f00;
   --lb-st-done: #0072b2;
-  --lb-ok-text: #0072b2;
+  --lb-ok-text: #00659e;
   --gem-1: #0033cc;
   --gem-2: #002699;
   --gem-3: #7a4f00;

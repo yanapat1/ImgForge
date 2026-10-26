@@ -9,9 +9,80 @@ files it is given — which is why `core/workers.py` can run these functions in 
 | File | What it does |
 |---|---|
 | `features.py` | The **feature registry** (`build_registry`): deep models from `config.yaml features.models` (DINOv2, CLIP / OpenCLIP, SigLIP 2 via Hugging Face), your newest YOLO `best.pt` backbones, and fast CPU features (colour histogram, HOG, box geometry). Each `FeatureSpec` has `fn(crop_paths, samples, progress) → (N, D)` and a `metric`. Plus the `.npy` cache helpers. |
-| `analysis.py` | `project()` (UMAP / PaCMAP / LocalMAP / t-SNE / PCA), `knn()`, `label_suspicion()`, `outlier_scores()`, `near_duplicates()`, `find_groups()` (HDBSCAN + bubble polygons). `METHODS` = the methods offered in the page. |
+| `analysis.py` | `project()` (the 15 dimensionality-reduction methods below), `knn()`, `label_suspicion()`, `outlier_scores()`, `near_duplicates()`, `find_groups()` (HDBSCAN + bubble polygons). `METHODS` = the methods offered in the page. |
 | `label_quality.py` | cleanlab on **k-fold out-of-fold predicted probabilities**: `oof_pred_probs()` (StratifiedKFold; logreg / kNN / MLP on the feature space, PCA-reduced), `cleanlab_report()` (label quality, label issues + rank, suggested class, out-of-distribution scores, confident joint, class ranking, overlapping classes, health score), `run()` (both, leaving out removed boxes and classes under `min_class_count`), `od_report()` (cleanlab object detection on a detector's predictions: bad location, swapped class, overlooked objects). |
 | `user_features.py` | Settings › Models entries as feature spaces (`model:<id>:<hash>`): YOLO `embed()`, a forward hook on a torch layer, an adapter `embed()`, an ONNX / OpenVINO output, or a Hugging Face backbone. `OwnerModels` lists a session owner's embedding models for `features.FeatureRegistry`. |
+
+## Dimensionality reduction methods
+
+`METHODS` in `analysis.py` lists every method; its `category` groups the page's **Method** dropdown
+into Linear / Non-linear / Other, and `note` is the option's tooltip. All return `(N, 2)` float32.
+
+### Linear
+
+Each 2D axis is a weighted sum of the feature dimensions: distances along the map are honest, but
+curved structure (clusters on a manifold) is flattened onto each other.
+
+| Key | Method | Library | Notes |
+|---|---|---|---|
+| `pca` | PCA | sklearn / torch on GPU (≥ 20k points) | Two directions of largest variance; the page shows their explained variance. |
+| `svd` | Truncated SVD | sklearn | PCA without centring (LSA): the first axis follows the mean direction. |
+| `ica` | ICA (FastICA) | sklearn | Statistically independent axes instead of largest-variance ones. |
+| `fa` | Factor Analysis | sklearn | PCA with a separate noise level per dimension; run on the first 50 PCs (full 512-d took 43 s for 6k points). |
+
+### Non-linear (manifold learning)
+
+Keep each point's neighbourhood rather than straight-line distances: clusters separate well, but
+distances *between* clusters are only loosely meaningful (PaCMAP / Isomap keep them best).
+
+| Key | Method | Library | Params | Notes |
+|---|---|---|---|---|
+| `umap` | UMAP | umap-learn / cuML | `n_neighbors`, `min_dist` | The default. |
+| `pacmap` | PaCMAP | pacmap | `n_neighbors` | Better global structure than UMAP. |
+| `localmap` | LocalMAP | pacmap | `n_neighbors` | PaCMAP with sharper cluster separation. |
+| `tsne` | t-SNE | openTSNE / cuML / sklearn | `perplexity` | PCA to 50 dims first. |
+| `kpca` | Kernel PCA (RBF) | sklearn | `gamma` (0 = 1 / dims) | Fitted on 3000 points, the rest `transform`ed. |
+| `isomap` | Isomap | sklearn | `n_neighbors` | Geodesic distances on the k-NN graph; fitted on 3000, rest `transform`ed. |
+| `lle` | Locally Linear Embedding | sklearn | `n_neighbors` | Each point stays the same mix of its neighbours; fitted on 3000, rest `transform`ed. |
+| `spectral` | Spectral Embedding (Laplacian eigenmaps) | sklearn | `n_neighbors` | Fitted on 5000; no `transform`, so the rest are placed by their neighbours. Clusters with no k-NN links between them collapse to one point each: raise `n_neighbors`. |
+
+### Other
+
+Neither a fitted linear map nor neighbourhood-based manifold learning.
+
+| Key | Method | Library | Notes |
+|---|---|---|---|
+| `mds` | Metric MDS (SMACOF) | sklearn | Keeps pairwise distances; O(N²), so fitted on 1500 points and the rest placed by their neighbours. |
+| `random` | Gaussian random projection | sklearn | A random matrix not fitted to the data (linear, but data-independent): a baseline that shows how much structure the other methods add. |
+| `trees` | Random trees embedding | sklearn | 100 totally random trees hash each point into its leaves; Truncated SVD of that sparse code gives 2D. |
+
+Every sklearn method except PCA, SVD, ICA and random projection runs on the first 50 PCs. Methods that
+cannot handle every point (`FIT_MAX`) are fitted on a fixed random subset (seed 0); points outside it are
+`transform`ed when the estimator supports it, else placed at the inverse-distance mean of their 5 nearest
+fitted points (`_place_by_neighbours`). Timings for 6000 points × 512 dims on CPU: under 5 s each.
+
+Every new projection also gets **map-quality numbers** (`projection_quality()`, run in `core/workers.py
+do_project` and saved in the projection's `info`), shown under the Projection controls. They are measured on
+a fixed 2000-point subset with k = 10:
+
+| Metric | 1.0 means | Low means |
+|---|---|---|
+| trustworthiness | every 2D neighbour is a real neighbour | the map invents neighbours (unrelated points look close) |
+| continuity | every real neighbour stays close in 2D | the map tears neighbourhoods apart |
+| neighbours kept | each point's k nearest are also its k nearest in 2D | local detail is lost |
+
+Use them to choose between methods for one feature space: Random Projection is the floor to beat.
+
+**Near-duplicates** (`near_duplicates`, the Inspect button and the Curation rule) need a cut-off that means the same
+in every space. For unit-length (cosine) features it is a cosine (`analysis.duplicate_threshold`, 0.97). For the
+others (HOG, box geometry, unnormalized vectors of an embeddings session) the k-NN "similarity" is `1 − d²/2` on raw
+distances, so a fixed number flags everything in a small-scale space and nothing in a large one;
+`duplicate_cutoff()` takes the points whose nearest neighbour is in the closest `analysis.duplicate_quantile` (0.5 %)
+instead, and the page names the distance that came to.
+
+To add one: an entry in `METHODS` (label, category, params, note) and a branch in `project()` or
+`_sklearn_estimator()`; a new parameter also needs a hint in `PARAM_INFO` (`static/ts/views/controls.ts`)
+and its type in `PARAM_TYPES` (`dataviz/state.py`).
 
 ## How the code is written
 
@@ -41,5 +112,5 @@ files it is given — which is why `core/workers.py` can run these functions in 
 ## Gotchas
 
 - Feature `key`s name the cache files: renaming a key in `config.yaml` recomputes that feature.
-- UMAP runs unseeded (seeding forces numba single-threaded); PaCMAP / t-SNE use `random_state=0`. A recomputed
+- UMAP runs unseeded (seeding forces numba single-threaded); PaCMAP / t-SNE / the sklearn methods use `random_state=0`. A recomputed
   UMAP view therefore looks different — which is why every projection is saved and listed under "Saved views".

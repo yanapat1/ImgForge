@@ -1,23 +1,37 @@
 # Dataset Visualizer
 
 A FiftyOne-style explorer for YOLO datasets. Every bounding box becomes a dot in a 2D projection
-(UMAP / PaCMAP / t-SNE / PCA) of a feature space you pick (OpenCLIP, SigLIP 2, DINOv2, your own YOLO
+(15 methods, grouped Linear: PCA / SVD / ICA / FA · Non-linear: UMAP / PaCMAP / t-SNE / Isomap / LLE / … ·
+Other: MDS / random projection / random trees — see [`dataviz/ml/README.md`](dataviz/ml/README.md)) of a feature space you pick (OpenCLIP, SigLIP 2, DINOv2, your own YOLO
 weights, colour histogram, HOG, box geometry — or any model you add in Settings › Models with "Use in the plot": your
 detector's backbone, a hooked layer, an ONNX output or a Hugging Face backbone). **Find issues** runs cleanlab on k-fold
 out-of-fold predicted probabilities (label issues, label quality, out-of-distribution, class confusion, label health). Lasso dots (or describe them in words, for CLIP / SigLIP features) to see their crops, find suspicious labels,
 outliers and near-duplicates, measure distances between boxes, and switch between datasets on local
 disk or in S3 / RustFS buckets.
 
+Not only images: an **embeddings session** plots vectors you computed anywhere (audio, video, text, sensors,
+tables) from a folder of `.npy` files plus a `meta.csv`. Rows show as playable audio cards, videos that play on
+hover, text or image thumbnails, and any metadata column colours the plot. Format:
+[`dataviz/data/README.md`](dataviz/data/README.md#embeddings-folders-any-modality); try it with
+`python examples/make_embeddings_demo.py` and *New visualize session › Embeddings folder*.
+
 ```bash
 npm install && npm run build                                    # compile static/ts -> static/js (once, and after TS edits; `npm run watch` while developing)
-.venv/bin/python scripts/image-tools/app.py                      # config.yaml in this folder
-.venv/bin/python scripts/image-tools/app.py --dataset dataset --port 5151
-.venv/bin/python scripts/image-tools/app.py --list-features      # feature keys
-.venv/bin/python scripts/image-tools/app.py --show-config        # effective settings
-cd scripts/image-tools && ../../.venv/bin/python -m dataviz      # same thing, as a package
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env && set -a && . ./.env && set +a      # POSTGRES_PASSWORD, DATAVIZ_SECRET_KEY, admin
+docker compose up -d postgres                # PostgreSQL + pgvector on 127.0.0.1:15432 (POSTGRES_PASSWORD from .env)
+export DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:15432/dataviz   # or your own server
+.venv/bin/python app.py                      # config.yaml in this folder
+.venv/bin/python app.py --dataset dataset --port 5151
+.venv/bin/python app.py --list-features      # feature keys
+.venv/bin/python app.py --show-config        # effective settings
+.venv/bin/python -m dataviz                  # same thing, as a package
 ```
 
-Settings live in [`config.yaml`](config.yaml) (command-line flags win).
+Settings live in [`config.yaml`](config.yaml) (command-line flags win). Relative paths in it (`storage.allowed_roots`
+`'.'`, `dataset.workspace_root`) are relative to the **project root**: this folder when cloned on its own, or two
+levels up when it sits in a bigger project as `scripts/image-tools/` (the Docker image); `DATAVIZ_PROJECT_ROOT`
+sets it explicitly.
 
 ## Accounts, sessions and sharing
 
@@ -48,7 +62,7 @@ by the first admin and private; the old files are left untouched.
 ## Layout
 
 ```
-scripts/image-tools/
+./                      (or scripts/image-tools/ inside a bigger project)
 ├── app.py              launcher: puts this folder on sys.path, calls dataviz.cli.main()
 ├── config.yaml         every setting, documented inline
 ├── requirements.txt
@@ -94,7 +108,7 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | I want to … | Go to |
 |---|---|
 | add a feature model | `config.yaml` `features.models` (code: `dataviz/ml/features.py` `model_spec`) |
-| add a projection method | `dataviz/ml/analysis.py` `METHODS` + `project()`; page params: `static/ts/views/controls.ts` `PARAM_INFO` |
+| add a projection method | `dataviz/ml/analysis.py` `METHODS` (with its `category`) + `project()` / `_sklearn_estimator()`; page params: `static/ts/views/controls.ts` `PARAM_INFO` |
 | add an API endpoint | the matching `dataviz/server/routes/*.py` (`router(state, ctx)` factory) |
 | support another storage backend | `dataviz/data/sources.py` (implement the source interface), `connections.py` `source()` |
 | change colours / theme | `static/css/tokens.css`, `static/css/palettes.css` for the named palettes (+ `ui.palette` / `ui.palette_light` in `config.yaml`) |
@@ -107,6 +121,8 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | change text search (prompt, tokenizer, k) | `dataviz/ml/features.py` `TextEncoder` / `prompt()`, `state.py` `text_search()`; page: `static/ts/main.ts` (`#text-search`) |
 | change train / val leakage detection | `dataviz/data/curation.py` `_leak_items` (`leak_sim`); splits: `models.split_source` → `models/splits.py` |
 | change the model A-vs-B compare | `dataviz/models/insights.py` `compare()`, `static/ts/views/eval.ts` (`loadCompare` / `renderCompare`) |
+| change how an embeddings row looks (card, hover tip, dialog) or add a preview kind | `static/ts/views/preview.ts`, row dialog `views/modal.ts` `openRow`; server: `dataviz/data/embedding_source.py` (`PREVIEW_COLS`, MIME types), `routes/samples.py` `/api/preview` |
+| hide or show a control per session kind | `dataviz/server/deps.py` `capabilities()` → `html.no-boxes` (`static/ts/main.ts`) hides every `.needs-boxes` element (`static/css/states.css`) |
 | change the image browser (no selection) | `static/ts/views/image-grid.ts`; server lists / thumbnails: `dataviz/server/routes/samples.py` (`/api/images`, `/api/img/*`) |
 | change the image viewer (box toggles, right-click copy) | `static/ts/views/viewer.ts`, the dialog around it `views/modal.ts` |
 | change the box editor in the visualizer | `static/ts/views/box-editor.ts`; ops + save path: `dataviz/data/curation.py` (`apply_ops` `set_box` / `add`, `Curation.edit`) |
@@ -129,8 +145,10 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 ## Testing
 
 ```bash
-cd scripts/image-tools && DATAVIZ_TEST_DATABASE_URL=postgresql://postgres:pw@127.0.0.1:55432/postgres \
+DATAVIZ_TEST_DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:15432/postgres \
   .venv/bin/python -m pytest -q tests      # ~4 min; without the variable a pgvector container is started via docker
+                                           # (on a port docker picks, so it never collides with a running database)
+DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_page_smoke.py   # a browser of your own
 ```
 
 | Tests | Cover |

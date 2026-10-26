@@ -1,6 +1,6 @@
-# Dataset visualizer (scripts/image-tools) — versions this was built and tested with (Python 3.12).
+# Dataset visualizer — versions this was built and tested with (Python 3.12).
 # Install into an existing venv WITHOUT -U, so numpy/scipy/torch already there are not upgraded:
-#   uv pip install --python .venv/bin/python -r scripts/image-tools/requirements.txt
+#   uv pip install --python .venv/bin/python -r requirements.txt
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 orjson==3.10.12

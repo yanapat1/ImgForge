@@ -6,6 +6,7 @@ into the right HTTP status, and a raw-bytes JSON response.
     sample_or_404   a box record by id
     feature_or_400  a known feature key (None = the default feature)
     scores_or_409   k-NN scores, loading them from disk if cached; 409 = "compute them first"
+    boxes_only      409 in an embeddings session (no images / boxes: curation, models, the image viewer)
     owned           call a ModelRegistry method as the signed-in user (owner_id=) when it takes one
 """
 
@@ -62,5 +63,20 @@ def guards(state):
             raise HTTPException(409, f'features {key!r} not computed yet')
         return sc
 
+    def boxes_only():
+        if getattr(getattr(state, 'source', None), 'kind', None) == 'embeddings':
+            raise HTTPException(409, 'not available in an embeddings session (it has no images or boxes)')
+
     return SimpleNamespace(need_index=need_index, sample_or_404=sample_or_404, feature_or_400=feature_or_400,
-                           scores_or_409=scores_or_409)
+                           scores_or_409=scores_or_409, boxes_only=boxes_only)
+
+
+def kind_of(state):
+    """The open session's source kind ('local', 's3', 'labeling', 'embeddings'), None when there is none."""
+    return getattr(getattr(state, 'source', None), 'kind', None)
+
+
+def capabilities(state):
+    """What the page may offer for the open session: one place instead of kind checks spread over the page."""
+    emb = kind_of(state) == 'embeddings'
+    return {'boxes': not emb, 'images': not emb, 'curation': not emb, 'models': not emb, 'meta': emb}

@@ -38,7 +38,13 @@ def _noop(*_, **__):
 # ---------------------------------------------------------------- pure functions (run in a worker)
 
 def do_project(emb, method, params, metric, progress=_noop):
-    return analysis.project(emb, method, params, metric, progress)
+    xy, info = analysis.project(emb, method, params, metric, progress)
+    progress(stage='measuring how well the map keeps neighbours')
+    try:
+        info = {**info, 'quality': analysis.projection_quality(emb, xy)}
+    except Exception:  # noqa: BLE001 - a metric must never cost the projection itself
+        logging.getLogger('dataviz').warning('projection quality failed', exc_info=True)
+    return xy, info
 
 
 def do_scores(emb, labels, metric, k, progress=_noop):

@@ -80,7 +80,7 @@
 /* ---------------------------------------------------------------- hover tip */
 .hover-tip { position: fixed; z-index: var(--z-tip); pointer-events: none; padding: 6px; border-radius: var(--r-md); box-shadow: var(--shadow-3); }
 .hover-tip img { width: 168px; height: 168px; object-fit: cover; display: block; border-radius: var(--r-sm); background: var(--media-fill); }
-.hover-tip div { font-size: var(--fs-xs); padding: 6px 2px 1px; max-width: 168px; overflow-wrap: anywhere; line-height: 1.45; }
+.hover-tip .tip-label { font-size: var(--fs-xs); padding: 6px 2px 1px; max-width: 168px; overflow-wrap: anywhere; line-height: 1.45; }
 
 /* ---------------------------------------------------------------- modal */
 .modal { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--scrim); backdrop-filter: blur(2px);
@@ -263,3 +263,79 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .share-results li.on, .share-results li[role=option]:hover { background: var(--accent-soft); }
 .share-results .share-res-note { cursor: default; color: var(--text-faint); }
 .share-results .share-res-note.err { color: var(--danger-text); }
+
+/* ---- embeddings rows (views/preview.ts): a card whose row is audio, video, text or only vectors */
+/* the card is its own size container, so small thumbnails drop the columns before the text gets unreadable */
+.card:has(> .rc-body), .card:has(> .rc-video) { container-type: size; }
+.card .rc-body { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 4px; padding: 30px 8px 8px;
+  background: var(--surface-2); color: var(--text); text-align: left; }
+.rc-text { font-size: var(--fs-xs); line-height: 1.38; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4; overflow-wrap: anywhere; }
+.rc-quote .rc-text { -webkit-line-clamp: 5; }
+.rc-meta { margin-top: auto; display: flex; flex-wrap: wrap; gap: 1px 8px; font-size: 11px; line-height: 1.35; color: var(--text-muted);
+  overflow: hidden; max-height: 2.8em; }
+.rc-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-variant-numeric: tabular-nums; }
+.rc-meta i { font-style: normal; color: var(--text-faint); margin-right: 3px; }
+.rc-vec { align-items: flex-start; }
+.rc-vec > .ico { width: 20px; height: 20px; color: var(--accent); }
+.rc-vec b { font-size: var(--fs-xs); overflow-wrap: anywhere; }
+/* audio: one shared player (preview.ts togglePlay); the bottom edge fills with the clip's real position */
+.rc-audio .rc-text { -webkit-line-clamp: 2; }
+.rc-play { flex: none; width: 34px; height: 34px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.rc-play:hover:not(:disabled) { background: var(--accent-soft-hover); border-color: var(--accent); }
+.rc-play .ico { width: 16px; height: 16px; grid-area: 1 / 1; }
+.rc-play .ico + .ico, .card.playing .rc-play .ico:first-child { display: none; }
+.card.playing .rc-play .ico + .ico { display: block; }
+.card.playing .rc-play { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.rc-progress { position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p, 0) * 100%); background: var(--accent);
+  opacity: 0; transition: opacity var(--t) var(--ease); }
+.card.playing .rc-progress { opacity: 1; }
+.card .rc-video { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--media-bg); }
+.card .rc-kind { position: absolute; right: 4px; top: 4px; display: grid; place-items: center; width: 22px; height: 22px;
+  border-radius: var(--r-sm); background: var(--overlay); color: var(--text); }
+.card .rc-kind .ico { width: 13px; height: 13px; }
+.card.is-outlier .rc-kind { display: none; }
+@container (max-width: 96px) {
+  .card .rc-body { padding: 28px 6px 6px; }
+  .rc-meta { display: none; }
+  .rc-text, .rc-quote .rc-text { -webkit-line-clamp: 3; }
+  .rc-audio .rc-text { display: none; }
+}
+
+/* hover tip of a dot whose row has no image */
+.rc-tip { width: 168px; display: flex; flex-direction: column; gap: 6px; padding: 6px 4px 2px; }
+.rc-tip > .ico { width: 18px; height: 18px; color: var(--accent); }
+.rc-tip .rc-text { font-size: var(--fs-sm); -webkit-line-clamp: 6; }
+.rc-tip .rc-meta { max-height: none; }
+
+/* header: what an embeddings session's rows carry */
+.pill.modality { align-items: center; gap: 4px; color: var(--text-muted); }
+.pill.modality .ico { width: 14px; height: 14px; color: var(--accent); margin-left: 4px; }
+.pill.modality .ico:first-child { margin-left: 0; }
+
+/* ---- the row dialog (modal.ts openRow): preview on the stage, nearest rows under it, columns in the side table */
+.modal:not(.rows) .rd-row { display: none; }
+.modal.rows .vw-view, .modal.rows #vw-zoombar, .modal.rows #vw-editbar, .modal.rows #modal-crop { display: none !important; }
+.modal.rows .modal-stage { align-items: stretch; justify-content: flex-start; background: var(--surface-2); }
+.rd-row { display: flex; flex-direction: column; gap: var(--s5); width: 100%; padding: var(--s4); min-height: 0; overflow-y: auto; }
+.rd-media { display: flex; flex-direction: column; align-items: center; gap: var(--s3); }
+.rd-image, .rd-video { max-width: 100%; max-height: 52vh; border-radius: var(--r-md); background: var(--media-fill); object-fit: contain; }
+.rd-video { width: min(720px, 100%); height: auto; }
+.rd-image.tiny { width: min(320px, 100%); height: auto; max-height: none; image-rendering: pixelated; }
+.rd-audio { display: flex; align-items: center; gap: var(--s3); width: min(640px, 100%); padding: var(--s3) var(--s4);
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+.rd-audio > .ico { flex: none; width: 22px; height: 22px; color: var(--accent); }
+.rd-audio audio { flex: 1; min-width: 0; height: 36px; }
+.rd-text { margin: 0; width: min(70ch, 100%); padding: var(--s3) var(--s4); border-radius: var(--r-md); background: var(--surface);
+  border: 1px solid var(--border); font-size: var(--fs-lg); line-height: 1.55; overflow-wrap: anywhere; }
+.rd-none { display: flex; flex-direction: column; align-items: center; gap: var(--s2); padding: var(--s6) var(--s4); color: var(--text-muted);
+  text-align: center; font-size: var(--fs-sm); }
+.rd-none .ico { width: 32px; height: 32px; color: var(--accent); }
+.rd-none b { color: var(--text); font-size: var(--fs-lg); }
+.rd-nbrs-head { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: var(--s2); font-size: var(--fs-sm); }
+.rd-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.rd-cards .card { width: 100%; height: auto; aspect-ratio: 1; }
+/* a score in the corner (sort by score, nearest rows) takes the columns' line: the text gets it instead */
+.card:has(> .score) .rc-body .rc-meta { display: none; }
+.card:has(> .score) .rc-audio .rc-text { -webkit-line-clamp: 3; }

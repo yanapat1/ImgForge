@@ -54,11 +54,16 @@ DEFAULTS = {
         'localmap': {'n_neighbors': 10},
         'tsne': {'perplexity': 30},
         'pca': {},
+        'kpca': {'gamma': 0},
+        'isomap': {'n_neighbors': 10},
+        'lle': {'n_neighbors': 10},
+        'spectral': {'n_neighbors': 10},
         'tsne_threads': 8,
     },
     'analysis': {
         'knn_k': 10,
         'duplicate_threshold': 0.97,
+        'duplicate_quantile': 0.005,
         'groups': {'min_cluster_size': 15, 'per_class': True, 'bubble_pad': 0.015},
         # cleanlab on k-fold out-of-fold class probabilities (Find issues › Label issues), see ml/label_quality.py
         'label_quality': {'folds': 5, 'classifier': 'logreg', 'pca_dims': 256, 'quality_method': 'self_confidence',
@@ -80,6 +85,7 @@ DEFAULTS = {
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root
     'storage': {'allowed_roots': ['.']},
+    'embeddings': {'allow_url_previews': False},
     'vectors': {'enabled': True, 'hnsw_min_rows': 50000},   # pgvector copy of every feature set; HNSW index above n rows
     's3': {'concurrency': 32, 'connect_timeout': 5, 'read_timeout': 60, 'retries': 5},
     'logging': {'level': 'info', 'http': True, 'static': False},

@@ -56,7 +56,7 @@ def pg_server():
         yield from _with_template(_admin_url(url, 'postgres'))
         return
     from conftest_io import docker_db, pg_ready
-    with docker_db('dataviz-pgtest', PG_IMAGE, {'POSTGRES_PASSWORD': 'pw'}, 55432, 5432, pg_ready, 120) as (host, port):
+    with docker_db('dataviz-pgtest', PG_IMAGE, {'POSTGRES_PASSWORD': 'pw'}, 5432, pg_ready, 120) as (host, port):
         yield from _with_template(f'postgresql://postgres:pw@{host}:{port}/postgres')
     del psycopg
 

@@ -1,5 +1,6 @@
 """
-Embedding analysis: 2D projections (UMAP / t-SNE / PCA), nearest neighbours,
+Embedding analysis: 2D projections (linear: PCA / SVD / ICA / FA; non-linear: UMAP / PaCMAP / t-SNE / Isomap / ...;
+other: MDS / random projection / random trees), nearest neighbours,
 data-quality scores and group (cluster) finding with outliers.
 
 Most feature spaces are L2-normalized ("cosine" metric), so similarity = dot product.
@@ -18,14 +19,42 @@ _PACMAP_LOCK = threading.Lock()   # PaCMAP / LocalMAP also use numba
 # The box shows 128 CPUs but is shared: more t-SNE threads made it 20x slower (8 threads: 18 s for 10k points).
 TSNE_THREADS = min(8, os.cpu_count() or 1)
 
+# Grouped in the page's Method dropdown by `category` (in this order); `note` is the option's tooltip.
+CATEGORIES = ('Linear', 'Non-linear', 'Other')
+
 METHODS = {
-    'umap': {'label': 'UMAP', 'params': {'n_neighbors': 15, 'min_dist': 0.1}},
-    'pacmap': {'label': 'PaCMAP', 'params': {'n_neighbors': 10},
+    # linear: each 2D axis is a weighted sum of the feature dimensions
+    'pca': {'label': 'PCA', 'category': 'Linear', 'params': {},
+            'note': 'the two directions of largest variance'},
+    'svd': {'label': 'Truncated SVD', 'category': 'Linear', 'params': {},
+            'note': 'PCA without centring: the first axis follows the mean direction (LSA)'},
+    'ica': {'label': 'ICA', 'category': 'Linear', 'params': {},
+            'note': 'FastICA: statistically independent axes instead of largest-variance ones'},
+    'fa': {'label': 'Factor Analysis', 'category': 'Linear', 'params': {},
+           'note': 'PCA with a separate noise level per dimension (on the first 50 PCs)'},
+    # non-linear (manifold learning): keeps neighbourhoods, not straight-line distances
+    'umap': {'label': 'UMAP', 'category': 'Non-linear', 'params': {'n_neighbors': 15, 'min_dist': 0.1}},
+    'pacmap': {'label': 'PaCMAP', 'category': 'Non-linear', 'params': {'n_neighbors': 10},
                'note': 'keeps global structure (how clusters relate) better than UMAP'},
-    'localmap': {'label': 'LocalMAP', 'params': {'n_neighbors': 10},
+    'localmap': {'label': 'LocalMAP', 'category': 'Non-linear', 'params': {'n_neighbors': 10},
                  'note': 'PaCMAP variant with sharper separation between clusters'},
-    'tsne': {'label': 't-SNE', 'params': {'perplexity': 30}},
-    'pca': {'label': 'PCA', 'params': {}},
+    'tsne': {'label': 't-SNE', 'category': 'Non-linear', 'params': {'perplexity': 30}},
+    'kpca': {'label': 'Kernel PCA', 'category': 'Non-linear', 'params': {'gamma': 0},
+             'note': 'PCA in an RBF kernel space (fit on up to 3000 points, the rest projected)'},
+    'isomap': {'label': 'Isomap', 'category': 'Non-linear', 'params': {'n_neighbors': 10},
+               'note': 'keeps geodesic (along-the-neighbour-graph) distances (fit on up to 3000 points)'},
+    'lle': {'label': 'LLE', 'category': 'Non-linear', 'params': {'n_neighbors': 10},
+            'note': 'Locally Linear Embedding: each point stays a mix of its neighbours (fit on up to 3000 points)'},
+    'spectral': {'label': 'Spectral Embedding', 'category': 'Non-linear', 'params': {'n_neighbors': 10},
+                 'note': 'Laplacian eigenmaps of the k-NN graph (fit on up to 5000 points, the rest placed by '
+                         'neighbours)'},
+    # other: distance-preserving, data-independent or tree-based
+    'mds': {'label': 'MDS', 'category': 'Other', 'params': {},
+            'note': 'metric MDS: keeps pairwise distances (fit on up to 1500 points, the rest placed by neighbours)'},
+    'random': {'label': 'Random Projection', 'category': 'Other', 'params': {},
+               'note': 'Gaussian random matrix, not fitted to the data: a baseline for the other methods'},
+    'trees': {'label': 'Random Trees', 'category': 'Other', 'params': {},
+              'note': 'totally random trees hash each point to its leaves, then SVD to 2D'},
 }
 
 
@@ -182,6 +211,84 @@ def run_umap(emb, n_neighbors=15, min_dist=0.1, seed=None, metric='cosine', prog
             umap.layouts.tqdm = original
 
 
+# ---------------------------------------------------------------- scikit-learn projections
+
+# Points the O(n^2)+ methods are fitted on; the others are projected (transform) or placed by their neighbours.
+FIT_MAX = {'kpca': 3000, 'isomap': 3000, 'lle': 3000, 'spectral': 5000, 'mds': 1500}
+
+
+def _place_by_neighbours(x, fit_idx, fit_xy, k=5):
+    """Out-of-sample positions for methods without transform(): inverse-distance mean of the k nearest fitted points."""
+    from sklearn.neighbors import NearestNeighbors
+    out = np.empty((len(x), 2), np.float32)
+    nn = NearestNeighbors(n_neighbors=min(k, len(fit_idx))).fit(x[fit_idx])
+    dist, idx = nn.kneighbors(x)
+    w = 1.0 / np.maximum(dist, 1e-9)
+    out[:] = (fit_xy[idx] * w[..., None]).sum(1) / w.sum(1, keepdims=True)
+    out[fit_idx] = fit_xy
+    return out
+
+
+def _sklearn_estimator(method, params, n):
+    """Unfitted estimator producing 2 components for one of the scikit-learn methods."""
+    from sklearn import decomposition, manifold, random_projection
+    nn = max(2, min(int(params.get('n_neighbors', 10)), n - 2))
+    if method == 'svd':
+        return decomposition.TruncatedSVD(n_components=2, random_state=0)
+    if method == 'ica':
+        return decomposition.FastICA(n_components=2, whiten='unit-variance', max_iter=400, random_state=0)
+    if method == 'fa':
+        return decomposition.FactorAnalysis(n_components=2, random_state=0)
+    if method == 'kpca':
+        return decomposition.KernelPCA(n_components=2, kernel='rbf', gamma=float(params.get('gamma') or 0) or None,
+                                       eigen_solver='randomized', random_state=0)
+    if method == 'isomap':
+        return manifold.Isomap(n_components=2, n_neighbors=nn)
+    if method == 'lle':
+        return manifold.LocallyLinearEmbedding(n_components=2, n_neighbors=max(nn, 3), eigen_solver='dense',
+                                               random_state=0)
+    if method == 'spectral':
+        return manifold.SpectralEmbedding(n_components=2, affinity='nearest_neighbors', n_neighbors=nn,
+                                          random_state=0)
+    if method == 'mds':
+        return manifold.MDS(n_components=2, n_init=1, init='random', max_iter=300, random_state=0)
+    if method == 'random':
+        return random_projection.GaussianRandomProjection(n_components=2, random_state=0)
+    raise ValueError(f'unknown projection method {method!r}')
+
+
+def _project_sklearn(emb, method, params, progress):
+    label = METHODS[method]['label']
+    n = len(emb)
+    x = np.asarray(emb, np.float32)
+    if method not in ('pca', 'svd', 'ica', 'random') and x.shape[1] > 50 and n > 50:
+        progress(stage=f'{label}: PCA to 50 dims')
+        x = np.ascontiguousarray(pca_reduce(x, 50)[0], np.float32)
+    if method == 'trees':
+        from sklearn.decomposition import TruncatedSVD
+        from sklearn.ensemble import RandomTreesEmbedding
+        progress(stage=f'{label} on {n} points: hashing into leaves')
+        trees = RandomTreesEmbedding(n_estimators=100, max_depth=5, random_state=0, n_jobs=TSNE_THREADS)
+        leaves = trees.fit_transform(x)
+        progress(stage=f'{label}: SVD of the leaf codes')
+        return TruncatedSVD(n_components=2, random_state=0).fit_transform(leaves).astype(np.float32)
+    est = _sklearn_estimator(method, params, min(n, FIT_MAX.get(method, n)))
+    fit_max = FIT_MAX.get(method)
+    if not fit_max or n <= fit_max:
+        progress(stage=f'{label} on {n} points')
+        return np.asarray(est.fit_transform(x), np.float32)
+    fit_idx = np.sort(np.random.default_rng(0).choice(n, fit_max, replace=False))
+    progress(stage=f'{label}: fitting {fit_max} of {n} points')
+    fit_xy = np.asarray(est.fit_transform(x[fit_idx]), np.float32)
+    if hasattr(est, 'transform'):
+        progress(stage=f'{label}: projecting the other {n - fit_max} points')
+        out = np.concatenate([est.transform(x[i:i + 10000]) for i in range(0, n, 10000)]).astype(np.float32)
+        out[fit_idx] = fit_xy
+        return out
+    progress(stage=f'{label}: placing the other {n - fit_max} points by their neighbours')
+    return _place_by_neighbours(x, fit_idx, fit_xy)
+
+
 def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
     """2D projection. Returns (xy, info) where info holds e.g. PCA explained variance."""
     params = {**METHODS[method]['params'], **(params or {})}
@@ -259,7 +366,33 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
             xy = TSNE(n_components=2, perplexity=perplexity, init='pca', random_state=0,
                       n_jobs=TSNE_THREADS).fit_transform(x)
         return xy.astype(np.float32), {}
+    if method in METHODS:
+        return _project_sklearn(emb, method, params, progress), {}
     raise ValueError(f'unknown projection method {method!r}')
+
+
+def projection_quality(emb, xy, k=10, sample=2000):
+    """How faithful a 2D map is, on a fixed random subset (trustworthiness is O(n^2)).
+
+    trustworthiness: are 2D neighbours real neighbours (1 = no false neighbours appear in the map)?
+    continuity: are real neighbours kept close in 2D (1 = none torn apart)?
+    knn_preserved: mean share of each point's k nearest neighbours that are also its k nearest in 2D.
+    """
+    n = len(emb)
+    k = min(k, (n - 1) // 2)
+    if k < 1:
+        return {}
+    from sklearn.manifold import trustworthiness
+    from sklearn.neighbors import NearestNeighbors
+    idx = np.sort(np.random.default_rng(0).choice(n, sample, replace=False)) if n > sample else np.arange(n)
+    x = np.asarray(emb[idx], np.float32)
+    y = np.asarray(xy[idx], np.float32)
+    hi = NearestNeighbors(n_neighbors=k + 1).fit(x).kneighbors(x, return_distance=False)[:, 1:]
+    lo = NearestNeighbors(n_neighbors=k + 1).fit(y).kneighbors(y, return_distance=False)[:, 1:]
+    kept = np.mean([len(np.intersect1d(a, b, assume_unique=True)) for a, b in zip(hi, lo)]) / k
+    return {'trustworthiness': round(float(trustworthiness(x, y, n_neighbors=k)), 4),
+            'continuity': round(float(trustworthiness(y, x, n_neighbors=k)), 4),
+            'knn_preserved': round(float(kept), 4), 'k': int(k), 'n': int(len(idx))}
 
 
 def _knn_gpu(emb, k, progress):
@@ -369,6 +502,22 @@ def outlier_scores(emb, labels, metric='cosine'):
         else:
             scores[mask] = np.linalg.norm(emb[mask] - centroid, axis=1)
     return scores
+
+
+def duplicate_cutoff(nbr_sim, metric='cosine', threshold=0.97, quantile=0.005):
+    """(similarity cut-off, how it was chosen) for near-duplicates in one feature space.
+
+    Cosine spaces: `threshold` is a cosine and means the same in every space. Any other metric: knn's similarity is
+    1 - d²/2 on unnormalized vectors, so a fixed number is empty in one space and everything in another; take the
+    points whose nearest neighbour is among the closest `quantile` of all points instead (a rank, not a value).
+    """
+    if metric == 'cosine' or not getattr(nbr_sim, 'size', 0) or nbr_sim.shape[1] == 0:
+        return float(threshold), 'cosine'
+    first = nbr_sim[:, 0]
+    first = first[np.isfinite(first)]
+    if not len(first):
+        return float(threshold), 'cosine'
+    return float(np.quantile(first, 1.0 - quantile)), 'rank'
 
 
 def near_duplicates(nbr_idx, nbr_sim, threshold=0.97, limit=500, exclude=None):

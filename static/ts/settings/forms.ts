@@ -5,7 +5,7 @@ import { $req, esc, icon } from '../core/dom.js';
 import { lookName, PALETTES, paletteName, themeMode, THEME } from '../core/theme.js';
 import type { PaletteSpec } from '../core/theme.js';
 import { MAX_DIST_PICKS } from '../plot/marks.js';
-import type { ConnDraft, ConnItem, ConnKind, ConnTestResult, FolderEntry, SectionId, SetForm, StatusLine, YoloInfo } from '../types-settings.js';
+import type { ConnDraft, ConnItem, ConnKind, ConnTestResult, EmbeddingsSummary, FolderEntry, SectionId, SetForm, StatusLine, YoloInfo } from '../types-settings.js';
 import { SET } from './dialog.js';
 
 /** `el.dataset[k]` as a string ('' when the attribute is missing). */
@@ -63,13 +63,16 @@ export function renderDatasetsSec(): string {
       '<span>A bucket prefix in YOLO format (images/, labels/, classes.txt). Stream it, or sync a local cache for the fastest browsing.</span></button>' +
       `<button class="tile" data-act="new-local"><span class="ds-icon">${icon('folder')}</span><b>Local folder</b>` +
       '<span>A YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.</span></button>' +
-      `<button class="tile wide" data-act="new-labeling"><span class="ds-icon labeling">${icon('tag')}</span><b>Labeling session</b>` +
+      `<button class="tile" data-act="new-labeling"><span class="ds-icon labeling">${icon('tag')}</span><b>Labeling session</b>` +
       '<span>One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.</span></button>' +
+      `<button class="tile" data-act="new-embeddings"><span class="ds-icon embeddings">${icon('vectors')}</span><b>Embeddings folder</b>` +
+      '<span>Vectors you computed anywhere (audio, video, text, tables) as .npy files, plus a meta.csv of labels, previews and columns.</span></button>' +
       '</div><div class="form-foot"><button class="ghost" data-act="back">Cancel</button></div></section>';
   }
   if (SET.view === 's3') return renderS3Form();
   if (SET.view === 'local') return renderLocalForm();
   if (SET.view === 'labeling') return renderLabelingForm();
+  if (SET.view === 'embeddings') return renderEmbeddingsForm();
   const cards = SET.datasets.map((d) => {
     const active = d.id === SET.active;
     const tags: string[] = [];
@@ -84,12 +87,16 @@ export function renderDatasetsSec(): string {
       if (d.labeling && d.labeling.task) tags.push(tagc(`${d.labeling.project} › ${d.labeling.task}`));
       if (d.only_done) tags.push(tagc('finished images only', '', 'check'));
       if (d.error) tags.push(tagc(d.error, 'bad', 'alert'));
+    } else if (d.kind === 'embeddings') {
+      tags.push(tagc('vectors + metadata', 'on', 'vectors'));
+      for (const m of d.modality || []) tags.push(tagc(m, '', MODALITY_ICON[m] || 'vectors'));
+      if (d.exists === false) tags.push(tagc('folder not found', 'bad', 'alert'));
     } else {
       tags.push(tagc('read in place', '', 'folder'));
       if (d.exists === false) tags.push(tagc('folder not found', 'bad', 'alert'));
     }
     return `<div class="ds-card${active ? ' active' : ''}" data-id="${esc(d.id)}">` +
-      `<div class="ds-icon ${d.kind}">${icon(d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : 'folder')}</div>` +
+      `<div class="ds-icon ${d.kind}">${icon(d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : d.kind === 'embeddings' ? 'vectors' : 'folder')}</div>` +
       `<div class="ds-main"><div class="ds-title">${esc(d.name)}${active ? tagc('open now', 'on', 'check') : ''}</div>` +
       `<div class="ds-uri" title="${esc(d.uri || '')}">${esc(d.uri || '')}</div><div class="ds-meta">${tags.join('')}</div></div>` +
       '<div class="ds-actions">' +
@@ -135,8 +142,9 @@ function foldersHTML(list: FolderEntry[] | null | undefined, act: string, emptyT
   if (!list) return '';
   if (!list.length) return `<div class="folders"><div class="none">${esc(emptyText)}</div></div>`;
   return '<div class="folders">' + list.map((f) =>
-    `<button class="folder${f.yolo ? ' yolo' : ''}" data-act="${act}" data-name="${esc(f.name)}">${icon('folder')}` +
-    `<span class="name">${esc(f.name)}</span>${f.yolo ? tagc('YOLO', 'on', 'check') : ''}${icon('chev-r')}</button>`).join('') + '</div>';
+    `<button class="folder${f.yolo || f.embeddings ? ' yolo' : ''}" data-act="${act}" data-name="${esc(f.name)}">${icon('folder')}` +
+    `<span class="name">${esc(f.name)}</span>${f.yolo ? tagc('YOLO', 'on', 'check') : ''}${f.embeddings ? tagc('vectors', 'on', 'vectors') : ''}` +
+    `${icon('chev-r')}</button>`).join('') + '</div>';
 }
 
 function yoloSummary(info: YoloInfo): string {
@@ -197,6 +205,50 @@ function renderLocalForm(): string {
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-local" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-local" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
+}
+
+// ---- embeddings folder: <name>.npy vector files + meta.csv (dataviz/data/embedding_source.py), read in place
+export const MODALITY_ICON: Record<string, string> = { image: 'image', audio: 'wave', video: 'film', text: 'text', vector: 'vectors' };
+const COL_TYPE: Record<string, string> = { num: 'number', cat: 'category', text: 'free text' };
+
+// what the session will hold, before it is saved: the reader checks the folder exactly as the index will
+function summaryHTML(s: EmbeddingsSummary): string {
+  const prev = s.previews.length ? s.previews.map((p) => `<span class="emb-col prev">${icon(MODALITY_ICON[p] || 'vectors')}${esc(p)}</span>`).join('')
+    : '<span class="muted">none: cards show the label and columns</span>';
+  const cols = s.columns.length ? s.columns.map((c) => `<span class="emb-col ${c.type}" title="${esc(COL_TYPE[c.type] || c.type)}">` +
+    `<i>${c.type === 'num' ? '#' : c.type === 'cat' ? 'A' : '¶'}</i>${esc(c.name)}</span>`).join('') : '<span class="muted">none</span>';
+  return '<div class="emb-summary">' +
+    `<div class="emb-figs"><span><b class="num">${s.n.toLocaleString()}</b>rows</span>` +
+    `<span><b class="num">${s.features.length}</b>feature space${s.features.length === 1 ? '' : 's'}</span>` +
+    `<span><b class="num">${s.label ? s.classes : 1}</b>${s.label ? 'classes' : 'class (no label column)'}</span></div>` +
+    '<dl class="emb-dl">' +
+    `<dt>Vectors</dt><dd>${s.features.map((f) => `<span class="emb-feat"><b>${esc(f.name)}</b><span class="num">${f.dim} dims</span></span>`).join('')}</dd>` +
+    `<dt>Previews</dt><dd>${prev}${s.url_previews ? `<span class="muted">${s.url_previews.toLocaleString()} ` +
+      'are web links: shown only when the server allows it (config embeddings.allow_url_previews)</span>' : ''}</dd>` +
+    `<dt>Columns</dt><dd>${cols}</dd></dl></div>`;
+}
+
+function renderEmbeddingsForm(): string {
+  const f = formOf('embeddings');
+  const b = f.browse;
+  const ok = !!f.summary;
+  const parts = b ? b.path.split('/').filter(Boolean) : [];
+  const hint: StatusLine | null = f.status || (b && !b.embeddings
+    ? { kind: '', text: 'Open a folder that holds meta.csv (or meta.parquet) and one or more .npy files (marked vectors).' } : null);
+  return '<section><div class="form-card done"><div class="step-head">' + icon('vectors') + 'Embeddings folder on this machine</div>' +
+    `<div class="sec-actions"><input class="txt mono" style="flex:1" type="text" data-f="path" value="${esc(f.path || '')}" placeholder="/data/speech-embeddings" data-enter="emb-go">` +
+    `<button data-act="emb-go">${icon('arrow-r')}Go</button>${b && b.parent ? `<button class="icon-btn" data-act="emb-up" aria-label="Parent folder" title="Parent folder">${icon('up')}</button>` : ''}</div>` +
+    (b ? `<div class="browser">${crumbsHTML('/', parts, 'emb-crumb')}${foldersHTML(b.folders, 'emb-folder', 'no sub-folders here')}</div>` : '') +
+    (f.summary ? summaryHTML(f.summary) : '') + statusHTML(hint) +
+    '<details class="emb-format"><summary>Folder format</summary>' +
+    '<pre class="mono">meta.csv      one row per sample: label, id, image | audio | video (paths in the folder), text, any other columns\n' +
+    '&lt;name&gt;.npy    (rows × dims) float vectors, row i = meta row i; each file is one feature space</pre>' +
+    '<p class="sec-note">Columns of numbers colour the plot on a scale; columns with up to 50 values colour it by category. ' +
+    'Unit-length vectors are compared by cosine, others by Euclidean distance.</p></details>' +
+    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label></div>` +
+    `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
+    `<button data-act="save-embeddings" ${ok ? '' : 'disabled'}>Save</button>` +
+    `<button class="primary" data-act="save-embeddings" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
 }
 
 // ---- labeling-backed dataset: a labeling session + one of its box tasks, read live (dataviz/data/labeling_source.py)

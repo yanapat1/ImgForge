@@ -2,6 +2,7 @@
 driven by headless Chromium signed in as the first admin. Opens the session, waits for the plot, scans in Curation and expects the seeded train/val leak. Fails on any page
 error or console error. Skips without playwright (+ `playwright install chromium`)."""
 
+import csv
 import http.cookiejar
 import json
 import os
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import wave
 from pathlib import Path
 
 import pytest
@@ -119,7 +121,8 @@ class _SignedIn:
 
 def _browser(p):
     try:
-        return _SignedIn(p.chromium.launch())
+        # DATAVIZ_TEST_CHROMIUM: a browser binary to use instead of playwright's own download (e.g. a preinstalled one)
+        return _SignedIn(p.chromium.launch(executable_path=os.environ.get('DATAVIZ_TEST_CHROMIUM') or None))
     except Exception as e:  # noqa: BLE001 - no browser downloaded, or its system libraries missing
         why = next((ln.strip() for ln in str(e).splitlines() if 'shared libraries' in ln), str(e).splitlines()[0])
         pytest.skip(f'chromium cannot start ({why}): `playwright install chromium` (+ `playwright install-deps`)')
@@ -627,3 +630,61 @@ def test_cleanlab_detection_checks_from_a_model_run(server):
         assert not errors, '\n'.join(errors)
     finally:
         gs.should_exit = True
+
+
+def _make_embeddings(folder):
+    """An embeddings session folder: 30 rows of 2 classes, audio on even rows, text on all, a numeric + a category column."""
+    import numpy as np
+    (folder / 'wav').mkdir(parents=True)
+    with wave.open(str(folder / 'wav' / 'a.wav'), 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b'\0\0' * 4000)
+    rng = np.random.default_rng(0)
+    np.save(folder / 'vec.npy', (rng.normal(size=(2, 8))[np.arange(30) % 2] + 0.2 * rng.normal(size=(30, 8))).astype(np.float32))
+    with open(folder / 'meta.csv', 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(['id', 'label', 'audio', 'text', 'snr', 'room'])
+        for i in range(30):
+            w.writerow([f'u{i}', 'ab'[i % 2], 'wav/a.wav' if i % 2 == 0 else '', f'utterance {i}', i / 3, 'xy'[i % 3 == 0]])
+
+
+def test_embeddings_session_rows_audio_and_columns(server, tmp_path):
+    """An embeddings session: box-only views are gone, the gallery lists rows (audio cards play), a metadata column
+    colours the plot, and a row's dialog shows its audio, its columns and its nearest rows."""
+    folder = tmp_path / 'speech'
+    _make_embeddings(folder)
+    summary = _get(f'{server}/api/fs/embeddings?path={urllib.request.quote(str(folder))}')
+    assert summary['n'] == 30 and summary['previews'] == ['audio', 'text']
+    sid = _send(f'{server}/api/datasets', {'kind': 'embeddings', 'path': str(folder)})['id']
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/s/{sid}/')
+        page.click('#btn-compute')
+        page.wait_for_selector('#plot .main-svg', timeout=60000)
+        assert page.evaluate("document.documentElement.classList.contains('no-boxes')")
+        for hidden in ('#act-curation', '[data-tab="model"]', '[data-tab="eval"]', '#fb-scope', '#text-search'):
+            assert page.locator(hidden).is_hidden(), hidden
+        assert page.locator('#gallery-title').text_content() == 'All rows'
+        assert page.locator('#gallery-count').text_content() == '30 rows'
+        assert page.locator('#gallery .card .rc-play').count() == 15
+        page.click('#gallery .card[data-id="0"] .rc-play')
+        page.wait_for_selector('#gallery .card[data-id="0"].playing', timeout=10000)
+        page.click('#gallery .card[data-id="0"] .rc-play')         # click again: stop
+        assert page.locator('#gallery .card.playing').count() == 0
+        page.select_option('#color-by', 'meta:room')
+        page.wait_for_function("document.querySelector('#plot').textContent.includes('x (')", timeout=10000)   # legend
+        page.select_option('#color-by', 'meta:snr')
+        page.click('#gallery .card[data-id="3"]')
+        page.wait_for_selector('#modal.rows #m-row-media blockquote.rd-text', timeout=10000)
+        assert 'utterance 3' in page.locator('#m-row-media').inner_text()
+        assert 'snr' in page.locator('#modal-meta').inner_text()
+        page.wait_for_selector('#m-row-nbrs .rd-cards .card', timeout=10000)
+        page.keyboard.press('Escape')
+        browser.close()
+    assert not errors, '\n'.join(errors)

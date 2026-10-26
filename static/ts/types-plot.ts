@@ -36,4 +36,9 @@ export interface SimilarPayload { id: number[]; sim: number[] }
 /** POST api/text-search: a job id until the text encoder is ready, then the nearest boxes. */
 export type TextSearchResult = { ready: false; job_id: number } | { ready: true; id: number[]; score: number[] };
 /** GET api/duplicates */
-export interface DuplicatesPayload { pairs: Array<{ a: number; b: number; sim: number }> }
+/** cutoff: how near-duplicates were cut. 'cosine' = a cosine threshold; 'rank' = the closest `quantile` of points
+ *  (feature spaces that are not unit length, where a cosine means nothing), up to feature distance `distance`. */
+export interface DuplicatesPayload {
+  pairs: Array<{ a: number; b: number; sim: number }>;
+  cutoff?: { by: 'cosine' | 'rank'; sim: number; quantile?: number; distance?: number };
+}

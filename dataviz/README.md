@@ -1,8 +1,8 @@
 # `dataviz/` — the server package
 
 Everything that runs in Python: reading the config, indexing a dataset, computing features and
-projections, and serving the page + JSON API. The `app.py` launcher one folder up puts
-`scripts/image-tools/` on `sys.path` and calls `dataviz.cli.main()`; `python -m dataviz` does the same.
+projections, and serving the page + JSON API. The `app.py` launcher one folder up puts its own folder on
+`sys.path` and calls `dataviz.cli.main()`; `python -m dataviz` does the same.
 
 ## Files
 
@@ -65,4 +65,4 @@ Nothing imports `server` or `cli` back.
   startup should go through `need_index()` / `state.ready`.
 - Worker processes are **spawned**: they import `dataviz.core.workers` by name. `multiprocessing`
   passes the parent's `sys.path`, so it works from the launcher and from `python -m dataviz`; it would
-  not work if the package were imported from elsewhere without `scripts/image-tools` on the path.
+  not work if the package were imported from elsewhere without the app folder on the path.

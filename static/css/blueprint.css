@@ -11,13 +11,13 @@
 :root[data-look="blueprint"] .sec-sub { display: flex; align-items: center; gap: var(--s2); }
 :root[data-look="blueprint"] .sec-sub::after { content: ""; flex: 1; border-top: 1px dashed var(--border-strong); }
 :root[data-look="blueprint"] .sec-sub2 { color: var(--text-muted); }
-:root[data-look="blueprint"] button { font-weight: 600; }
-:root[data-look="blueprint"] button:hover:not(:disabled) { border-color: var(--accent-line); }
-:root[data-look="blueprint"] button.ghost:hover:not(:disabled),
-:root[data-look="blueprint"] button.icon-btn:hover:not(:disabled) { border-color: var(--border-strong); }
-:root[data-look="blueprint"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-:root[data-look="blueprint"] select,
-:root[data-look="blueprint"] textarea { background-color: var(--bg); }
+:where(:root[data-look="blueprint"]) button { font-weight: 600; }
+:where(:root[data-look="blueprint"]) button:hover:not(:disabled) { border-color: var(--accent-line); }
+:where(:root[data-look="blueprint"]) button.ghost:hover:not(:disabled),
+:where(:root[data-look="blueprint"]) button.icon-btn:hover:not(:disabled) { border-color: var(--border-strong); }
+:where(:root[data-look="blueprint"]) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+:where(:root[data-look="blueprint"]) select,
+:where(:root[data-look="blueprint"]) textarea { background-color: var(--bg); }
 /* crop marks: four 10px corner ticks drawn as background strokes, so no pseudo-element is taken from the component */
 :root[data-look="blueprint"] .form-card,
 :root[data-look="blueprint"] .radio-card,

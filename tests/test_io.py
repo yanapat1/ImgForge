@@ -300,7 +300,8 @@ def test_routes_browse_and_connections(client_as, tmp_roots, ftp_server, image_t
     c = client_as(make_user('browser'))
     root, names = image_tree
     r = c.get('/api/fs/browse', params={'path': str(root), 'images': 1}).json()
-    assert r['images'] == N_IMAGES - N_IMAGES // 5 and r['folders'] == [{'name': 'sub', 'yolo': False, 'images': N_IMAGES // 5}]
+    assert r['images'] == N_IMAGES - N_IMAGES // 5 and r['folders'] == [{'name': 'sub', 'yolo': False, 'embeddings': False,
+                                                                                     'images': N_IMAGES // 5}]
     r = c.get('/api/fs/browse', params={'path': str(root)}).json()
     assert 'images' not in r and 'images' not in r['folders'][0]               # unchanged without images=1
     assert c.get('/api/fs/browse', params={'path': '/etc'}).status_code == 400  # outside storage.allowed_roots
