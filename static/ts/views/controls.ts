@@ -20,6 +20,7 @@ const PARAM_INFO: Record<string, [string, string, number]> = {
   n_neighbors: ['nbrs', 'neighbours each point looks at: larger = more global structure', 1],
   min_dist: ['min_dist', 'smaller = tighter clusters', 0.05],
   perplexity: ['perplexity', '~ number of close neighbours each point considers', 1],
+  gamma: ['gamma', 'RBF kernel width: larger = more local; 0 = auto (1 / dims)', 0.1],
 };
 
 export function buildParamInputs(): void {
@@ -176,9 +177,15 @@ export async function loadView(): Promise<void> {
     updateBarSummary();
     S.groups = null;
     invalidateHover();
-    const ev = r.info && r.info.explained_variance;
-    $req('pca-info').textContent = ev
-      ? `explained variance: PC1 ${((ev[0] ?? 0) * 100).toFixed(1)}%, PC2 ${((ev[1] ?? 0) * 100).toFixed(1)}%` : '';
+    const ev = r.info?.explained_variance, q = r.info?.quality;
+    const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
+    $req('pca-info').textContent = [
+      ev ? `explained variance: PC1 ${pct(ev[0] ?? 0)}, PC2 ${pct(ev[1] ?? 0)}` : '',
+      q ? `map quality (${q.n.toLocaleString()} pts, k=${q.k}): trustworthiness ${q.trustworthiness.toFixed(3)} · ` +
+        `continuity ${q.continuity.toFixed(3)} · neighbours kept ${pct(q.knn_preserved)}` : '',
+    ].filter(Boolean).join('  ·  ');
+    $req('pca-info').title = q ? 'trustworthiness: no false neighbours in 2D (1 = best) · continuity: true neighbours ' +
+      'not torn apart (1 = best) · neighbours kept: share of each point\'s k nearest that stay its k nearest in 2D' : '';
     await refreshGroups();
     renderPlot();
     renderGallery();
@@ -220,7 +227,6 @@ export function updateModeControls(): void {
 export function updateMethodControls(): void {
   const m = $req<HTMLSelectElement>('method').value;
   for (const k of Object.keys(status().methods)) $req(`params-${k}`).classList.toggle('hidden', k !== m);
-  $req('pca-info').classList.toggle('hidden', m !== 'pca');
 }
 
 export function viewIdsVisible(): number[] {
@@ -480,7 +486,7 @@ export async function onGroupControls(): Promise<void> {
 export function renderFeatureSelect(selected?: string): void {
   const sel = $req<HTMLSelectElement>('feature');
   const cur = selected || sel.value;
-  const groups = { model: 'My models (Settings › Models)', imported: 'Imported embeddings', deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
+  const groups = { provided: 'Your vectors', model: 'My models (Settings › Models)', imported: 'Imported embeddings', deep: 'Deep features (GPU)', simple: 'Simple features (fast, CPU)' };
   const features = status().features ?? [];
   sel.innerHTML = Object.entries(groups).filter(([g]) => features.some((f) => f.group === g)).map(([g, title]) =>
     `<optgroup label="${title}">` + features.filter((f) => f.group === g).map((f) =>

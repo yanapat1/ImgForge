@@ -9,6 +9,7 @@ import { clearLasso } from '../plot/interactions.js';
 import { pickNumber, updateMarks } from '../plot/marks.js';
 import { updateHighlight } from '../plot/render.js';
 import { renderImageGrid } from './image-grid.js';
+import { allRows, cardMedia, isRows, loadVisibleMedia, rowId, syncPlaying, unit } from './preview.js';
 
 /** Options of setSelection. `highlight: null` leaves the plot highlight alone. */
 export interface SelectionOpts {
@@ -91,9 +92,9 @@ type Cmp = (a: number, b: number) => number;
 /** Value of a numeric column at a box id (0 when the column is not loaded: callers check that first). */
 const at = (col: ArrayLike<number> | undefined, id: number): number => col?.[id] ?? 0;
 
-export function sortedSelection(): number[] {
+export function sortedSelection(from: number[] = S.sel): number[] {
   const P = pts();
-  const ids = S.sel.slice();
+  const ids = from.slice();
   const sort = $req<HTMLSelectElement>('sort').value;
   const by: Record<string, Cmp> = {
     suspicion: (a, b) => at(P.suspicion, b) - at(P.suspicion, a),
@@ -106,6 +107,12 @@ export function sortedSelection(): number[] {
     class: (a, b) => at(P.cls, a) - at(P.cls, b) || a - b,
     'group-out': (a, b) => (isOutlier(b) ? 1 : 0) - (isOutlier(a) ? 1 : 0) || a - b,
     image: (a, b) => { const x = P.image[a] ?? '', y = P.image[b] ?? ''; return x < y ? -1 : x > y ? 1 : a - b; },
+    // embeddings sessions: a numeric metadata column, largest first (blanks last)
+    ...Object.fromEntries(Object.entries(P.meta_types ?? {}).filter(([, t]) => t === 'num').map(([c]): [string, Cmp] => {
+      const col = P.meta?.[c] ?? [];
+      const v = (id: number): number => { const x = col[id]; return typeof x === 'number' ? x : -Infinity; };
+      return [`meta:${c}`, (a, b) => v(b) - v(a) || a - b];
+    })),
     // mistakes first (missed, misplaced, wrong class), then found boxes least confident first
     'm-status': (a, b) => (MISTAKE_RANK[at(P.m_status, b) + 1] ?? 0) - (MISTAKE_RANK[at(P.m_status, a) + 1] ?? 0) || at(P.m_score, a) - at(P.m_score, b),
     'm-score': (a, b) => at(P.m_score, a) - at(P.m_score, b),
@@ -149,13 +156,13 @@ function cardHTML(id: number): string {
   const model = ms > 0 ? `<span class="m-badge" style="--c:${errColor(ms)}" title="model: ${errLabel}` +
     `${at(P.m_pred, id) >= 0 ? ` (says ${esc(clsName(at(P.m_pred, id)))})` : ''}">${errLabel}</span>` : '';
   const out = showOutlierMarks() && isOutlier(id);
-  const desc = `#${id} ${esc(clsName(c))} · ${esc(P.image[id])}${out ? ' · OUTLIER (no group)' : ''}`;
+  const desc = `#${id} ${esc(clsName(c))} · ${esc(isRows() ? rowId(id) : P.image[id])}${out ? ' · OUTLIER (no group)' : ''}`;
   const picked = S.picked.includes(id);
   return `<div class="card${out ? ' is-outlier' : ''}${picked ? ' picked' : ''}" data-id="${id}" role="button" tabindex="0" ` +
     `aria-pressed="${picked}" title="${desc}\nclick: details · ctrl+click: select (pin on map)" aria-label="${desc}">` +
     `<span class="pick-badge"><span class="pick-n">${pickNumber(id)}</span>${icon('check')}</span>` +
     (out ? `<span class="out-badge">${icon('x')}outlier</span>` : '') +
-    `<img loading="lazy" src="api/crop/${id}" alt="">` +
+    cardMedia(id) +
     `<span class="badge" style="--c:${clsColor(c)}">${esc(clsName(c))}</span>` +
     warn + model + (score ? `<span class="score">${score}</span>` : '') + '</div>';
 }
@@ -189,13 +196,16 @@ const EMPTY_HTML = '<div class="empty">' +
 
 export function renderGallery(): void {
   const g = $req('gallery');
-  $req('gallery-title').textContent = S.selTitle;
-  const total = S.selKind === 'pairs' ? S.pairs.length : S.sel.length;
-  $req('gallery-count').textContent = total ? `${total.toLocaleString()} ${S.selKind === 'pairs' ? 'pairs' : 'boxes'}` : '';
+  // an embeddings session has no image browser: with nothing selected the gallery lists every row
+  const browse = isRows() && !!S.P && S.selKind !== 'pairs' && !S.sel.length && S.selTitle === 'No selection';
+  const sel = browse ? allRows() : S.sel;
+  $req('gallery-title').textContent = browse ? 'All rows' : S.selTitle;
+  const total = S.selKind === 'pairs' ? S.pairs.length : sel.length;
+  $req('gallery-count').textContent = total ? `${total.toLocaleString()} ${S.selKind === 'pairs' ? 'pairs' : unit(total)}` : '';
 
   const counts = new Map<number, number>();
   const cls = S.P ? S.P.cls : [];
-  for (const id of S.sel) { const c = cls[id] ?? 0; counts.set(c, (counts.get(c) || 0) + 1); }
+  for (const id of sel) { const c = cls[id] ?? 0; counts.set(c, (counts.get(c) || 0) + 1); }
   let groupChips = '';
   if (showOutlierMarks() && S.selKind !== 'pairs' && S.sel.length) {
     const nOut = S.sel.filter(isOutlier).length;
@@ -214,7 +224,7 @@ export function renderGallery(): void {
     // empty (a lasso over no dot, a search with no hit) says so instead
     if (S.selKind !== 'pairs' && S.P && S.selTitle === 'No selection') { renderImageGrid(); return; }
     g.innerHTML = S.P && S.selTitle !== 'No selection'
-      ? `<div class="empty"><h3>Nothing in this selection</h3><div>${esc(S.selTitle)}: no box. <b>Clear</b> lists every image again.</div></div>`
+      ? `<div class="empty"><h3>Nothing in this selection</h3><div>${esc(S.selTitle)}: no ${unit(1)}. <b>Clear</b> lists every ${isRows() ? 'row' : 'image'} again.</div></div>`
       : EMPTY_HTML;
     $req('pager').innerHTML = '';
     return;
@@ -226,9 +236,11 @@ export function renderGallery(): void {
     g.innerHTML = S.pairs.slice(start, start + UI.page_size).map((p) =>
       `<div class="pair">${cardHTML(p.a)}${cardHTML(p.b)}<span class="sim">${p.sim.toFixed(3)}</span></div>`).join('');
   } else {
-    g.innerHTML = sortedSelection().slice(start, start + UI.page_size).map(cardHTML).join('');
+    g.innerHTML = sortedSelection(sel).slice(start, start + UI.page_size).map(cardHTML).join('');
   }
   g.scrollTop = 0;
+  syncPlaying();
+  loadVisibleMedia(g);
   $req('pager').innerHTML = pages > 1
     ? `<button data-p="${S.page - 1}" aria-label="Previous page" ${S.page === 0 ? 'disabled' : ''}>${icon('chev-l')}</button>` +
       `<span class="muted">page <span class="num">${S.page + 1} / ${pages}</span></span>` +
@@ -238,5 +250,6 @@ export function renderGallery(): void {
 
 export function galleryOrder(): number[] {
   if (S.selKind === 'pairs') return S.pairs.flatMap((p) => [p.a, p.b]);
+  if (isRows() && !S.sel.length && S.selTitle === 'No selection') return sortedSelection(allRows());
   return sortedSelection();
 }

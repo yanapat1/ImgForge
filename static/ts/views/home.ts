@@ -22,7 +22,7 @@ import { labelUrl, vizUrl } from '../core/nav.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { TASK_TYPES } from '../label/state.js';
 import type { TaskTypeInfo } from '../label/state.js';
-import { VIZ_TASKS } from '../settings/forms.js';
+import { MODALITY_ICON, VIZ_TASKS } from '../settings/forms.js';
 import { openSettings } from '../settings/dialog.js';
 import type { Role, Status } from '../types.js';
 import type { HomeExportTarget, HomeProject, HomeScope, HomeSession, HomeTask, SharedFields, WizardOpts } from '../types-home.js';
@@ -127,11 +127,20 @@ function classColor(i: number): string {
 
 function sourceLabel(d: HomeSession): string {
   if (d.kind === 'labeling') return 'Labeling';
+  if (d.kind === 'embeddings') return 'Embeddings';
   if (d.kind !== 's3') return 'Local';
   return d.mode === 'cache' ? 'S3 · cached' : 'S3 · stream';
 }
 
-const KIND_ICON: Record<string, string> = { s3: 'cloud', labeling: 'tag', local: 'folder' };
+const KIND_ICON: Record<string, string> = { s3: 'cloud', labeling: 'tag', local: 'folder', embeddings: 'vectors' };
+// an embeddings session's cover: the glyph of what its rows are (audio, video, text...) when there are no images
+const modalityGlyph = (d: HomeSession): string => {
+  const m = d.modality || [];
+  const main = ['video', 'audio', 'text'].find((x) => m.includes(x));      // the richest preview names the session
+  return main ? MODALITY_ICON[main] ?? 'vectors' : 'vectors';
+};
+const modalityHTML = (d: HomeSession): string => (d.kind === 'embeddings' && d.modality?.length
+  ? `<span class="sc-modality">${d.modality.map((m) => `<span title="rows carry ${esc(m)} previews">${icon(MODALITY_ICON[m] || 'vectors')}${esc(m)}</span>`).join('')}</span>` : '');
 const kindIcon = (d: HomeSession): string => KIND_ICON[d.kind] || 'folder';
 
 function coverHTML(d: HomeSession): string {
@@ -139,8 +148,11 @@ function coverHTML(d: HomeSession): string {
   const tag = `<span class="sc-src${d.kind === 'labeling' ? ' lbl' : ''}">${icon(kindIcon(d))}${esc(sourceLabel(d))}</span>` +
     (d.loaded ? `<span class="sc-live" title="Loaded on the server: it opens at once">${icon('check')}Loaded</span>` : '') + visBadge(d);
   if (!d.cover) {
-    return `<div class="sc-cover empty">${tag}<div class="sc-glyph">${icon(d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : 'db')}` +
-      '<span>Not indexed yet: the first open builds its crops</span></div></div>';
+    const emb = d.kind === 'embeddings';
+    const note = !emb ? 'Not indexed yet: the first open builds its crops'
+      : d.stats?.n_boxes ? `${fmt(d.stats.n_boxes)} rows · ${(d.modality || ['vector']).join(' · ')}` : 'Not read yet: the first open reads its vectors';
+    return `<div class="sc-cover empty${emb ? ' emb' : ''}">${tag}<div class="sc-glyph">${icon(emb ? modalityGlyph(d) : d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : 'db')}` +
+      `<span>${esc(note)}</span></div></div>`;
   }
   const v = encodeURIComponent(st.workspace || '');      // a new dataset version = a new workspace = fresh crops
   let imgs = '';
@@ -159,7 +171,8 @@ const editBtn = (act: string, x: { name: string; tags?: string[] | undefined }, 
 function cardHTML(d: HomeSession): string {
   const st = d.stats || {};
   const stat = (v: number | null | undefined, label: string): string => (v == null ? '' : `<span><b class="num">${fmt(v)}</b>${label}</span>`);
-  const stats = stat(st.n_images, 'images') + stat(st.n_boxes, 'boxes') + stat(st.n_classes, 'classes');
+  const stats = d.kind === 'embeddings' ? stat(st.n_boxes, 'rows') + stat(st.n_classes, 'classes')
+    : stat(st.n_images, 'images') + stat(st.n_boxes, 'boxes') + stat(st.n_classes, 'classes');
   const classes = st.classes || [];
   const more = (st.n_classes || classes.length) - Math.min(MAX_CHIPS, classes.length);
   const chips = classes.slice(0, MAX_CHIPS).map((c, i) =>
@@ -175,7 +188,7 @@ function cardHTML(d: HomeSession): string {
     '<div class="sc-body">' +
     `<h3 class="sc-title"><button class="sc-open" data-act="open" title="Open ${esc(d.name)}">${esc(d.name)}</button></h3>` +
     tagsHTML(tagsOf(d)) +
-    `<div class="sc-uri${lb ? ' plain' : ''}" title="${esc(where)}"><bdi>${esc(where)}</bdi></div>` +
+    `<div class="sc-uri${lb ? ' plain' : ''}" title="${esc(where)}"><bdi>${esc(where)}</bdi></div>` + modalityHTML(d) +
     (stats ? `<div class="sc-stats">${stats}</div>` : '<div class="sc-stats muted">Stats appear after the first open</div>') +
     (chips ? `<div class="sc-chips">${chips}</div>` : '') +
     '</div>' +
@@ -288,7 +301,7 @@ function emptyHTML(): string {
   return '<div class="home-empty">' +
     `<div class="es-mark"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg></div>` +
     '<h2>No sessions yet</h2>' +
-    '<p class="muted">Visualize a YOLO dataset (a folder on this machine or an S3 / RustFS prefix with images/ and labels/), or label a folder of images: boxes, polygons, keypoints or tags, one or more tasks at once.</p>' +
+    '<p class="muted">Visualize a YOLO dataset (a folder on this machine or an S3 / RustFS prefix with images/ and labels/) or a folder of your own embeddings, or label a folder of images: boxes, polygons, keypoints or tags, one or more tasks at once.</p>' +
     `<div class="es-actions"><button class="primary big" data-act="new-viz">${icon('scatter')}Visualize a dataset</button>` +
     `<button class="big" data-act="new-label">${icon('tag')}Label images</button></div>` +
     '<ol class="es-steps">' +
@@ -322,7 +335,7 @@ const TAB: Record<TabId, TabDef> = {
     items: () => sorted(H.sessions.map((d): Item => ({ d, t: 0 }))),
     of: (x) => x.d ?? x.p,
     card: (x) => (x.d ? cardHTML(x.d) : ''),
-    tile: 'A YOLO folder, an S3 / RustFS prefix, or a task of a labeling session',
+    tile: 'A YOLO folder, an S3 / RustFS prefix, a labeling task, or a folder of your own embeddings',
     empty: ['No visualize sessions yet', 'Explore a YOLO dataset as a map of its boxes: lasso groups, find outliers, suspicious labels and near-duplicates. A labeling session can be visualized too, live.'],
   },
   label: {

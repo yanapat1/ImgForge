@@ -48,8 +48,8 @@ def eval_overview(ctx, split='val', conf_mode='best', conf=0.25, iou=None, focus
 
 def router(state, ctx):
     r = APIRouter(dependencies=[Depends(deps.current_user)])
-    viewer = [Depends(deps.require_bound('viewer'))]
     g = guards(state)
+    viewer = [Depends(deps.require_bound('viewer')), Depends(g.boxes_only)]   # predictions need boxes
     reg, svc = ctx.models, ctx.model_service
 
     def need():
@@ -224,7 +224,7 @@ def router(state, ctx):
             if fn:
                 fn()
 
-    @r.post('/api/models/{mid}/test-embed', dependencies=[Depends(deps.require_bound('labeler'))])
+    @r.post('/api/models/{mid}/test-embed', dependencies=[Depends(deps.require_bound('labeler')), Depends(g.boxes_only)])
     async def test_embed(mid: str, user=Depends(current_user)):
         """Embed the first 4 boxes of the open session with this model: the embedding size and the time it took."""
         import time
@@ -246,7 +246,7 @@ def router(state, ctx):
         return {'ok': True, 'dim': int(emb.shape[1]) if emb.ndim == 2 else 0, 'n': len(ids),
                 'ms': round((time.time() - t0) * 1000), 'key': spec.key}
 
-    @r.post('/api/models/{mid}/predict', dependencies=[Depends(deps.require_bound('labeler'))])
+    @r.post('/api/models/{mid}/predict', dependencies=[Depends(deps.require_bound('labeler')), Depends(g.boxes_only)])
     def run_predict(mid: str):
         m = model_or_404(mid)
         st = ctx.current()

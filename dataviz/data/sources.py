@@ -553,6 +553,11 @@ def count_images(path, cap=IMAGE_COUNT_CAP):
     return n
 
 
+def _has_embeddings(d):
+    """Looks like an embeddings session folder (data/embedding_source.py): a metadata table next to .npy files."""
+    return ((d / 'meta.csv').is_file() or (d / 'meta.parquet').is_file()) and any(d.glob('*.npy'))
+
+
 def browse_local(path, images=False):
     """Sub-folders of a local path, each flagged when it holds images/ + labels/.
 
@@ -570,9 +575,10 @@ def browse_local(path, images=False):
             continue
         try:
             yolo = (d / 'images').is_dir() and (d / 'labels').is_dir()
+            emb = _has_embeddings(d)
         except PermissionError:
-            yolo = False
-        folders.append({'name': d.name, 'yolo': yolo})
+            yolo = emb = False
+        folders.append({'name': d.name, 'yolo': yolo, 'embeddings': emb})
     yolo_here = (p / 'images').is_dir() and (p / 'labels').is_dir()
     info = None
     if yolo_here:
@@ -580,7 +586,7 @@ def browse_local(path, images=False):
                 'labels': sum(1 for _ in (p / 'labels').glob('*.txt')),
                 'classes': (p / 'classes.txt').exists() or (p / 'data.yaml').exists()}
     out = {'path': str(p), 'parent': str(p.parent) if p.parent != p else None, 'yolo': yolo_here, 'info': info,
-           'folders': folders}
+           'embeddings': _has_embeddings(p), 'folders': folders}
     if images:
         with ThreadPoolExecutor(8) as ex:             # a slow network mount answers each scandir in parallel
             counts = list(ex.map(lambda f: count_images(p / f['name']), folders))

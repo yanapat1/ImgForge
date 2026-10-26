@@ -160,10 +160,28 @@ export function bubbleAt(clientX: number, clientY: number): number | null {
   return best;
 }
 
+// embeddings sessions: colour by a metadata column ('meta:<name>'); numbers go on a scale, categories get a legend
+function metaColumn(colorBy: string): { name: string; type: string; values: Array<number | string | null> } | null {
+  if (!colorBy.startsWith('meta:')) return null;
+  const Pt = pts(), name = colorBy.slice(5);
+  const values = Pt.meta?.[name], type = Pt.meta_types?.[name];
+  return values && type ? { name, type, values } : null;
+}
+
 // categorical colourings: key per box, legend label and colour per key (class is the default)
 function categorical(colorBy: string): Categorical {
   const Pt: Points = pts();
   const at = (a: ArrayLike<number>, id: number): number => a[id] ?? -1;
+  const mc = metaColumn(colorBy);
+  if (mc && mc.type !== 'num') {
+    // values ordered by how often they occur, so the commonest get the first (most distinct) palette colours
+    const counts = new Map<string, number>();
+    for (const v of mc.values) if (v !== null && v !== '') counts.set(String(v), (counts.get(String(v)) ?? 0) + 1);
+    const order = [...counts.keys()].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || a.localeCompare(b));
+    const idx = new Map(order.map((v, i): [string, number] => [v, i]));
+    return { key: (id) => { const v = mc.values[id]; return v === null || v === '' || v === undefined ? -1 : idx.get(String(v)) ?? -1; },
+      label: (k) => (k < 0 ? `${mc.name}: blank` : order[k]), color: (k) => (k < 0 ? THEME.ungrouped : clsColor(k)) };
+  }
   if (colorBy === 'session') {
     const idx = S.sessionIdx ?? new Map<string, number>();
     const sessions = [...idx.keys()];
@@ -199,6 +217,11 @@ export function renderPlot(): void {
   const view = S.view;
   let colorBy = $req<HTMLSelectElement>('color-by').value;
   if (isContinuous(colorBy) && !pts()[colorBy]) colorBy = 'class';      // e.g. model colours before a model is scored
+  if (colorBy.startsWith('meta:') && !metaColumn(colorBy)) colorBy = 'class';
+  const metaNum = ((): { name: string; values: Array<number | string | null> } | null => {
+    const mc = metaColumn(colorBy);
+    return mc && mc.type === 'num' ? mc : null;
+  })();
   const dot = +$req<HTMLInputElement>('dot-size').value;
   const vis = visibleIndices();
   const Pt = pts();
@@ -240,22 +263,29 @@ export function renderPlot(): void {
     }
   }
 
-  if (isContinuous(colorBy) || colorBy === 'group') {
+  if (isContinuous(colorBy) || colorBy === 'group' || metaNum) {
     const ids = vis.map(idAt);
     let marker: Partial<P.PlotMarker>;
-    if (colorBy === 'group') {
+    if (metaNum) {
+      const num = (id: number): number => { const v = metaNum.values[id]; return typeof v === 'number' ? v : NaN; };
+      marker = { size: dot, color: ids.map(num), colorscale: SCALE.seq, showscale: true,
+        colorbar: { title: { text: metaNum.name, side: 'right', font: { color: THEME.muted } }, thickness: 10,
+          outlinewidth: 0, tickfont: { color: THEME.muted, size: 11 } } };
+    } else if (colorBy === 'group') {
       const of = S.groups ? S.groups.of : new Map<number, number>();
       marker = { size: dot, color: ids.map((id) => { const g = of.get(id); const c = g == null || g < 0 ? THEME.ungrouped : clsColor(g * 7 + 3);
         return outLasso(id) ? mixHex(c, THEME.plot, 0.82) : c; }) };
-    } else {
+    } else if (isContinuous(colorBy)) {
       const cfg = CONTINUOUS[colorBy];
       const col = Pt[colorBy];
       marker = { size: dot, color: ids.map((id) => cfg.f(col?.[id] ?? NaN)), colorscale: SCALE[cfg.scale],
         showscale: true, colorbar: { title: { text: cfg.label, side: 'right', font: { color: THEME.muted } }, thickness: 10,
           outlinewidth: 0, tickfont: { color: THEME.muted, size: 11 } } };
+    } else {
+      marker = { size: dot };
     }
     // a colour scale cannot be faded per dot by colour: outside the lasso it falls back to low alpha
-    marker.opacity = isContinuous(colorBy) && S.dimSet ? ids.map((id) => (outLasso(id) ? 0.06 : 0.9)) : opacityFor(ids, 0.85);
+    marker.opacity = (isContinuous(colorBy) || metaNum) && S.dimSet ? ids.map((id) => (outLasso(id) ? 0.06 : 0.9)) : opacityFor(ids, 0.85);
     traces.push({
       type: 'scattergl', mode: 'markers', name: colorBy, showlegend: false,
       x: vis.map(xAt), y: vis.map(yAt),

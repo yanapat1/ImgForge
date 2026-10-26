@@ -125,7 +125,7 @@ def crop_cache(paths, size=224, progress=None):
                     if progress and done % 512 == 0:
                         progress(done, n)
             mm.flush()
-            del mm
+            mm = None                               # release the memmap before the rename (put() is done with it)
             os.replace(tmp, target)
         finally:
             if tmp.exists():
@@ -249,11 +249,11 @@ def _prefetch(make, count, depth=3):
 def _batched_torch(paths, progress, forward, mean, std, batch_size=128, size=224, per_sample_bytes=24 << 20):
     """Shared loop for HF vision models. Crops come from the shared uint8 memmap, are copied to the GPU as uint8
     (pinned, async), normalised there, and the embeddings are collected and L2-normalised on the GPU."""
-    import torch
     n = len(paths)
     progress(0, n, 'embedding crops')
-    if n == 0:
+    if n == 0:                                  # nothing to embed: no need for torch (or a GPU) at all
         return np.zeros((0, 1), np.float32)
+    import torch
     crops = crop_cache(paths, size, progress)
     batch_size = max(1, hardware.pick_batch(per_sample_bytes, cap=batch_size))
     starts = list(range(0, n, batch_size))

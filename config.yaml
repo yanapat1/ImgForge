@@ -26,6 +26,10 @@ storage:
   allowed_roots: ['.']           # folders users may read datasets / models from (and browse in the page);
                                  #  relative = to the project root
 
+embeddings:                      # embeddings sessions (a folder of .npy vectors + meta.csv)
+  allow_url_previews: false      # image / audio / video columns holding http(s) URLs: off, every viewer's browser would
+                                 #  fetch from that outside host (their IP, and whatever the owner points it at)
+
 vectors:                         # a pgvector copy of every computed feature space: a lost workspace .npy is rebuilt
   enabled: true                  #  from it instead of re-running the model
   hnsw_min_rows: 50000           # build an HNSW index above this many boxes (below, an exact scan is faster)
@@ -46,7 +50,7 @@ index:
 
 startup:
   feature: openclip-h14          # the only view loaded at start (best class separation); any key under features.models / simple / yolo:<run>
-  method: umap                   # umap | pacmap | localmap | tsne | pca (only this one is compiled at warm-up)
+  method: umap                   # any key of dataviz/ml/analysis.py METHODS, e.g. umap | pacmap | tsne | pca | isomap (only this one is compiled at warm-up)
   precompute: []                 # also compute these in the background at start, e.g. [openclip-h14, hog]
 
 features:
@@ -112,11 +116,17 @@ projections:                     # default parameters (the page can change them 
   localmap: {n_neighbors: 10}
   tsne:     {perplexity: 30}
   pca:      {}
+  kpca:     {gamma: 0}           # RBF width; 0 = auto (1 / dims)
+  isomap:   {n_neighbors: 10}
+  lle:      {n_neighbors: 10}
+  spectral: {n_neighbors: 10}
+  # also offered, no parameters: svd, ica, fa (linear) · mds, random, trees (other)
   tsne_threads: 8                # the box shows 128 CPUs but is shared: more threads made t-SNE 20x slower
 
 analysis:
   knn_k: 10                      # neighbours used for label suspicion / suggested class / near-duplicates
-  duplicate_threshold: 0.97      # cosine similarity for "Near-duplicates"
+  duplicate_threshold: 0.97      # cosine similarity for "Near-duplicates" (feature spaces compared by cosine)
+  duplicate_quantile: 0.005      # other spaces (HOG, box geometry, unnormalized vectors): the closest 0.5 % of points
   groups:                        # bubbles / outliers
     min_cluster_size: 15         # default "min size" in the page
     per_class: true              # default "per class" (false = "all points")

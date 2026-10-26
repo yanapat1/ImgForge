@@ -139,6 +139,8 @@ export interface EditResult extends CurResult { label: string; sha1: string; box
 export type SampleInfo = Sample & {
   cls: number; cls_name: string; image: string; label: string; box_idx: number | null; area: number; aspect: number;
   brightness: number; blur: number; session: string; img_w: number; img_h: number;
+  // embeddings sessions only
+  row_id?: string; meta?: Record<string, number | string | null>; preview?: Record<string, string>;
 };
 
 // ------------------------------------------------------------------ settings (GET/POST api/settings)

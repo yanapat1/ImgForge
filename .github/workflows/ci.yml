@@ -1,0 +1,64 @@
+# Every push and pull request: the page (typecheck, lint, build) and the Python test suite against PostgreSQL +
+# pgvector. The heavy model runtimes (torch, transformers, ultralytics, ONNX, OpenVINO, RF-DETR) are not installed:
+# their tests skip, everything else (projections, k-NN, curation, sessions, sharing, the HTTP API, the page in
+# Chromium) runs on CPU.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg17
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATAVIZ_TEST_DATABASE_URL: postgresql://postgres:pw@127.0.0.1:5432/postgres
+      DATAVIZ_ANALYSIS_GPU: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4          # the page smoke tests serve the built page; test_filter_js runs filter.ts
+        with:
+          node-version: 20
+          cache: npm
+      - name: Build the page
+        run: npm ci && npm run build
+      - name: Install (no GPU model runtimes)
+        run: |
+          grep -vE '^(torch|transformers|ultralytics|onnxruntime|openvino|rfdetr|opencv-python)' requirements.txt > /tmp/req-ci.txt
+          pip install -r /tmp/req-ci.txt opencv-python-headless pytest 'moto[server]' pyftpdlib playwright ruff
+          python -m playwright install --with-deps chromium
+      - name: Lint (errors only)
+        run: ruff check --isolated --select E9,F63,F7,F82 .
+      - name: Tests
+        run: python -m pytest -q -rs tests

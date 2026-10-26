@@ -23,7 +23,7 @@ from ...auth import context, deps
 from ...ml import analysis
 from ...paths import STATIC_DIR
 from ...workspace import list_workspaces
-from ..deps import guards, json_bytes
+from ..deps import capabilities, guards, json_bytes
 from ..static import NO_CACHE, render_index
 
 
@@ -85,9 +85,11 @@ def router(state, ctx):
             'default_feature': st.default_feature,
             'startup': {'feature': st.default_feature, 'method': st.startup_method, 'cached': st.embedding_cached()},
             'features': [{'key': s.key, 'label': s.label, 'group': s.group, 'note': s.note, 'text': bool(s.text_model),
-                          'cached': st.feature_cached(s.key)} for s in st.registry.values()],
+                          'metric': s.metric, 'cached': st.feature_cached(s.key)} for s in st.registry.values()],
+            'caps': capabilities(st),
             'dataset': {'id': st.dataset_id, 'name': st.source.name, 'uri': st.source.uri,
                         'kind': st.source.kind, 'mode': getattr(st.source, 'mode', None),
+                        'modality': (st.index or {}).get('modality'),
                         'index_job': st.index_job.id if st.index_job else None,
                         'stale': st.stale},
         })
@@ -177,6 +179,21 @@ def router(state, ctx):
     def points():
         need_index()
         s = state.samples
+        if state.source.kind == 'embeddings':          # rows, not boxes: metadata columns instead of box geometry
+            from ...data.embedding_source import shown_previews
+            types = state.index.get('meta_types') or {}
+            urls = bool((state.cfg.get('embeddings') or {}).get('allow_url_previews'))
+            return json_bytes(state.payload('points', lambda: {
+                'id': list(range(len(s))),
+                'cls': state.labels,
+                'image': [x['image'] for x in s],
+                'session': [x['session'] for x in s],
+                'row_id': [x['row_id'] for x in s],
+                'preview': [shown_previews(x['preview'], urls) for x in s],
+                'text': [x['preview'].get('text', '')[:300] for x in s] if any('text' in x['preview'] for x in s) else None,
+                'meta': {c: [x['meta'].get(c) for x in s] for c in types},
+                'meta_types': types,
+            }))
         return json_bytes(state.payload('points', lambda: {
             'id': list(range(len(s))),
             'cls': state.labels,

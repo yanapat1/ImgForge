@@ -40,7 +40,7 @@ from .workspace import resolve_workspace, find_workspace, _now
 # Defaults; the real values come from config.yaml in this folder (State.cfg).
 PALETTE = vconfig.DEFAULTS['ui']['palette']
 KNN_K = vconfig.DEFAULTS['analysis']['knn_k']
-PARAM_TYPES = {'n_neighbors': int, 'min_dist': float, 'perplexity': float}
+PARAM_TYPES = {'n_neighbors': int, 'min_dist': float, 'perplexity': float, 'gamma': float}
 
 
 def normalize_params(method, params):
@@ -208,6 +208,9 @@ class State:
         elif src.kind == 'labeling':
             job.progress(stage='reading the labeling session')
             src.check()                              # the session / task may have gone since the page opened it
+        elif src.kind == 'embeddings':
+            job.progress(stage='checking the vectors and metadata table')
+            src.check()
         idx = None
         if self.cache_dir is None:
             job.progress(stage='checking dataset fingerprint')
@@ -243,6 +246,9 @@ class State:
         return idx
 
     def _build_index(self, job, src):
+        if src.kind == 'embeddings':
+            return src.build_index(self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
+                                   rebuild=self.rebuild, progress=job.progress)
         return build_index(src, self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
                           pad=float(self.cfg['index']['crop_pad']), rebuild=self.rebuild,
                           progress=job.progress, workers=self.cfg['index'].get('workers', 'auto'))
@@ -259,6 +265,8 @@ class State:
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {'created': _now()}
         meta.update({'dataset': src.uri, 'fingerprint': self.fingerprint, 'n_boxes': len(self.samples),
                      'n_images': len(self.by_image), 'classes': self.classes, 'last_opened': _now()})
+        if src.kind == 'embeddings':
+            meta['modality'] = idx.get('modality')
         meta_path.write_text(json.dumps(meta, indent=1))
         self.index = idx
         self._register_existing_projections()

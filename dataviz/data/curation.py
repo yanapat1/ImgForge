@@ -785,15 +785,20 @@ class Curation:
                                       f'centre (z = {z[sid]:.1f}, {key})',
                                       lambda ln: [{'op': 'delete', 'line': ln, 'label': 'Delete box'}]))
         from ..ml import analysis
-        pairs = analysis.near_duplicates(sc['nbr_idx'], sc['nbr_sim'], cfg['near_dup'], lim * 2,
+        # a cosine threshold only means something for unit vectors; other spaces cut by rank (analysis.duplicate_cutoff)
+        metric = getattr(st.registry.get(key), 'metric', 'cosine')
+        quantile = float(((getattr(st, 'cfg', None) or {}).get('analysis') or {}).get('duplicate_quantile', 0.005))
+        cut, how = analysis.duplicate_cutoff(sc['nbr_sim'], metric, cfg['near_dup'], quantile)
+        pairs = analysis.near_duplicates(sc['nbr_idx'], sc['nbr_sim'], cut, lim * 2,
                                          deleted if deleted.any() else None)
         samples = st.samples
         n = 0
         for a, b, sim in pairs:
             if deleted[a] or deleted[b] or samples[a]['image'] == samples[b]['image']:
                 continue
+            close = f'cosine {sim:.3f}' if how == 'cosine' else f'distance {np.sqrt(max(0.0, 2.0 * (1.0 - sim))):.3g}'
             it = self._box_item('near_dup', int(b), loc, f'near-identical to box #{a} in {samples[a]["image"]} '
-                                f'(cosine {sim:.3f})', lambda ln: [{'op': 'delete', 'line': ln, 'label': 'Delete this box'}])
+                                f'({close})', lambda ln: [{'op': 'delete', 'line': ln, 'label': 'Delete this box'}])
             it['id'] = f'near_dup|{a}|{b}'
             it['box_ids'] = [int(b), int(a)]
             it['others'] = [samples[a]['image']]

@@ -53,7 +53,7 @@
       <div id="home-head" class="home-head hidden">
         <div class="home-title">
           <h2>Sessions</h2>
-          <p class="muted">Visualize a YOLO dataset (crops, features and views stay cached per session), or label a folder of images for one or more tasks.</p>
+          <p class="muted">Visualize a YOLO dataset or your own embeddings (audio, video, text, tables), with features and views cached per session, or label a folder of images for one or more tasks.</p>
         </div>
         <button id="home-new" class="primary" data-act="new"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-plus"/></svg><span id="home-new-text">New session</span></button>
       </div>
@@ -156,13 +156,13 @@
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg></button>
     <button class="act" data-tab="stats" role="tab" aria-selected="false" aria-label="Class stats" title="Class stats">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-bars"/></svg></button>
-    <button id="act-curation" class="act" data-tab="curation" role="tab" aria-selected="false" aria-label="Curation: find and fix label problems" title="Curation — find and fix label / image problems">
+    <button id="act-curation" class="act needs-boxes" data-tab="curation" role="tab" aria-selected="false" aria-label="Curation: find and fix label problems" title="Curation — find and fix label / image problems">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-alert"/></svg><span id="act-cur-badge" class="act-badge num hidden"></span></button>
     <!-- model views: need a model (Settings › Models) -->
     <div class="act-sep" role="separator" aria-label="Model views"><span>model</span></div>
-    <button class="act" data-tab="model" role="tab" aria-selected="false" aria-label="Model: predictions vs labels" title="Model — predictions vs labels, likely label errors">
+    <button class="act needs-boxes" data-tab="model" role="tab" aria-selected="false" aria-label="Model: predictions vs labels" title="Model — predictions vs labels, likely label errors">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg></button>
-    <button class="act" data-tab="eval" role="tab" aria-selected="false" aria-label="Evaluation: compare models, explain them with the dataset" title="Evaluation — compare models, findings, report">
+    <button class="act needs-boxes" data-tab="eval" role="tab" aria-selected="false" aria-label="Evaluation: compare models, explain them with the dataset" title="Evaluation — compare models, findings, report">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eval"/></svg></button>
     <!-- the user menu (views/usermenu.js paints the avatar once the user is known) -->
     <button id="act-user" class="act act-user hidden" aria-haspopup="menu" aria-expanded="false" aria-label="Account" title="Account"></button>
@@ -434,7 +434,7 @@
               <p class="hint muted">With all classes, the chips under the bar hide or isolate classes (double-click).</p>
             </div>
           </div>
-          <form id="text-search" class="bar-search" role="search">
+          <form id="text-search" class="bar-search needs-boxes" role="search">
             <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>
             <input id="text-q" type="search" class="text-q" placeholder="Describe boxes… ( / )"
                    aria-label="Search boxes by text" autocomplete="off">
@@ -533,7 +533,7 @@
               </div>
             </div>
           </div>
-          <div class="popover-anchor">
+          <div class="popover-anchor needs-boxes">
             <button id="fb-cls-btn" class="fb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-cls-pop" title="Images that contain some / all / none of the chosen classes">
               <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg><span class="fb-t">Has class</span><span id="fb-cls-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
             <div id="fb-cls-pop" class="popover panel hidden fb-pop" role="group" aria-label="Image has class">
@@ -546,12 +546,12 @@
               <div id="fb-cls-chips" class="chips fb-cls-chips"></div>
             </div>
           </div>
-          <div class="popover-anchor">
+          <div class="popover-anchor needs-boxes">
             <button id="fb-more-btn" class="fb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="fb-more-pop" title="Box count, size, aspect, light, sessions, tags, model, scores, issues, text">
               <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg><span class="fb-t">More filters</span><span id="fb-more-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
             <div id="fb-more-pop" class="popover panel hidden fb-pop fb-more" role="group" aria-label="More filters"></div>
           </div>
-          <div id="fb-scope" class="fb-seg" role="group" aria-label="Filter scope" title="Images: a matching image shows all its boxes · Boxes: only the matching boxes">
+          <div id="fb-scope" class="fb-seg needs-boxes" role="group" aria-label="Filter scope" title="Images: a matching image shows all its boxes · Boxes: only the matching boxes">
             <button type="button" data-scope="image" aria-pressed="true">Images</button>
             <button type="button" data-scope="box" aria-pressed="false">Boxes</button>
           </div>
@@ -619,10 +619,10 @@
       </div>
       <div class="stats-grid">
         <section class="stat-card">
-          <h3>Boxes per class</h3>
+          <h3 id="stat-counts-h">Boxes per class</h3>
           <div id="stat-counts" class="stat"></div>
         </section>
-        <section class="stat-card">
+        <section class="stat-card needs-boxes">
           <h3>Box area per class <span class="muted">% of image, log scale</span></h3>
           <div id="stat-area" class="stat"></div>
         </section>
@@ -781,7 +781,7 @@
   </div>
 </div>
 
-<div id="hover-tip" class="hover-tip panel hidden"><img alt=""><div></div></div>
+<div id="hover-tip" class="hover-tip panel hidden"><div class="tip-media"></div><div class="tip-label"></div></div>
 
 <div id="modal" class="modal hidden">
   <div class="modal-box panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
@@ -792,13 +792,13 @@
           <button id="m-prev" class="icon-btn" aria-label="Previous box" title="Previous (←)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg></button>
           <button id="m-next" class="icon-btn" aria-label="Next box" title="Next (→)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-r"/></svg></button>
         </div>
-        <div id="vw-toggles" class="segmented" role="group" aria-label="What to draw">
+        <div id="vw-toggles" class="segmented needs-boxes" role="group" aria-label="What to draw">
           <button id="vw-labels" class="view-btn" aria-pressed="true" title="Show / hide the labeled boxes (B)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eye"/></svg>Labels</button>
           <button id="vw-names" class="view-btn" aria-pressed="true" title="Show / hide the class names on the boxes (L)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Names</button>
           <button id="m-preds" class="view-btn hidden" aria-pressed="false" title="Draw the selected model's predictions (dashed) (P)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-target"/></svg>Predictions</button>
         </div>
-        <button id="vw-edit" class="view-btn" aria-pressed="false" title="Fix boxes or draw missing ones (E) · right-click the image to copy it"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-edit"/></svg>Edit</button>
-        <button id="m-sameimg"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Boxes in this image</button>
+        <button id="vw-edit" class="view-btn needs-boxes" aria-pressed="false" title="Fix boxes or draw missing ones (E) · right-click the image to copy it"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-edit"/></svg>Edit</button>
+        <button id="m-sameimg" class="needs-boxes"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Boxes in this image</button>
         <button id="m-group" class="hidden" title="All dots in the same group as this one"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Its group</button>
         <button id="m-similar" class="primary"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Find similar</button>
         <button id="m-close" class="icon-btn" aria-label="Close" title="Close (Esc)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
@@ -822,6 +822,11 @@
           <span id="vw-edit-st" class="muted hint grow" aria-live="polite"></span>
           <button id="vw-discard" class="ghost" title="Drop the unsaved changes">Discard</button>
           <button id="vw-save" class="primary" title="Write the label file (Ctrl+S) · undo from the toast or Curation › History"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Save</button>
+        </div>
+        <!-- an embeddings session's row (views/modal.ts openRow): its preview, then its nearest rows -->
+        <div id="m-row" class="rd-row">
+          <div id="m-row-media" class="rd-media"></div>
+          <div id="m-row-nbrs" class="rd-nbrs"></div>
         </div>
         <div class="vw-view">
           <div id="vw" class="vw">
