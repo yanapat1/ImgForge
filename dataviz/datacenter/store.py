@@ -413,10 +413,15 @@ def unzip_into(zpath, folder, root, allowed):
         if need > free:
             raise DCError(f'the zip unpacks to {need / 1e9:.1f} GB but only {free / 1e9:.1f} GB are free', 507)
         frel = _rel_of(os.path.realpath(root), folder)
-        for info in infos:
-            rel = _zip_member_ok(info)
-            if rel is None:
-                continue
+        members = [(info, rel) for info in infos if (rel := _zip_member_ok(info)) is not None]
+        # most dataset zips wrap everything in one folder (traffic/images/..., traffic/data.yaml): unpacked into an
+        # empty folder that wrapper would hide the layout from format detection, so its contents land there instead
+        tops = {rel.split('/', 1)[0] for _, rel in members}
+        if len(tops) == 1 and all('/' in rel for _, rel in members) \
+                and not any(not n.startswith('.') for n in os.listdir(folder)):
+            cut = len(next(iter(tops))) + 1
+            members = [(info, rel[cut:]) for info, rel in members]
+        for info, rel in members:
             dest = resolve(root, join(frel, rel), allowed)
             if os.path.lexists(dest):
                 skipped += 1

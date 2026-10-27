@@ -24,13 +24,13 @@ def dc(client_as, tmp_path):
     return client_as, client_as(make_user('alice'))
 
 
-def yolo_zip(n=3):
+def yolo_zip(n=3, wrap=''):
     b = io.BytesIO()
     with zipfile.ZipFile(b, 'w') as z:
         for i in range(n):
-            z.writestr(f'images/train/im{i}.jpg', jpeg_bytes())
-            z.writestr(f'labels/train/im{i}.txt', '0 0.5 0.5 0.2 0.2\n1 0.3 0.3 0.1 0.1\n')
-        z.writestr('data.yaml', 'names: [cat, dog]\n')
+            z.writestr(f'{wrap}images/train/im{i}.jpg', jpeg_bytes())
+            z.writestr(f'{wrap}labels/train/im{i}.txt', '0 0.5 0.5 0.2 0.2\n1 0.3 0.3 0.1 0.1\n')
+        z.writestr(f'{wrap}data.yaml', 'names: [cat, dog]\n')
         z.writestr('../evil.txt', 'x')                      # zip-slip: skipped
     return b.getvalue()
 
@@ -241,3 +241,18 @@ def test_send_to_label_and_visualize(dc):
            files=[('files', ('a.docx', b'xx', 'application/octet-stream'))])
     r = c.post('/api/dc/send', json={'bucket': b['id'], 'paths': ['docs'], 'target': 'visualize'})
     assert r.status_code == 400 and 'visualizer opens' in r.json()['detail']
+
+
+def test_zip_with_one_wrapper_folder(dc):
+    """A zip of a folder (traffic/images/..., traffic/data.yaml) unpacked into an empty bucket lands unwrapped, so its
+    format is detected; into a folder that already has files it keeps the wrapper."""
+    _, c = dc
+    b = new_bucket(c, name='wrapped')
+    z = yolo_zip(wrap='traffic/')
+    r = c.post(f'/api/dc/buckets/{b["id"]}/upload', files=[('files', ('t.zip', z, 'application/zip'))]).json()
+    assert r['retagged']['to'] == 'yolo-detect'
+    names = [e['name'] for e in c.get(f'/api/dc/buckets/{b["id"]}/ls').json()['entries']]
+    assert names == ['images', 'labels', 'data.yaml']
+    c.post(f'/api/dc/buckets/{b["id"]}/upload', params={'path': ''}, files=[('files', ('t.zip', z, 'application/zip'))])
+    names = [e['name'] for e in c.get(f'/api/dc/buckets/{b["id"]}/ls').json()['entries']]
+    assert 'traffic' in names
