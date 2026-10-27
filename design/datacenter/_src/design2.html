@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Center · Bucket board</title>
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') === 'light' ? 'light' : 'dark';</script>
+<link rel="stylesheet" href="../../../static/css/tokens.css">
+<link rel="stylesheet" href="../../../static/css/base.css">
+<link rel="stylesheet" href="../../../static/css/components.css">
+<link rel="stylesheet" href="../../../static/css/assistant.css">
+<style>
+/* ---------- app shell */
+.app-header { flex: none; height: var(--header-h); display: flex; align-items: center; gap: var(--s5);
+  padding: 0 var(--s4) 0 10px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -.01em; }
+.brand-mark { width: 32px; height: 32px; color: var(--accent); }
+.nav { display: flex; align-items: stretch; height: 100%; gap: 2px; margin-left: var(--s2); }
+.nav a { display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; color: var(--text-muted); font-weight: 650; text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: var(--fs); }
+.nav a .ico { color: var(--text-faint); }
+.nav a.on { color: var(--accent-text); border-bottom-color: var(--accent); }
+.nav a.on .ico { color: var(--accent); }
+.nav .cnt { font: 600 11px var(--mono); color: var(--text-faint); background: var(--surface-3); padding: 1px 6px; border-radius: 999px; }
+.hdr-right { margin-left: auto; display: flex; align-items: center; gap: var(--s2); }
+.hdr-right .icon-btn { width: 34px; height: 34px; border-radius: var(--r-md); }
+.hdr-right .icon-btn .ico { width: 18px; height: 18px; }
+.gem-ico { color: var(--gem-2); }
+button .gem-ico, button:hover:not(:disabled) .gem-ico { color: var(--gem-2); }
+.asst-btn { height: 34px; border-radius: var(--r-md); border-color: color-mix(in srgb, var(--gem-2) 40%, var(--border-strong)); }
+.asst-btn.on { background: color-mix(in srgb, var(--gem-2) 14%, var(--surface-2)); border-color: var(--gem-2); color: var(--text); }
+.storage { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--text-faint); margin-right: var(--s2); }
+.storage .bar { width: 72px; height: 5px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.storage .bar i { display: block; height: 100%; width: 43%; background: var(--accent); border-radius: inherit; }
+.user-btn .avatar { --av-size: 30px; }
+
+.main { flex: 1; min-height: 0; display: flex; position: relative; }
+.scroll { flex: 1; min-width: 0; overflow: hidden; }
+.wrap { padding: 22px var(--s6) 32px; }
+
+/* ---------- board head */
+.b-head { display: flex; align-items: flex-end; gap: var(--s4); margin-bottom: 16px; }
+.b-head h2 { font-size: 26px; font-weight: 700; letter-spacing: -.015em; display: flex; align-items: center; gap: 10px; }
+.b-head h2 .count-badge { font-size: var(--fs-sm); font-weight: 600; }
+.b-head p { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.b-head p b { color: var(--text); font-weight: 600; }
+.b-head .acts { margin-left: auto; display: flex; gap: var(--s2); }
+.b-head .acts button { height: 36px; padding: 0 var(--s4); border-radius: var(--r-md); }
+
+.b-filters { display: flex; align-items: center; gap: var(--s3); margin-bottom: 10px; }
+.search { position: relative; flex: 0 0 300px; }
+.search .ico { position: absolute; left: 10px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--text-faint); }
+.search input { width: 100%; height: 34px; padding: 0 var(--s3) 0 32px; background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r); font-size: var(--fs-sm); }
+.search input::placeholder { color: var(--text-faint); }
+.search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+.seg > button { height: 34px; font-size: var(--fs-sm); padding: 0 11px; gap: 6px; }
+.seg > button .n { font: 600 11px var(--mono); color: var(--text-faint); }
+.seg > button.active .n { color: var(--accent-text); }
+.seg > button i.sw { width: 8px; height: 8px; border-radius: 2px; background: var(--c); flex: none; }
+.b-filters select { height: 34px; }
+.lbl { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
+
+.tagbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; padding: 8px 10px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--border); }
+.tagbar .htb-label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-muted); font-weight: 600; margin-right: 4px; }
+.tagbar .htb-label .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.tchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 550;
+  color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; }
+.tchip .num { font: 600 11px var(--mono); color: var(--text-faint); }
+.tchip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); }
+.tchip.on .num { color: var(--accent-text); }
+.tchip.on .ico { width: 12px; height: 12px; color: var(--accent); stroke-width: 2.4; }
+.tchip.auto { border-style: dashed; }
+.tagbar .sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+.tagbar .mode { margin-left: auto; font-size: var(--fs-xs); color: var(--text-faint); display: inline-flex; align-items: center; gap: 8px; }
+.tagbar .mode b { font: 650 11px var(--mono); color: var(--text-muted); padding: 1px 6px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); }
+.tagbar .clear { height: 24px; padding: 0 8px; font-size: 12px; }
+
+/* ---------- bucket cards */
+.grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 16px; }
+.bcard { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); overflow: hidden; box-shadow: 0 1px 0 rgba(0,0,0,.04); }
+.bcard.hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
+.bcard.changed { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn), var(--shadow-2); }
+.strip { position: relative; height: 104px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; background: var(--media-bg);
+  border-bottom: 1px solid var(--border); }
+.strip img { width: 100%; height: 100%; object-fit: cover; display: block; filter: saturate(.92); }
+.strip .ftile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: var(--surface-2);
+  font: 600 10.5px var(--mono); color: var(--text-faint); }
+.strip .ftile .ico { width: 20px; height: 20px; color: var(--text-muted); stroke-width: 1.5; }
+.strip.emb { display: block; background: radial-gradient(circle, var(--border-hover) 1.2px, transparent 1.7px) 0 0 / 13px 13px, var(--surface-2); }
+.strip.emb .cl { position: absolute; border-radius: 50%; }
+.src { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; border-radius: 999px;
+  font: 650 10.5px var(--font); letter-spacing: .04em; text-transform: uppercase; background: var(--overlay); color: var(--text);
+  backdrop-filter: blur(4px); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.src .ico { width: 13px; height: 13px; vertical-align: 0; }
+.pickbox { position: absolute; top: 8px; right: 8px; z-index: 1; width: 20px; height: 20px; border-radius: 5px; background: var(--overlay);
+  border: 1.5px solid var(--border-hover); }
+.bcard.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-2); }
+.bcard.picked .pickbox { background: var(--accent) var(--tick) center / 13px no-repeat; border-color: var(--accent); }
+.bbody { padding: 12px 14px 4px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+.bname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bname b { font-size: var(--fs-lg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bname .icon-btn { margin-left: auto; width: 26px; height: 26px; background: transparent; border-color: transparent; }
+.fmt { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.badge { --c: var(--text-faint); display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 7px; border-radius: var(--r-sm); flex: none;
+  font-size: 12.5px; font-weight: 700; letter-spacing: .005em; white-space: nowrap;
+  color: color-mix(in srgb, var(--c) 72%, var(--text)); background: color-mix(in srgb, var(--c) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 42%, transparent); }
+.badge .ico { width: 14px; height: 14px; color: var(--c); stroke-width: 1.9; }
+.badge.other { border-style: dashed; }
+.badge.lg { height: 28px; font-size: 13.5px; padding: 0 11px 0 8px; }
+.hintp { margin-top: -3px; font: 11.5px/1.3 var(--mono); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.counts { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; column-gap: 18px; font-size: var(--fs-xs); color: var(--text-faint); }
+.counts div { display: flex; flex-direction: column; line-height: 1.25; }
+.counts b { font: 650 var(--fs-sm) var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.counts b.na { color: var(--text-faint); font-weight: 500; }
+.ctags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+.ctag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 550;
+  color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border); }
+.ctag.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); }
+.ctag.add { border-style: dashed; color: var(--text-faint); background: transparent; }
+.bfoot { display: flex; align-items: center; gap: 10px; padding: 8px 14px 10px; margin-top: 6px; border-top: 1px solid var(--border);
+  font-size: var(--fs-xs); color: var(--text-faint); min-width: 0; }
+.bfoot .used { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.bfoot .used .ico { width: 14px; height: 14px; color: var(--accent); }
+.bfoot .used.none .ico { color: var(--text-faint); }
+.bfoot .used.none { color: var(--text-faint); }
+.bfoot .when { margin-left: auto; white-space: nowrap; }
+.was { font-size: 11.5px; color: var(--text-faint); text-decoration: line-through; white-space: nowrap; }
+.warn-line { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--warn-text); font-weight: 600; }
+.warn-line .ico { width: 14px; height: 14px; color: var(--warn); }
+
+.newcard { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: var(--s5);
+  border: 1.5px dashed var(--border-strong); border-radius: var(--r-lg); color: var(--text-muted); font-size: var(--fs-sm); background: transparent; }
+.newcard .ico { width: 26px; height: 26px; color: var(--accent); }
+.newcard b { color: var(--text); font-size: var(--fs); }
+.hidden-note { display: inline-flex; align-items: center; gap: 6px; } .hidden-note b { color: var(--text-muted); font-weight: 600; } .hidden-note .ico { width: 14px; height: 14px; }
+.board-foot { margin-top: 18px; font-size: var(--fs-xs); color: var(--text-faint); display: flex; gap: 16px; }
+
+/* ---------- bucket (file manager) view */
+.bk { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bk-head { flex: none; padding: 12px var(--s6) 12px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.crumbs { display: flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--text-muted); }
+.crumbs a { color: var(--text-muted); text-decoration: none; padding: 1px 6px; border-radius: var(--r-sm); }
+.crumbs a:first-child { margin-left: -6px; }
+.crumbs a.cur { color: var(--text); font-weight: 650; }
+.crumbs .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.bk-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.bk-title h2 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.bk-title .meta { display: flex; gap: 16px; font-size: var(--fs-xs); color: var(--text-faint); margin-left: 6px; }
+.bk-title .meta b { font: 650 var(--fs-sm) var(--mono); color: var(--text); margin-right: 4px; }
+.bk-title .acts { margin-left: auto; display: flex; gap: var(--s2); }
+.bk-title .acts button { height: 32px; }
+.bk-body { flex: 1; min-height: 0; display: flex; }
+.tree { flex: none; width: 264px; background: var(--surface); border-right: 1px solid var(--border); padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
+  font-size: var(--fs-sm); overflow: hidden; }
+.tree .sec { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); padding: 10px 8px 6px; }
+.ti { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 calc(8px + var(--d, 0) * 16px); border-radius: var(--r-sm); color: var(--text-muted);
+  white-space: nowrap; min-width: 0; }
+.ti .ico { width: 15px; height: 15px; color: var(--text-faint); }
+.ti .ico.fold { color: var(--accent); }
+.ti .chev { width: 12px; height: 12px; color: var(--text-faint); stroke-width: 2.2; }
+.ti .chev.sp { visibility: hidden; }
+.ti .n { margin-left: auto; font: 11px var(--mono); color: var(--text-faint); }
+.ti .tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .8; }
+.ti.on { background: var(--accent-soft); color: var(--accent-text); font-weight: 650; }
+.ti.on .n { color: var(--accent-text); }
+.ti.drag { box-shadow: inset 0 0 0 1.5px var(--accent-line); }
+.facts { margin: 6px 4px 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); display: flex; flex-direction: column; gap: 6px;
+  font-size: var(--fs-xs); color: var(--text-muted); }
+.facts .chk { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; }
+.facts .chk .ico { width: 13px; height: 13px; color: var(--ok); stroke-width: 2.6; }
+.facts .h { font-weight: 650; color: var(--text); font-size: var(--fs-sm); display: flex; align-items: center; gap: 6px; }
+.facts .sess { display: flex; align-items: center; gap: 6px; }
+.facts .sess .k { font: 650 10px var(--font); letter-spacing: .05em; text-transform: uppercase; padding: 1px 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-muted); }
+
+.files { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.toolbar { flex: none; display: flex; align-items: center; gap: var(--s2); padding: 10px var(--s5); border-bottom: 1px solid var(--border); background: var(--bg); }
+.toolbar button { height: 30px; }
+.toolbar .vsep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.toolbar .info { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
+.toolbar .info b { font: 650 var(--fs-xs) var(--mono); color: var(--text-muted); }
+.toolbar .search { flex: 0 0 220px; }
+.toolbar .search input { height: 30px; }
+.toolbar .sz { display: inline-flex; align-items: center; gap: 6px; }
+.toolbar .sz input { width: 80px; }
+.toolbar .sz .ico { color: var(--text-faint); width: 14px; height: 14px; }
+.ftags { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px var(--s5); border-bottom: 1px solid var(--border); font-size: var(--fs-xs); color: var(--text-faint); position: relative; }
+.ftags .fl { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-weight: 600; margin-right: 4px; }
+.ftags .fl .ico { width: 14px; height: 14px; color: var(--accent); }
+.ftags .ctag .ico { width: 11px; height: 11px; margin-left: 4px; color: var(--text-faint); }
+.ftags .ctag.auto { border-style: dashed; color: var(--text-faint); gap: 4px; }
+.ftags .ctag.auto .ico { margin: 0; }
+.ftags .ctag.add.open { border-style: solid; border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
+.ftags .right { margin-left: auto; }
+
+.tiles { flex: 1; min-height: 0; overflow: hidden; padding: 14px var(--s5) 90px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px 10px; align-content: start; }
+.tile { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.tile .im { position: relative; aspect-ratio: 4 / 3; border-radius: var(--r-md); overflow: hidden; background: var(--media-fill); outline: 1px solid var(--border); outline-offset: -1px; }
+.tile .im img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile .cb { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; border-radius: 4px; background: var(--overlay); border: 1.5px solid var(--border-hover); opacity: 0; }
+.tile.sel .cb { opacity: 1; background: var(--accent) var(--tick) center / 12px no-repeat; border-color: var(--accent); }
+.tile.hov .cb { opacity: 1; }
+.tile.sel .im { outline: 3px solid var(--accent); outline-offset: -3px; }
+.tile.sel .im::after { content: ""; position: absolute; inset: 0; background: var(--accent-soft); }
+.tile.hov .im { outline: 2px solid var(--highlight); outline-offset: -2px; }
+.tile .lb { position: absolute; right: 5px; bottom: 5px; height: 19px; padding: 0 6px; border-radius: var(--r-sm); display: inline-flex; align-items: center; gap: 4px;
+  font: 600 11px var(--mono); background: var(--overlay); color: var(--text); backdrop-filter: blur(3px); }
+.tile .lb.miss { background: var(--warn); color: var(--on-highlight); font-family: var(--font); font-weight: 700; }
+.tile .nm { font: 11px/1.2 var(--mono); letter-spacing: -.02em; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+.tile.sel .nm { color: var(--accent-text); }
+
+.selbar { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 14px;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3); white-space: nowrap; }
+.selbar .cnt { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--fs-sm); margin-right: 8px; }
+.selbar .cnt .pill-n { font: 700 12px var(--mono); background: var(--accent); color: var(--on-accent); padding: 1px 7px; border-radius: 999px; }
+.selbar .cnt .sub { font-weight: 500; color: var(--text-faint); font-size: var(--fs-xs); }
+.selbar button { height: 32px; background: transparent; border-color: transparent; }
+.selbar button.primary { background: var(--accent); border-color: var(--accent); margin-left: 6px; }
+.selbar button.dz .ico, .selbar button.dz { color: var(--danger-text); }
+.selbar button.dz .ico { color: var(--danger); }
+.selbar .vsep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+
+/* names-only list */
+.list { flex: 1; min-height: 0; overflow: hidden; padding: 0 var(--s5) 20px; }
+.lrow { display: grid; grid-template-columns: 26px minmax(0, 340px) minmax(200px, 1fr) 90px 110px 140px 170px; align-items: center; height: 30px; padding: 0 8px; font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border); color: var(--text); column-gap: 18px; }
+.lrow.h { position: sticky; top: 0; height: 34px; font-size: var(--fs-xs); font-weight: 650; color: var(--text-faint); background: var(--bg); border-bottom-color: var(--border-strong); }
+.lrow.h .sorted { color: var(--text); display: inline-flex; align-items: center; gap: 3px; }
+.lrow.h .sorted .ico { width: 12px; height: 12px; }
+.lrow .nm { display: flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--mono); font-size: 12.5px; }
+.lrow .nm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .nm .ico { width: 15px; height: 15px; color: var(--text-faint); }
+.lrow .r { text-align: right; font: 12px var(--mono); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.lrow .m { font-size: var(--fs-xs); color: var(--text-faint); }
+.lrow input[type=checkbox] { margin: 0; }
+.lst { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-muted); }
+.lst i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.lst.miss { color: var(--warn-text); } .lst.miss i { background: var(--warn); }
+.lst.none { color: var(--text-faint); } .lst.none i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-faint); }
+.lrow:nth-child(even):not(.h) { background: color-mix(in srgb, var(--surface) 45%, transparent); }
+.lrow.sel { background: var(--accent-soft) !important; }
+
+/* tag editor popover */
+.pop { position: absolute; z-index: 20; width: 340px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column; }
+.pop::before { content: ""; position: absolute; top: -7px; left: var(--ax, 30px); width: 12px; height: 12px; background: var(--surface-2); border-left: 1px solid var(--border-strong);
+  border-top: 1px solid var(--border-strong); transform: rotate(45deg); }
+.pop-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; font-weight: 650; font-size: var(--fs-sm); }
+.pop-h .p { font: 12px var(--mono); color: var(--text-faint); font-weight: 400; }
+.pop-in { margin: 0 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 5px 6px; min-height: 36px; border: 1px solid var(--accent-line);
+  border-radius: var(--r); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pop-in .ctag { gap: 5px; height: 22px; font-size: 12px; color: var(--text); background: var(--surface-3); }
+.pop-in .ctag .ico { width: 11px; height: 11px; color: var(--text-faint); stroke-width: 2.4; }
+.pop-in .typed { font-size: var(--fs-sm); color: var(--text); padding-left: 3px; }
+.pop-in .typed::after { content: ""; display: inline-block; width: 1.5px; height: 15px; background: var(--accent); vertical-align: -3px; margin-left: 1px; }
+.pop-sec { padding: 10px 14px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+.sug { display: flex; align-items: center; gap: 8px; height: 30px; margin: 0 6px; padding: 0 8px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.sug .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.sug .m { margin-left: auto; font-size: var(--fs-xs); color: var(--text-faint); }
+.sug.act { background: var(--accent-soft); color: var(--accent-text); }
+.sug.act .ico { color: var(--accent); }
+.sug mark { background: none; color: var(--text); font-weight: 700; text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
+.sug.act mark { color: var(--accent-text); }
+.autobox { margin: 8px 14px 0; padding: 8px 10px; border-radius: var(--r); border: 1px dashed var(--border-strong); display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
+.autobox .ico { width: 14px; height: 14px; color: var(--text-faint); margin-top: 1px; }
+.autobox b { font-family: var(--mono); color: var(--text); font-weight: 600; }
+.pop-f { display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; margin-top: 8px; border-top: 1px solid var(--border); font-size: var(--fs-xs); color: var(--text-faint); }
+.pop-f button { height: 28px; margin-left: auto; }
+.pop-f button + button { margin-left: 0; }
+
+/* ---------- assistant panel */
+.aside { flex: none; width: 404px; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-left: 1px solid var(--border-strong); box-shadow: -12px 0 32px rgba(0,0,0,.18); z-index: 4; }
+.a-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.a-head h3 { font-size: var(--fs-lg); }
+.a-head .model { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-faint); }
+.a-head .model i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);  animation: none; }
+.a-head .model b { color: var(--ok-text); font-weight: 650; }
+.a-head .icon-btn { margin-left: auto; width: 28px; height: 28px; background: transparent; border-color: transparent; }
+.a-head .icon-btn + .icon-btn { margin-left: 0; }
+.a-ctx { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: var(--fs-xs); color: var(--text-faint); flex-wrap: wrap; }
+.a-ctx .ai-chip { height: 24px; }
+.a-log { flex: 1; min-height: 0; overflow: hidden; padding: 12px 14px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; }
+.a-note { display: flex; align-items: center; gap: 6px; margin: -4px 16px 10px; font-size: 11.5px; color: var(--text-faint); }
+.a-note .ico { width: 12px; height: 12px; }
+.aside .ai-composer { margin-bottom: 10px; }
+.a-log .ai-bubble { font-size: var(--fs-sm); padding: 7px 11px; }
+.a-log .ai-md { font-size: 13px; line-height: 1.5; } .a-log .ai-md p { margin: 0; } .a-log .ai-body { gap: 8px; } .a-log .ai-composer textarea { min-height: 20px; }
+.a-log .ai-md code { font-family: var(--mono); }
+.tool { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2);
+  font-size: 12px; color: var(--text-muted); min-width: 0; }
+.tool .ico { width: 13px; height: 13px; color: var(--text-faint); }
+.tool .ico.ok { color: var(--ok); stroke-width: 2.6; }
+.tool code { font: 12px var(--mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tool code em { font-style: normal; color: var(--text-faint); }
+.tool .res { margin-left: auto; white-space: nowrap; font: 600 11.5px var(--mono); color: var(--text-muted); }
+.tool .ro { font: 650 9.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; flex: none; }
+.tools { display: flex; flex-direction: column; gap: 4px; }
+.tool-x { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); overflow: hidden; }
+.tool-x .tool { border: none; border-radius: 0; background: transparent; }
+.tool-x .thumbs { display: flex; gap: 3px; padding: 0 8px 8px; }
+.tool-x .thumbs img { width: 40px; height: 28px; object-fit: cover; border-radius: 4px; filter: brightness(.55) saturate(.7); }
+.tool-x .thumbs span { display: grid; place-items: center; width: 40px; height: 28px; border-radius: 4px; background: var(--surface-3); font: 600 11px var(--mono); color: var(--text-muted); }
+.plan { border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--surface-2); overflow: hidden; }
+.plan-h { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--accent-soft); border-bottom: 1px solid var(--accent-line); font-size: var(--fs-sm); font-weight: 700; color: var(--accent-text); }
+.plan-h .ico { width: 15px; height: 15px; color: var(--accent); }
+.plan-h span { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--accent-text); opacity: .85; }
+.plan ol { list-style: none; margin: 0; padding: 6px 10px; display: flex; flex-direction: column; }
+.plan li { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 12.5px; line-height: 1.4; }
+.plan li input { margin: 1px 0 0; width: 15px; height: 15px; flex: none; }
+.plan li code { font: 12px var(--mono); color: var(--text); background: var(--surface-3); padding: 0 4px; border-radius: 3px; }
+.plan li .op { font: 650 10px var(--mono); text-transform: uppercase; color: var(--text-faint); width: 38px; flex: none; margin-top: 2px; }
+.plan .pnote { margin: 0 10px; padding: 6px 0 8px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-faint); display: flex; gap: 6px; align-items: flex-start; }
+.plan .pnote .ico { width: 13px; height: 13px; color: var(--ok); margin-top: 1px; }
+.plan-f { display: flex; gap: 6px; padding: 0 10px 10px; }
+.plan-f button { height: 28px; font-size: var(--fs-xs); }
+.plan-f .grow { flex: 1; }
+.pnote2 { white-space: nowrap; margin-left: auto; align-self: center; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-faint); }
+.pnote2 .ico { width: 12px; height: 12px; color: var(--ok); stroke-width: 2.6; }
+.qchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.qchip { height: auto; min-height: 28px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 550; white-space: normal; text-align: left; background: var(--surface-2); }
+.qchip .n { font: 600 11px var(--mono); color: var(--text-faint); }
+.qchip.dash { border-style: dashed; color: var(--text-muted); background: transparent; }
+.cant { border: 1px solid var(--border-strong); border-left: 3px solid var(--warn); border-radius: var(--r); padding: 8px 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; line-height: 1.45; }
+.cant .t { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: var(--fs-sm); }
+.cant .t .ico { width: 15px; height: 15px; color: var(--warn); }
+.cant .k { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
+.cant p { margin: 0; color: var(--text-muted); }
+.cant p b { color: var(--text); font-weight: 600; }
+.cant .acts { display: flex; gap: 6px; margin-top: 3px; }
+.cant .acts button { height: 26px; font-size: var(--fs-xs); }
+.a-log .ai-msg.user .ai-bubble { max-width: 88%; }
+.dim-old { opacity: .62; }
+
+/* ---------- toast + modal */
+.toast { position: fixed; left: 24px; bottom: 24px; z-index: 120; width: 470px; display: flex; gap: 12px; padding: 12px 12px 12px 14px; background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-left: 3px solid var(--warn); border-radius: var(--r-md); box-shadow: var(--shadow-3); }
+.toast > .ico { width: 18px; height: 18px; color: var(--warn); margin-top: 2px; }
+.toast .tb { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.toast .tt { font-weight: 700; font-size: var(--fs-sm); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.toast .tt .badge { height: 20px; font-size: 11.5px; padding: 0 6px; }
+.toast .tt .ico.ar { width: 14px; height: 14px; color: var(--text-faint); }
+.toast .td { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.45; }
+.toast .td code { font: 11.5px var(--mono); color: var(--text); }
+.toast .ta { display: flex; gap: 6px; margin-top: 4px; }
+.toast .ta button { height: 26px; font-size: var(--fs-xs); }
+.toast .x { width: 24px; height: 24px; padding: 0; justify-content: center; background: transparent; border-color: transparent; }
+.toast .timer { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--border); border-radius: 0 0 var(--r-md) var(--r-md); overflow: hidden; }
+.toast .timer i { display: block; height: 100%; width: 64%; background: var(--warn); }
+
+.scrim { position: fixed; inset: 0; z-index: 100; background: color-mix(in srgb, var(--bg) 62%, transparent); display: flex; align-items: center; justify-content: flex-end; padding-right: 120px; }
+.dlg { width: 640px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3); display: flex; flex-direction: column; }
+.dlg-h { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.dlg-h h3 { font-size: var(--fs-lg); }
+.dlg-h .icon-btn { margin-left: auto; background: transparent; border-color: transparent; }
+.dlg-b { padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
+.fld { display: flex; flex-direction: column; gap: 6px; }
+.fld > label, .fld > .l { font-size: var(--fs-xs); font-weight: 650; color: var(--text-muted); }
+.fld input[type=text] { height: 34px; padding: 0 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); font-size: var(--fs-sm); }
+.fld input.focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dest { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dest .opt { display: flex; gap: 10px; padding: 11px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.dest .opt .ico { width: 20px; height: 20px; color: var(--text-faint); margin-top: 1px; }
+.dest .opt b { display: block; font-size: var(--fs-sm); }
+.dest .opt span { font-size: var(--fs-xs); color: var(--text-faint); line-height: 1.4; }
+.dest .opt.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.dest .opt.on .ico { color: var(--accent); }
+.dest .opt.on b { color: var(--accent-text); }
+.radios { display: flex; gap: 6px; }
+.radios .seg > button { height: 30px; font-size: var(--fs-sm); }
+.row2 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; }
+.sumbox { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.sumrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; font-size: var(--fs-sm); border-bottom: 1px solid var(--border); }
+.sumrow:last-child { border-bottom: none; }
+.sumrow .ico { width: 15px; height: 15px; color: var(--accent); }
+.sumrow code { font: 12.5px var(--mono); }
+.sumrow .r { margin-left: auto; font: 12px var(--mono); color: var(--text-muted); white-space: nowrap; }
+.sumrow.tot { font-size: var(--fs-xs); color: var(--text-faint); background: var(--surface); border-radius: 0 0 var(--r-md) var(--r-md); }
+.sumrow.tot b { color: var(--text); font-family: var(--mono); }
+.sumrow.tot .ok { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ok-text); }
+.sumrow.tot .ok .ico { width: 13px; height: 13px; color: var(--ok); stroke-width: 2.6; }
+.chk-line { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.chk-line .m { color: var(--text-faint); font-size: var(--fs-xs); }
+.addmore { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--accent-text); font-weight: 600; }
+.addmore .ico { width: 15px; height: 15px; color: var(--accent); }
+.dlg-f { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.dlg-f .hint { flex: 1; }
+.dlg-f button { height: 34px; padding: 0 16px; }
+.tiny-tags { display: flex; gap: 4px; }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute">
+  
+  <style>.f { fill: currentColor; fill-opacity: .22; } .s { fill: currentColor; stroke: none; }</style>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m14.5 17-5-5 5-5"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9.5 17 5-5-5-5"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m7 9.5 5 5 5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M17 7 7 17M7 7l10 10"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10"/></symbol>
+  <symbol id="i-circle" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="7.5"/></symbol>
+  <symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M5 12h13.5M13 6.5l5.5 5.5-5.5 5.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path class="f" d="M10.3 4.2 2.6 17.6A2 2 0 0 0 4.3 20.6h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4"/><circle class="s" cx="12" cy="17" r="1.1"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path class="f" d="m12 3 9 4.6-9 4.6-9-4.6z"/><path d="m3 12.2 9 4.6 9-4.6M3 16.6l9 4.6 9-4.6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle class="f" cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="3"/><circle class="s" cx="8.5" cy="9.5" r="1.6"/><path d="m3.5 17.5 5-5 4 4 2.5-2.5 5.5 5"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path class="f" d="M3.5 5.5v5.3a2 2 0 0 0 .6 1.4l8.2 8.2a2 2 0 0 0 2.8 0l5.3-5.3a2 2 0 0 0 0-2.8L12.2 4.1a2 2 0 0 0-1.4-.6H5.5a2 2 0 0 0-2 2z"/><circle class="s" cx="8" cy="8" r="1.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path class="f" d="M4 15.5v2.5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5"/><path d="M12 4v10.5M7.5 10l4.5 4.5 4.5-4.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 9A8 8 0 0 0 5 7.5M4.5 15A8 8 0 0 0 19 16.5"/><path d="M5 3.5v4h4M19 20.5v-4h-4"/></symbol>
+  <symbol id="i-scatter" viewBox="0 0 24 24"><path class="f" stroke-dasharray="2.6 2.4" d="M5.5 9.5c1-4 8-5.5 11.5-3 3.5 2.5 2.5 8-1.5 9.5-4.5 1.7-11-1.5-10-6.5z"/><circle class="s" cx="9.5" cy="10" r="1.6"/><circle class="s" cx="14" cy="8.6" r="1.6"/><circle class="s" cx="13" cy="13" r="1.6"/><circle class="s" cx="5" cy="19" r="1.4"/><circle class="s" cx="20" cy="19.5" r="1.4"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><rect class="f" x="4" y="12" width="4" height="8" rx="1.2"/><rect class="f" x="10" y="5" width="4" height="15" rx="1.2"/><rect class="f" x="16" y="9" width="4" height="11" rx="1.2"/></symbol>
+  <symbol id="i-model" viewBox="0 0 24 24"><rect class="f" x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 3v3.5M14.5 3v3.5M9.5 17.5V21M14.5 17.5V21M3 9.5h3.5M3 14.5h3.5M17.5 9.5H21M17.5 14.5H21"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle class="s" cx="12" cy="12" r="1.5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path class="f" d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15z"/><path d="M12 15V4m-4.5 4.5L12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
+  <symbol id="i-eval" viewBox="0 0 24 24"><rect class="f" x="4" y="4" width="16" height="16" rx="2.5"/><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="m7.5 13.5 2.5 2.5 3.5-5.5M15.5 8h1.5M15.5 12h1.5M15.5 16h1.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path class="f" d="M6 7h12l-.9 12.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9z"/><path d="M4 7h16M9.5 7V4.5h5V7M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path class="f" d="M10.3 3.6a1.8 1.8 0 0 1 3.4 0l.3.9a1.8 1.8 0 0 0 2.4 1l.9-.4a1.8 1.8 0 0 1 2.4 2.4l-.4.9a1.8 1.8 0 0 0 1 2.4l.9.3a1.8 1.8 0 0 1 0 3.4l-.9.3a1.8 1.8 0 0 0-1 2.4l.4.9a1.8 1.8 0 0 1-2.4 2.4l-.9-.4a1.8 1.8 0 0 0-2.4 1l-.3.9a1.8 1.8 0 0 1-3.4 0l-.3-.9a1.8 1.8 0 0 0-2.4-1l-.9.4a1.8 1.8 0 0 1-2.4-2.4l.4-.9a1.8 1.8 0 0 0-1-2.4l-.9-.3a1.8 1.8 0 0 1 0-3.4l.9-.3a1.8 1.8 0 0 0 1-2.4l-.4-.9a1.8 1.8 0 0 1 2.4-2.4l.9.4a1.8 1.8 0 0 0 2.4-1z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path class="f" d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.6A3.8 3.8 0 0 1 17.5 18.5z"/><path d="M12 11v5m-2-2 2 2 2-2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path class="f" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path class="f" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path class="f" d="M8 5.5v13l10.5-6.5z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path class="f" d="m15.5 4.5 4 4L9 19H5v-4z"/><path d="m13 7 4 4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path class="f" d="M7 9h10v3a5 5 0 0 1-10 0z"/><path d="M9.5 4v5M14.5 4v5M12 17v3.5"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path class="f" d="m3.5 15.5 12-12 5 5-12 12z"/><path d="m7.5 11.5 2 2M10.5 8.5l2 2M13.5 5.5l2 2"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse class="f" cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/></symbol>
+  
+  <symbol id="i-wave" viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="3"/><path d="M6.5 12h1M9.5 9v6M12.5 6.5v11M15.5 9.5v5M18 11.5v1"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect class="f" x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><rect class="f" x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8 8.5h8M8 12h8M8 15.5h5"/></symbol>
+  <symbol id="i-vectors" viewBox="0 0 24 24"><rect class="f" x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M8 7v10M12 7v10M16 7v10"/><circle class="s" cx="8" cy="10" r="1.5"/><circle class="s" cx="12" cy="14.5" r="1.5"/><circle class="s" cx="16" cy="9" r="1.5"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect class="f" x="6" y="5" width="4" height="14" rx="1.2"/><rect class="f" x="14" y="5" width="4" height="14" rx="1.2"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5l5.5 5.5"/></symbol>
+  
+  <symbol id="i-box" viewBox="0 0 24 24"><rect class="f" x="5" y="5" width="14" height="14" rx="1.5"/><rect class="s" x="3" y="3" width="4" height="4" rx="1"/><rect class="s" x="17" y="17" width="4" height="4" rx="1"/></symbol>
+  <symbol id="i-polygon" viewBox="0 0 24 24"><path class="f" d="M5 8.5 11 4l8 4.5-2 10.5H7.5z"/><circle class="s" cx="5" cy="8.5" r="1.7"/><circle class="s" cx="11" cy="4" r="1.7"/><circle class="s" cx="19" cy="8.5" r="1.7"/><circle class="s" cx="17" cy="19" r="1.7"/><circle class="s" cx="7.5" cy="19" r="1.7"/></symbol>
+  <symbol id="i-keypoint" viewBox="0 0 24 24"><path d="M12 6v6M12 12l-5 7M12 12l5 7M6 9.5h12"/><circle class="s" cx="12" cy="4.5" r="2"/><circle class="s" cx="6" cy="9.5" r="1.6"/><circle class="s" cx="18" cy="9.5" r="1.6"/><circle class="s" cx="7" cy="19" r="1.6"/><circle class="s" cx="17" cy="19" r="1.6"/></symbol>
+  <symbol id="i-crosshair" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="6.5"/><path d="M12 2.5v6M12 15.5v6M2.5 12h6M15.5 12h6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path class="f" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.8 6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.6 3.4M6.5 7.6C4 9.3 2.5 12 2.5 12S6 18.5 12 18.5c1.7 0 3.2-.5 4.5-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2M4 4l16 16"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect class="f" x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M9.3 10h.01M12.6 10h.01M15.9 10h.01M18 10h.01M8 14.2h8"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14.5 4.5 10 9 5.5"/><path d="M4.5 10h10a5 5 0 0 1 0 10H11"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14.5 19.5 10 15 5.5"/><path d="M19.5 10h-10a5 5 0 0 0 0 10H13"/></symbol>
+  <symbol id="i-skip" viewBox="0 0 24 24"><path class="f" d="M5 5.5v13l9-6.5z"/><path d="M18.5 5.5v13"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect class="f" x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><circle class="s" cx="7.5" cy="7.5" r="1.1"/><circle class="s" cx="7.5" cy="16.5" r="1.1"/></symbol>
+  <symbol id="i-ftp" viewBox="0 0 24 24"><path class="f" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9 13.5h6M13 11.2l2.3 2.3-2.3 2.3"/></symbol>
+  
+  <symbol id="i-brand" viewBox="0 0 32 32"><rect x="1" y="1" width="30" height="30" rx="9" fill="currentColor" fill-opacity=".14" stroke="none"/><path stroke-dasharray="3 2.6" stroke-width="1.8" d="M7.5 13c1.2-5 10.5-7 15-3.7 4.4 3.2 3 10.3-2 12.2-5.8 2.2-14.2-2-13-8.5z"/><g stroke="none" fill="currentColor"><circle cx="12.5" cy="13.5" r="2"/><circle cx="18.5" cy="11.8" r="2"/><circle cx="17" cy="17.6" r="2"/><circle cx="7" cy="24.5" r="1.5" fill-opacity=".55"/><circle cx="26" cy="25" r="1.5" fill-opacity=".55"/></g></symbol>
+  <symbol id="i-robot" viewBox="0 0 24 24"><rect class="f" x="4.5" y="8" width="15" height="11" rx="3"/><path d="M12 8V4.5M2.5 12.5v3M21.5 12.5v3M9.5 16h5"/><circle class="s" cx="12" cy="3.8" r="1.2"/><circle class="s" cx="9.2" cy="12.3" r="1.3"/><circle class="s" cx="14.8" cy="12.3" r="1.3"/></symbol>
+  
+  <symbol id="i-gem" viewBox="0 0 24 24"><path class="f" d="M6.5 4h10l4.5 5.5L11.5 21 2 9.5z"/><path d="M2 9.5h19M9.3 4 7.2 9.5l4.3 11.5 4.3-11.5L13.7 4M7.2 9.5 11.5 4l4.3 5.5"/><path d="M20 1.5v4M18 3.5h4"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path class="f" d="M11 3.5c.7 4.4 2.6 6.3 7 7-4.4.7-6.3 2.6-7 7-.7-4.4-2.6-6.3-7-7 4.4-.7 6.3-2.6 7-7z"/><path d="M19 15.5v5M16.5 18h5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect class="f" x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path class="f" d="M20.5 3.5 3.5 10.3l7 3.2 3.2 7z"/><path d="m10.5 13.5 10-10"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect class="f" x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle class="f" cx="12" cy="8.5" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle class="f" cx="9" cy="8.5" r="3.6"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0M15.5 5.2a3.6 3.6 0 0 1 0 6.6M18 13.6a6.5 6.5 0 0 1 3.5 5.9"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path class="f" d="M5 4h7v16H5a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 5 4z"/><path d="M12 4H5a1.5 1.5 0 0 0-1.5 1.5v13A1.5 1.5 0 0 0 5 20h7M10 12h10.5M17 8.5l3.5 3.5-3.5 3.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect class="f" x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle class="s" cx="12" cy="15.5" r="1.4"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path class="f" d="M12 3.5 19 6v5.5c0 4.4-3 7.8-7 9-4-1.2-7-4.6-7-9V6z"/><path d="m8.8 12 2.3 2.3 4.3-4.6"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle class="f" cx="17.5" cy="5.5" r="2.7"/><circle class="f" cx="6.5" cy="12" r="2.7"/><circle class="f" cx="17.5" cy="18.5" r="2.7"/><path d="m8.9 10.6 6.2-3.7M8.9 13.4l6.2 3.7"/></symbol>
+</svg>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect class="f" x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 5.5v-.5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8.5a2 2 0 0 0 2 2h.5"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><path class="f" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9 13.5h7m-2.5-2.5 2.5 2.5-2.5 2.5"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect class="f" x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect class="f" x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle class="s" cx="4.8" cy="6.5" r="1.3"/><circle class="s" cx="4.8" cy="12" r="1.3"/><circle class="s" cx="4.8" cy="17.5" r="1.3"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle class="s" cx="6" cy="12" r="1.6"/><circle class="s" cx="12" cy="12" r="1.6"/><circle class="s" cx="18" cy="12" r="1.6"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path class="f" d="M6.5 3.5h7l4.5 4.5v10.5a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M13.5 3.5V8H18"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3.3-3.3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0L5 13.3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-fplus" viewBox="0 0 24 24"><path class="f" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 10.5v6M9 13.5h6"/></symbol>
+  <symbol id="i-hdd" viewBox="0 0 24 24"><rect class="f" x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 13h18"/><circle class="s" cx="17" cy="15.5" r="1"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M12 6v12m-4-4 4 4 4-4"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><path d="M4 6h9M4 12h6M4 18h9"/><path class="f" d="M15 9l5 3-5 3z"/></symbol>
+</svg>
+
+<div id="app" style="display:contents"></div>
+
+<script>
+const Q = new URLSearchParams(location.search);
+const SHOT = Q.get('shot') || 'img1';
+const ic = (id, cls = '') => `<svg class="ico ${cls}"><use href="#${id}"/></svg>`;
+const S = i => `./samples/img_${String(i % 30).padStart(2, '0')}.jpg`;
+
+const FMT = {
+  'yolo-det': { l: 'YOLO detect', c: 'var(--accent)', i: 'i-box' },
+  'yolo-seg': { l: 'YOLO seg', c: 'var(--err-fp)', i: 'i-polygon' },
+  'yolo-pose': { l: 'YOLO pose', c: 'var(--err-loc)', i: 'i-keypoint' },
+  'coco': { l: 'COCO', c: 'var(--err-tp)', i: 'i-db' },
+  'voc': { l: 'Pascal VOC', c: 'var(--err-cls)', i: 'i-text' },
+  'cls': { l: 'Classification folders', c: 'var(--err-miss)', i: 'i-folder' },
+  'img': { l: 'Images only', c: 'var(--text-muted)', i: 'i-image' },
+  'emb': { l: 'Embeddings', c: 'var(--prog-review)', i: 'i-vectors' },
+  'other': { l: 'Other', c: 'var(--text-faint)', i: 'i-layers' },
+};
+const badge = (f, extra = '') => { const d = FMT[f]; return `<span class="badge ${f === 'other' ? 'other' : ''} ${extra}" style="--c:${d.c}">${ic(d.i)}${d.l}</span>`; };
+const SRC = { managed: ['i-hdd', 'Managed'], local: ['i-link', 'Local link'], s3: ['i-cloud', 'S3 link'] };
+
+const BUCKETS = [
+  { n: 'traffic-cams-2026', f: 'yolo-det', src: 's3', hint: 'images/ · labels/ · data.yaml', imgs: [0, 7, 12, 21],
+    c: [['12,480', 'images'], ['12,480', 'labels'], ['9', 'classes'], ['3.2 GB', 'size']], tags: ['cv-team', 'traffic', 'day', 's3'], used: 2, when: '2 h ago' },
+  { n: 'warehouse-pallets', f: 'coco', src: 'managed', hint: 'images/ · annotations/instances_*.json', imgs: [4, 9, 16, 25],
+    c: [['4,212', 'images'], ['31,870', 'annots'], ['6', 'classes'], ['1.1 GB', 'size']], tags: ['cv-team', 'warehouse', 'indoor'], used: 1, when: 'yesterday' },
+  { n: 'ppe-helmets-voc', f: 'voc', src: 'local', hint: 'JPEGImages/ · Annotations/*.xml · ImageSets/', imgs: [5, 13, 18, 27],
+    c: [['5,031', 'images'], ['5,031', 'xml'], ['3', 'classes'], ['860 MB', 'size']], tags: ['cv-team', 'safety', 'construction'], used: 0, when: 'Oct 21' },
+  { n: 'drone-seg', f: 'yolo-seg', src: 'managed', hint: 'images/ · labels/ (polygons) · data.yaml', imgs: [3, 11, 19, 29],
+    c: [['2,940', 'images'], ['2,940', 'labels'], ['5', 'classes'], ['2.4 GB', 'size']], tags: ['cv-team', 'aerial', 'seg'], used: 1, when: 'Oct 24' },
+  { n: 'pose-gym', f: 'yolo-pose', src: 'managed', hint: 'images/ · labels/ · kpt_shape [17, 3]', imgs: [8, 14, 22, 26],
+    c: [['1,806', 'images'], ['1,806', 'labels'], ['1', 'class'], ['640 MB', 'size']], tags: ['cv-team', 'people', 'indoor'], used: 1, when: 'Oct 19' },
+  { n: 'leaf-disease', f: 'cls', src: 'local', hint: 'train/<38 class dirs>/ · val/', imgs: [1, 10, 17, 24],
+    c: [['18,320', 'images'], ['folder', 'labels'], ['38', 'classes'], ['1.9 GB', 'size']], tags: ['cv-team', 'plants', 'cls'], used: 0, when: 'Oct 12' },
+  { n: 'raw-upload-oct27', f: 'img', src: 'managed', hint: '640 .jpg · no label files', imgs: [2, 6, 15, 23],
+    c: [['640', 'images'], ['—', 'labels'], ['—', 'classes'], ['410 MB', 'size']], tags: ['cv-team', 'unlabeled', 'day'], used: 0, when: '25 min ago' },
+  { n: 'audio-embeds', f: 'emb', src: 's3', hint: 'embeddings.npy · metadata.parquet', emb: true,
+    c: [['52,000', 'vectors'], ['768', 'dims'], ['14', 'classes'], ['160 MB', 'size']], tags: ['audio', 's3'], used: 1, when: 'Oct 9' },
+  { n: 'misc-scraps', f: 'other', src: 'managed', hint: 'mixed .jpg .txt .csv · no known layout', imgs: [20, 28], files: ['.csv', '.txt'],
+    c: [['213', 'images'], ['41', 'other files'], ['—', 'classes'], ['88 MB', 'size']], tags: ['cv-team', 'scratch'], used: 0, when: 'Oct 2' },
+];
+
+function header(asstOn) {
+  return `<header class="app-header">
+    <div class="brand"><svg class="brand-mark"><use href="#i-brand"/></svg><h1>Dataset Visualizer</h1></div>
+    <nav class="nav"><a>${ic('i-layers')}Sessions <span class="cnt">7</span></a><a class="on">${ic('i-db')}Data <span class="cnt">9</span></a></nav>
+    <div class="hdr-right">
+      <span class="storage">Managed store <span class="bar"><i></i></span> 9.6 / 22 GB</span>
+      <button class="asst-btn ${asstOn ? 'on' : ''}">${ic('i-gem', 'gem-ico')}Assistant</button>
+      <button class="icon-btn ghost">${ic(document.documentElement.dataset.theme === 'light' ? 'i-moon' : 'i-sun')}</button>
+      <button class="user-btn"><span class="avatar av-c5">YP</span></button>
+    </div></header>`;
+}
+
+function strip(b) {
+  if (b.emb) {
+    const cl = [[22, 30, 46, 'var(--prog-review)'], [58, 52, 38, 'var(--accent)'], [80, 26, 30, 'var(--err-tp)']].map(([x, y, s, c]) =>
+      `<span class="cl" style="left:${x}%;top:${y}%;width:${s}px;height:${s}px;background:radial-gradient(circle, color-mix(in srgb, ${c} 70%, transparent) 0 1.6px, transparent 2px) 0 0/6px 6px;box-shadow:0 0 0 1px color-mix(in srgb, ${c} 30%, transparent)"></span>`).join('');
+    return `<div class="strip emb">${cl}</div>`;
+  }
+  const tiles = b.imgs.map(i => `<img src="${S(i)}">`).join('') + (b.files || []).map(e => `<div class="ftile">${ic('i-file')}${e}</div>`).join('');
+  return `<div class="strip">${tiles}</div>`;
+}
+
+function card(b, o = {}) {
+  const [si, sl] = SRC[b.src];
+  const f = o.fmt || b.f;
+  const tags = b.tags.map(t => `<span class="ctag ${o.activeTag === t ? 'on' : ''}">${t}</span>`).join('');
+  const used = b.used ? `<span class="used">${ic('i-play')}Used by ${b.used} session${b.used > 1 ? 's' : ''}</span>` : `<span class="used none">${ic('i-play')}Not in a session</span>`;
+  const fmtRow = o.changed
+    ? `<div class="fmt">${badge('other')}<span class="was">YOLO detect</span></div><div class="warn-line">${ic('i-alert')}labels/ missing · images have no labels</div>`
+    : `<div class="fmt">${badge(f)}</div><div class="hintp">${b.hint}</div>`;
+  return `<article class="bcard ${o.cls || ''}">
+    <div style="position:relative">${strip(b)}<span class="src">${ic(si)}${sl}</span>${o.pick !== undefined ? '<span class="pickbox"></span>' : ''}</div>
+    <div class="bbody">
+      <div class="bname"><b>${b.n}</b><button class="icon-btn">${ic('i-more')}</button></div>
+      ${fmtRow}
+      <div class="counts">${(o.changed ? [['12,480', 'images'], ['0', 'labels'], ['—', 'classes'], ['3.2 GB', 'size']] : b.c).map(([v, k]) => `<div><b class="${v === '—' ? 'na' : ''}">${v}</b>${k}</div>`).join('')}</div>
+      <div class="ctags">${tags}</div>
+    </div>
+    <div class="bfoot">${used}<span class="when">${b.when}</span></div>
+  </article>`;
+}
+
+function board(o = {}) {
+  const active = o.activeTag;
+  const list = active ? BUCKETS.filter(b => b.tags.includes(active)) : BUCKETS;
+  const tagCounts = [['cv-team', 8], ['day', 2], ['indoor', 2], ['s3', 2], ['traffic', 1], ['warehouse', 1], ['safety', 1], ['construction', 1], ['aerial', 1], ['seg', 1], ['people', 1], ['plants', 1], ['cls', 1], ['unlabeled', 1], ['audio', 1], ['scratch', 1]];
+  const shownTags = o.cols === 3 ? tagCounts.slice(0, 9) : tagCounts.slice(0, 12);
+  const fc = active ? [['All', 8], ['YOLO', 3, 'var(--accent)'], ['COCO', 1, 'var(--err-tp)'], ['VOC', 1, 'var(--err-cls)'], ['Classification', 1, 'var(--err-miss)'], ['Images only', 1, 'var(--text-muted)'], ['Embeddings', 0, 'var(--prog-review)'], ['Other', 1, 'var(--text-faint)']]
+    : [['All', 9], ['YOLO', o.changedFirst ? 2 : 3, 'var(--accent)'], ['COCO', 1, 'var(--err-tp)'], ['VOC', 1, 'var(--err-cls)'], ['Classification', 1, 'var(--err-miss)'], ['Images only', 1, 'var(--text-muted)'], ['Embeddings', 1, 'var(--prog-review)'], ['Other', o.changedFirst ? 2 : 1, 'var(--text-faint)']];
+  const fcShown = o.cols === 3 ? fc.filter(x => !['Classification', 'Images only', 'Embeddings'].includes(x[0])) : fc;
+  return `<div class="scroll"><div class="wrap">
+    <div class="b-head">
+      <div><h2>Data <span class="count-badge">9 buckets</span></h2>
+      <p>Everything you imported or linked. <b>6</b> managed in the local store · <b>3</b> linked (2 S3, 1 local folder) · <b>53.4 GB</b> total</p></div>
+      <div class="acts"><button>${ic('i-link')}Link source</button><button class="primary">${ic('i-plus')}Import data</button></div>
+    </div>
+    <div class="b-filters">
+      <div class="search">${ic('i-search')}<input placeholder="Search buckets, folders, files…"><kbd>/</kbd></div>
+      <span class="lbl">Format</span>
+      <div class="segmented seg">${fcShown.map(([l, n, c], i) => `<button class="view-btn ${i === 0 ? 'active' : ''}">${c ? `<i class="sw" style="--c:${c}"></i>` : ''}${l} <span class="n">${n}</span></button>`).join('')}${o.cols === 3 ? `<button>More ${ic('i-chev-d')}</button>` : ''}</div>
+      <span class="grow"></span>
+      <select><option>Sort: Recently used</option></select>
+      <div class="segmented"><button class="icon-btn view-btn active">${ic('i-grid')}</button><button class="icon-btn">${ic('i-list')}</button></div>
+    </div>
+    <div class="tagbar">
+      <span class="htb-label">${ic('i-tag')}Tags</span>
+      ${shownTags.map(([t, n]) => `<span class="tchip ${t === active ? 'on' : ''}">${t === active ? ic('i-check') : ''}${t}<span class="num">${n}</span></span>`).join('')}
+      <span class="tchip" style="border-style:dashed">+${o.cols === 3 ? 7 : 4} more</span>
+      <span class="mode">${active ? `<span>8 of 9 match</span><button class="ghost clear">${ic('i-x')}Clear</button>` : ''}<span>Match <b>ALL</b></span></span>
+    </div>
+    <div class="grid" style="--cols:${o.cols || 4}">${list.map((b, i) => card(b, { activeTag: active, cls: (o.hoverFirst && i === 0 ? 'hover' : '') + (o.changedFirst && i === 0 ? ' changed' : '') + (o.picked && o.picked.includes(i) ? ' picked' : ''), changed: o.changedFirst && i === 0, pick: o.picked ? 1 : undefined })).join('')}</div>
+    <div class="board-foot">${active ? `<span class="hidden-note">${ic('i-eye-off')}1 bucket hidden by the tag filter: <b>audio-embeds</b> (Embeddings, tags: audio, s3)</span><span>·</span>` : ''}<span>Formats are detected from folder structure and re-checked after every change.</span></div>
+  </div></div>`;
+}
+
+/* ---------- bucket view */
+const NAMES = Array.from({ length: 48 }, (_, i) => {
+  const cam = String((i * 5) % 14 + 1).padStart(2, '0');
+  const s = 29695 + i * 97; const hh = String(Math.floor(s / 3600)).padStart(2, '0'), mm = String(Math.floor(s / 60) % 60).padStart(2, '0'), ss = String(s % 60).padStart(2, '0');
+  return `cam${cam}_0312_${hh}${mm}${ss}.jpg`;
+});
+const LBL = i => (i === 9 || i === 13 || i === 27) ? 'miss' : (i === 18 ? 'empty' : String(2 + (i * 5) % 9));
+const SEL = [2, 3, 5, 10, 11, 12];
+
+function bucketHead() {
+  return `<div class="bk-head">
+    <div class="crumbs"><a>${ic('i-db')} Data</a>${ic('i-chev-r')}<a>traffic-cams-2026</a>${ic('i-chev-r')}<a>images</a>${ic('i-chev-r')}<a class="cur">train</a></div>
+    <div class="bk-title"><h2>traffic-cams-2026</h2>${badge('yolo-det', 'lg')}
+      <span class="src" style="position:static;box-shadow:none;background:var(--surface-2);border:1px solid var(--border)">${ic('i-cloud')}S3 link</span>
+      <div class="tiny-tags"><span class="ctag">traffic</span><span class="ctag">day</span><span class="ctag">s3</span><span class="ctag">cv-team</span><span class="ctag add">+ Tag</span></div>
+      <div class="meta"><span><b>12,480</b>images</span><span><b>9</b>classes</span><span><b>3.2 GB</b></span></div>
+      <div class="acts"><button>${ic('i-refresh')}Re-scan</button><button>${ic('i-share')}Send to…</button></div>
+    </div></div>`;
+}
+
+function tree() {
+  const row = (d, label, o = {}) => `<div class="ti ${o.on ? 'on' : ''}" style="--d:${d}">${o.file ? `<svg class="ico chev sp"></svg>${ic('i-file')}` : `${ic(o.open ? 'i-chev-d' : 'i-chev-r', 'chev')}${ic('i-folder', 'fold')}`}<span>${label}</span>${o.tag ? '<span class="tdot" title="tagged"></span>' : ''}${o.n ? `<span class="n">${o.n}</span>` : ''}</div>`;
+  return `<aside class="tree">
+    <div class="sec">Folders</div>
+    ${row(0, 'traffic-cams-2026', { open: 1, n: '12,480' })}
+    ${row(1, 'images', { open: 1, n: '12,480' })}
+    ${row(2, 'train', { on: 1, n: '8,736', tag: 1 })}
+    ${row(2, 'val', { n: '2,496', tag: 1 })}
+    ${row(2, 'test', { n: '1,248', tag: 1 })}
+    ${row(1, 'labels', { n: '12,480' })}
+    ${row(1, 'data.yaml', { file: 1 })}
+    ${row(1, 'README.md', { file: 1 })}
+    <div class="sec" style="margin-top:8px">Format check</div>
+    <div class="facts">
+      <div class="h">${badge('yolo-det')}</div>
+      <div class="chk">${ic('i-check')}images/{train,val,test}</div>
+      <div class="chk">${ic('i-check')}labels/ mirrors images/</div>
+      <div class="chk">${ic('i-check')}data.yaml · 9 names</div>
+      <div class="chk" style="color:var(--warn-text)">${ic('i-alert')}<span>24 images without .txt</span></div>
+    </div>
+    <div class="sec" style="margin-top:8px">Filter by folder tag</div>
+    <div class="ctags" style="padding:0 6px">${['split:train', 'split:val', 'split:test', 'day', 'reviewed', 'dusk'].map(t => `<span class="ctag">${t}</span>`).join('')}</div>
+    <div class="sec" style="margin-top:8px">Used by</div>
+    <div class="facts">
+      <div class="sess"><span class="k">Viz</span>traffic-cams v3</div>
+      <div class="sess"><span class="k">Label</span>night relabel pass</div>
+    </div>
+  </aside>`;
+}
+
+function folderTags(open) {
+  return `<div class="ftags"><span class="fl">${ic('i-folder')}images/train</span>
+    <span class="ctag auto">${ic('i-lock')}format:yolo</span><span class="ctag">split:train</span><span class="ctag">day</span><span class="ctag">reviewed</span>
+    <span style="position:relative"><span class="ctag add ${open ? 'open' : ''}">+ Tag</span>${open ? tagPopover() : ''}</span>
+    <span class="right">Tags apply to this folder and are inherited by sub-folders</span></div>`;
+}
+
+function toolbar(mode) {
+  return `<div class="toolbar">
+    <input type="checkbox" ${mode === 'thumb' ? '' : ''} style="margin:0 4px 0 2px">
+    <button>${ic('i-fplus')}New folder</button><button>${ic('i-upload')}Upload</button>
+    <span class="vsep"></span>
+    <span class="info"><b>8,736</b> images · <b>8,712</b> labelled · <b>24</b> without labels</span>
+    <span class="grow"></span>
+    <div class="search">${ic('i-search')}<input placeholder="Filter in this folder"></div>
+    <select style="height:30px"><option>Name A–Z</option></select>
+    <div class="segmented"><button class="view-btn ${mode === 'thumb' ? 'active' : ''}">${ic('i-grid')}Thumbnails</button><button class="view-btn ${mode === 'list' ? 'active' : ''}">${ic('i-list')}Names only</button></div>
+    ${mode === 'thumb' ? `<span class="sz">${ic('i-image')}<input type="range" min="0" max="100" value="40"></span>` : ''}
+  </div>`;
+}
+
+function thumbs() {
+  const t = NAMES.slice(0, 40).map((nm, i) => {
+    const l = LBL(i);
+    const lb = l === 'miss' ? `<span class="lb miss">no label</span>` : l === 'empty' ? `<span class="lb">0 boxes</span>` : `<span class="lb">${ic('i-box')}${l}</span>`;
+    return `<div class="tile ${SEL.includes(i) ? 'sel' : ''} ${i === 20 ? 'hov' : ''}"><div class="im"><img src="${S(i)}">${lb}<span class="cb"></span></div><div class="nm">${nm}</div></div>`;
+  }).join('');
+  return `<div class="tiles">${t}</div>
+    <div class="selbar"><span class="cnt"><span class="pill-n">6</span>selected <span class="sub">· 2.1 MB · labels follow</span></span>
+      <span class="vsep"></span>
+      <button>${ic('i-move')}Move</button><button>${ic('i-copy')}Copy</button><button>${ic('i-tag')}Tag</button><button class="dz">${ic('i-trash')}Delete</button>
+      <button class="primary">${ic('i-share')}Send to…${ic('i-chev-d')}</button>
+      <span class="vsep"></span><button class="icon-btn">${ic('i-x')}</button></div>`;
+}
+
+function namesList() {
+  const rows = NAMES.slice(0, 30).map((nm, i) => {
+    const l = LBL(i);
+    const st = l === 'miss' ? '<span class="lst miss"><i></i>no label file</span>' : l === 'empty' ? '<span class="lst none"><i></i>empty (0 boxes)</span>' : `<span class="lst"><i></i>${l} boxes · ${['car', 'truck', 'person', 'bus'][i % 4]}${l > 3 ? ' +' + (i % 3 + 1) : ''}</span>`;
+    const kb = 180 + (i * 37) % 160;
+    return `<div class="lrow"><input type="checkbox"><div class="nm">${ic('i-image')}<span>${nm}</span></div>${st}<div class="r">${kb} KB</div><div class="r">${i % 6 === 4 ? '1280×720' : '1920×1080'}</div><div class="m">Mar 12, 08:${String(14 + (i % 40)).padStart(2, '0')}</div><div class="m">${i % 5 === 3 ? 'edited Oct 26 by you' : 'imported Oct 3'}</div></div>`;
+  }).join('');
+  return `<div class="list"><div class="lrow h"><span></span><span class="sorted">Name ${ic('i-sort')}</span><span>Labels</span><span style="text-align:right">Size</span><span style="text-align:right">Dimensions</span><span>Captured</span><span>Last change</span></div>${rows}</div>`;
+}
+
+function tagPopover() {
+  return `<div class="pop" style="left:-26px;top:calc(100% + 10px);--ax:40px">
+    <div class="pop-h">${ic('i-tag')}Folder tags <span class="p">images/train</span></div>
+    <div class="pop-in"><span class="ctag">split:train ${ic('i-x')}</span><span class="ctag">day ${ic('i-x')}</span><span class="ctag">reviewed ${ic('i-x')}</span><span class="typed">dus</span></div>
+    <div class="pop-sec">Suggestions</div>
+    <div class="sug act">${ic('i-tag')}<span><mark>dus</mark>k</span><span class="m">on 3 folders</span></div>
+    <div class="sug">${ic('i-tag')}<span><mark>dus</mark>t-on-lens</span><span class="m">on 1 folder</span></div>
+    <div class="sug">${ic('i-plus')}<span>Create tag “dus”</span><span class="m">new</span></div>
+    <div class="pop-sec">Automatic</div>
+    <div class="autobox">${ic('i-lock')}<div><b>format:yolo</b> is set by format detection and can't be removed by hand. It changes if the folder structure changes.</div></div>
+    <div class="pop-f"><kbd>Enter</kbd> add<button class="ghost">Cancel</button><button class="primary">Done</button></div>
+  </div>`;
+}
+
+function bucketView(mode) {
+  return `<div class="bk">${bucketHead()}<div class="bk-body">${tree()}<section class="files">${toolbar(mode)}${folderTags(mode === 'list')}
+    ${mode === 'thumb' ? thumbs() : namesList()}</section></div></div>`;
+}
+
+/* ---------- assistant */
+function assistant() {
+  return `<aside class="aside">
+    <div class="a-head"><span class="ai-mark">${ic('i-gem')}</span><h3>Assistant</h3><span class="model" title="LLM status: connected"><i aria-hidden="true"></i><b>Connected</b> · claude-sonnet</span>
+      <button class="icon-btn">${ic('i-refresh')}</button><button class="icon-btn">${ic('i-x')}</button></div>
+    <div class="a-ctx">Scope <button class="ai-chip" aria-pressed="true">${ic('i-db')}traffic-cams-2026</button><button class="ai-chip">${ic('i-layers')}All data</button></div>
+    <div class="a-log">
+      <div class="ai-msg user"><div class="ai-bubble">move all night images into a new folder night/ and tag it</div></div>
+      <div class="ai-msg"><span class="ai-av">${ic('i-gem')}</span><div class="ai-body">
+        <div class="tools">
+          <div class="tool">${ic('i-chev-r')}${ic('i-check', 'ok')}<code>list_folders<em>(</em>"/"<em>)</em></code><span class="res">7 folders</span><span class="ro">read</span></div>
+          <div class="tool">${ic('i-chev-r')}${ic('i-check', 'ok')}<code>search<em>(</em>"night", by=content<em>)</em></code><span class="res">38 matches</span><span class="ro">read</span></div>
+        </div>
+        <div class="ai-md"><p>38 night images (31 train, 7 val). Their labels move with them.</p></div>
+        <div class="plan"><div class="plan-h">${ic('i-flow')}Plan · 4 changes<span>needs your OK</span></div>
+          <ol>
+            <li><input type="checkbox" checked><span class="op">mkdir</span><span><code>images/night/</code> and <code>labels/night/</code></span></li>
+            <li><input type="checkbox" checked><span class="op">move</span><span>38 images → <code>images/night/</code></span></li>
+            <li><input type="checkbox" checked><span class="op">move</span><span>38 label .txt → <code>labels/night/</code></span></li>
+            <li><input type="checkbox" checked><span class="op">tag</span><span><code>images/night/</code> with <code>night</code></span></li>
+          </ol>
+          <div class="plan-f"><button class="primary">${ic('i-check')}Confirm</button><button>Cancel</button><span class="pnote2">${ic('i-check')}stays YOLO · undoable</span></div>
+        </div>
+      </div></div>
+
+      <div class="ai-msg user"><div class="ai-bubble">clean up the dataset</div></div>
+      <div class="ai-msg"><span class="ai-av">${ic('i-gem')}</span><div class="ai-body">
+        <div class="ai-md"><p>“Clean up” can mean several things. Which one?</p></div>
+        <div class="qchips"><button class="qchip">Duplicates <span class="n">112</span></button><button class="qchip">Unlabeled images <span class="n">24</span></button>
+          <button class="qchip">Orphan labels <span class="n">5</span></button><button class="qchip">Empty folders <span class="n">2</span></button><button class="qchip dash">Other…</button></div>
+      </div></div>
+
+      <div class="ai-msg user"><div class="ai-bubble">convert this to a video dataset</div></div>
+      <div class="ai-msg"><span class="ai-av">${ic('i-gem')}</span><div class="ai-body">
+        <div class="cant"><div class="t">${ic('i-alert')}I can't do that here</div>
+          <p><span class="k">Why</span> · I have no video-encoding tool, and these are stills from <b>14 cameras</b> taken 2–40 s apart, not continuous frames.</p>
+          <p><span class="k">Instead</span> · I can sort them into one folder per camera, in time order, ready for ffmpeg.</p>
+          <div class="acts"><button>${ic('i-folder')}Group by camera</button><button class="ghost">Show me how</button></div></div>
+      </div></div>
+    </div>
+    <div class="ai-composer" style="flex-direction:row;align-items:center"><textarea rows="1" placeholder="Ask about your data, or say what to change…"></textarea><button class="ai-send primary icon-btn">${ic('i-send')}</button></div>
+    <div class="a-note">${ic('i-lock')}Reads run on their own · changes wait for your Confirm</div>
+  </aside>`;
+}
+
+/* ---------- toast + send-to modal */
+function toast() {
+  return `<div class="toast">${ic('i-alert')}<div class="tb">
+    <div class="tt">Format changed: ${badge('yolo-det')}${ic('i-arrow-r', 'ar')}${badge('other')}</div>
+    <div class="td"><b>traffic-cams-2026</b> · <code>labels/</code> is missing, so 12,480 images have no YOLO labels. It was moved to <code>misc-scraps/labels/</code>. Sessions keep the data they already imported.</div>
+    <div class="ta"><button class="primary">${ic('i-undo')}Undo move</button><button class="ghost">What makes a bucket YOLO?</button></div>
+  </div><button class="x">${ic('i-x')}</button><span class="timer"><i></i></span></div>`;
+}
+
+function sendModal() {
+  return `<div class="scrim"><div class="dlg">
+    <div class="dlg-h">${ic('i-share')}<h3>Send to session</h3><button class="icon-btn">${ic('i-x')}</button></div>
+    <div class="dlg-b">
+      <div class="fld"><span class="l">Selected data</span>
+        <div class="sumbox">
+          <div class="sumrow">${ic('i-folder')}<code>warehouse-pallets/images/train2026</code><span class="r">3,370 img</span></div>
+          <div class="sumrow">${ic('i-folder')}<code>warehouse-pallets/images/val2026</code><span class="r">842 img</span></div>
+          <div class="sumrow tot">${badge('coco')}<span><b>4,212</b> images · <b>31,870</b> boxes · <b>6</b> classes</span><span class="ok">${ic('i-check')}annotations found</span></div>
+        </div>
+        <span class="addmore">${ic('i-plus')}Add more data · import from disk, URL or S3 now</span>
+      </div>
+      <div class="fld"><span class="l">Open in</span>
+        <div class="dest">
+          <div class="opt">${ic('i-scatter')}<div><b>Visualize session</b><span>Embed, cluster and explore. Finds outliers and label errors.</span></div></div>
+          <div class="opt on">${ic('i-edit')}<div><b>Label session</b><span>Review and edit boxes, with the COCO boxes as pre-labels.</span></div></div>
+        </div></div>
+      <div class="fld"><span class="l">Session</span>
+        <div class="radios"><div class="segmented seg"><button class="view-btn active">${ic('i-plus')}New session</button><button>Add to existing</button></div></div>
+      </div>
+      <div class="row2">
+        <div class="fld"><label>Session name</label><input type="text" class="focus" value="warehouse-pallets · label pass 2"></div>
+        <div class="fld"><label>Task type</label><select style="height:34px"><option>Detection (boxes) · from COCO bbox</option></select></div>
+      </div>
+      <label class="chk-line"><input type="checkbox" checked>Import the 31,870 existing boxes as pre-labels <span class="m">· 6 classes: pallet, box, forklift, person, cart, shelf</span></label>
+    </div>
+    <div class="dlg-f"><span class="hint">Linked, not copied · the session reads from the bucket</span><button class="ghost">Cancel</button><button class="primary">${ic('i-arrow-r')}Create label session</button></div>
+  </div></div>`;
+}
+
+function render() {
+  let h = '';
+  if (SHOT === 'img1') h = header(false) + `<div class="main">${board({ activeTag: 'cv-team', hoverFirst: true })}</div>`;
+  else if (SHOT === 'img2') h = header(false) + `<div class="main">${bucketView('thumb')}</div>`;
+  else if (SHOT === 'img3') h = header(false) + `<div class="main">${bucketView('list')}</div>`;
+  else if (SHOT === 'img4') h = header(true) + `<div class="main">${board({ cols: 3 })}${assistant()}</div>`;
+  else if (SHOT === 'img5') h = header(false) + `<div class="main">${board({ changedFirst: true, picked: [1] })}</div>` + sendModal() + toast();
+  document.getElementById('app').innerHTML = h;
+}
+render();
+</script>
+</body>
+</html>
