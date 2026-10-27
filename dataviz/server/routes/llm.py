@@ -9,7 +9,9 @@ generator, and a provider error mid-stream becomes a {"t": "error"} line. Auto-t
 
 Everything runs on the CALLER's providers and switches (llm/store.py is per user). The dataset features need
 the visualizer session the request is bound to (/s/<id>/: viewer; auto-tag writes box tags: labeler); the
-label page features need the labeling session (assist: viewer; prelabel / accept: labeler).
+label page features need the labeling session (assist: viewer; prelabel / accept: labeler). The Data Center
+agent (/api/llm/dc/*) needs no session: its tools act through datacenter/service.py as the caller, and its
+changes only run on /api/llm/dc/confirm.
 """
 
 import base64
@@ -25,7 +27,7 @@ from fastapi.responses import StreamingResponse
 from ...auth import access, deps, tiers
 from ...auth import context as auth_context
 from ...core import logging as vlog
-from ...llm import budget, context, providers, tasks
+from ...llm import agent, budget, context, providers, tasks
 from ...llm.providers import LLMError
 
 _log = vlog.get_logger('llm')
@@ -243,6 +245,41 @@ def router(state, ctx):
                 _log.warning(f'chat: {vlog.esc(msg)}')
                 yield json.dumps({'t': 'error', 'error': msg}) + '\n'
         return StreamingResponse(gen(), media_type='application/x-ndjson', headers={'Cache-Control': 'no-cache'})
+
+    # ------------------------------------------------------------ Data Center agent (NDJSON stream)
+    @r.post('/api/llm/dc/chat')
+    def dc_chat(body: dict):
+        p = need('data_center')
+        msgs_in = body.get('messages') or []
+        if not msgs_in or not isinstance(msgs_in, list) or not isinstance(msgs_in[-1], dict) \
+                or msgs_in[-1].get('role') != 'user':
+            raise HTTPException(400, 'the last message must be the user\'s')
+        scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
+        user = auth_context.user()          # captured now: the stream runs in another thread
+        lim = limit()
+        with _llm_errors():
+            prep = agent.prepare(user, p, msgs_in, scope, lim)
+
+        def gen():
+            try:
+                for ev in agent.run(user, p, msgs_in, scope, lim, prepared=prep):
+                    yield json.dumps(ev, default=str) + '\n'
+            except Exception as e:  # noqa: BLE001 - the page shows the message in the transcript
+                msg = str(e) if isinstance(e, LLMError) else f'{type(e).__name__}: {e}'
+                _log.warning(f'dc chat: {vlog.esc(msg)}')
+                yield json.dumps({'type': 'error', 'detail': msg}) + '\n'
+        return StreamingResponse(gen(), media_type='application/x-ndjson', headers={'Cache-Control': 'no-cache'})
+
+    @r.post('/api/llm/dc/confirm')
+    def dc_confirm(body: dict):
+        need('data_center')
+        ids = body.get('action_ids')
+        if not isinstance(ids, list):
+            raise HTTPException(400, 'action_ids must be a list')
+        try:
+            return agent.confirm(auth_context.user(), body.get('plan_id'), ids)
+        except agent.AgentError as e:
+            raise HTTPException(e.status, str(e))
 
     # ------------------------------------------------------------ structured features
     @r.post('/api/llm/label-check')

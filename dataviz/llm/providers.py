@@ -2,10 +2,12 @@
 LLM provider clients over raw httpx (no SDKs): OpenAI, OpenAI-compatible servers (vLLM, Ollama, LM Studio,
 OpenRouter ...), Anthropic and Gemini behind one message format.
 
-    msgs = [{'role': 'user' | 'assistant', 'parts': [{'text': str} | {'jpeg': bytes, 'cache'?: True} | {'wav': bytes}]}]
+    msgs = [{'role': 'user' | 'assistant' | 'tool', 'parts': [{'text': str} | {'jpeg': bytes, 'cache'?: True}
+             | {'wav': bytes} | {'tool_call': {id, name, args, sig?}} | {'tool_result': {id, name, content, is_error?}}]}]
 
-`chat_stream()` yields ('delta', text) ... then ('usage', {'in', 'out'}); `complete()` / `complete_json()` answer at
-once; `list_models()` fills the Settings model dropdown; `test()` is Test connection. Errors are LLMError with a
+Tool calls are assistant parts, tool results go in a 'tool' message (sent as the user's turn to Anthropic / Gemini,
+as role 'tool' messages to OpenAI). `chat_stream()` yields ('delta', text) ... then ('usage', {'in', 'out'});
+`complete()` / `complete_json()` answer at once; `complete_tools()` is one native tool-calling step; `list_models()` fills the Settings model dropdown; `test()` is Test connection. Errors are LLMError with a
 human message (provider status + its own message, trimmed) and an HTTP status for the route: 400 for a setup problem
 (bad key, unknown model), 502 when the provider failed. The API key never appears in a message or a log line.
 """
@@ -126,11 +128,16 @@ def _b64(b):
     return base64.b64encode(b).decode('ascii')
 
 
+def _keep(x):
+    return bool(x.get('text') or x.get('jpeg') or x.get('wav')) or 'tool_call' in x or 'tool_result' in x
+
+
 def _merge(msgs):
-    """Consecutive messages of one role merged (Anthropic / Gemini want alternating turns); empty ones dropped."""
+    """Consecutive messages of one role merged (Anthropic / Gemini want alternating turns); empty ones dropped.
+    A 'tool' message (tool results) counts as the user's turn."""
     out = []
     for m in msgs:
-        parts = [x for x in m.get('parts') or [] if x.get('text') or x.get('jpeg') or x.get('wav')]
+        parts = [x for x in m.get('parts') or [] if _keep(x)]
         if not parts:
             continue
         role = 'assistant' if m.get('role') == 'assistant' else 'user'
@@ -145,9 +152,28 @@ def _max_tokens(p, max_tokens):
     return int(max_tokens or p.get('max_output_tokens') or 2048)
 
 
-def _openai_body(p, system, msgs, stream, json_mode, max_tokens, temperature=True):
+def _tool_args_json(args):
+    return json.dumps(args if isinstance(args, dict) else {}, ensure_ascii=False)
+
+
+def _openai_body(p, system, msgs, stream, json_mode, max_tokens, temperature=True, tools=None):
     out = [{'role': 'system', 'content': system}] if system else []
     for m in _merge(msgs):
+        calls = [x['tool_call'] for x in m['parts'] if 'tool_call' in x]
+        results = [x['tool_result'] for x in m['parts'] if 'tool_result' in x]
+        rest = [x for x in m['parts'] if 'tool_call' not in x and 'tool_result' not in x]
+        # tool results are role 'tool' messages, right after the assistant message that called them
+        for t in results:
+            out.append({'role': 'tool', 'tool_call_id': str(t['id']), 'content': str(t.get('content') or '')})
+        if calls:
+            out.append({'role': 'assistant', 'content': '\n\n'.join(x['text'] for x in rest if 'text' in x) or None,
+                        'tool_calls': [{'id': str(c['id']), 'type': 'function',
+                                        'function': {'name': c['name'], 'arguments': _tool_args_json(c.get('args'))}}
+                                       for c in calls]})
+            continue
+        if not rest:
+            continue
+        m = {'role': m['role'], 'parts': rest}
         if all('text' in x for x in m['parts']):
             out.append({'role': m['role'], 'content': '\n\n'.join(x['text'] for x in m['parts'])})
             continue
@@ -169,10 +195,14 @@ def _openai_body(p, system, msgs, stream, json_mode, max_tokens, temperature=Tru
         body['stream_options'] = {'include_usage': True}   # not sent to compatible servers: some reject it
     if json_mode and p['kind'] == 'openai':
         body['response_format'] = {'type': 'json_object'}
+    if tools:
+        body['tools'] = [{'type': 'function', 'function': {'name': t['name'], 'description': t.get('description', ''),
+                                                           'parameters': t.get('parameters') or {'type': 'object'}}}
+                         for t in tools]
     return body
 
 
-def _anthropic_body(p, system, msgs, stream, max_tokens):
+def _anthropic_body(p, system, msgs, stream, max_tokens, tools=None):
     merged = _merge(msgs)
     # one cache breakpoint on the last context image flagged cache (the exemplar sheet): repeat questions reuse it
     last_cache = None
@@ -182,9 +212,18 @@ def _anthropic_body(p, system, msgs, stream, max_tokens):
                 last_cache = (i, j)
     out = []
     for i, m in enumerate(merged):
-        content = []
+        # tool_result blocks must open the user turn that answers a tool_use
+        content = [{'type': 'tool_result', 'tool_use_id': str(t['id']), 'content': str(t.get('content') or ''),
+                    **({'is_error': True} if t.get('is_error') else {})}
+                   for t in (x['tool_result'] for x in m['parts'] if 'tool_result' in x)]
         for j, x in enumerate(m['parts']):
-            if 'text' in x:
+            if 'tool_result' in x:
+                continue
+            if 'tool_call' in x:
+                c = x['tool_call']
+                content.append({'type': 'tool_use', 'id': str(c['id']), 'name': c['name'],
+                                'input': c.get('args') if isinstance(c.get('args'), dict) else {}})
+            elif 'text' in x:
                 content.append({'type': 'text', 'text': x['text']})
             elif 'jpeg' in x:
                 content.append({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg',
@@ -201,15 +240,62 @@ def _anthropic_body(p, system, msgs, stream, max_tokens):
         body['temperature'] = min(1.0, float(p['temperature']))       # anthropic: 0..1
     if stream:
         body['stream'] = True
+    if tools:
+        body['tools'] = [{'name': t['name'], 'description': t.get('description', ''),
+                          'input_schema': t.get('parameters') or {'type': 'object'}} for t in tools]
     return body
 
 
-def _gemini_body(p, system, msgs, json_mode, max_tokens):
+# the OpenAPI subset Gemini's functionDeclarations accept: anything else (additionalProperties, default, $schema ...)
+# is a 400, so it is stripped
+_GEMINI_SCHEMA = {'type', 'format', 'description', 'nullable', 'enum', 'properties', 'required', 'items',
+                  'minItems', 'maxItems', 'minimum', 'maximum', 'anyOf', 'title', 'propertyOrdering'}
+
+
+def gemini_schema(s):
+    """A JSON schema cut down to what Gemini accepts (recursively; `required` keeps only declared properties)."""
+    if not isinstance(s, dict):
+        return s
+    out = {}
+    for k, v in s.items():
+        if k not in _GEMINI_SCHEMA:
+            continue
+        if k == 'properties' and isinstance(v, dict):
+            out[k] = {name: gemini_schema(sub) for name, sub in v.items()}
+        elif k == 'items':
+            out[k] = gemini_schema(v)
+        elif k == 'anyOf' and isinstance(v, list):
+            out[k] = [gemini_schema(x) for x in v]
+        elif k == 'type' and isinstance(v, list):         # ["string", "null"] -> string + nullable
+            types = [t for t in v if t != 'null']
+            out['type'] = types[0] if types else 'string'
+            if 'null' in v:
+                out['nullable'] = True
+        else:
+            out[k] = v
+    if 'required' in out:
+        out['required'] = [r for r in out['required'] if r in (out.get('properties') or {})]
+        if not out['required']:
+            del out['required']
+    return out
+
+
+def _gemini_body(p, system, msgs, json_mode, max_tokens, tools=None):
     contents = []
     for m in _merge(msgs):
         parts = []
         for x in m['parts']:
-            if 'text' in x:
+            if 'tool_call' in x:
+                c = x['tool_call']
+                part = {'functionCall': {'name': c['name'], 'args': c.get('args') if isinstance(c.get('args'), dict) else {}}}
+                if c.get('sig'):
+                    part['thoughtSignature'] = c['sig']      # thinking models refuse a call history without it
+                parts.append(part)
+            elif 'tool_result' in x:
+                t = x['tool_result']
+                parts.append({'functionResponse': {'name': t['name'], 'response': {
+                    ('error' if t.get('is_error') else 'content'): str(t.get('content') or '')}}})
+            elif 'text' in x:
                 parts.append({'text': x['text']})
             elif 'jpeg' in x:
                 parts.append({'inline_data': {'mime_type': 'image/jpeg', 'data': _b64(x['jpeg'])}})
@@ -224,6 +310,11 @@ def _gemini_body(p, system, msgs, json_mode, max_tokens):
     body = {'contents': contents, 'generationConfig': cfg}
     if system:
         body['systemInstruction'] = {'parts': [{'text': system}]}
+    if tools:
+        body['tools'] = [{'functionDeclarations': [
+            {'name': t['name'], 'description': t.get('description', ''),
+             **({'parameters': gemini_schema(t['parameters'])} if (t.get('parameters') or {}).get('properties') else {})}
+            for t in tools]}]
     return body
 
 
@@ -232,17 +323,17 @@ def _gemini_model(p):
     return m[len('models/'):] if m.startswith('models/') else m
 
 
-def _request(p, system, msgs, stream, json_mode=False, max_tokens=None):
-    """(path, body, headers) of a generate request for this provider."""
+def _request(p, system, msgs, stream, json_mode=False, max_tokens=None, tools=None):
+    """(path, body, headers) of a generate request for this provider. tools: [{name, description, parameters}]."""
     kind = p.get('kind')
     h = _headers(p)
     if kind in ('openai', 'openai_compat'):
-        return '/chat/completions', _openai_body(p, system, msgs, stream, json_mode, max_tokens), h
+        return '/chat/completions', _openai_body(p, system, msgs, stream, json_mode, max_tokens, tools=tools), h
     if kind == 'anthropic':
-        return '/v1/messages', _anthropic_body(p, system, msgs, stream, max_tokens), h
+        return '/v1/messages', _anthropic_body(p, system, msgs, stream, max_tokens, tools=tools), h
     if kind == 'gemini':
         path = f'/models/{_gemini_model(p)}:' + ('streamGenerateContent?alt=sse' if stream else 'generateContent')
-        return path, _gemini_body(p, system, msgs, json_mode, max_tokens), h
+        return path, _gemini_body(p, system, msgs, json_mode, max_tokens, tools=tools), h
     raise LLMError(f'unknown provider kind {kind!r}')
 
 
@@ -320,6 +411,61 @@ def complete(p, system, msgs, json=False, max_tokens=None):
         raise LLMError('the provider answered something that is not JSON', 502) from None
     text, usage = _parse_answer(p['kind'], data)
     return text, usage or {'in': 0, 'out': 0}
+
+
+def _parse_tool_calls(kind, body):
+    """[{id, name, args, sig?}] of an answer. args is None when the model sent arguments that are not a JSON
+    object (the agent reports that back to it instead of guessing)."""
+    calls = []
+    if kind in ('openai', 'openai_compat'):
+        msg = ((body.get('choices') or [{}])[0].get('message') or {})
+        for k, c in enumerate(msg.get('tool_calls') or []):
+            fn = c.get('function') or {}
+            raw = fn.get('arguments')
+            try:
+                args = raw if isinstance(raw, dict) else json.loads(raw or '{}')
+            except ValueError:
+                args = None
+            calls.append({'id': str(c.get('id') or f'call_{k}'), 'name': str(fn.get('name') or ''),
+                          'args': args if isinstance(args, dict) else None})
+    elif kind == 'anthropic':
+        for x in body.get('content') or []:
+            if x.get('type') == 'tool_use':
+                inp = x.get('input')
+                calls.append({'id': str(x.get('id')), 'name': str(x.get('name') or ''),
+                              'args': inp if isinstance(inp, dict) else None})
+    else:
+        parts = (((body.get('candidates') or [{}])[0].get('content') or {}).get('parts')) or []
+        for k, x in enumerate(parts):
+            fc = x.get('functionCall')
+            if not fc:
+                continue
+            args = fc.get('args')
+            c = {'id': str(fc.get('id') or f'call_{k}'), 'name': str(fc.get('name') or ''),
+                 'args': args if isinstance(args, dict) else ({} if args is None else None)}
+            if x.get('thoughtSignature'):
+                c['sig'] = x['thoughtSignature']
+            calls.append(c)
+    return calls
+
+
+def complete_tools(p, system, msgs, tools, max_tokens=None):
+    """One non-streamed step with native tool calling -> {text, tool_calls: [{id, name, args, sig?}], usage}.
+    tools: [{name, description, parameters (JSON schema)}]."""
+    path, body, h = _request(p, system, msgs, False, False, max_tokens, tools=tools)
+    r = _post(p, path, body, h, 'generate')
+    if _retry_without(p, r, body):
+        r = _post(p, path, body, h, 'generate')
+    if r.status_code >= 400:
+        raise _fail(p, r, f'{p.get("model")}')
+    try:
+        data = r.json()
+    except ValueError:
+        raise LLMError('the provider answered something that is not JSON', 502) from None
+    kind = p['kind']
+    text, usage = _parse_answer(kind, data)
+    calls = _parse_tool_calls(kind, data)
+    return {'text': text or '', 'tool_calls': calls, 'usage': usage or {'in': 0, 'out': 0}}
 
 
 def _sse_data(r):
