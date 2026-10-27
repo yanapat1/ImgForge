@@ -26,7 +26,8 @@ from .providers import LLMError
 _log = vlog.get_logger('llm')
 MAX_STEPS = 8
 PLAN_TTL = 15 * 60
-MAX_PLANS = 100
+MAX_PLANS = 100                 # kept at once (oldest dropped first) ...
+MAX_USER_PLANS = 10             # ... and per user, so one busy user cannot push out everyone else's
 MAX_TURNS = 40
 MAX_RESULT = 6000               # characters of one tool result fed back to the model
 PROMPT = Path(__file__).with_name('prompts') / 'datacenter.md'
@@ -53,8 +54,7 @@ def _scope_text(user, scope):
         return 'The user is on the Data Center overview (no bucket open).'
     name = None
     try:
-        from ..datacenter import service
-        b = service.get_bucket(user, bid)
+        b = tools._svc().get_bucket(user, bid)
         name = b.get('name')
         kind = b.get('kind')
     except Exception:  # noqa: BLE001 - a stale scope: the model still has the id and the tools
@@ -114,9 +114,13 @@ def _store_plan(user, actions):
     with _plans_lock:
         for k in [k for k, v in _plans.items() if now - v['created'] > PLAN_TTL]:
             del _plans[k]
+        uid = (user or {}).get('id')
+        mine = [k for k, v in _plans.items() if v['user_id'] == uid]
+        for k in mine[:max(0, len(mine) - MAX_USER_PLANS + 1)]:
+            del _plans[k]
         while len(_plans) >= MAX_PLANS:
             _plans.popitem(last=False)
-        _plans[pid] = {'user_id': (user or {}).get('id'), 'actions': actions, 'created': now}
+        _plans[pid] = {'user_id': uid, 'actions': actions, 'created': now}
     return pid
 
 
@@ -165,6 +169,9 @@ def run(user, provider, messages, scope, limit=None, prepared=None, max_steps=MA
         if text:
             yield {'type': 'delta', 'text': text}
         if not calls:
+            if not text:
+                yield {'type': 'error', 'detail': 'the model returned an empty answer: try again or rephrase'}
+                return
             yield done()
             return
         for k, c in enumerate(calls):           # ids must be unique for the history: some servers send none

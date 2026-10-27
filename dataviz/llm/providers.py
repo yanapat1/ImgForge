@@ -7,7 +7,8 @@ OpenRouter ...), Anthropic and Gemini behind one message format.
 
 Tool calls are assistant parts, tool results go in a 'tool' message (sent as the user's turn to Anthropic / Gemini,
 as role 'tool' messages to OpenAI). `chat_stream()` yields ('delta', text) ... then ('usage', {'in', 'out'});
-`complete()` / `complete_json()` answer at once; `complete_tools()` is one native tool-calling step; `list_models()` fills the Settings model dropdown; `test()` is Test connection. Errors are LLMError with a
+`complete()` / `complete_json()` answer at once; `complete_tools()` is one native tool-calling step;
+`list_models()` fills the Settings model dropdown; `test()` is Test connection. Errors are LLMError with a
 human message (provider status + its own message, trimmed) and an HTTP status for the route: 400 for a setup problem
 (bad key, unknown model), 502 when the provider failed. The API key never appears in a message or a log line.
 """
@@ -415,33 +416,34 @@ def complete(p, system, msgs, json=False, max_tokens=None):
 
 def _parse_tool_calls(kind, body):
     """[{id, name, args, sig?}] of an answer. args is None when the model sent arguments that are not a JSON
-    object (the agent reports that back to it instead of guessing)."""
+    object (the agent reports that back to it instead of guessing). id is '' when the provider sent none (Gemini
+    usually, some compatible servers): the caller gives it one that is unique over the whole conversation."""
     calls = []
     if kind in ('openai', 'openai_compat'):
         msg = ((body.get('choices') or [{}])[0].get('message') or {})
-        for k, c in enumerate(msg.get('tool_calls') or []):
+        for c in msg.get('tool_calls') or []:
             fn = c.get('function') or {}
             raw = fn.get('arguments')
             try:
                 args = raw if isinstance(raw, dict) else json.loads(raw or '{}')
             except ValueError:
                 args = None
-            calls.append({'id': str(c.get('id') or f'call_{k}'), 'name': str(fn.get('name') or ''),
+            calls.append({'id': str(c.get('id') or ''), 'name': str(fn.get('name') or ''),
                           'args': args if isinstance(args, dict) else None})
     elif kind == 'anthropic':
         for x in body.get('content') or []:
             if x.get('type') == 'tool_use':
                 inp = x.get('input')
-                calls.append({'id': str(x.get('id')), 'name': str(x.get('name') or ''),
+                calls.append({'id': str(x.get('id') or ''), 'name': str(x.get('name') or ''),
                               'args': inp if isinstance(inp, dict) else None})
     else:
         parts = (((body.get('candidates') or [{}])[0].get('content') or {}).get('parts')) or []
-        for k, x in enumerate(parts):
+        for x in parts:
             fc = x.get('functionCall')
             if not fc:
                 continue
             args = fc.get('args')
-            c = {'id': str(fc.get('id') or f'call_{k}'), 'name': str(fc.get('name') or ''),
+            c = {'id': str(fc.get('id') or ''), 'name': str(fc.get('name') or ''),
                  'args': args if isinstance(args, dict) else ({} if args is None else None)}
             if x.get('thoughtSignature'):
                 c['sig'] = x['thoughtSignature']

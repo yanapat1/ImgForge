@@ -68,6 +68,10 @@ def main(argv=None):
     try:
         if t.mutating:
             clean, summary = tools.prepare(user, a.tool, args)
+            from .auth import tiers
+            if a.yes and 'data.manage' in tiers.PERMS and not tiers.has(user, 'data.manage'):
+                print(json.dumps({'ok': False, 'error': f'{a.user} has no data.manage permission', 'status': 403}))
+                return 1
             if not a.yes:
                 print(json.dumps({'ok': False, 'confirm': summary, 'args': clean,
                                   'hint': 'run again with --yes to do it'}, indent=2, ensure_ascii=False))

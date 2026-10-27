@@ -276,8 +276,11 @@ def router(state, ctx):
         ids = body.get('action_ids')
         if not isinstance(ids, list):
             raise HTTPException(400, 'action_ids must be a list')
+        user = auth_context.user()
+        if 'data.manage' in tiers.PERMS:            # changing data needs the same permission as /api/dc/*/ops
+            tiers.check(user, 'data.manage')
         try:
-            return agent.confirm(auth_context.user(), body.get('plan_id'), ids)
+            return agent.confirm(user, body.get('plan_id'), ids)
         except agent.AgentError as e:
             raise HTTPException(e.status, str(e))
 
