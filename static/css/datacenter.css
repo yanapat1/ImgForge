@@ -476,7 +476,7 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choice { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: 12.5px; }
 .choice.other { border-style: dashed; color: var(--text-muted); background: transparent; }
-.ai-cant { border: 1px solid var(--border-strong); border-left: 3px solid var(--danger); border-radius: var(--r-md); background: var(--surface-2); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.ai-cant { border: 1px solid var(--danger-line); border-radius: var(--r-md); background: var(--surface-2); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .ai-cant .h { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
 .ai-cant .h .ico { color: var(--danger); align-self: center; }
 .ai-cant .alt { display: flex; align-items: center; gap: 10px; padding-top: 6px; border-top: 1px solid var(--border); }
@@ -505,12 +505,12 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 
 /* ---------------------------------------------------------------- action toast (core/toast.ts actionToast) */
 .act-toast { position: fixed; left: var(--s4); bottom: var(--s4); z-index: calc(var(--z-modal) + 20); width: min(600px, calc(100vw - 2 * var(--s4)));
-  background: var(--surface-3); border: 1px solid var(--border-strong); border-left: 3px solid var(--accent); border-radius: var(--r-md); box-shadow: var(--shadow-3);
+  background: var(--surface-3); border: 1px solid var(--accent-line); border-radius: var(--r-md); box-shadow: var(--shadow-3);
   padding: 11px 12px 11px 14px; display: none; gap: 11px; align-items: flex-start; }
 .act-toast.show { display: flex; animation: dc-toast-in var(--t) var(--ease); }
-.act-toast.warn { border-left-color: var(--warn); }
-.act-toast.ok { border-left-color: var(--ok); }
-.act-toast.err { border-left-color: var(--danger); }
+.act-toast.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.act-toast.ok { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.act-toast.err { border-color: var(--danger-line); }
 .act-toast > .ico.t { width: 18px; height: 18px; margin-top: 1px; color: var(--accent); }
 .act-toast.warn > .ico.t { color: var(--warn); } .act-toast.ok > .ico.t { color: var(--ok); } .act-toast.err > .ico.t { color: var(--danger); }
 .at-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--text-muted); }
