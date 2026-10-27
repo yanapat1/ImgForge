@@ -19,6 +19,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -31,9 +32,10 @@ from .store import DCError
 
 __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
            'summary', 'ls', 'read_file', 'read_text', 'ops', 'undo', 'upload', 'set_tags', 'all_tags', 'detect',
-           'stats', 'search', 'send']
+           'stats', 'search', 'send', 'sync', 'export', 'source', 'autolabel']
 
 KINDS = ('managed', 'local', 's3')
+MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
 PERM = 'data.manage'
 S3_TTL = 600                        # an S3 detection is reused this long (no cheap fingerprint for a prefix)
 SEARCH_SCAN = 300_000               # entries walked by one search
@@ -110,6 +112,22 @@ _BUCKET_SQL = """SELECT b.*, u.username, u.display_name FROM app.dc_buckets b
                  JOIN app.users u ON u.id = b.owner_id"""
 
 
+class _Row:
+    """A bucket row. An S3 link loaded into a local folder (mode local, pulled at least once) reads and writes
+    that folder, so for every rule below it is `kind` local with `root` = the copy; `link` stays s3 and the S3
+    columns stay readable for the re-sync."""
+
+    def __init__(self, row):
+        self._r = row
+        self.link = row.kind
+        self.local_copy = row.kind == 's3' and row.mode == 'local' and row.synced_at is not None
+        self.kind = 'local' if self.local_copy else row.kind
+        self.root = row.local_root if self.local_copy else row.root
+
+    def __getattr__(self, k):
+        return getattr(self._r, k)
+
+
 def _visible_rows(user, conn, bid=None):
     if user is None:
         raise DCError('sign in first', 401)
@@ -120,7 +138,7 @@ def _visible_rows(user, conn, bid=None):
     if bid is not None:
         q += ' AND b.id = :b'
         a['b'] = bid
-    return conn.execute(text(q + ' ORDER BY lower(b.name), b.created_at'), a).all()
+    return [_Row(r) for r in conn.execute(text(q + ' ORDER BY lower(b.name), b.created_at'), a).all()]
 
 
 def _row(user, bid, conn=None):
@@ -141,21 +159,26 @@ def _writable(r):
 
 
 def _need_write(r):
+    if r.kind == 's3' and r.mode == 'local':
+        raise DCError(f'bucket “{r.name}” is still loading from S3: it can be changed once the download finished',
+                      409)
     if r.kind == 's3':
-        raise DCError(f'bucket “{r.name}” is an S3 link and read-only: copy the data into a managed bucket to '
-                      'change it')
+        raise DCError(f'bucket “{r.name}” is streamed from S3 and read-only: switch it to “load into local” '
+                      '(Edit) or copy the data into a managed bucket to change it')
     if not _writable(r):
         raise DCError(f'bucket “{r.name}” cannot be written ({r.root} is missing or read-only)')
 
 
-def _s3(r):
+def _s3(r, rel=''):
+    """The S3 view of a link (of its sub-folder `rel`)."""
     if not r.connection_id:
         raise DCError(f'the S3 connection of bucket “{r.name}” was deleted', 409)
     try:
         conn = _datasets().connection(r.connection_id, owner_id=r.owner_id)
     except KeyError:
         raise DCError(f'the S3 connection of bucket “{r.name}” was deleted', 409) from None
-    return store.S3View(conn, r.s3_bucket, r.prefix, (_cfg().get('s3') or {}))
+    return store.S3View(conn, r.s3_bucket, '/'.join(p for p in ((r.prefix or '').strip('/'), rel) if p),
+                        (_cfg().get('s3') or {}))
 
 
 def _abs(r, path, must_exist=True):
@@ -264,15 +287,16 @@ def _shape(rows, conn):
         fmt = res.get('format')
         tree = res.get('tree') or {}
         out.append({
-            'id': r.id, 'name': r.name, 'kind': r.kind, 'root': r.root, 'writable': _writable(r),
+            'id': r.id, 'name': r.name, 'kind': r.link, 'root': r.root, 'writable': _writable(r),
             'owner': {'id': r.owner_id, 'username': r.username, 'display_name': r.display_name},
             'created_at': _epoch(r.created_at), 'updated_at': _epoch(r.updated_at),
             'format': fmt, 'tags': tg.get(r.id, []),
             'stats': {'images': tree.get('images'), 'labels': tree.get('labels'),
                       'classes': (fmt or {}).get('classes'), 'size': tree.get('size')},
             'sessions': ses.get(r.id, []),
-            **({'connection_id': r.connection_id, 's3_bucket': r.s3_bucket, 'prefix': r.prefix}
-               if r.kind == 's3' else {}),
+            **({'connection_id': r.connection_id, 's3_bucket': r.s3_bucket, 'prefix': r.prefix, 'mode': r.mode,
+                'local_ready': r.local_copy, 'synced_at': _epoch(r.synced_at), 's3_root': r._r.root}
+               if r.link == 's3' else {}),
         })
     return out
 
@@ -326,11 +350,17 @@ def _slug(name):
     return s[:80]
 
 
-def create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_bucket=None, prefix='', tags=()):
+def create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_bucket=None, prefix='', tags=(),
+                  mode='stream'):
+    """A new bucket. An S3 link with mode='local' is created streamed and its first pull is queued (sync): the
+    result carries that `job_id`."""
     _need(user)
     name = _clean_name(name)
     if kind not in KINDS:
         raise DCError('kind must be managed, local or s3')
+    mode = mode or 'stream'
+    if mode not in MODES:
+        raise DCError('mode must be stream or local')
     try:
         utags = vtags.clean_tags(list(tags or []))
     except ValueError as e:
@@ -392,12 +422,28 @@ def create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_
         vtags.apply_format(bid, _cached(r, '', force=True)['format'])
     except Exception:  # noqa: BLE001 - an unreachable S3 bucket is still linked; detect says why later
         pass
+    if kind == 's3' and mode == 'local':
+        return update_bucket(user, bid, mode='local')
     return get_bucket(user, bid)
 
 
-def update_bucket(user, bid, name=None):
+def update_bucket(user, bid, name=None, mode=None):
+    """Rename, and/or switch an S3 link between stream and local. Switching to local queues a pull into the
+    bucket's local folder (the result carries `job_id`); switching back to stream keeps that folder on disk, so a
+    later switch to local only downloads again over it."""
     r = _row(user, bid)
     _need(user)
+    job_id = None
+    if mode is not None:
+        if mode not in MODES:
+            raise DCError('mode must be stream or local')
+        if r.link != 's3':
+            raise DCError('only an S3 link has a load mode: managed and local buckets are always local')
+        with db.begin() as c:
+            c.execute(text('UPDATE app.dc_buckets SET mode = :m, updated_at = now() WHERE id = :b'),
+                      {'m': mode, 'b': r.id})
+        if mode == 'local':
+            job_id = sync(user, bid)['job_id']
     if name is not None:
         name = _clean_name(name)
         try:
@@ -406,7 +452,66 @@ def update_bucket(user, bid, name=None):
                           {'n': name, 'b': r.id})
         except IntegrityError:
             raise DCError(f'a bucket called “{name}” already exists: pick another name', 409) from None
-    return get_bucket(user, bid)
+    out = get_bucket(user, bid)
+    if job_id is not None:
+        out['job_id'] = job_id
+    return out
+
+
+def _local_root(r):
+    """The folder an S3 link is loaded into: its saved local_root, else a new one under the data root."""
+    if r.local_root:
+        return r.local_root
+    base = store.data_root(_cfg()) / '.s3'
+    root = base / f'{_slug(r.name)}-{r.id[:6]}'
+    with db.begin() as c:
+        c.execute(text('UPDATE app.dc_buckets SET local_root = :p WHERE id = :b'), {'p': str(root), 'b': r.id})
+    return str(root)
+
+
+def sync(user, bid):
+    """(Re-)load an S3 link (mode local) into its local folder: every object is downloaded, replacing the local
+    file of the same name; files only the local copy has are kept. A job on the io lane (inline from the CLI)
+    -> {job_id, result}."""
+    r = _row(user, bid)
+    _need(user)
+    if r.link != 's3':
+        raise DCError('only an S3 link can be synced')
+    if r.mode != 'local':
+        raise DCError('switch the bucket to “load into local” first (Edit › Load mode)')
+    dest = _local_root(r)
+
+    def fn(job=None):
+        view = _s3(r)
+        try:
+            res = view.pull(dest, job.progress if job is not None else None,
+                            (lambda: job.cancelled.is_set()) if job is not None else None)
+        finally:
+            view.close()
+        if job is None or not job.cancelled.is_set():
+            with db.begin() as c:
+                c.execute(text('UPDATE app.dc_buckets SET synced_at = now(), updated_at = now() WHERE id = :b'),
+                          {'b': r.id})
+            _revalidate(_row(user, bid))
+        return res
+
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    if jobs is None:
+        return {'job_id': None, 'result': fn()}
+    return {'job_id': jobs.submit(f'dc-sync:{r.id}', f'load {r.name} from S3', fn, lane='io',
+                                  public_result=True, owner=user['id']).id, 'result': None}
+
+
+def export(user, bid, path=''):
+    """(zip file name, chunk iterator) of a folder (or one file) of a bucket with local files."""
+    r = _row(user, bid)
+    if r.kind == 's3':
+        raise DCError(f'bucket “{r.name}” is streamed from S3: switch it to “load into local” to export it')
+    rel = store.clean_rel(path)
+    _abs(r, rel)
+    name = _slug(rel.rsplit('/', 1)[-1] if rel else r.name) + '.zip'
+    return name, store.zip_stream(r.root, rel, _allowed())
 
 
 def delete_bucket(user, bid, delete_files=False):
@@ -414,7 +519,7 @@ def delete_bucket(user, bid, delete_files=False):
     folder; a linked folder / S3 prefix is never deleted (it is not ours)."""
     r = _row(user, bid)
     _need(user)
-    if delete_files and r.kind != 'managed':
+    if delete_files and r.kind != 'managed' and not (r.link == 's3' and r.local_root):
         raise DCError('only a managed bucket’s files can be deleted: a link is only forgotten')
     with db.begin() as c:
         undo_ids = c.execute(text('SELECT id FROM app.dc_undo WHERE bucket_id = :b'), {'b': r.id}).scalars().all()
@@ -424,7 +529,7 @@ def delete_bucket(user, bid, delete_files=False):
         shutil.rmtree(trash / u, ignore_errors=True)
     if delete_files:
         base = store.data_root(_cfg())
-        root = Path(os.path.realpath(r.root))
+        root = Path(os.path.realpath(r.local_root if r.link == 's3' else r.root))  # an S3 link: only its copy
         if base in root.parents:
             shutil.rmtree(root, ignore_errors=True)
     return {'ok': True, 'deleted_files': bool(delete_files)}
@@ -799,25 +904,13 @@ def _send_label(user, r, rel, fmt, name, task_type):
     tt = TASK_TYPES.get(task_type or 'detect')
     if tt is None:
         raise DCError(f'task_type must be one of {", ".join(TASK_TYPES)}')
-    names = []
-    if r.kind != 's3':
-        try:
-            tree = formats.LocalTree(_abs(r, rel))
-            names, kpt, _ = formats._yaml_info(tree, '', [n for n, d in tree.scan() if not d])
-        except DCError:
-            kpt = None
-    else:
-        kpt = None
+    names, kpt = _yaml_names(r, rel)
     task = {'name': {'object_detection': 'Detect', 'segmentation': 'Segment', 'keypoints': 'Pose',
                      'classification': 'Classify'}[tt], 'task_type': tt, 'classes': names[:500]}
     if tt == 'keypoints':
         k = int(kpt[0]) if isinstance(kpt, (list, tuple)) and kpt else 17
         task['config'] = {'keypoints': [f'kp{i + 1}' for i in range(k)]}
-    if r.kind == 's3':
-        source = {'kind': 's3', 'connection_id': r.connection_id, 'bucket': r.s3_bucket,
-                  'prefix': '/'.join(p for p in (r.prefix.strip('/'), rel) if p)}
-    else:
-        source = {'kind': 'local', 'path': _abs(r, rel)}
+    source = _label_source(r, rel)
     reg = _labeling()
     try:
         entry = reg.create({'name': sessions.free_name(user['id'], 'label', name[:200]), 'tasks': [task],
@@ -829,9 +922,52 @@ def _send_label(user, r, rel, fmt, name, task_type):
             'job_id': job_id}
 
 
+def _yaml_names(r, rel):
+    """(class names, kpt_shape) from the data YAML of a local folder; ([], None) for S3 or without one."""
+    if r.kind == 's3':
+        return [], None
+    try:
+        tree = formats.LocalTree(_abs(r, rel))
+        names, kpt, _ = formats._yaml_info(tree, '', [n for n, d in tree.scan() if not d])
+        return list(names or []), kpt
+    except DCError:
+        return [], None
+
+
+def _label_source(r, rel):
+    """The labeling-project source of folder `rel` (images are referenced in place, never copied)."""
+    if r.kind == 's3':
+        return {'kind': 's3', 'connection_id': r.connection_id, 'bucket': r.s3_bucket,
+                'prefix': '/'.join(p for p in (r.prefix.strip('/'), rel) if p)}
+    return {'kind': 'local', 'path': _abs(r, rel)}
+
+
+def source(user, bid, path=''):
+    """What a new labeling session needs to read folder `path` of a bucket (New label › Data Center):
+    {source, format, classes, bucket, path} -- source is the POST /api/label/projects `source`."""
+    r = _row(user, bid)
+    rel = store.clean_rel(path)
+    if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
+        raise DCError(f'{rel} is a file: pick the folder that holds it')
+    fmt = _cached(r, rel)['format']
+    names, _ = _yaml_names(r, rel)
+    return {'source': _label_source(r, rel), 'format': fmt, 'classes': names[:500], 'bucket': r.id, 'path': rel,
+            'name': r.name + (f' · {rel}' if rel else '')}
+
+
 def _submit_label_import(pid, source, owner_id, name):
     """List the folder's images into the new project (= the import job of POST /api/label/projects): a job when
     the server's job manager is wired in, else inline (CLI)."""
+    fn = _label_import_fn(pid, source, owner_id)
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    if jobs is None:
+        fn()
+        return None
+    return jobs.submit(f'label-import:{pid}', f'import images · {name}', fn, lane='io', session_id=pid).id
+
+
+def _label_import_fn(pid, source, owner_id):
     reg = _labeling()
 
     def fn(job=None):
@@ -863,13 +999,7 @@ def _submit_label_import(pid, source, owner_id, name):
             return {'added': added}
         finally:
             src.close()
-
-    ctx = _conf['ctx']
-    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
-    if jobs is None:
-        fn()
-        return None
-    return jobs.submit(f'label-import:{pid}', f'import images · {name}', fn, lane='io', session_id=pid).id
+    return fn
 
 
 def _label_names(rels, taken):
@@ -890,3 +1020,258 @@ def _label_names(rels, taken):
         used.add(stem(nm))
         out.append(nm)
     return out
+
+
+# ---------------------------------------------------------------------------------------------- label with a model
+AUTO_TASKS = {'object_detection': 'Detect', 'segmentation': 'Segment', 'keypoints': 'Pose',
+              'classification': 'Classify'}
+
+
+def _hooks():
+    hooks = getattr(_conf['ctx'], 'label_auto', None) if _conf['ctx'] is not None else None
+    if hooks is None:
+        raise DCError('labeling with a model runs in the server (the labeling routes are not loaded here)', 501)
+    return hooks
+
+
+def _http(fn, *a, **kw):
+    """Call a labeling-route helper; its HTTPException / ModelError / ValueError becomes a DCError."""
+    from starlette.exceptions import HTTPException
+
+    from ..labeling.models import ModelError
+    try:
+        return fn(*a, **kw)
+    except HTTPException as e:
+        d = e.detail.get('detail') if isinstance(e.detail, dict) else e.detail
+        raise DCError(str(d), e.status_code) from None
+    except ModelError as e:
+        raise DCError(str(e), getattr(e, 'status', 400)) from None
+    except (ValueError, KeyError) as e:
+        raise DCError(str(e).strip("'\""), 404 if isinstance(e, KeyError) else 400) from None
+
+
+def _link_of(model):
+    model = dict(model or {})
+    rid, cid = model.get('registry_id') or None, model.get('connection_id') or None
+    if not rid and not (cid and model.get('model_id')):
+        raise DCError('pick a model: one of Settings › Models, or a model server and one of its models')
+    return {'registry_id': rid, 'connection_id': None if rid else cid,
+            'model_id': rid or str(model['model_id']), 'version': model.get('version') or None}
+
+
+def autolabel(user, bid, path='', model=None, target='inplace', new_name=None, conf=None, write_yolo=True,
+              name=None):
+    """Label every image of folder `path` with a model: a labeling session is made (its classes = the model's
+    classes), the model is linked and run over every image (the label-all job), and with write_yolo the result
+    is written into the bucket as YOLO files (labels next to the images, data.yaml + classes.txt in the folder).
+
+    target 'inplace' labels the bucket itself (it must be writable); 'copy' first copies the folder into a new
+    managed bucket `new_name` and labels that (a streamed S3 bucket can only be copied).
+    -> {job_id, bucket (the labeled one), result?}: one job on the model lane; its result carries the session."""
+    r = _row(user, bid)
+    _need(user)
+    _need(user, 'label.create')
+    hooks = _hooks()
+    link = _link_of(model)
+    if conf is not None and not 0 <= float(conf) <= 1:
+        raise DCError('confidence must be between 0 and 1')
+    rel = store.clean_rel(path)
+    if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
+        raise DCError(f'{rel} is a file: pick the folder that holds the images')
+    info = _http(hooks.model_info, link, user['id'])
+    tt = info.get('task_type') or 'object_detection'
+    classes = [str(c) for c in info.get('classes') or []]
+    if tt not in AUTO_TASKS:
+        raise DCError(f'{info.get("name") or link["model_id"]} is a {tt} model: it cannot label images')
+    if not classes and tt != 'classification':
+        raise DCError(f'{info.get("name") or link["model_id"]} reports no classes')
+    if target == 'inplace':
+        _need_write(r)
+        dest = r
+    elif target == 'copy':
+        nb = create_bucket(user, new_name or f'{r.name}-labeled', 'managed')
+        dest = _row(user, nb['id'])
+    else:
+        raise DCError('target must be inplace or copy')
+    session_name = (name or '').strip() or f'{dest.name}{f" · {rel}" if rel and target == "inplace" else ""} · ' \
+                                             f'{info.get("name") or link["model_id"]}'
+
+    def fn(job=None):
+        out = {'bucket': dest.id, 'copied': None}
+        src_rel = rel
+        if target == 'copy':
+            out['copied'] = _copy_folder(r, rel, dest.root, job)
+            src_rel = ''
+        if write_yolo:                         # loose images -> images/ first, so the result is a YOLO layout
+            out['restructured'] = _to_yolo_layout(user, dest, src_rel, undoable=target == 'inplace')
+        if target == 'copy':
+            _revalidate(dest)
+        if job is not None:
+            job.progress(stage='making the labeling session', done=0, total=None)
+        from ..data import sessions
+        task = {'name': AUTO_TASKS[tt], 'task_type': tt, 'classes': [], 'config': {}}
+        if tt == 'keypoints':
+            task['config'] = {'keypoints': list(info.get('keypoints') or [f'kp{i + 1}' for i in range(17)])}
+        reg = _labeling()
+        try:
+            entry = reg.create({'name': sessions.free_name(user['id'], 'label', session_name[:200]), 'tasks': [task],
+                                'source': _label_source(dest, src_rel)}, user['id'])
+        except (ValueError, KeyError) as e:
+            raise DCError(str(e).strip("'\"")) from None
+        pid = entry['id']
+        out['session'] = {'id': pid, 'name': entry['name'], 'url': f'?label={pid}'}
+        if job is not None:
+            job.progress(stage='listing the images')
+        _label_import_fn(pid, entry['source'], user['id'])(job)
+        st = _http(hooks.store, pid)
+        tid = reg.project(pid)['tasks'][0]['id']
+        body = SimpleNamespace(registry_id=link['registry_id'], connection_id=link['connection_id'],
+                               model_id=link['model_id'], version=link['version'],
+                               conf=float(conf if conf is not None else 0.25), auto_on_open=False,
+                               class_map={c: 'new' for c in classes})
+        _http(hooks.link, pid, tid, body)
+        hooks.activate(pid, tid, True)
+        task = st.task(tid)
+        run = _http(hooks.label_all, pid, reg.get(pid), task, task['config']['model'], 'all', body.conf)
+        out['labeled'] = run(job) if job is not None else run(_InlineJob())
+        if write_yolo and not out['labeled'].get('cancelled'):
+            if job is not None:
+                job.progress(stage='writing YOLO labels', done=0, total=None)
+            out['written'] = _write_yolo(dest, src_rel, st, st.task(tid))
+            _cached(_row(user, dest.id), src_rel, force=True)
+            out['retagged'] = _revalidate(_row(user, dest.id))
+        return out
+
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None)
+    if jobs is None:
+        return {'job_id': None, 'bucket': dest.id, 'result': fn()}
+    job = jobs.submit(f'dc-autolabel:{dest.id}:{rel}', f'label {dest.name} with {info.get("name") or link["model_id"]}',
+                      fn, lane='model', public_result=True, owner=user['id'])
+    return {'job_id': job.id, 'bucket': dest.id, 'result': None}
+
+
+def _to_yolo_layout(user, r, rel, undoable):
+    """A folder with images but no images/ sub-folder: move its images (and sub-folders holding images) into
+    images/, the layout YOLO tools and format detection expect (labels/ then mirrors it). In place this goes
+    through ops(), so it has an undo id; a fresh copy is moved directly. None when nothing had to move."""
+    base = _abs(r, rel)
+    if os.path.basename(base).lower() in ('images', 'labels'):
+        return None
+    entries = [e for e in os.scandir(base) if not e.name.startswith('.')]
+    if any(e.is_dir() and e.name.lower() == 'images' for e in entries):
+        return None
+    skip = {'labels', 'annotations', 'data.yaml', 'classes.txt'}
+
+    def holds_images(path):
+        return any(store.is_image(n) for _, _, fs in os.walk(path) for n in fs)
+
+    moves = [e.name for e in entries if e.name.lower() not in skip and
+             (store.is_image(e.name) if e.is_file() else e.is_dir() and holds_images(e.path))]
+    if not moves:
+        return None
+    if not undoable:
+        os.makedirs(os.path.join(base, 'images'))
+        for n in moves:
+            shutil.move(os.path.join(base, n), os.path.join(base, 'images', n))
+        return {'moved': len(moves), 'undo_id': None}
+    res = ops(user, r.id, [{'op': 'mkdir', 'path': store.join(rel, 'images')}] +
+              [{'op': 'move', 'path': store.join(rel, n), 'to': store.join(rel, 'images')} for n in moves])
+    if res['errors']:
+        raise DCError(f'could not move the images into images/: {res["errors"][0]["error"]}')
+    return {'moved': len(moves), 'undo_id': res['undo_id']}
+
+
+class _InlineJob:
+    """A stand-in job for running the label-all body without the job manager."""
+
+    def __init__(self):
+        self.cancelled = threading.Event()
+
+    def progress(self, *a, **k):
+        pass
+
+
+def _copy_folder(r, rel, dest, job=None):
+    """Copy folder `rel` of bucket `r` into folder `dest` (an S3 one is downloaded) -> {files, bytes}."""
+    progress = job.progress if job is not None else (lambda *a, **k: None)
+    cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
+    if r.kind == 's3':
+        view = _s3(r, rel)
+        try:
+            res = view.pull(dest, progress, cancelled)
+        finally:
+            view.close()
+        return {'files': res['downloaded'], 'bytes': res['bytes']}
+    allowed = _allowed()
+    todo = [(p, a) for p, isdir, a in store.walk_local(r.root, rel, allowed, cap=10_000_000) if not isdir]
+    progress(0, len(todo), 'copying')
+    n = size = 0
+    for p, a in todo:
+        if cancelled is not None and cancelled():
+            raise DCError('cancelled', 499)
+        sub = p[len(rel) + 1:] if rel else p
+        out = os.path.join(dest, sub)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        shutil.copy2(a, out)
+        n += 1
+        size += os.path.getsize(out)
+        if n % 200 == 0:
+            progress(n, len(todo), 'copying')
+    progress(n, len(todo), 'copying')
+    return {'files': n, 'bytes': size}
+
+
+def _write_yolo(r, rel, st, task):
+    """Write the session's labels into folder `rel` of bucket `r` as YOLO: each image's .txt goes in the
+    labels/ folder that mirrors its images/ folder (next to the image when there is no images/ level, which is
+    where ultralytics looks then), plus data.yaml and classes.txt at the folder root. -> {labels, data_yaml}."""
+    from ..labeling import formats as lfmt
+    base = _abs(r, rel)
+    index, names = lfmt.class_map(task['classes'])
+    n = 0
+    for m, rows in st.iter_task_export(task['id']):
+        if not rows and m['status'] != 'done':
+            continue
+        meta = m.get('meta') if isinstance(m.get('meta'), dict) else {}
+        img = str(meta.get('rel_path') or m.get('uri') or '')
+        if not img:
+            continue
+        folder, stem = posix_dir(img), os.path.splitext(img.rsplit('/', 1)[-1])[0]
+        lab_dir = store.label_dir_for(folder)
+        if lab_dir is not None:
+            out = os.path.join(base, lab_dir, stem + '.txt')
+        elif rel and os.path.basename(base).lower() == 'images':          # the picked folder is images/ itself
+            out = os.path.join(os.path.dirname(base), 'labels', folder, stem + '.txt')
+        else:                                                             # no images/ level: next to the image
+            out = os.path.join(base, folder, stem + '.txt')
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, 'w') as f:
+            f.write(lfmt.label_text(task, rows, index))
+        n += 1
+    splits = [d for d in ('train', 'val', 'valid', 'test') if os.path.isdir(os.path.join(base, 'images', d))]
+    if splits:
+        train = 'images/train' if 'train' in splits else f'images/{splits[0]}'
+        val = next((f'images/{d}' for d in ('val', 'valid') if d in splits), train)
+    else:
+        train = val = 'images' if os.path.isdir(os.path.join(base, 'images')) else '.'
+    lines = [f'# written by the Data Center from a {task["task_type"].replace("_", " ")} model', 'path: .',
+             f'train: {train}', f'val: {val}', f'nc: {len(names)}', 'names:']
+    lines += [f'  {i}: {_yaml_str(nm)}' for i, nm in enumerate(names)]
+    if task['task_type'] == 'keypoints':
+        k = len((task.get('config') or {}).get('keypoints') or [])
+        lines.append(f'kpt_shape: [{k}, 3]')
+    with open(os.path.join(base, 'data.yaml'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    with open(os.path.join(base, 'classes.txt'), 'w') as f:
+        f.write(lfmt.classes_txt(names))
+    return {'labels': n, 'data_yaml': store.join(rel, 'data.yaml'), 'classes': names}
+
+
+def _yaml_str(s):
+    import json
+    return json.dumps(str(s), ensure_ascii=False)
+
+
+def posix_dir(rel):
+    return rel.rsplit('/', 1)[0] if '/' in rel else ''

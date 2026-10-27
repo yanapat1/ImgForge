@@ -297,8 +297,12 @@ dc_buckets = Table(
     Column('connection_id', String(36), ForeignKey('app.connections.id', ondelete='SET NULL')),
     Column('s3_bucket', String(255)),
     Column('prefix', Text, nullable=False, server_default=text("''")),
+    Column('mode', String(8), nullable=False, server_default=text("'stream'")),  # s3: stream | local (0007)
+    Column('local_root', Text),                          # s3 + local: the editable copy, under storage.data_root
+    _ts('synced_at'),                                     # end of the last finished pull (NULL: still streamed)
     _now('created_at'), _now('updated_at'),
     CheckConstraint("kind IN ('managed', 'local', 's3')", name='kind'),
+    CheckConstraint("mode IN ('stream', 'local')", name='mode'),
     Index('ux_dc_buckets_owner_name', 'owner_id', func.lower(text('name')), unique=True),
     schema='app')
 

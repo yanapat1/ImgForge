@@ -6,7 +6,11 @@ This is the shared contract between `dataviz/datacenter/` (the backend), `datavi
 - **Bucket**: one root of data. Each bucket is private to its owner, and admins see every bucket. There are three kinds:
   - `managed`: a folder under `storage.data_root` (config; default `data/` under the project root, always allowed). Imports land here.
   - `local`: a linked folder anywhere inside `storage.allowed_roots`. It is used in place.
-  - `s3`: a linked bucket and prefix that goes through one of the owner's S3 connections. It is **read-only** in v1: you can list, view, detect, tag and send it, but not change it.
+  - `s3`: a linked bucket and prefix that goes through one of the owner's S3 connections. It has a load `mode`:
+    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it.
+    - `local`: a pull job downloads every object into `local_root` (`<data_root>/.s3/<name>-<id>`). Once the first pull has finished (`synced_at`), the bucket reads and writes that copy, so it is editable, undoable and exportable like a local bucket. Its `kind` stays `s3` and `root` is the copy.
+    - Re-sync (`sync`) downloads again. An object replaces the local file with the same name; files only the copy has are kept, and nothing is deleted.
+    - Switching back to `stream` keeps the copy on disk.
 - **Path**: relative to the bucket root, POSIX, no leading slash; `''` is the root. Every resolved local path is checked with `connections.check_local`; `..`, absolute paths and symlinks that escape are rejected with 400.
 - **Tags**: each one is on `(bucket, path)`, where `path=''` is the bucket itself. Tags are `{tag, auto}`. **Auto** tags are written only by format detection, as `format:<key>`. Users cannot remove them, and they are swapped when the format changes. User tags are cleaned with `core/names.clean_tags`.
 
@@ -26,8 +30,22 @@ Every function takes `user` (the acting user dict) first, raises `DCError(messag
 ```
 list_buckets(user, q='', tags=(), formats=())                  -> [Bucket]
 get_bucket(user, bid)                                          -> Bucket
-create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_bucket=None, prefix='', tags=())
-update_bucket(user, bid, name=None)                            -> Bucket
+create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_bucket=None, prefix='', tags=(), mode='stream')
+    -> Bucket (+ job_id when an s3 link starts with mode='local')
+update_bucket(user, bid, name=None, mode=None)                 -> Bucket (+ job_id when switched to local)
+sync(user, bid)                                                -> {job_id, result}   # s3 + mode local: (re)pull
+export(user, bid, path='')                                     -> (zip name, chunk iterator)   # not for a streamed s3 bucket
+source(user, bid, path='')                                     -> {source, format, classes, bucket, path, name}
+    # the POST /api/label/projects `source` of a bucket folder (New label › Data Center), classes from its data.yaml
+autolabel(user, bid, path='', model={registry_id | connection_id + model_id, version}, target='inplace'|'copy',
+          new_name=None, conf=None, write_yolo=True, name=None) -> {job_id, bucket, result}
+    # one model-lane job:
+    #   1. copy: into the new managed bucket new_name (a streamed s3 bucket can only be copied)
+    #   2. make a labeling session; its classes are the model's
+    #   3. link + activate the model, then label all
+    #   4. write_yolo: loose images move into images/ first (in place: through ops, so undoable),
+    #      then labels/*.txt, data.yaml and classes.txt
+    # job result: {bucket, session: {id, name, url}, labeled, written, copied, restructured: {moved, undo_id}}
 delete_bucket(user, bid, delete_files=False)                   -> {ok}
 summary(user)                                                  -> {buckets, images, size, managed: {used, free}, links: {local, s3}}
 ls(user, bid, path='', offset=0, limit=500, sort='name'|'-mtime'|'size', q='')
@@ -49,7 +67,7 @@ send(user, bid, paths, target='visualize'|'label', name=None, task_type='detect'
     -> {target, id, url}   # creates a visualize session (dataset upsert) or a label project (source {kind:'local', path})
 ```
 
-`Bucket = {id, name, kind, root, writable, owner, created_at, updated_at, format, tags, stats: {images, labels, classes, size}, sessions: [{id, kind:'visualize'|'label', name, url}]}`
+`Bucket = {id, name, kind, root, writable, owner, created_at, updated_at, format, tags, stats: {images, labels, classes, size}, sessions: [{id, kind:'visualize'|'label', name, url}]}`. An s3 bucket also has `{connection_id, s3_bucket, prefix, mode, local_ready, synced_at, s3_root}`.
 `Entry = {name, path, type: 'dir'|'file', size, mtime, kind: 'image'|'label'|'yaml'|'json'|'xml'|'text'|'npy'|'archive'|'other', items?: n (dir), w?, h?, labels?: n (an image with a YOLO label file)}`
 `Tag = {tag, auto}`
 
@@ -74,6 +92,10 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | GET | `/api/dc/tags` | all_tags |
 | GET | `/api/dc/search?q=&tag=&format=&bucket=&path=&glob=` | search |
 | POST | `/api/dc/send` `{bucket, paths, target, name, task_type}` | send |
+| POST | `/api/dc/buckets/{bid}/sync` | sync |
+| GET | `/api/dc/buckets/{bid}/export?path=` | export (a streamed zip) |
+| GET | `/api/dc/buckets/{bid}/source?path=` | source |
+| POST | `/api/dc/autolabel` `{bucket, path, model, target, new_name, conf, write_yolo, name}` | autolabel |
 
 ## AI assistant: `/api/llm/dc/*` (`dataviz/llm/agent.py`, `tools.py`)
 `POST /api/llm/dc/chat` `{messages: [{role, text}], scope: {bucket, path, selection: [paths]}}` streams NDJSON, one event per line:

@@ -41,6 +41,8 @@ tools.py). `?` marks an optional argument.
 | `add_tags` | change | bucket, path?, tags | Add user tags to a bucket ('' path) or a folder / file. format:* tags are automatic. |
 | `remove_tags` | change | bucket, path?, tags | Remove user tags (automatic format:* tags cannot be removed). |
 | `send_to_session` | change | bucket, paths, target, name?, task_type? | Open folders / files in the visualizer (target visualize) or as a labeling project (target label). |
+| `set_s3_mode` | change | bucket, mode | Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local (downloaded into an editable local folder that can be re-synced and exported). |
+| `sync_from_s3` | change | bucket | Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 version, local-only files are kept. |
 | `ask_user` | control | question, options | Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn. |
 | `cannot_do` | control | reason, alternative? | Say the request cannot be done with these tools, why, and the closest thing you can do. Ends your turn. |
 

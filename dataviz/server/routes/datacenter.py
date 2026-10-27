@@ -9,7 +9,7 @@ Handlers are plain `def`: FastAPI runs them in its thread pool (disk and S3 work
 """
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException
 
 from ...auth import deps
@@ -43,7 +43,7 @@ def router(state, ctx):
     def create_bucket(body: dict, user=Depends(MANAGE)):
         return _call(service.create_bucket, user, body.get('name'), kind=body.get('kind') or 'managed',
                      path=body.get('path'), connection_id=body.get('connection_id'), s3_bucket=body.get('s3_bucket'),
-                     prefix=body.get('prefix') or '', tags=tuple(body.get('tags') or ()))
+                     prefix=body.get('prefix') or '', tags=tuple(body.get('tags') or ()), mode=body.get('mode') or 'stream')
 
     @r.get('/buckets/{bid}')
     def get_bucket(bid: str, user=Depends(deps.current_user)):
@@ -51,7 +51,21 @@ def router(state, ctx):
 
     @r.patch('/buckets/{bid}')
     def update_bucket(bid: str, body: dict, user=Depends(MANAGE)):
-        return _call(service.update_bucket, user, bid, name=body.get('name'))
+        return _call(service.update_bucket, user, bid, name=body.get('name'), mode=body.get('mode'))
+
+    @r.post('/buckets/{bid}/sync')
+    def sync(bid: str, user=Depends(MANAGE)):
+        return _call(service.sync, user, bid)
+
+    @r.get('/buckets/{bid}/export')
+    def export(bid: str, path: str = '', user=Depends(deps.current_user)):
+        name, chunks = _call(service.export, user, bid, path)
+        return StreamingResponse(chunks, media_type='application/zip',
+                                 headers={'Content-Disposition': f'attachment; filename="{name}"'})
+
+    @r.get('/buckets/{bid}/source')
+    def source(bid: str, path: str = '', user=Depends(deps.current_user)):
+        return _call(service.source, user, bid, path)
 
     @r.delete('/buckets/{bid}')
     def delete_bucket(bid: str, delete_files: int = 0, user=Depends(MANAGE)):
@@ -120,5 +134,11 @@ def router(state, ctx):
         return _call(service.send, user, body.get('bucket'), body.get('paths') or [''],
                      target=body.get('target') or 'visualize', name=body.get('name'),
                      task_type=body.get('task_type') or 'detect')
+
+    @r.post('/autolabel')
+    def autolabel(body: dict, user=Depends(MANAGE)):
+        return _call(service.autolabel, user, body.get('bucket'), body.get('path') or '', model=body.get('model'),
+                     target=body.get('target') or 'inplace', new_name=body.get('new_name'), conf=body.get('conf'),
+                     write_yolo=body.get('write_yolo', True) is not False, name=body.get('name'))
 
     return r

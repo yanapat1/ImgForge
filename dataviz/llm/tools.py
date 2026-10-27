@@ -274,6 +274,19 @@ def _send(user, a):
     return res, f'opened {res.get("target")} {res.get("url") or res.get("id")}'
 
 
+def _s3_mode(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().update_bucket(user, b['id'], mode=a['mode'])
+    how = 'loading into a local folder (a download job)' if a['mode'] == 'local' else 'streamed from S3 again'
+    return {'bucket': res['id'], 'mode': res.get('mode'), 'job_id': res.get('job_id')}, f'{res["name"]}: {how}'
+
+
+def _s3_sync(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().sync(user, b['id'])
+    return res, f'{b["name"]}: re-sync from S3 started'
+
+
 def _items(paths):
     paths = list(paths or [])
     shown = ', '.join(paths[:3]) + (f' +{len(paths) - 3} more' if len(paths) > 3 else '')
@@ -341,6 +354,18 @@ _add(Tool('send_to_session', 'Open folders / files in the visualizer (target vis
           True, _send, lambda b, a: f'Send {_items(a["paths"])} from {_bname(b, a)} to '
                                     f'{"the visualizer" if a["target"] == "visualize" else "a labeling project"}'
                                     + (f' as {a["name"]!r}' if a.get('name') else ''), s3_ok=True))
+
+_add(Tool('set_s3_mode', 'Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local '
+                        '(downloaded into an editable local folder that can be re-synced and exported).',
+          _obj({'bucket': BUCKET, 'mode': {'type': 'string', 'enum': ['stream', 'local'], 'description': 'load mode'}},
+               ['bucket', 'mode']),
+          True, _s3_mode, lambda b, a: f'Set {_bname(b, a)} to '
+                                       + ('load into a local folder (downloads it)' if a['mode'] == 'local'
+                                          else 'stream from S3'), s3_ok=True))
+_add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 '
+                          'version, local-only files are kept.',
+          _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
+          lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True))
 
 _add(Tool('ask_user', 'Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn.',
           _obj({'question': S('one short question'), 'options': A('2-5 concrete answers the user can click')},

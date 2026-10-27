@@ -20,6 +20,7 @@ import stat as statmod
 import time
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 from ..data import connections
@@ -475,6 +476,58 @@ def upload_local(root, allowed, rel, files, unzip=True):
 
 
 # ---------------------------------------------------------------------------------------------- thumbnails
+class _Pipe(io.RawIOBase):
+    """A write-only sink zipfile writes into; the bytes are drained chunk by chunk (export streams, no temp file)."""
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.pos = 0
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        self.buf += b
+        self.pos += len(b)
+        return len(b)
+
+    def tell(self):
+        return self.pos
+
+    def take(self):
+        out = bytes(self.buf)
+        self.buf.clear()
+        return out
+
+
+def zip_stream(root, rel, allowed):
+    """Yield a zip of folder `rel` of `root` (or of one file) chunk by chunk: names inside are relative to that
+    folder, the trash and dot files are left out. Stored, not deflated: images do not shrink."""
+    rel = clean_rel(rel)
+    base = resolve(root, rel, allowed, must_exist=True)
+    pipe = _Pipe()
+    with zipfile.ZipFile(pipe, 'w', zipfile.ZIP_STORED, allowZip64=True) as z:
+        if os.path.isfile(base):
+            z.write(base, os.path.basename(base))
+        else:
+            for p, isdir, absp in walk_local(root, rel, allowed, cap=10_000_000):
+                if isdir:
+                    continue
+                name = p[len(rel) + 1:] if rel else p
+                with open(absp, 'rb') as src, z.open(zipfile.ZipInfo.from_file(absp, name), 'w') as dst:
+                    while True:
+                        chunk = src.read(CHUNK)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        if len(pipe.buf) >= CHUNK:
+                            yield pipe.take()
+                if pipe.buf:
+                    yield pipe.take()
+    if pipe.buf:
+        yield pipe.take()
+
+
 def thumbnail(data_or_path, key, w, cfg):
     """A JPEG at most w px on its long side, cached on disk under the workspace root (key = path + mtime + size)."""
     from PIL import Image, ImageOps
@@ -574,11 +627,58 @@ class S3View:
         except Exception:  # noqa: BLE001
             return None
 
+    def pull(self, dest, progress=None, cancelled=None, workers=8):
+        """Download every object below the prefix into folder `dest` ("load into local"): an object replaces the
+        local file of the same name, local files S3 does not have are kept (nothing is ever deleted).
+        -> {downloaded, bytes, failed}."""
+        progress = progress or (lambda *a, **k: None)
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        progress(stage='listing bucket')
+        objs = self.keys('', cap=10_000_000)
+        todo = sorted(objs)
+        done, got, failed = 0, 0, []
+        progress(0, len(todo), 'downloading')
+
+        def fetch(k):
+            dst = dest / k
+            if dst.is_dir():                                            # a local folder named like the object
+                shutil.rmtree(dst)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_name(dst.name + '.part')
+            body = self.client.get_object(Bucket=self.bucket, Key=self.base + k)['Body']
+            with open(tmp, 'wb') as f:
+                for chunk in body.iter_chunks(1 << 20):
+                    f.write(chunk)
+            os.replace(tmp, dst)
+            return objs[k]
+
+        with ThreadPoolExecutor(max(1, int(workers))) as ex:
+            for i in range(0, len(todo), 256):
+                if cancelled is not None and cancelled():
+                    break
+                part = todo[i:i + 256]
+                for k, res in zip(part, ex.map(lambda k: _try(fetch, k), part)):
+                    if isinstance(res, Exception):
+                        failed.append({'path': k, 'error': str(res)})
+                    else:
+                        got += res
+                done += len(part)
+                progress(done, len(todo), 'downloading', extra=f'{got / 1e6:.1f} MB')
+        return {'downloaded': done - len(failed), 'bytes': got, 'failed': failed[:50], 'total': len(todo)}
+
     def close(self):
         try:
             self.client.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _try(fn, *a):
+    try:
+        return fn(*a)
+    except Exception as e:  # noqa: BLE001 - one object that fails must not stop the pull
+        return e
 
 
 def posix_parent(rel):

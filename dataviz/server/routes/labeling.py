@@ -30,6 +30,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import orjson
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -145,6 +146,12 @@ def router(state, ctx):
     def roots():
         return connections.allowed_roots(ctx.cfg)
 
+    def source_roots():
+        """Where a local image source may lie: the allowed roots plus the Data Center's managed store (New label ›
+        Data Center reads a managed bucket in place)."""
+        from ...datacenter import store as dcstore
+        return dcstore.roots(ctx.cfg)
+
     def owners_connections(owner_id):
         """What media.make_source / sinks.make_sink look connections up in: only the project owner's."""
         return ctx.datasets.scoped(owner_id)
@@ -156,7 +163,7 @@ def router(state, ctx):
         kind = src.get('kind') or 'upload'
         with _errors():
             if kind == 'local' and str(src.get('path') or '').strip():
-                src['path'] = connections.check_local(src['path'], roots())
+                src['path'] = connections.check_local(src['path'], source_roots())
             elif kind in REMOTE and src.get('connection_id'):
                 try:
                     ctx.datasets.connection(src['connection_id'], owner_id=owner_id)
@@ -311,10 +318,13 @@ def router(state, ctx):
         on = True if body is None else body.on
         if on:
             model_link(task)
+        set_active(pid, tid, on)
+        return {'task_id': tid, 'active': on}
+
+    def set_active(pid, tid, on=True):
         with active_lock:
             s = active.setdefault(pid, set())
             (s.add if on else s.discard)(tid)
-        return {'task_id': tid, 'active': on}
 
     @r.patch('/api/label/projects/{pid}', dependencies=O)
     def patch_project(pid: str, body: LabelProjectPatch):
@@ -765,6 +775,9 @@ def router(state, ctx):
     def put_task_model(pid: str, tid: str, body: TaskModelIn | None = None):
         """Link a model to a task (or unlink with a null body): one of the project OWNER's models / model
         connections. 'new' class_map entries become classes."""
+        return link_task_model(pid, tid, body)
+
+    def link_task_model(pid, tid, body):
         st = store(pid)
         owner = need().get(pid)['owner_id']
         with _errors():
@@ -852,8 +865,16 @@ def router(state, ctx):
                 model_conn(link['connection_id'], entry['owner_id'])    # 400 now, not in the job, when it is gone
             if body.scope not in ('unlabeled', 'not_done', 'all'):
                 raise ValueError(f'unknown scope {body.scope!r} (unlabeled, not_done or all)')
-        tid, scope = task['id'], body.scope
         conf = body.conf if body.conf is not None else link.get('conf')
+        fn = label_all_fn(pid, entry, task, link, body.scope, conf)
+        job = ctx.jobs.submit(f'label-predict:{pid}:{task["id"]}', f'label all · {entry["name"]} · {task["name"]}',
+                              fn, lane='model', public_result=True, session_id=pid)
+        return {'job_id': job.id}
+
+    def label_all_fn(pid, entry, task, link, scope, conf):
+        """fn(job) of the label-all job (also run inside the Data Center's autolabel job)."""
+        st = store(pid)
+        tid = task['id']
 
         def fn(job):
             ad = adapter_for(link, entry['owner_id'])
@@ -937,10 +958,18 @@ def router(state, ctx):
                       f'{" (cancelled)" if cancelled else ""} [dim]({stats["seen"] / max(took, 1e-6):.1f} img/s)[/]')
             return {'n_images': stats['n_images'], 'n_shapes': stats['n_shapes'], 'failed': stats['failed'],
                     'cancelled': cancelled, 'seconds': round(took, 2)}
+        return fn
 
-        job = ctx.jobs.submit(f'label-predict:{pid}:{tid}', f'label all · {entry["name"]} · {task["name"]}', fn,
-                              lane='model', public_result=True, session_id=pid)
-        return {'job_id': job.id}
+    def model_info(link, owner_id):
+        """{name, task_type, classes, ...} of a model a link names (registry model or model server)."""
+        if link.get('registry_id'):
+            from ...models import hub
+            return hub.info(ctx.models, registry_model(link['registry_id'], owner_id), workdir())
+        _, m = models.find_model(model_conn(link['connection_id'], owner_id), link['model_id'], fresh=True)
+        return m
+
+    ctx.label_auto = SimpleNamespace(link=link_task_model, activate=set_active, label_all=label_all_fn,
+                                     model_info=model_info, store=store, drop_source=drop_source)
 
     @r.post('/api/label/projects/{pid}/remove-model-labels', dependencies=L)
     def remove_model_labels(pid: str, body: RemoveModelLabelsIn):
