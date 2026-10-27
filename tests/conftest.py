@@ -125,6 +125,8 @@ def pg(pg_server):
     url = _admin_url(pg_server['base'], name)
     db.init(url, pool_size=5)
     crypto.init(TEST_SECRET_KEY)
+    from dataviz.auth import tiers
+    tiers.clear_cache()                            # the in-process tier cache belongs to the previous database
     yield url
     db.dispose()
     with psycopg.connect(pg_server['base'], autocommit=True) as c:

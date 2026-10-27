@@ -1,6 +1,7 @@
 // Settings dialog renderers: one function per section / form, returning HTML from SET state.
 
 import { getJSON } from '../core/api.js';
+import { can, cannot } from '../core/auth.js';
 import { $req, esc, icon } from '../core/dom.js';
 import { lookName, PALETTES, paletteName, themeMode, THEME } from '../core/theme.js';
 import type { PaletteSpec } from '../core/theme.js';
@@ -59,17 +60,20 @@ export const tagc = (text: string, cls = '', ico = ''): string => `<span class="
 // ---- datasets
 export function renderDatasetsSec(): string {
   if (SET.view === 'add') {
-    return '<section><div class="tiles">' +
-      `<button class="tile" data-act="new-s3"><span class="ds-icon s3">${icon('cloud')}</span><b>S3 / RustFS bucket</b>` +
-      '<span>A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.</span></button>' +
-      `<button class="tile" data-act="new-local"><span class="ds-icon">${icon('folder')}</span><b>Local folder</b>` +
-      '<span>A folder of images (labels optional) or a YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.</span></button>' +
-      `<button class="tile" data-act="new-labeling"><span class="ds-icon labeling">${icon('tag')}</span><b>Labeling session</b>` +
-      '<span>One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.</span></button>' +
-      `<button class="tile" data-act="new-embeddings"><span class="ds-icon embeddings">${icon('vectors')}</span><b>Embeddings folder</b>` +
-      '<span>Vectors you computed anywhere (audio, video, text, tables) as .npy files, plus a meta.csv of labels, previews and columns.</span></button>' +
-      `<button class="tile" data-act="new-union"><span class="ds-icon union">${icon('layers')}</span><b>Combined datasets</b>` +
-      `<span>2 to ${UNION_MAX} of your visualize sessions as one map, to compare them (what was added, removed, moved or relabelled) or to explore them together. Nothing is copied.</span></button>` +
+    const add = can('dataset.create');           // combining datasets they can already open needs no permission
+    const tile = (act: string, cls: string, ico: string, title: string, text: string): string =>
+      `<button class="tile" data-act="${act}"><span class="ds-icon${cls ? ` ${cls}` : ''}">${icon(ico)}</span><b>${title}</b><span>${text}</span></button>`;
+    return '<section>' + (add ? '' : `<p class="sec-note">${esc(cannot('add new datasets'))}. You can still combine the ones you can open.</p>`) +
+      '<div class="tiles">' + (add ? tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
+        'A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.') +
+      tile('new-local', '', 'folder', 'Local folder',
+        'A folder of images (labels optional) or a YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.') +
+      tile('new-labeling', 'labeling', 'tag', 'Labeling session',
+        'One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.') +
+      tile('new-embeddings', 'embeddings', 'vectors', 'Embeddings folder',
+        'Vectors you computed anywhere (audio, video, text, tables) as .npy files, plus a meta.csv of labels, previews and columns.') : '') +
+      tile('new-union', 'union', 'layers', 'Combined datasets',
+        `2 to ${UNION_MAX} of your visualize sessions as one map, to compare them (what was added, removed, moved or relabelled) or to explore them together. Nothing is copied.`) +
       '</div><div class="form-foot"><button class="ghost" data-act="back">Cancel</button></div></section>';
   }
   if (SET.view === 's3') return renderS3Form();
@@ -596,7 +600,9 @@ export function renderConnsSec(): string {
       `<button class="icon-btn ghost" data-act="remove-conn" aria-label="Delete" title="Delete">${icon('trash')}</button></div>` +
       `<div class="ds-progress" id="cst-${esc(c.id)}"></div></div>`;
   }).join('') || '<p class="sec-note">No connections yet. Add one here, while adding an S3 dataset, or while creating a labeling session.</p>';
-  return `<section><div class="sec-actions"><button class="primary" data-act="new-conn">${icon('plus')}New connection</button></div>${cards}</section>`;
+  const add = can('connection.add') ? `<button class="primary" data-act="new-conn">${icon('plus')}New connection</button>`
+    : `<span class="sec-note">${esc(cannot('add connections'))}</span>`;
+  return `<section><div class="sec-actions">${add}</div>${cards}</section>`;
 }
 
 // ---- appearance / plot / workspace

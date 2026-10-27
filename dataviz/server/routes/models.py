@@ -19,8 +19,8 @@ from PIL import Image, ImageDraw
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response, PlainTextResponse
 
-from ...auth import deps
-from ...auth.deps import admin_user, can_add_connections, current_user
+from ...auth import deps, tiers
+from ...auth.deps import can_add_connections, current_user, require_perm
 from ...core import logging as vlog
 from ...data import connections, sources
 from ...models import insights, registry as mreg, schema
@@ -82,7 +82,7 @@ def router(state, ctx):
         need()
         return {'models': [public(m) for m in owned(reg.models)]}
 
-    @r.get('/api/models/discover', dependencies=[Depends(admin_user)])
+    @r.get('/api/models/discover', dependencies=[Depends(require_perm('model.upload'))])
     def discover():
         need()
         known = {m.get('path') for m in owned(reg.models)}
@@ -102,6 +102,7 @@ def router(state, ctx):
     @r.post('/api/models')
     def save_model(body: dict, user=Depends(current_user)):
         need()
+        tiers.check(user, 'model.add')          # files on the server also need model.upload (registry.upsert)
         if not user.get('is_admin') and (body.get('format') == 'api' or body.get('api')):
             can_add_connections(user)                # an API model is an outbound connection of the server
         try:
@@ -138,7 +139,7 @@ def router(state, ctx):
         res['openvino'] = mreg.guess_format(p) == 'openvino'
         return res
 
-    @r.get('/api/models/browse', dependencies=[Depends(admin_user)])
+    @r.get('/api/models/browse', dependencies=[Depends(require_perm('model.upload'))])
     async def browse_files(path: str = ''):
         """Folders + model files (weights, arch yaml, adapter .py) under `path`, for the path picker."""
         need()
@@ -172,7 +173,7 @@ def router(state, ctx):
                             'classes': len(d.get('classes') or {})})
         return {'models': out}
 
-    @r.post('/api/models/upload', dependencies=[Depends(admin_user)])
+    @r.post('/api/models/upload', dependencies=[Depends(require_perm('model.upload'))])
     async def upload(files: list[UploadFile] = File(...)):
         """Store uploaded weights under <workspace_root>/models/<id>/; returns the path to put in the form.
         OpenVINO: send the .xml and .bin together (the folder is returned)."""
@@ -233,7 +234,7 @@ def router(state, ctx):
         st = ctx.current()
         g.need_index()
         try:
-            spec = user_features.spec_for(m, svc.fingerprint(m), svc.workdir, bool(user.get('is_admin')))
+            spec = user_features.spec_for(m, svc.fingerprint(m), svc.workdir, tiers.has(user, 'model.upload'))
         except ValueError as e:
             raise HTTPException(400, str(e))
         ids = list(range(min(4, len(st.samples))))

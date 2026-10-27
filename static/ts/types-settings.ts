@@ -283,8 +283,14 @@ export type SetChange = (el: HTMLElement) => void | Promise<void>;
 /** A user as the admin list shows it (GET api/admin/users → users[]); times are epoch seconds. */
 export interface AdminUser {
   id: string; username: string; email: string; name: string; is_admin: boolean; is_active: boolean; avatar_ver: number;
-  created?: number | null; last_login?: number | null; n_sessions?: number;
+  tier_id?: string | null; created?: number | null; last_login?: number | null; n_sessions?: number;
 }
+/** One row of GET api/admin/tiers → tiers[]: a named permission set (dataviz/auth/tiers.py). */
+export interface AdminTier {
+  id: string; name: string; description: string; permissions: string[]; is_default: boolean; n_users?: number;
+}
+/** The permission catalog (GET api/admin/tiers → permissions[]). */
+export interface TierPerm { key: string; label: string }
 /** GET / PUT api/admin/settings */
 export interface AdminSettings { signup_enabled: boolean; who_can_add_connections: 'everyone' | 'admins' }
 /** One row of GET api/admin/audit */

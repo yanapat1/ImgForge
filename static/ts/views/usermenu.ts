@@ -83,7 +83,7 @@ function openMenu(from: HTMLButtonElement): void {
   closeMenu(false);
   const m = menuEl();
   m.innerHTML = `<div class="um-head">${avatarHTML(ME, 36, { title: false })}<div class="um-who"><b>${esc(displayName(ME))}</b>` +
-    `<span class="muted">@${esc(ME.username)}</span></div>${ME.is_admin ? `<span class="um-admin">${icon('shield')}admin</span>` : ''}</div>` +
+    `<span class="muted">@${esc(ME.username)}${!ME.is_admin && ME.tier ? ` · ${esc(ME.tier.name)}` : ''}</span></div>${ME.is_admin ? `<span class="um-admin">${icon('shield')}admin</span>` : ''}</div>` +
     `<button role="menuitem" data-um="account">${icon('user')}Account settings</button>` +
     (isAdmin() ? `<button role="menuitem" data-um="users">${icon('users')}Users &amp; admin</button>` : '') +
     `<div class="um-sep" role="separator"></div><button role="menuitem" data-um="logout">${icon('logout')}Sign out</button>`;

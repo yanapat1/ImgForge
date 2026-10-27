@@ -47,7 +47,7 @@ def digest(token):
 
 def _user(r):
     return {'id': r.id, 'username': r.username, 'email': r.email, 'display_name': r.display_name,
-            'is_admin': bool(r.is_admin), 'avatar_ver': int(r.avatar_ver or 0)}
+            'is_admin': bool(r.is_admin), 'avatar_ver': int(r.avatar_ver or 0), 'tier_id': r.tier_id}
 
 
 # ------------------------------------------------------------------------------------------ cache
@@ -120,7 +120,7 @@ def resolve(token):
     d = digest(token)
     with db.begin() as c:
         r = c.execute(text("""
-            SELECT u.id, u.username, u.email, u.display_name, u.is_admin, u.avatar_ver, u.is_active,
+            SELECT u.id, u.username, u.email, u.display_name, u.is_admin, u.avatar_ver, u.is_active, u.tier_id,
                    s.last_seen_at, s.expires_at, now() AS now
             FROM app.auth_sessions s JOIN app.users u ON u.id = s.user_id
             WHERE s.token_hash = :h"""), {'h': d}).first()

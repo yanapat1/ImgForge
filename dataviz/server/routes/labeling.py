@@ -35,7 +35,7 @@ import orjson
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from ...auth import access, context, deps
+from ...auth import access, context, deps, tiers
 from ...core import logging as vlog
 from ...data import connections
 from ...labeling import colors, models
@@ -280,6 +280,7 @@ def router(state, ctx):
     @r.post('/api/label/projects')
     def create_project(body: LabelProjectIn, user=Depends(deps.current_user)):
         """A new session owned by the caller; its source / export target may only use the caller's connections."""
+        tiers.check(user, 'label.create')
         data = body.model_dump()
         data['tasks'] = [{**t, 'classes': [c if isinstance(c, str) else {k: v for k, v in c.items() if v is not None}
                                            for c in t['classes']]} for t in data['tasks']]
@@ -961,6 +962,7 @@ def router(state, ctx):
     # ------------------------------------------------------------ duplicate (v2)
     @r.post('/api/label/projects/{pid}/duplicate', dependencies=L)
     def duplicate(pid: str, body: DuplicateIn | None = None, user=Depends(deps.current_user)):
+        tiers.check(user, 'label.create')
         need()
         with _errors():
             entry = reg.get(pid)

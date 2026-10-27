@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from ...auth import access, deps
+from ...auth import access, deps, tiers
 from ...core import logging as vlog
 from ...data import connections, sessions, sources
 from ...data.embedding_source import EmbeddingSource
@@ -213,6 +213,8 @@ def router(state, ctx):
                 body = {k: v for k, v in body.items() if k != 'id'}
             elif have != 'owner':
                 raise HTTPException(403, 'only the owner of this session can do that')
+        if not body.get('id') and body.get('kind') != 'union':     # combining what they can already open: no tier
+            tiers.check(user, 'dataset.create')
         if body.get('kind') == 'union' and not body.get('id') and body.get('reuse'):
             # Compare / Combine on the home page: the caller's existing union over the same members, if any
             ids = [(m.get('id') if isinstance(m, dict) else m) for m in (body.get('parts') or [])]
@@ -445,6 +447,7 @@ def router(state, ctx):
     async def check_embeddings(path: str, user=Depends(deps.current_user)):
         """What an embeddings session on `path` would hold (rows, feature spaces, columns), or 400 with why not."""
         need_registry()
+        tiers.check(user, 'dataset.create')
         try:
             where = connections.check_local(path, roots() or [])
             return {'path': where, **await run_io(EmbeddingSource(where).check)}
@@ -454,6 +457,8 @@ def router(state, ctx):
     @r.get('/api/fs/browse')
     async def browse_folder(path: str = '', images: int = 0, user=Depends(deps.current_user)):
         need_registry()
+        if not (tiers.has(user, 'dataset.create') or tiers.has(user, 'label.create')):     # both pick a folder
+            tiers.check(user, 'dataset.create')
         try:
             return await run_io(browse_allowed, path, bool(images))
         except ValueError as e:

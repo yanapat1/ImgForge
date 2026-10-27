@@ -48,6 +48,18 @@ def _session_fk(name='session_id', **kw):
 
 # ==================================================================================================== app
 
+tiers = Table(                                        # what a non-admin may create (auth/tiers.py); admins: everything
+    'tiers', metadata,
+    Column('id', String(32), primary_key=True),
+    Column('name', String(40), nullable=False),
+    Column('description', Text, nullable=False, server_default=text("''")),
+    Column('permissions', JSONB, nullable=False, server_default=text("'[]'::jsonb")),   # keys of tiers.PERMS
+    Column('is_default', Boolean, nullable=False, server_default=text('false')),        # users.tier_id NULL + sign-ups
+    _now('created_at'),
+    Index('ux_tiers_name', func.lower(text('name')), unique=True),
+    Index('ux_tiers_is_default', 'is_default', unique=True, postgresql_where=text('is_default')),
+    schema='app')
+
 users = Table(
     'users', metadata,
     Column('id', String(32), primary_key=True),
@@ -57,6 +69,7 @@ users = Table(
     Column('password_hash', Text, nullable=False),
     Column('is_admin', Boolean, nullable=False, server_default=text('false')),
     Column('is_active', Boolean, nullable=False, server_default=text('true')),
+    Column('tier_id', String(32), ForeignKey('app.tiers.id', ondelete='SET NULL')),     # NULL: the default tier
     Column('avatar', LargeBinary),                       # 256 px WebP, re-encoded by the server
     Column('avatar_mime', String(40)),
     Column('avatar_ver', Integer, nullable=False, server_default=text('0')),   # bumps on change: cache-busting URL

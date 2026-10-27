@@ -365,6 +365,18 @@ input[type=checkbox].switch:disabled { opacity: .45; cursor: not-allowed; }
 .adm-email { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .adm-acts { text-align: right; }
 .adm-acts .danger:hover:not(:disabled) .ico { color: var(--danger); }
+.adm-table select { min-width: 120px; }
+.tier-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
+.tier-row { display: flex; flex-direction: column; gap: 6px; padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border); }
+.tier-row:last-child { border-bottom: 0; }
+.tier-row .hint { margin: 0; }
+.tier-head { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.tier-dflt { font-size: var(--fs-xs); font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
+.tier-acts { margin-left: auto; display: flex; gap: var(--s1); align-items: center; }
+.chip.tier-perm { cursor: default; height: 22px; font-size: var(--fs-xs); }
+.tier-perms { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.tier-perms legend { font-weight: 600; font-size: var(--fs-sm); margin-bottom: var(--s1); }
 .audit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 320px; overflow-y: auto;
   border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); }
 .audit-list li { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; padding: 6px var(--s3); border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
@@ -373,7 +385,7 @@ input[type=checkbox].switch:disabled { opacity: .45; cursor: not-allowed; }
 .au-act { font-family: var(--mono); font-size: var(--fs-xs); color: var(--accent-text); }
 .au-target { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
-  .adm-table th:nth-child(2), .adm-table td:nth-child(2), .adm-table th:nth-child(5), .adm-table td:nth-child(5) { display: none; }
+  .adm-table th:nth-child(2), .adm-table td:nth-child(2), .adm-table th:nth-child(6), .adm-table td:nth-child(6) { display: none; }
 }
 
 /* ---------------------------------------------------------------- combined dataset (forms.ts renderUnionForm): members in priority order */

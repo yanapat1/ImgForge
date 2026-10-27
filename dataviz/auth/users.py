@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import db
 from ..core.names import unique_name
-from . import passwords, tokens
+from . import passwords, tiers, tokens
 
 USERNAME_RE = re.compile(r'^[a-z0-9._-]{3,32}$')
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+$')
@@ -30,10 +30,10 @@ def _conn(conn):
 
 # ------------------------------------------------------------------------------------------ shapes
 def public(r, email=True):
-    """The user dict the app passes around: {id, username, email, display_name, is_admin, avatar_ver}."""
+    """The user dict the app passes around: {id, username, email, display_name, is_admin, avatar_ver, tier_id}."""
     m = r if isinstance(r, dict) else r._mapping
     out = {'id': m['id'], 'username': m['username'], 'email': m['email'], 'display_name': m['display_name'],
-           'is_admin': bool(m['is_admin']), 'avatar_ver': int(m['avatar_ver'] or 0)}
+           'is_admin': bool(m['is_admin']), 'avatar_ver': int(m['avatar_ver'] or 0), 'tier_id': m.get('tier_id')}
     if not email:
         del out['email']
     return out
@@ -122,7 +122,7 @@ def list_all(conn=None):
             FROM app.users u ORDER BY lower(u.username)""")).all()
     return [{'id': r.id, 'username': r.username, 'email': r.email, 'name': r.display_name,
              'is_admin': bool(r.is_admin), 'is_active': bool(r.is_active), 'avatar_ver': int(r.avatar_ver or 0),
-             'created': _epoch(r.created_at), 'last_login': _epoch(r.last_login_at),
+             'tier_id': r.tier_id, 'created': _epoch(r.created_at), 'last_login': _epoch(r.last_login_at),
              'n_sessions': int(r.n_sessions)} for r in rows]
 
 
@@ -146,7 +146,7 @@ def search(q, limit=10, conn=None):
 
 
 # ------------------------------------------------------------------------------------------ writes
-def create(username, email, display_name, password, is_admin=False, conn=None):
+def create(username, email, display_name, password, is_admin=False, conn=None, tier_id=None):
     """A new active account; returns its public dict. ValueError (human message) when anything is invalid."""
     username, email = clean_username(username), clean_email(email)
     display_name = clean_display_name(display_name)
@@ -156,10 +156,13 @@ def create(username, email, display_name, password, is_admin=False, conn=None):
     try:
         with _conn(conn) as c:
             _check_unique(c, username, email)
-            r = c.execute(text("""INSERT INTO app.users(id, username, email, display_name, password_hash, is_admin)
-                                  VALUES (:id, :u, :e, :d, :h, :a) RETURNING *"""),
+            if tier_id and not tiers.exists(tier_id, c):
+                raise ValueError('no such tier')
+            r = c.execute(text("""INSERT INTO app.users(id, username, email, display_name, password_hash, is_admin,
+                                                     tier_id)
+                                  VALUES (:id, :u, :e, :d, :h, :a, :t) RETURNING *"""),
                           {'id': uid, 'u': username, 'e': email, 'd': display_name, 'h': h,
-                           'a': bool(is_admin)}).first()
+                           'a': bool(is_admin), 't': tier_id or None}).first()
     except IntegrityError as e:          # a concurrent sign-up won the name (unique index)
         raise ValueError('that username or email is already taken') from e
     return public(r)
@@ -176,8 +179,10 @@ def _guard_last_admin(c, uid):
         raise ValueError(LAST_ADMIN)
 
 
-def update(uid, *, username=None, email=None, display_name=None, is_admin=None, is_active=None, conn=None):
-    """Change the given fields (None = keep); returns the public dict. KeyError for an unknown user."""
+def update(uid, *, username=None, email=None, display_name=None, is_admin=None, is_active=None, tier_id=None,
+           conn=None):
+    """Change the given fields (None = keep; tier_id '' = the default tier); returns the public dict. KeyError for an
+    unknown user."""
     revoke = False
     try:
         with _conn(conn) as c:
@@ -196,6 +201,10 @@ def update(uid, *, username=None, email=None, display_name=None, is_admin=None, 
                 sets['is_admin'] = bool(is_admin)
             if is_active is not None:
                 sets['is_active'] = bool(is_active)
+            if tier_id is not None:
+                if tier_id and not tiers.exists(tier_id, c):
+                    raise ValueError('no such tier')
+                sets['tier_id'] = tier_id or None
             if cur.is_admin and cur.is_active and (sets.get('is_admin') is False or sets.get('is_active') is False):
                 _guard_last_admin(c, uid)
             if sets.get('is_active') is False and cur.is_active:

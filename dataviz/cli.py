@@ -225,6 +225,10 @@ def start_database(cfg, ws_root):
         sys.exit(f'\n{e}')
     bootstrap.ensure_defaults()
     admin, password = bootstrap.ensure_first_admin(log=dlog.info)
+    try:
+        bootstrap.sync_env_admin(log=dlog.info)
+    except ValueError as e:                     # e.g. a password the policy refuses: start anyway, say why
+        dlog.error(f'DATAVIZ_ADMIN_RESET: cannot set the admin from the env: {e}')
     if admin is None:
         with db.connect() as c:
             r = c.execute(text("""SELECT id, username FROM app.users WHERE is_admin AND is_active

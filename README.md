@@ -38,7 +38,25 @@ sets it explicitly.
 Everyone signs in (username or email + password; `/login`). Sign-up is open by default; admins can turn it off
 in **Settings › Users**, where they also create accounts, reset passwords, make other people admin, deactivate or
 delete users (handing their sessions to someone else) and read the audit log. The first admin is created on the
-first start from `DATAVIZ_ADMIN_USERNAME / _EMAIL / _PASSWORD` (an empty password is generated and printed once).
+first start from `DATAVIZ_ADMIN_USERNAME / _EMAIL / _PASSWORD` (an empty password is generated and printed once);
+with `DATAVIZ_ADMIN_RESET=true` every start makes that account an active admin with that password again.
+Passwords need at least 8 characters.
+
+**Tiers** decide what a non-admin may add to the server. Admins create, rename and edit them in **Settings › Users**
+(a checkbox per permission), move users between them, and pick the default tier for sign-ups and users without one:
+
+| permission | lets the user |
+|---|---|
+| `dataset.create` | add datasets to visualize (local folder, S3, labeling task, embeddings) and browse the server's folders |
+| `label.create` | create / duplicate labeling sessions |
+| `connection.add` | add S3 / FTP / database / model-server / LLM connections |
+| `model.add` | add Hugging Face / API models |
+| `model.upload` | upload or point at model files on the server (weights, adapters: loading them runs code) |
+| `llm.use` | use the AI assistant |
+
+Built in: **Viewer** (nothing: opens what is shared with them), **Member** (default: everything but `model.upload`),
+**Contributor** (everything: adds data and models to label and visualize with). Admins have every permission;
+sharing roles (Viewer / Labeler below) still decide what someone may do on another person's session.
 
 The page opens on **Sessions**: one card per session (a dataset to **visualize** — a local folder, an S3 / RustFS
 prefix or a labeling task — or a **label** session). Every session has an owner and is **private** (only the owner
@@ -51,7 +69,8 @@ newest `sessions.max_loaded` stay loaded, shared by everyone viewing them).
 Connections (S3, FTP / SFTP, databases, model servers), LLM providers + keys, models and every preference belong
 to the account that made them: nobody else sees them, and a shared session reads its data with its owner's
 connection without revealing it. Secrets are encrypted in the database (`DATAVIZ_SECRET_KEY`). Models that load
-files on the server (weights, adapters) can only be added by admins; everyone can add API models.
+files on the server (weights, adapters) can only be added by admins and tiers with `model.upload`; a saved one stops
+loading when its owner loses that permission.
 
 **Storage:** PostgreSQL (with pgvector) holds accounts, sessions, sharing, settings, connections, labeling
 annotations (schema `lbl`) and every computed feature vector (schema `vec`); `docker compose up` starts it.
@@ -155,7 +174,7 @@ DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_p
 | Tests | Cover |
 |---|---|
 | `test_auth.py`, `test_admin.py`, `test_sharing.py`, `test_sessions_access.py` | sign-up / login (username or email), lockout per account + address, per-IP limit, cookies, CSRF, logout / password change revoke sessions, admin users + settings + last-admin guard, avatars, sharing + roles |
-| `test_acl.py`, `test_acl_routes.py`, `test_multi_session.py`, `test_security.py` | every `/api` route is guarded; the viewer / labeler / owner matrix; several sessions served at once at `s/<id>/`; open sign-up hardening (no code-running models for non-admins, no SSRF echo, no open redirect) |
+| `test_acl.py`, `test_acl_routes.py`, `test_multi_session.py`, `test_security.py`, `test_tiers.py` | every `/api` route is guarded; the viewer / labeler / owner matrix; several sessions served at once at `s/<id>/`; open sign-up hardening (no code-running models for non-admins, no SSRF echo, no open redirect) |
 | `test_repos.py`, `test_legacy_import.py`, `test_vectors.py`, `test_db_schema.py` | per-user connections / providers / models (secrets encrypted, never shared), the one-time import of the old files, pgvector store, migrations == schema |
 | `test_curation.py` | every curation rule (incl. `split_leak`), fix / undo byte round-trip, sha1 conflicts, S3 writes (moto), 20k-image scan speed |
 | `test_store.py`, `test_routes.py`, `test_io.py`, `test_formats.py`, `test_colors.py` | labeling: SQLite store, its API routes, upload / local / S3 / FTP / SFTP media and export sinks, YOLO writers, class colours |

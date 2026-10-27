@@ -4,6 +4,7 @@
 // any file model (or a Hugging Face backbone) can embed the boxes as a feature space, before the projection.
 
 import { api, errText, getJSON, postJSON } from '../core/api.js';
+import { can, cannot } from '../core/auth.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import type { CustomSpec, FoundModel, ModelEmbed, LabelModelEntry, ModelApi, ModelBrowse, ModelDraft, ModelFamily, ModelForm, ModelFormat, ModelItem, ModelSpec,
@@ -35,7 +36,8 @@ const isFormat = (x: string): x is ModelFormat => x in FORMATS;
 const ago = (t: number): string => { const s = Date.now() / 1000 - t; return s < 5400 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
 
 export async function loadModelsData(): Promise<void> {
-  const [m, f] = await Promise.all([getJSON<{ models: ModelItem[] }>('api/models'), getJSON<{ found: FoundModel[] }>('api/models/discover')]);
+  const [m, f] = await Promise.all([getJSON<{ models: ModelItem[] }>('api/models'),
+    can('model.upload') ? getJSON<{ found: FoundModel[] }>('api/models/discover') : Promise.resolve({ found: [] as FoundModel[] })]);
   SET.models = m.models;
   SET.found = f.found;
   if (!SET.spec) SET.spec = await getJSON<ModelSpec>('api/models/spec');
@@ -74,7 +76,9 @@ export function renderModelsSec(): string {
     `<div class="ds-uri" title="${esc(f.path)}">${esc(f.path)}</div><div class="ds-meta">${tagc(FAMILIES[f.family][0], 'on')}${tagc(FORMATS[f.format][0])}` +
     `${f.size ? tagc(fmtBytes(f.size)) : ''}${tagc(ago(f.mtime))}</div></div>` +
     `<div class="ds-actions"><button data-act="add-found" data-i="${i}">${icon('plus')}Add</button></div></div>`).join('');
-  return `<section><div class="sec-actions"><button class="primary" data-act="new-model">${icon('plus')}Add model</button>` +
+  const add = can('model.add') ? `<button class="primary" data-act="new-model">${icon('plus')}Add model</button>`
+    : `<span class="sec-note">${esc(cannot('add models'))}</span>`;
+  return `<section><div class="sec-actions">${add}` +
     '<span class="sec-note">Models are shared by every dataset and by the labeling page (link one to a task, then activate it there); ' +
     'predictions are cached per dataset. Use them in the <b>Model</b> tab, and (with “Use in the plot”) as a feature space under <b>Features › My models</b>.</span></div>' +
     cards + (found ? `<h4 class="m-found-h">Found in this project</h4>${found}` : '') + '</section>';

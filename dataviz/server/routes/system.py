@@ -19,7 +19,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from ...auth import context, deps
+from ...auth import context, deps, tiers
 from ...ml import analysis
 from ...paths import STATIC_DIR
 from ...workspace import list_workspaces
@@ -28,7 +28,9 @@ from ..static import NO_CACHE, render_index
 
 
 def public_user(u):
-    return {k: u.get(k) for k in ('id', 'username', 'display_name', 'is_admin', 'avatar_ver')} if u else None
+    if not u:
+        return None
+    return {**{k: u.get(k) for k in ('id', 'username', 'display_name', 'is_admin', 'avatar_ver')}, **tiers.describe(u)}
 
 
 def router(state, ctx):

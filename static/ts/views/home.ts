@@ -20,7 +20,7 @@
 import { api, errText, getJSON, postJSON } from '../core/api.js';
 import { toast } from '../core/toast.js';
 import { $, $req, esc, icon, ICONS } from '../core/dom.js';
-import { isAdmin, pref, rememberPref } from '../core/auth.js';
+import { can as tierCan, cannot, isAdmin, pref, rememberPref } from '../core/auth.js';
 import { avatarStackHTML, ownerChipHTML } from '../core/avatar.js';
 import { labelUrl, vizUrl } from '../core/nav.js';
 import { setTheme, THEME } from '../core/theme.js';
@@ -1036,6 +1036,12 @@ const CARD_MENU: Record<string, (pid: string) => unknown> = {
 const editSession = (id: string): void => { void openSettings('datasets', { solo: true, edit: id }); };
 const editProject = (pid: string): void => { void wizard({ edit: pid, names: labelNames(pid) }); };
 
+/** The new-labeling-session wizard, or why the user's tier cannot open it. */
+function newLabel(): void {
+  if (tierCan('label.create')) void wizard({ names: labelNames(null) });
+  else toast(cannot('create labeling projects'), 'err');
+}
+
 const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
   open: (b) => openSession(dataOf(b, 'id')),
   edit: (b) => editSession(dataOf(b, 'id')),
@@ -1054,9 +1060,9 @@ const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
     const d = H.sessions.find((x) => x.id === dataOf(b, 'id'));
     if (d && d.project_id) open(`.session-card[data-id="${CSS.escape(d.id)}"]`, labelUrl(d.project_id));
   },
-  new: () => (H.tab === 'label' ? wizard({ names: labelNames(null) }) : openSettings('datasets', { solo: true, view: 'add' })),
+  new: () => (H.tab === 'label' ? newLabel() : openSettings('datasets', { solo: true, view: 'add' })),
   'new-viz': () => openSettings('datasets', { solo: true, view: 'add' }),
-  'new-label': () => wizard({ names: labelNames(null) }),
+  'new-label': () => newLabel(),
   reload: () => load(),
   share: (b) => { const id = dataOf(b, 'id'); return share(id, H.sessions.find((x) => x.id === id)?.name ?? ''); },
   lshare: (b) => { const pid = dataOf(b, 'pid'); return share(pid, H.projects.find((x) => x.id === pid)?.name ?? ''); },
