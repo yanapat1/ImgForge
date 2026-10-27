@@ -82,7 +82,8 @@ const sendFoot = (bid: string, paths: string[], n?: number): string => {
   const p = esc(paths.join('\n'));
   return `<div class="details-foot"><div class="send-row">` +
     `<button type="button" class="primary" data-act="send" data-target="visualize" data-bid="${esc(bid)}" data-paths="${p}">${icon('scatter')}${n ? `Visualize ${fmtN(n)}` : 'Send to Visualize'}</button>` +
-    `<button type="button" data-act="send" data-target="label" data-bid="${esc(bid)}" data-paths="${p}">${icon('edit')}${n ? `Label ${fmtN(n)}` : 'Send to Label'}</button></div></div>`;
+    `<button type="button" data-act="send" data-target="label" data-bid="${esc(bid)}" data-paths="${p}">${icon('edit')}${n ? `Label ${fmtN(n)}` : 'Send to Label'}</button></div>` +
+    (n ? '' : `<button type="button" class="ghost sm d-auto" data-act="autolabel" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('robot')}Label all with a model…</button>`) + '</div>';
 };
 
 const head = (ico: string, title: string, extra = ''): string =>
@@ -95,9 +96,10 @@ function bucketDetails(b: Bucket): string {
   const tags = D.bid === b.id && D.path === '' && D.listing ? D.listing.tags : b.tags;
   const ro = b.writable ? 'read-write' : 'read-only';
   return `<div class="d-scroll"><section class="d-sec">` +
-    head(srcIcon(b), b.name, `<button type="button" class="icon-btn ghost sm" data-act="bucket-menu" data-bid="${esc(b.id)}" aria-haspopup="menu" aria-label="Bucket actions" title="Bucket actions">${icon('more')}</button>`) +
+    head(srcIcon(b), b.name, `<button type="button" class="icon-btn ghost sm" data-act="edit-bucket" data-bid="${esc(b.id)}" aria-label="Edit bucket" title="Edit: name, tags${b.kind === 's3' ? ', load mode' : ''}, export…">${icon('edit')}</button>` +
+      `<button type="button" class="icon-btn ghost sm" data-act="bucket-menu" data-bid="${esc(b.id)}" aria-haspopup="menu" aria-label="Bucket actions" title="Bucket actions">${icon('more')}</button>`) +
     `<div class="d-path">${icon(b.kind === 's3' ? 'cloud' : 'folder')}<span title="${esc(b.root)}">${esc(b.root)}</span></div>` +
-    `<div class="d-meta">${esc(SOURCE[b.kind]?.[1] ?? b.kind)} · ${ro}${b.updated_at ? ` · changed ${esc(timeAgo(b.updated_at))}` : ''}</div></section>` +
+    `<div class="d-meta">${esc(SOURCE[b.kind]?.[1] ?? b.kind)}${b.kind === 's3' ? ` · ${b.mode === 'local' ? (b.local_ready ? 'loaded locally' : 'loading…') : 'streamed'}` : ''} · ${ro}${b.updated_at ? ` · changed ${esc(timeAgo(b.updated_at))}` : ''}</div></section>` +
     formatSec(b.id, '', f) + tagsSec(b.id, '', tags, true) + contentsSec(s, b) + sessionsSec(b) + '</div>' +
     sendFoot(b.id, ['']);
 }
@@ -201,7 +203,9 @@ export const DETAIL_ACTIONS: Record<string, Action> = {
     const m = document.getElementById('dc-menu');
     if (!b || !m) return;
     m.innerHTML = `<button type="button" role="menuitem" data-act="go" data-bid="${esc(bid)}" data-path="">${icon('folder')}Open</button>` +
-      `<button type="button" role="menuitem" data-act="rename-bucket" data-bid="${esc(bid)}">${icon('edit')}Rename…</button>` +
+      `<button type="button" role="menuitem" data-act="edit-bucket" data-bid="${esc(bid)}">${icon('edit')}Edit…</button>` +
+      `<button type="button" role="menuitem" data-act="rename-bucket" data-bid="${esc(bid)}">${icon('text')}Rename…</button>` +
+      `<button type="button" role="menuitem" data-act="autolabel" data-bid="${esc(bid)}" data-path="">${icon('robot')}Label with model…</button>` +
       `<button type="button" role="menuitem" data-act="redetect" data-bid="${esc(bid)}" data-path="">${icon('refresh')}Re-detect format</button>` +
       `<button type="button" role="menuitem" class="danger" data-act="delete-bucket" data-bid="${esc(bid)}">${icon('trash')}${b.kind === 'managed' ? 'Delete…' : 'Unlink…'}</button>`;
     floatPopover(m, el);

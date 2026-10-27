@@ -36,7 +36,16 @@ export interface Bucket {
   sessions: BucketSession[];
   /** optional sample image paths for the card mosaic (not in the contract yet: else the page asks search) */
   samples?: string[];
+  /** S3 links: the connection + bucket + prefix, the load mode, whether the local copy is in use (pulled at least
+   *  once; root is then that folder), the last finished pull, and the s3:// root */
+  connection_id?: string | null; s3_bucket?: string | null; prefix?: string;
+  mode?: S3Mode; local_ready?: boolean; synced_at?: number | null; s3_root?: string;
+  /** PATCH / POST answers that queued a pull */
+  job_id?: number | null;
 }
+
+/** An S3 link is streamed (read-only) or loaded into an editable local folder (re-synced on demand). */
+export type S3Mode = 'stream' | 'local';
 
 /** GET /api/dc/summary */
 export interface Summary {
@@ -82,6 +91,31 @@ export interface SendResult { target: SendTarget; id: string; url: string }
 
 export interface CreateBucketBody {
   name: string; kind: BucketKind; path?: string; connection_id?: string; s3_bucket?: string; prefix?: string; tags?: string[];
+  mode?: S3Mode;
+}
+
+/** POST /api/dc/buckets/{bid}/sync */
+export interface SyncResult { job_id: number | null; result: { downloaded: number; bytes: number; total: number } | null }
+
+/** GET /api/dc/buckets/{bid}/source: what New label › Data Center needs to read a bucket folder */
+export interface DcSource {
+  source: { kind: 'local'; path: string } | { kind: 's3'; connection_id: string; bucket: string; prefix: string };
+  format: Format | null; classes: string[]; bucket: string; path: string; name: string;
+}
+
+/** POST /api/dc/autolabel */
+export interface AutolabelBody {
+  bucket: string; path: string;
+  model: { registry_id?: string; connection_id?: string; model_id?: string; version?: string | null };
+  target: 'inplace' | 'copy'; new_name?: string; conf?: number; write_yolo?: boolean; name?: string;
+}
+export interface AutolabelResult { job_id: number | null; bucket: string }
+/** the job's result */
+export interface AutolabelDone {
+  bucket: string; session?: { id: string; name: string; url: string };
+  labeled?: { n_images: number; n_shapes: number; failed: number; cancelled: boolean };
+  written?: { labels: number; data_yaml: string; classes: string[] };
+  copied?: { files: number; bytes: number } | null;
 }
 
 // ---- AI assistant: POST /api/llm/dc/chat (NDJSON) and /api/llm/dc/confirm

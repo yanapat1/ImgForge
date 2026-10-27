@@ -16,6 +16,7 @@ import { openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } from './ops.js';
+import { downloadZip } from './edit.js';
 import { openSend } from './send.js';
 import {
   baseName, bucketOf, curBucket, D, fbadge, fdot, fmtDate, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, parentOf,
@@ -465,7 +466,11 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
   'clear-nameq': () => { D.nameQ = ''; closeFloat(); void loadListing(); },
   'send-menu': (el) => menu(el, `<div class="dc-menu-h">Send ${D.sel.size ? `${fmtN(D.sel.size)} selected` : 'this folder'} to</div>` +
     `<button type="button" role="menuitem" data-act="send" data-target="visualize">${icon('scatter')}Visualize<span class="faint">explore embeddings</span></button>` +
-    `<button type="button" role="menuitem" data-act="send" data-target="label">${icon('edit')}Label<span class="faint">a labeling project</span></button>`),
+    `<button type="button" role="menuitem" data-act="send" data-target="label">${icon('edit')}Label<span class="faint">a labeling project</span></button>` +
+    (D.sel.size ? '' : `<div class="dc-menu-h">This folder</div>` +
+      `<button type="button" role="menuitem" data-act="autolabel" data-path="${esc(D.path)}">${icon('robot')}Label with model…<span class="faint">auto-label every image</span></button>` +
+      `<button type="button" role="menuitem" data-act="export-zip"${curBucket()?.kind === 's3' && !curBucket()?.local_ready ? ' disabled title="Load the bucket into local first (Edit)"' : ''}>${icon('download')}Export (zip)<span class="faint">download this folder</span></button>`)),
+  'export-zip': () => { closeFloat(); if (D.bid) downloadZip(D.bid, D.path); },
   send: (el) => {
     closeFloat();
     const bid = el.dataset['bid'] || D.bid || D.focus;

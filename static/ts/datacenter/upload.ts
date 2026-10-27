@@ -1,6 +1,7 @@
 // Getting data in. The Import data dialog has three ways: a new managed bucket filled with dropped / chosen files or a
 // zip (unpacked by the server), a link to a local folder (the GET /api/fs/browse folder browser, as in the Settings
-// and the labeling wizard), or a link to an S3 bucket + prefix through one of the user's S3 connections (read-only).
+// and the labeling wizard), or a link to an S3 bucket + prefix through one of the user's S3 connections, streamed (read-only)
+// or loaded into local (a pull job; edit.ts trackPull follows it).
 // Also the folder's Upload button and files dropped on the folder view (browser.ts): uploadFiles sends them with XHRs
 // (byte progress; ≤ 8 files / 16 MB per request, one after the other) into the open folder, the progress shown in
 // the folder strip; the answer's `retagged` gets the format-change toast (ops.ts).
@@ -12,10 +13,11 @@ import { toast } from '../core/toast.js';
 import { openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
+import { modeCards, trackPull } from './edit.js';
 import { showRetag } from './ops.js';
 import { bucketOf, D, fmtN, fmtSize, hooks } from './state.js';
 import type { BrowseResult, ConnectionsPayload } from '../types-settings.js';
-import type { BucketKind, CreateBucketBody, UploadResult } from '../types-datacenter.js';
+import type { BucketKind, CreateBucketBody, S3Mode, UploadResult } from '../types-datacenter.js';
 
 const BATCH_FILES = 8, BATCH_BYTES = 16 << 20;
 
@@ -98,6 +100,7 @@ interface Imp {
   way: Way; files: File[]; name: string;
   browse: BrowseResult | null; path: string; berr: string | null;
   conns: Array<{ id: string; name: string }> | null; conn: string; s3buckets: string[] | null; s3bucket: string; prefix: string; s3err: string | null;
+  mode: S3Mode;
   progress: string;
 }
 
@@ -130,7 +133,9 @@ function body(I: Imp): string {
         `<label class="fld"><span>Bucket</span><select id="dc-s3bucket"${I.s3buckets ? '' : ' disabled'}>${(I.s3buckets ?? []).map((x) => `<option${x === I.s3bucket ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label></div>` +
         `<label class="fld"><span>Prefix (optional)</span><input type="text" class="txt" id="dc-s3prefix" value="${esc(I.prefix)}" placeholder="datasets/traffic/" autocomplete="off"></label>` +
         (I.s3err ? `<div class="status-line err">${icon('alert')}${esc(I.s3err)}</div>` : '') +
-        '<p class="hint">S3 links are read-only: list, view, detect, tag and send them; copy into a managed bucket to change files.</p>';
+        `<div class="m-lbl">Load mode</div>${modeCards(I.mode)}` +
+        `<p class="hint">${I.mode === 'stream' ? 'A streamed link is read-only: list, view, detect, tag and send it. Switch to Load into local later in Edit.'
+          : 'The bucket is downloaded into the managed store, then you can change, label and export it. Re-sync from S3 any time (Edit).'}</p>`;
   }
   return `<div class="dc-imp"><div class="dc-ways" role="tablist" aria-label="Where the data comes from">${wayTab(I, 'managed', 'upload', 'Upload files')}${wayTab(I, 'local', 'folder', 'Local folder')}${wayTab(I, 's3', 'cloud', 'S3 bucket')}</div>` +
     `<label class="fld"><span>Bucket name</span><input type="text" class="txt" id="dc-imp-name" value="${esc(I.name)}" placeholder="e.g. traffic-cams-2026" autocomplete="off" spellcheck="false"></label>` +
@@ -160,7 +165,7 @@ async function walk(items: DataTransferItemList): Promise<File[]> {
 /** The Import data dialog; way 'managed' (upload) by default, 'local' / 's3' for Link source. */
 export async function openImport(way: Way = 'managed'): Promise<void> {
   if (!can('data.manage')) { toast(cannot('add data'), 'err'); return; }
-  const I: Imp = { way, files: [], name: '', browse: null, path: '', berr: null, conns: null, conn: '', s3buckets: null, s3bucket: '', prefix: '', s3err: null, progress: '' };
+  const I: Imp = { way, files: [], name: '', browse: null, path: '', berr: null, conns: null, conn: '', s3buckets: null, s3bucket: '', prefix: '', s3err: null, progress: '', mode: 'stream' };
   let root: HTMLElement | null = null;
   const paint = (): void => {
     const host = root?.querySelector('.dc-imp');
@@ -216,7 +221,9 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
       r.addEventListener('click', (e) => {
         const t = e.target instanceof Element ? e.target : null;
         const w = t?.closest<HTMLElement>('[data-way]'), fs = t?.closest<HTMLElement>('[data-fs]'), pk = t?.closest<HTMLElement>('[data-pick]');
-        if (w) switchWay((w.dataset['way'] as Way | undefined) ?? 'managed');
+        const md = t?.closest<HTMLElement>('[data-mode]');
+        if (md) { I.mode = md.dataset['mode'] === 'local' ? 'local' : 'stream'; paint(); }
+        else if (w) switchWay((w.dataset['way'] as Way | undefined) ?? 'managed');
         else if (fs) void browse(fs.dataset['fs'] ?? '');
         else if (pk) { input.toggleAttribute('webkitdirectory', pk.dataset['pick'] === 'dir'); input.click(); }
         else if (t?.closest('#dc-dz')) { input.removeAttribute('webkitdirectory'); input.click(); }
@@ -244,7 +251,7 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
       if (kind === 'local') { if (!I.path) return 'Pick a folder'; req.path = I.path; }
       if (kind === 's3') {
         if (!I.conn || !I.s3bucket) return 'Pick a connection and a bucket';
-        req.connection_id = I.conn; req.s3_bucket = I.s3bucket; req.prefix = I.prefix.trim().replace(/^\/+/, '');
+        req.connection_id = I.conn; req.s3_bucket = I.s3bucket; req.prefix = I.prefix.trim().replace(/^\/+/, ''); req.mode = I.mode;
       }
       let b;
       try { b = await api.createBucket(req); } catch (e) { return `Could not create the bucket: ${errText(e)}`; }
@@ -257,6 +264,7 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
       }
       await hooks.reload();
       hooks.navigate(b.id, '');
+      if (b.job_id != null) void trackPull(b.job_id, b.name);
       return null;
     },
   });

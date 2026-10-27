@@ -2,13 +2,15 @@
 // Pure types, no runtime code. Forms are `type` aliases (not interfaces) so the dialog's data-f="a.b.c" writer can
 // view them as plain records. Each form carries a `form` tag, so `SET.form` narrows like a discriminated union.
 
+import type { Bucket, Format } from './types-datacenter.js';
+
 // ------------------------------------------------------------------ shared
 export type StatusKind = 'busy' | 'ok' | 'err' | '';
 /** One status line (statusHTML). */
 export interface StatusLine { kind: StatusKind; text: string }
 
 export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace' | 'account' | 'users';
-export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'labeling' | 'embeddings' | 'union' | 'conn' | 'model' | 'llm-form' | 'llm-add';
+export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'dc' | 'labeling' | 'embeddings' | 'union' | 'conn' | 'model' | 'llm-form' | 'llm-add';
 
 /** openSettings options (the Sessions home opens the dialog in solo mode). */
 export interface OpenSettingsOpts {
@@ -118,6 +120,12 @@ export type LocalForm = {
   id?: string | undefined; path?: string | undefined; name?: string | undefined;
   unit?: MapUnit | undefined; cff?: boolean | undefined;
   browse?: BrowseResult | null | undefined;
+  status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
+};
+/** New visualize › Data Center: a folder of one of the user's Data Center buckets (POST /api/dc/send, target visualize). */
+export type DcForm = {
+  form: 'dc';
+  buckets: Bucket[] | null; bid: string; path: string; dirs: string[] | null; format: Format | null; name: string;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
 export type EmbeddingsForm = {
@@ -255,7 +263,7 @@ export type LlmForm = {
   lastTest: { ok: boolean; sig: string } | null; saveStatus: StatusLine | null;
 };
 
-export type SetForm = S3Form | LocalForm | EmbeddingsForm | LabelingForm | UnionForm | ConnForm | ModelForm | LlmForm;
+export type SetForm = S3Form | LocalForm | DcForm | EmbeddingsForm | LabelingForm | UnionForm | ConnForm | ModelForm | LlmForm;
 
 // ------------------------------------------------------------------ the dialog state
 export interface SetState {

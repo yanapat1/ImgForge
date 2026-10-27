@@ -4,8 +4,8 @@
 
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
-  Bucket, CreateBucketBody, Format, FolderStats, Listing, LsSort, Op, OpsResult, SearchResult, SendResult, SendTarget,
-  Summary, Tag, TagCount, UndoResult,
+  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, Format, FolderStats, Listing, LsSort, Op, OpsResult,
+  S3Mode, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, UndoResult,
 } from '../types-datacenter.js';
 
 const B = (bid: string): string => `api/dc/buckets/${encodeURIComponent(bid)}`;
@@ -30,6 +30,11 @@ export async function listBuckets(q = '', tags: readonly string[] = [], formats:
 export const getBucket = (bid: string): Promise<Bucket> => getJSON<Bucket>(B(bid));
 export const createBucket = (body: CreateBucketBody): Promise<Bucket> => postJSON<Bucket>('api/dc/buckets', body);
 export const renameBucket = (bid: string, name: string): Promise<Bucket> => sendJSON<Bucket>('PATCH', B(bid), { name });
+export const updateBucket = (bid: string, body: { name?: string; mode?: S3Mode }): Promise<Bucket> => sendJSON<Bucket>('PATCH', B(bid), body);
+export const syncBucket = (bid: string): Promise<SyncResult> => postJSON<SyncResult>(`${B(bid)}/sync`, {});
+export const exportUrl = (bid: string, path = ''): string => `${B(bid)}/export${qs({ path })}`;
+export const source = (bid: string, path = ''): Promise<DcSource> => getJSON<DcSource>(`${B(bid)}/source${qs({ path })}`);
+export const autolabel = (body: AutolabelBody): Promise<AutolabelResult> => postJSON<AutolabelResult>('api/dc/autolabel', body);
 export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: boolean }> =>
   sendJSON<{ ok: boolean }>('DELETE', `${B(bid)}${deleteFiles ? '?delete_files=1' : ''}`);
 

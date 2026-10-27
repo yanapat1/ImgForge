@@ -6,6 +6,7 @@ import { $, $req, esc, icon, syncRanges } from '../core/dom.js';
 import { setWheelMode, wheelModeHTML } from '../core/gesture.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { vizUrl } from '../core/nav.js';
+import * as dcApi from '../datacenter/api.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
 import { updateMarks } from '../plot/marks.js';
 import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, EmbeddingsSummary, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
@@ -131,6 +132,28 @@ function editDataset(id: string): void {
   else if (d.kind === 'union') newUnionForm(d);
   else if (d.kind === 'embeddings') { SET.view = 'embeddings'; SET.sec = 'datasets'; SET.form = { form: 'embeddings', id: d.id, path: d.path, name: d.name }; renderSettings(); void embBrowse(d.path); }
   else { SET.view = 'local'; SET.sec = 'datasets'; SET.form = { form: 'local', id: d.id, path: d.path, name: d.name, unit: d.unit, cff: d.class_from_folder }; renderSettings(); void localBrowse(d.path); }
+}
+
+async function dcLoad(): Promise<void> {
+  const f = formOf('dc');
+  try { f.buckets = await dcApi.listBuckets(); f.status = null; } catch (e) { f.buckets = []; f.status = { kind: 'err', text: errText(e) }; }
+  f.bid = f.buckets[0]?.id ?? '';
+  renderSettings();
+  if (f.bid) await dcBrowse('');
+}
+
+async function dcBrowse(path: string): Promise<void> {
+  const f = formOf('dc');
+  f.path = path; f.dirs = null; f.format = null;
+  f.status = { kind: 'busy', text: 'reading folder…' };
+  renderSettings();
+  try {
+    const ls = await dcApi.ls(f.bid, path, 0, 500);
+    f.dirs = ls.entries.filter((e) => e.type === 'dir').map((e) => e.name);
+    f.format = ls.format;
+    f.status = null;
+  } catch (e) { f.status = { kind: 'err', text: errText(e) }; }
+  renderSettings();
 }
 
 async function s3Browse(): Promise<void> {
@@ -293,6 +316,14 @@ const SET_ACTIONS: Record<string, SetAction> = {
   add: () => { SET.view = 'add'; renderSettings(); },
   back,
   'new-s3': () => newS3Form(null),
+  'new-dc': () => { SET.view = 'dc'; SET.form = { form: 'dc', buckets: null, bid: '', path: '', dirs: null, format: null, name: '' }; renderSettings(); void dcLoad(); },
+  'dc-crumb': (b) => dcBrowse(dd(b, 'to')),
+  'dc-folder': (b) => { const f = formOf('dc'); return dcBrowse([f.path, dd(b, 'name')].filter(Boolean).join('/')); },
+  'save-dc': () => {
+    const f = formOf('dc');
+    const name = f.name.trim();
+    return saveDataset(f, 'creating…', () => dcApi.send(f.bid, [f.path], 'visualize', name, 'detect'), true);
+  },
   'new-local': () => { SET.view = 'local'; SET.form = { form: 'local', path: '', name: '' }; renderSettings(); void localBrowse(''); },
   'new-labeling': () => newLabelingForm(null),
   'new-embeddings': () => { SET.view = 'embeddings'; SET.form = { form: 'embeddings', path: '', name: '' }; renderSettings(); void embBrowse(''); },
@@ -439,6 +470,7 @@ const SET_ACTIONS: Record<string, SetAction> = {
 const SET_CHANGES: Record<string, SetChange> = {
   'conn-pick': () => { const f = formOf('s3'); f.buckets = null; f.browse = null; f.connStatus = null; renderSettings(); if (f.connId !== 'new') void testConn(); },
   'bucket-pick': () => { formOf('s3').prefix = ''; void s3Browse(); },
+  'dc-bucket': () => { void dcBrowse(''); },
   'lds-project': () => { pickLabelingTask(formOf('labeling')); renderSettings(); },
   'lds-task': () => renderSettings(),
   'mode-pick': () => document.querySelectorAll('.radio-card').forEach((c) => c.classList.toggle('sel', !!c.querySelector<HTMLInputElement>('input')?.checked)),

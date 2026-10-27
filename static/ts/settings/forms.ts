@@ -64,7 +64,9 @@ export function renderDatasetsSec(): string {
     const tile = (act: string, cls: string, ico: string, title: string, text: string): string =>
       `<button class="tile" data-act="${act}"><span class="ds-icon${cls ? ` ${cls}` : ''}">${icon(ico)}</span><b>${title}</b><span>${text}</span></button>`;
     return '<section>' + (add ? '' : `<p class="sec-note">${esc(cannot('add new datasets'))}. You can still combine the ones you can open.</p>`) +
-      '<div class="tiles">' + (add ? tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
+      '<div class="tiles">' + (add ? tile('new-dc', 'dc', 'db', 'From Data Center',
+        'A bucket (or one of its folders) you keep in Data Center: uploaded, a linked folder or S3. Read in place, nothing is copied.') +
+      tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
         'A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.') +
       tile('new-local', '', 'folder', 'Local folder',
         'A folder of images (labels optional) or a YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.') +
@@ -78,6 +80,7 @@ export function renderDatasetsSec(): string {
   }
   if (SET.view === 's3') return renderS3Form();
   if (SET.view === 'local') return renderLocalForm();
+  if (SET.view === 'dc') return renderDcForm();
   if (SET.view === 'labeling') return renderLabelingForm();
   if (SET.view === 'embeddings') return renderEmbeddingsForm();
   if (SET.view === 'union') return renderUnionForm();
@@ -264,6 +267,30 @@ function renderLocalForm(): string {
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-local" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-local" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
+}
+
+// ---- a Data Center bucket folder: opened through POST /api/dc/send (target visualize), which saves the dataset
+const DC_VISUAL = new Set(['yolo-detect', 'yolo-seg', 'yolo-pose', 'yolo-obb', 'images', 'classification', 'embeddings']);
+
+function renderDcForm(): string {
+  const f = formOf('dc');
+  if (f.buckets === null) return `<section>${statusHTML(f.status || { kind: 'busy', text: 'loading the Data Center buckets…' })}</section>`;
+  const b = f.buckets.find((x) => x.id === f.bid);
+  const parts = f.path ? f.path.split('/') : [];
+  const fk = f.format ? String(f.format.format) : '';
+  const ok = !!b && !!f.format && DC_VISUAL.has(fk);
+  const pick = f.buckets.length
+    ? `<label class="fld">Bucket<select data-f="bid" data-act-change="dc-bucket">${f.buckets.map((x) =>
+      `<option value="${esc(x.id)}"${x.id === f.bid ? ' selected' : ''}>${esc(x.name)}${x.format ? ` · ${esc(x.format.label)}` : ''}${x.stats?.images != null ? ` · ${x.stats.images.toLocaleString('en-US')} img` : ''}</option>`).join('')}</select></label>`
+    : `<div class="status-line">${icon('db')}<span>No buckets yet: add data in Data Center first.</span></div>`;
+  const st = f.status || (f.format ? (ok ? { kind: 'ok' as const, text: `${f.format.label}${f.format.classes ? ` · ${f.format.classes} classes` : ''}` }
+    : { kind: 'err' as const, text: `${f.format.label}: the visualizer opens YOLO folders, plain image folders, classification folders and embeddings${fk === 'coco' || fk === 'voc' ? ' (convert it to YOLO first)' : ''}` }) : null);
+  return '<section><div class="form-card done"><div class="step-head">' + icon('db') + 'A folder of a Data Center bucket</div>' + pick +
+    (b ? `<div class="browser">${crumbsHTML(b.name, parts, 'dc-crumb')}${foldersHTML((f.dirs ?? []).map((n) => ({ name: n })), 'dc-folder', f.dirs ? 'no sub-folders here' : '…')}</div>` : '') +
+    statusHTML(st) + '<p class="sec-note">Read in place from the bucket: nothing is copied.</p></div>' +
+    `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name)}" placeholder="${esc(b ? b.name + (f.path ? ` · ${f.path}` : '') : '')}"></label></div>` +
+    `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
+    `<button class="primary" data-act="save-dc" ${ok ? '' : 'disabled'}>${icon('play')}Create &amp; open</button></div></section>`;
 }
 
 // ---- embeddings folder: <name>.npy vector files + meta.csv (dataviz/data/embedding_source.py), read in place

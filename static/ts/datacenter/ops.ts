@@ -241,18 +241,20 @@ async function renameBucket(bid: string): Promise<void> {
   });
 }
 
-async function deleteBucket(bid: string): Promise<void> {
+export async function deleteBucket(bid: string): Promise<void> {
   const b = bucketOf(bid);
   if (!b) return;
   const managed = b.kind === 'managed';
+  const copy = b.kind === 's3' && !!(b.local_ready || b.synced_at);
   await openDialog({
     title: managed ? `Delete ${b.name}?` : `Unlink ${b.name}?`, ok: managed ? 'Delete' : 'Unlink', okClass: 'danger-btn',
     body: managed
       ? `<p class="muted">The bucket and its files under the managed store are removed. Sessions made from it keep working until their data is needed again.</p>` +
         `<label class="check"><input type="checkbox" id="dc-delfiles" checked> Also delete the ${esc(fmtN(b.stats?.images ?? null))} files</label>`
-      : `<p class="muted">Only the link goes: the ${esc(SOURCE[b.kind]?.[1] ?? '')} source <code>${esc(b.root)}</code> is not touched.</p>`,
+      : `<p class="muted">Only the link goes: the ${esc(SOURCE[b.kind]?.[1] ?? '')} source <code>${esc(b.s3_root ?? b.root)}</code> is not touched.</p>` +
+        (copy ? `<label class="check"><input type="checkbox" id="dc-delfiles" checked> Also delete the local copy</label>` : ''),
     onOk: async (root) => {
-      const files = managed && !!root.querySelector<HTMLInputElement>('#dc-delfiles')?.checked;
+      const files = (managed || copy) && !!root.querySelector<HTMLInputElement>('#dc-delfiles')?.checked;
       try { await api.deleteBucket(bid, files); } catch (e) { return errText(e); }
       D.focus = null;
       toast(`${managed ? 'Deleted' : 'Unlinked'} ${b.name}`, 'ok');
