@@ -13,9 +13,43 @@ import time
 import uuid
 from pathlib import Path
 
+# pytest -n <workers> (pytest-xdist): numpy / BLAS / numba / torch start one thread per core in EVERY worker (and in every
+# app.py a smoke test launches), so 16 workers on 128 cores ran 2000 threads and the suite got slower than serial. Worse,
+# every index build spawns hardware.workers('proc') decode processes (16 on 128 cores): 32 workers x 16 = 560 pythons
+# and the 64 GiB container was OOM-killed. Each worker is pinned to its own slice of the cores instead (sched_setaffinity
+# is what hardware._cpu_count reads, and children -- decode pools, app.py -- inherit it), with BLAS threads to match.
+# Set before anything imports numpy. A serial run is left as it is.
+if os.environ.get('PYTEST_XDIST_WORKER_COUNT'):
+    _cores = sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else list(range(os.cpu_count() or 2))
+    _n = int(os.environ['PYTEST_XDIST_WORKER_COUNT'])
+    _share = max(2, len(_cores) // _n)
+    _i = int(os.environ.get('PYTEST_XDIST_WORKER', 'gw0').lstrip('gw') or 0)
+    if hasattr(os, 'sched_setaffinity'):
+        _start = (_i * _share) % max(1, len(_cores) - _share + 1)
+        os.sched_setaffinity(0, _cores[_start:_start + _share])
+    for _var in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMBA_NUM_THREADS',
+                 'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+        os.environ.setdefault(_var, str(_share))
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))     # makes `dataviz` importable
+
+
+def pytest_xdist_auto_num_workers(config):
+    """-n auto. xdist's default is one worker per core (128 here) at ~2 GiB each, which OOM-kills a 64 GiB container.
+    Measured on 128 cores / 64 GiB: -n 8 89 s (22 GiB peak), 12 75 s (30 GiB), 16 70 s (32 GiB, a timing test flaked);
+    the floor is the UMAP numba compile (~30 s) every worker pays. DATAVIZ_TEST_WORKERS overrides."""
+    if os.environ.get('DATAVIZ_TEST_WORKERS'):
+        return int(os.environ['DATAVIZ_TEST_WORKERS'])
+    n = min(12, max(1, len(os.sched_getaffinity(0)) // 4))
+    try:                                                    # a visible cgroup v2 limit: half of it at ~2.5 GiB a worker
+        limit = open('/sys/fs/cgroup/memory.max').read().strip()
+        if limit != 'max':
+            n = min(n, max(1, int(limit) // 2 // (5 << 29)))
+    except (OSError, ValueError):
+        pass
+    return n
 
 
 def pytest_configure(config):
@@ -56,7 +90,9 @@ def pg_server():
         yield from _with_template(_admin_url(url, 'postgres'))
         return
     from conftest_io import docker_db, pg_ready
-    with docker_db('dataviz-pgtest', PG_IMAGE, {'POSTGRES_PASSWORD': 'pw'}, 5432, pg_ready, 120) as (host, port):
+    # every worker holds up to 2 x pool_size (5) connections: the default 100 ran out at -n 16
+    with docker_db('dataviz-pgtest', PG_IMAGE, {'POSTGRES_PASSWORD': 'pw'}, 5432, pg_ready, 120,
+                   args=('-c', 'max_connections=1000')) as (host, port):
         yield from _with_template(f'postgresql://postgres:pw@{host}:{port}/postgres')
     del psycopg
 

@@ -12,6 +12,7 @@ import { S, UI } from '../core/state.js';
 import type { ImagesPayload } from '../types.js';
 import { FB, filterAgg } from './filter-bar.js';
 import { TIPS_HTML } from './gallery.js';
+import { isImageUnit } from './preview.js';
 
 /** GET api/edits/status: what a re-index would place in the plot. */
 export interface EditStatus { pending_new: number; moved: number; images?: unknown }
@@ -26,6 +27,20 @@ const IG: ImageGridState = { bg: [], pending: {}, total: 0, loaded: false, loadi
   listRank: null, fKey: '', rank: null, rankKey: null, ver: {}, status: { pending_new: 0, moved: 0 } };
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
+// a named list of images shown instead of every image (the Compare tab's "Only in A", "Labels differ"…); the
+// filter bar still applies. Cleared by its × chip, or when a box selection fills the panel.
+let subset: { names: string[]; title: string; set: Set<string> } | null = null;
+
+/** Show only `names` (in display order) in the image browser, titled `title`; null goes back to every image. */
+export function setImageSubset(names: string[] | null, title = ''): void {
+  subset = names ? { names: names.slice().sort(collator.compare), title, set: new Set(names) } : null;
+  IG.page = 0;
+  IG.list = null;
+  renderImageGrid();
+}
+export const imageSubset = (): { names: string[]; title: string } | null => subset;
+window.addEventListener('selection-changed', () => { if (S.sel.length && subset) { subset = null; IG.list = null; } });
+
 export async function loadImages(): Promise<void> {
   if (IG.loading) return IG.loading;
   IG.loading = (async () => {
@@ -38,7 +53,7 @@ export async function loadImages(): Promise<void> {
       IG.list = null;
       IG.rank = null;
       const st = await getJSON<EditStatus>('api/edits/status').catch(() => null);
-      if (st) IG.status = st;
+      if (st) IG.status = livePending === null ? st : { ...st, pending_new: livePending };
     } finally { IG.loading = null; }
   })();
   return IG.loading;
@@ -58,6 +73,16 @@ function ranks(): Ranks {
 
 // the images that pass the filter bar, in display order
 export function imageOrder(): string[] {
+  if (subset) {
+    const res: FilterResult | null = FB.res;
+    if (!res || !res.mask || !res.active) return subset.names;
+    const all = new Set(baseOrder());                // the filter's images (+ background ones that pass)
+    return subset.names.filter((n) => all.has(n));
+  }
+  return baseOrder();
+}
+
+function baseOrder(): string[] {
   const R = ranks();
   const res: FilterResult | null = FB.res, F = FB.F;
   if (!res || !res.mask || !res.active) {
@@ -96,7 +121,7 @@ function tileHTML(name: string): string {
   const v = IG.ver[name] ? `&v=${IG.ver[name]}` : '';
   return `<div class="card img-card${n ? '' : ' bg'}" data-img="${esc(name)}" role="button" tabindex="0" title="${esc(name)}">` +
     `<img loading="lazy" decoding="async" alt="" src="api/img/thumb?name=${encodeURIComponent(name)}&size=${thumbSize()}${v}">` +
-    `<span class="badge">${n ? `${n} box${n === 1 ? '' : 'es'}` : 'background'}</span>` +
+    (isImageUnit() ? '' : `<span class="badge">${n ? `${n} box${n === 1 ? '' : 'es'}` : 'background'}</span>`) +
     `<span class="img-name">${esc(name)}</span></div>`;
 }
 
@@ -114,7 +139,8 @@ export function renderImageGrid(): void {
   const list = imageOrder();
   const fres: FilterResult | null = FB.res;
   const filtered = fres && fres.active;
-  $req('gallery-title').textContent = filtered ? 'Filtered images' : 'All images';
+  $req('gallery-title').textContent = subset ? subset.title : filtered ? 'Filtered images' : 'All images';
+
   $req('gallery-count').textContent = `${list.length.toLocaleString()} image${list.length === 1 ? '' : 's'}`;
   renderBanner();
   if (!list.length) {
@@ -126,7 +152,15 @@ export function renderImageGrid(): void {
   const pages = Math.ceil(list.length / size);
   IG.page = Math.max(0, Math.min(IG.page, pages - 1));
   const start = IG.page * size;
-  g.innerHTML = `<details class="img-hint muted"><summary>${icon('image')}No selection: every image is listed. Lasso dots in the plot to see their box crops · click an image to view, copy or edit it</summary>${TIPS_HTML}</details>` +
+  if (!g.dataset['subsetBound']) {                // the × of a subset: back to every image (one delegated listener)
+    g.dataset['subsetBound'] = '1';
+    g.addEventListener('click', (e) => {
+      if (e.target instanceof Element && e.target.closest('[data-subset-clear]')) setImageSubset(null);
+    });
+  }
+  const head = subset ? `<div class="img-subset"><span>${esc(subset.title)}</span>` +
+    `<button type="button" class="ghost" data-subset-clear title="Show every image again">${icon('x')}All images</button></div>` : '';
+  g.innerHTML = head + `<details class="img-hint muted"><summary>${icon('image')}No selection: every image is listed. Lasso dots in the plot to see their box crops · click an image to view, copy or edit it</summary>${TIPS_HTML}</details>` +
     list.slice(start, start + size).map(tileHTML).join('');
   g.scrollTop = 0;
   $req('pager').innerHTML = pages > 1
@@ -149,7 +183,7 @@ export function onFilterChanged(): void {
 // after a save in the viewer: new thumbnail, pending count, banner
 export function onImageEdited(name: string, status?: EditStatus | null): void {
   IG.ver[name] = (IG.ver[name] || 0) + 1;
-  if (status) IG.status = status;
+  if (status) IG.status = livePending === null ? status : { ...status, pending_new: livePending };
   void loadImages().then(() => {
     if (!S.sel.length) renderImageGrid();
     else renderBanner();
@@ -164,7 +198,8 @@ function renderBanner(): void {
   el.classList.toggle('hidden', !n && !m);
   if (!n && !m) return;
   el.innerHTML = `${icon('alert')}<span>${n ? `<b>${n}</b> new box${n === 1 ? '' : 'es'}` : ''}${n && m ? ' and ' : ''}` +
-    `${m ? `<b>${m}</b> moved` : ''} since the index: re-index to place them in the plot.</span>` +
+    `${m ? `<b>${m}</b> moved` : ''} since the index${livePending !== null && n
+      ? ': shown as provisional dots (rings), re-index to place them exactly.' : ': re-index to place them in the plot.'}</span>` +
     `<button id="edit-reindex" class="ghost">${icon('refresh')}Re-index</button>`;
   $req('edit-reindex').onclick = reindex;
 }
@@ -180,3 +215,12 @@ async function reindex(): Promise<void> {
 }
 
 export const bannerStatus = (): EditStatus => IG.status;
+
+// a session with a live feed (core/live.ts): a box drawn in this page's editor is also a live `new` entry, so the
+// count of not-yet-indexed boxes comes from the feed's pending_new alone (never api/edits/status + the feed)
+let livePending: number | null = null;
+export function setLivePending(n: number | null): void {
+  livePending = n;
+  if (n !== null) IG.status = { ...IG.status, pending_new: n };
+  renderBanner();
+}

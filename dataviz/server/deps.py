@@ -79,4 +79,13 @@ def kind_of(state):
 def capabilities(state):
     """What the page may offer for the open session: one place instead of kind checks spread over the page."""
     emb = kind_of(state) == 'embeddings'
-    return {'boxes': not emb, 'images': not emb, 'curation': not emb, 'models': not emb, 'meta': emb}
+    # one point per image (data/views.py ImageView): no boxes to edit / fix / score a model against (yet)
+    img = getattr(getattr(state, 'source', None), 'unit', None) == 'image'
+    src = getattr(state, 'source', None)
+    union = kind_of(state) == 'union'
+    return {'union': union, 'live': bool(getattr(src, 'live', False)) or kind_of(state) == 'labeling',
+            'boxes': not emb and not img, 'images': not emb,
+            'curation': not emb and not img and (not union or bool(getattr(src, 'label_writable', False))),
+            'models': not emb and not img, 'meta': emb, 'unit': 'embeddings' if emb else 'image' if img else 'box',
+            # an S3 layout needs the bucket listing: read once the index job has made it
+            'layout': getattr(state.source, 'layout', None) if not emb and getattr(state, 'ready', False) else None}

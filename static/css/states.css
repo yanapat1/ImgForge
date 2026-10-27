@@ -51,3 +51,8 @@ html[data-role="viewer"] #cur-fixall, html[data-role="viewer"] .cur-fixes, html[
 /* rows with metadata instead of boxes in images: no curation, models, box filters or image viewer (the server answers
    409 for those routes anyway) */
 html.no-boxes .needs-boxes, html.no-boxes #activity .act-sep { display: none !important; }
+
+/* ---------------------------------------------------------------- one point per image (main.ts html.image-unit) */
+/* images with no labels (data/views.py ImageView): no box tools, curation or model scoring; images, text search,
+   classes (sub-folders), light and sessions still apply */
+html.image-unit .needs-labels { display: none !important; }

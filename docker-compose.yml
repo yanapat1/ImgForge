@@ -25,7 +25,10 @@ services:
       retries: 30
 
   image-tools:
-    build: .
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.12-slim}   # see the Dockerfile: an earlier build skips reinstalling torch
     image: image-tools:latest
     container_name: image-tools
     restart: unless-stopped

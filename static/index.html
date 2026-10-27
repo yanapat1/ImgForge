@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="static/css/label.css?v=15">
 <link rel="stylesheet" href="static/css/curation.css?v=14">
 <link rel="stylesheet" href="static/css/assistant.css?v=14">
+<link rel="stylesheet" href="static/css/compare.css?v=1">
 <link rel="stylesheet" href="static/css/states.css?v=15">
 <link rel="stylesheet" href="static/css/responsive.css?v=14">
 <link rel="stylesheet" href="static/css/editorial.css?v=3">
@@ -156,14 +157,17 @@
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg></button>
     <button class="act" data-tab="stats" role="tab" aria-selected="false" aria-label="Class stats" title="Class stats">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-bars"/></svg></button>
-    <button id="act-curation" class="act needs-boxes" data-tab="curation" role="tab" aria-selected="false" aria-label="Curation: find and fix label problems" title="Curation — find and fix label / image problems">
+    <button id="act-curation" class="act needs-boxes needs-labels" data-tab="curation" role="tab" aria-selected="false" aria-label="Curation: find and fix label problems" title="Curation — find and fix label / image problems">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-alert"/></svg><span id="act-cur-badge" class="act-badge num hidden"></span></button>
     <!-- model views: need a model (Settings › Models) -->
     <div class="act-sep" role="separator" aria-label="Model views"><span>model</span></div>
-    <button class="act needs-boxes" data-tab="model" role="tab" aria-selected="false" aria-label="Model: predictions vs labels" title="Model — predictions vs labels, likely label errors">
+    <button class="act needs-boxes needs-labels" data-tab="model" role="tab" aria-selected="false" aria-label="Model: predictions vs labels" title="Model — predictions vs labels, likely label errors">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-model"/></svg></button>
-    <button class="act needs-boxes" data-tab="eval" role="tab" aria-selected="false" aria-label="Evaluation: compare models, explain them with the dataset" title="Evaluation — compare models, findings, report">
+    <button class="act needs-boxes needs-labels" data-tab="eval" role="tab" aria-selected="false" aria-label="Evaluation: compare models, explain them with the dataset" title="Evaluation — compare models, findings, report">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eval"/></svg></button>
+    <!-- after the model views (their order is fixed); a combined dataset only (views/compare.ts shows it when api/meta has members) -->
+    <button id="act-compare" class="act hidden" data-tab="compare" role="tab" aria-selected="false" aria-label="Compare: what differs between the combined datasets" title="Compare — what differs between the combined datasets">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg></button>
     <!-- the user menu (views/usermenu.js paints the avatar once the user is known) -->
     <button id="act-user" class="act act-user hidden" aria-haspopup="menu" aria-expanded="false" aria-label="Account" title="Account"></button>
     <button id="btn-settings" class="act act-bottom" aria-label="Settings: datasets, S3 connections, appearance" title="Settings — datasets, S3 / RustFS, theme"
@@ -173,6 +177,15 @@
 
   <!-- LEFT (AI): the assistant chat, next to the plot (views/assistant.js renders it) -->
   <section id="ai-side" class="left-panel hidden" aria-label="AI assistant" data-llm="assistant"></section>
+
+  <!-- LEFT (Compare): two members of a combined dataset (views/compare.ts renders it; the map stays on the right) -->
+  <section id="cmp-side" class="left-panel hidden" aria-label="Compare datasets">
+    <div class="side-head">
+      <h2>Compare</h2>
+      <span id="cmp-sub" class="muted hint"></span>
+    </div>
+    <div id="cmp-body" class="side-scroll cmp-side"></div>
+  </section>
 
   <!-- LEFT (Explore): gallery of selected samples -->
   <section id="gallery-panel" class="left-panel" aria-label="Selection gallery">
@@ -406,6 +419,10 @@
                 <option value="cl_ood_feat">cleanlab: out-of-distribution</option>
                 <option value="cl_ood_prob">cleanlab: out-of-distribution (probs)</option>
               </optgroup>
+              <optgroup label="Compare (combined dataset)" data-needs="union" hidden disabled>
+                <option value="origin">dataset (A / B / …)</option>
+                <option value="diff">compare: box diff</option>
+              </optgroup>
               <optgroup label="Model (Model tab)" data-needs="model" hidden disabled>
                 <option value="m_status">model: found / missed / wrong</option>
                 <option value="m_pred">model: predicted class</option>
@@ -551,7 +568,7 @@
               <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg><span class="fb-t">More filters</span><span id="fb-more-badge" class="badge-count num hidden"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
             <div id="fb-more-pop" class="popover panel hidden fb-pop fb-more" role="group" aria-label="More filters"></div>
           </div>
-          <div id="fb-scope" class="fb-seg needs-boxes" role="group" aria-label="Filter scope" title="Images: a matching image shows all its boxes · Boxes: only the matching boxes">
+          <div id="fb-scope" class="fb-seg needs-boxes needs-labels" role="group" aria-label="Filter scope" title="Images: a matching image shows all its boxes · Boxes: only the matching boxes">
             <button type="button" data-scope="image" aria-pressed="true">Images</button>
             <button type="button" data-scope="box" aria-pressed="false">Boxes</button>
           </div>
@@ -622,7 +639,7 @@
           <h3 id="stat-counts-h">Boxes per class</h3>
           <div id="stat-counts" class="stat"></div>
         </section>
-        <section class="stat-card needs-boxes">
+        <section class="stat-card needs-boxes needs-labels">
           <h3>Box area per class <span class="muted">% of image, log scale</span></h3>
           <div id="stat-area" class="stat"></div>
         </section>
@@ -792,14 +809,15 @@
           <button id="m-prev" class="icon-btn" aria-label="Previous box" title="Previous (←)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg></button>
           <button id="m-next" class="icon-btn" aria-label="Next box" title="Next (→)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-r"/></svg></button>
         </div>
-        <div id="vw-toggles" class="segmented needs-boxes" role="group" aria-label="What to draw">
+        <div id="vw-toggles" class="segmented needs-boxes needs-labels" role="group" aria-label="What to draw">
           <button id="vw-labels" class="view-btn" aria-pressed="true" title="Show / hide the labeled boxes (B)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-eye"/></svg>Labels</button>
           <button id="vw-names" class="view-btn" aria-pressed="true" title="Show / hide the class names on the boxes (L)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Names</button>
           <button id="m-preds" class="view-btn hidden" aria-pressed="false" title="Draw the selected model's predictions (dashed) (P)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-target"/></svg>Predictions</button>
         </div>
-        <button id="vw-edit" class="view-btn needs-boxes" aria-pressed="false" title="Fix boxes or draw missing ones (E) · right-click the image to copy it"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-edit"/></svg>Edit</button>
-        <button id="m-sameimg" class="needs-boxes"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Boxes in this image</button>
+        <button id="vw-edit" class="view-btn needs-boxes needs-labels" aria-pressed="false" title="Fix boxes or draw missing ones (E) · right-click the image to copy it"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-edit"/></svg>Edit</button>
+        <button id="m-sameimg" class="needs-boxes needs-labels"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-image"/></svg>Boxes in this image</button>
         <button id="m-group" class="hidden" title="All dots in the same group as this one"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Its group</button>
+        <button id="m-cmp" class="hidden" title="This image in A and in B, side by side (C)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Compare A | B</button>
         <button id="m-similar" class="primary"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Find similar</button>
         <button id="m-close" class="icon-btn" aria-label="Close" title="Close (Esc)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
       </div>

@@ -383,15 +383,40 @@ def color_hist(paths, samples, progress, bins=8):
     return l2_normalize(_map_cpu(one, paths, progress, 'colour histograms'))
 
 
-def hog(paths, samples, progress, size=64):
-    descriptor = cv2.HOGDescriptor((size, size), (16, 16), (8, 8), (8, 8), 9)
+def _hog_descriptor(gray, cell=8, bins=9):
+    """HOG with cv2.HOGDescriptor's default layout: 2×2-cell blocks at a 1-cell stride, unsigned
+    gradients over `bins` orientation bins (linearly split between the two nearest), L2-Hys blocks.
+    OpenCV 5 moved HOGDescriptor out of the main package (into contrib's xobjdetect), so it is done here."""
+    g = gray.astype(np.float32)
+    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=1)    # ksize=1: the [-1, 0, 1] kernel HOG uses
+    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=1)
+    mag, ang = cv2.cartToPolar(gx, gy, angleInDegrees=True)
+    b = (ang % 180.0) / (180.0 / bins) - 0.5
+    b0 = np.floor(b)
+    w1 = b - b0
+    b0 = b0.astype(np.int64) % bins
+    b1 = (b0 + 1) % bins
+    h, w = g.shape
+    ch, cw = h // cell, w // cell
+    ys, xs = np.mgrid[:h, :w]
+    c = (ys // cell) * cw + xs // cell
+    hist = (np.bincount((c * bins + b0).ravel(), (mag * (1 - w1)).ravel(), ch * cw * bins)
+            + np.bincount((c * bins + b1).ravel(), (mag * w1).ravel(), ch * cw * bins)).reshape(ch, cw, bins)
+    blocks = np.concatenate([hist[:-1, :-1], hist[:-1, 1:], hist[1:, :-1], hist[1:, 1:]], axis=-1)
+    blocks = blocks.reshape(-1, 4 * bins)
+    blocks /= np.sqrt((blocks ** 2).sum(1, keepdims=True)) + 1e-6
+    blocks = np.minimum(blocks, 0.2)                # L2-Hys: clip, then renormalise
+    blocks /= np.sqrt((blocks ** 2).sum(1, keepdims=True)) + 1e-6
+    return blocks.ravel().astype(np.float32)
 
+
+def hog(paths, samples, progress, size=64):
     def one(p):
         gray = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
         if gray is None:                            # unreadable crop: black
             gray = np.zeros((size, size), np.uint8)
         gray = cv2.resize(gray, (size, size), interpolation=cv2.INTER_AREA)
-        return descriptor.compute(gray).ravel()
+        return _hog_descriptor(gray)
     return l2_normalize(_map_cpu(one, paths, progress, 'HOG descriptors'))
 
 

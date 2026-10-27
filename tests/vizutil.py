@@ -19,6 +19,18 @@ def make_yolo(root, classes=('cat', 'dog'), boxes=(('a', '0 0.5 0.5 0.4 0.4\n1 0
     return root
 
 
+def union_session(owner_id, name, parts, visibility='private'):
+    """A combined dataset over the visualizer sessions `parts` ([(sid, alias)]) through the registry -> its id."""
+    from dataviz.data import connections
+    reg = connections.Registry('/nonexistent')
+    ds = reg.upsert_dataset({'kind': 'union', 'name': name, 'parts': [{'id': i, 'alias': a} for i, a in parts]},
+                            owner_id)
+    if visibility != 'private':
+        from dataviz.data import sessions
+        sessions.set_sharing(ds['id'], visibility, [], owner_id)
+    return ds['id']
+
+
 def viz_session(owner_id, name, path, visibility='private', kind='local'):
     """A visualizer session (app.sessions + app.viz_sessions, a local or embeddings folder) -> its id."""
     from dataviz import db
@@ -73,6 +85,9 @@ def make_viz_app(root, max_loaded=4):
             reg = src.feature_registry()
             st = State(src, None, reg, default_feature=next(iter(reg)), jobs=ctx.jobs, cfg=cfg, workspace_root=root,
                        dataset_id=ds['id'])
+        elif ds.get('kind') == 'union':             # a combined dataset: its members through the registry
+            st = State(ctx.datasets.source(ds), None, registry, default_feature='geom', jobs=ctx.jobs, cfg=cfg,
+                       workspace_root=root, dataset_id=ds['id'])
         else:
             st = State(LocalSource(ds['path'], name=ds.get('name')), None, registry, default_feature='geom',
                        jobs=ctx.jobs, cfg=cfg, workspace_root=root, dataset_id=ds['id'])

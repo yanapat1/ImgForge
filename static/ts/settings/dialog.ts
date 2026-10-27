@@ -9,9 +9,9 @@ import { vizUrl } from '../core/nav.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
 import { updateMarks } from '../plot/marks.js';
 import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, EmbeddingsSummary, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
-  SectionId, SetAction, SetChange, SetState } from '../types-settings.js';
-import { connDefaults, connEditable, connKind, connTestText, dd, fillWorkspaceSec, formOf, renderAppearanceSec, renderConnsSec, renderDatasetsSec, renderPlotSec,
-  renderWorkspaceSec, rowAttr, SECTIONS, setDisabled, statusHTML, VIZ_TASKS } from './forms.js';
+  SectionId, SetAction, SetChange, SetState, UnionForm } from '../types-settings.js';
+import { connDefaults, connEditable, connKind, connTestText, dd, defaultAlias, fillWorkspaceSec, formOf, renderAppearanceSec, renderConnsSec, renderDatasetsSec, renderPlotSec,
+  renderWorkspaceSec, rowAttr, SECTIONS, setDisabled, statusHTML, UNION_MAX, unionInput, VIZ_TASKS } from './forms.js';
 import { LAB_ACTIONS, labCancelRec, labInput, labKeydown, loadLabSettings, renderLabelingSec } from './labeling.js';
 import { saveSettings } from '../views/controls.js';
 import { loadModelsData, MODEL_ACTIONS, MODEL_CHANGES, renderModelsSec } from './models.js';
@@ -98,7 +98,7 @@ export function renderSettings(): void {
   count('snav-nms', SET.models.length);
   count('snav-nllm', SET.llm ? SET.llm.providers.length : 0);
   const [title, sub] = SET.solo ? [SET.form && 'id' in SET.form && SET.form.id ? 'Edit session' : 'New session',
-    'One dataset: a YOLO folder or S3 / RustFS prefix, a task of a labeling session, or a folder of embeddings (vectors + a meta table)'] : SECTIONS[SET.sec];
+    'One dataset: a YOLO folder or S3 / RustFS prefix, a task of a labeling session, a folder of embeddings (vectors + a meta table), or 2+ sessions combined'] : SECTIONS[SET.sec];
   $req('sec-title').innerHTML = `${esc(title)}<span class="sub">${esc(sub)}</span>`;
   const body = $req('settings-body');
   body.innerHTML = (SET.error ? `<div class="status-line err">${icon('alert')}${esc(SET.error)}</div>` : '') + RENDERERS[SET.sec]();
@@ -128,8 +128,9 @@ function editDataset(id: string): void {
   if (!d) return;
   if (d.kind === 's3') newS3Form(d);
   else if (d.kind === 'labeling') void newLabelingForm(d);
+  else if (d.kind === 'union') newUnionForm(d);
   else if (d.kind === 'embeddings') { SET.view = 'embeddings'; SET.sec = 'datasets'; SET.form = { form: 'embeddings', id: d.id, path: d.path, name: d.name }; renderSettings(); void embBrowse(d.path); }
-  else { SET.view = 'local'; SET.sec = 'datasets'; SET.form = { form: 'local', id: d.id, path: d.path, name: d.name }; renderSettings(); void localBrowse(d.path); }
+  else { SET.view = 'local'; SET.sec = 'datasets'; SET.form = { form: 'local', id: d.id, path: d.path, name: d.name, unit: d.unit, cff: d.class_from_folder }; renderSettings(); void localBrowse(d.path); }
 }
 
 async function s3Browse(): Promise<void> {
@@ -173,7 +174,7 @@ async function localBrowse(path: string | null | undefined): Promise<void> {
   f.status = { kind: 'busy', text: 'reading folder…' };
   renderSettings();
   try {
-    f.browse = await getJSON<BrowseResult>(`api/fs/browse?path=${encodeURIComponent(path || '')}`);
+    f.browse = await getJSON<BrowseResult>(`api/fs/browse?images=1&path=${encodeURIComponent(path || '')}`);
     f.path = f.browse.path;
     f.status = null;
   } catch (e) { f.status = { kind: 'err', text: errText(e) }; }
@@ -206,7 +207,7 @@ function newS3Form(d: DatasetItem | null): void {
   SET.sec = 'datasets';
   const f: S3Form = { form: 's3', id: d?.id, connId: d ? (d.connection_id ?? 'new') : (SET.conns[0]?.id ?? 'new'),
     conn: { endpoint: '', region: '', verify_ssl: true }, bucket: d?.bucket, prefix: d ? d.prefix : '',
-    mode: d ? d.mode : 'stream', name: d ? d.name : '' };
+    mode: d ? d.mode : 'stream', name: d ? d.name : '', unit: d?.unit, cff: d?.class_from_folder };
   SET.form = f;
   renderSettings();
   if (f.connId !== 'new') void testConn();
@@ -229,6 +230,36 @@ async function newLabelingForm(d: DatasetItem | null, pid?: string): Promise<voi
     if (!f.task_id) pickLabelingTask(f);
   } catch (e) { f.status = { kind: 'err', text: errText(e) }; }
   if (SET.form === f) renderSettings();
+}
+
+// combined dataset: an edit starts from its members in order (parts); a new one from nothing
+function newUnionForm(d: DatasetItem | null): void {
+  SET.view = 'union';
+  SET.sec = 'datasets';
+  const f: UnionForm = { form: 'union', id: d?.id, name: d ? d.name : '', pick: '',
+    parts: (d?.parts || []).map((p) => ({ ...p })) };
+  SET.form = f;
+  renderSettings();
+}
+
+// move / remove a member row, then put the focus back on the same control of the row it ended in
+function unionRow(b: HTMLElement, move: (f: UnionForm, i: number) => number | null): void {
+  const f = formOf('union');
+  const i = Number(rowAttr(b, '[data-i]', 'i'));
+  const act = dd(b, 'act');
+  const to = move(f, i);
+  f.saveStatus = null;
+  renderSettings();
+  const row = to === null ? null : document.querySelector<HTMLElement>(`#settings-body .un-row[data-i="${to}"]`);
+  const el = row?.querySelector<HTMLButtonElement>(`[data-act="${act}"]:not(:disabled)`) ?? row?.querySelector<HTMLElement>('.un-alias')
+    ?? document.querySelector<HTMLElement>('#settings-body [data-f="pick"]');
+  el?.focus();
+}
+
+// the next free default alias (A, B, C… skipping the ones in use)
+function freeAlias(f: UnionForm): string {
+  const used = new Set(f.parts.map((p) => p.alias.trim().toLowerCase()));
+  for (let i = 0; ; i++) if (!used.has(defaultAlias(i).toLowerCase())) return defaultAlias(i);
 }
 
 // the first task of the picked session that has boxes (classification tasks cannot be visualized)
@@ -276,6 +307,25 @@ const SET_ACTIONS: Record<string, SetAction> = {
     const f = formOf('embeddings');
     return saveDataset(f, 'saving…', () => postJSON<{ id: string }>('api/datasets', { id: f.id, kind: 'embeddings', path: f.summary?.path, name: f.name }), !!b.dataset.open);
   },
+  'new-union': () => newUnionForm(null),
+  'un-add': () => {
+    const f = formOf('union');
+    const d = SET.datasets.find((x) => x.id === f.pick);
+    if (!d || f.parts.length >= UNION_MAX) return;
+    f.parts.push({ id: d.id, alias: freeAlias(f), name: d.name, kind: d.kind });
+    f.pick = '';
+    f.saveStatus = null;
+    renderSettings();
+    document.querySelector<HTMLElement>('#settings-body [data-f="pick"]:not(:disabled)')?.focus();
+  },
+  'un-up': (b) => unionRow(b, (f, i) => { const [p] = f.parts.splice(i, 1); if (p) f.parts.splice(i - 1, 0, p); return i - 1; }),
+  'un-down': (b) => unionRow(b, (f, i) => { const [p] = f.parts.splice(i, 1); if (p) f.parts.splice(i + 1, 0, p); return i + 1; }),
+  'un-rm': (b) => unionRow(b, (f, i) => { f.parts.splice(i, 1); return f.parts.length ? Math.min(i, f.parts.length - 1) : null; }),
+  'save-union': (b) => {
+    const f = formOf('union');
+    return saveDataset(f, 'checking the sessions…', () => postJSON<{ id: string }>('api/datasets', { id: f.id, kind: 'union', name: f.name,
+      parts: f.parts.map((p) => ({ id: p.id, alias: p.alias.trim() })) }), !!b.dataset.open);
+  },
   'test-conn': testConn,
   'go-prefix': () => { if (formOf('s3').bucket) void s3Browse(); },
   's3-crumb': (b) => { formOf('s3').prefix = dd(b, 'to'); void s3Browse(); },
@@ -293,12 +343,13 @@ const SET_ACTIONS: Record<string, SetAction> = {
       let cid = f.connId;
       if (cid === 'new') cid = (await postJSON<{ id: string }>('api/connections', f.conn)).id;
       return postJSON<{ id: string }>('api/datasets', { id: f.id, kind: 's3', connection_id: cid, bucket: f.bucket, prefix: f.prefix || '',
-        mode: f.mode, name: f.name });
+        mode: f.mode, name: f.name, unit: f.unit || 'auto', class_from_folder: !!f.cff });
     }, !!b.dataset.open);
   },
   'save-local': (b) => {
     const f = formOf('local');
-    return saveDataset(f, 'saving…', () => postJSON<{ id: string }>('api/datasets', { id: f.id, kind: 'local', path: f.browse?.path, name: f.name }), !!b.dataset.open);
+    return saveDataset(f, 'saving…', () => postJSON<{ id: string }>('api/datasets', { id: f.id, kind: 'local', path: f.browse?.path, name: f.name,
+      unit: f.unit || 'auto', class_from_folder: !!f.cff }), !!b.dataset.open);
   },
   'save-labeling': (b) => {
     const f = formOf('labeling');
@@ -330,8 +381,10 @@ const SET_ACTIONS: Record<string, SetAction> = {
     const d = SET.datasets.find((x) => x.id === rowAttr(b, '[data-id]', 'id'));
     if (!d) return;
     if (!confirm(`Remove the session "${d.name}"?\n\nNo dataset files are deleted.`)) return;
-    try { await api(`api/datasets/${encodeURIComponent(d.id)}`, { method: 'DELETE' }); } catch (e) { alert(errText(e)); }
+    let err: string | null = null;              // e.g. a member of a combined dataset: shown above the list
+    try { await api(`api/datasets/${encodeURIComponent(d.id)}`, { method: 'DELETE' }); } catch (e) { err = errText(e); }
     await loadSettingsData();
+    if (err) SET.error = `Could not remove “${d.name}”: ${err}`;
     renderSettings();
   },
   'new-conn': () => { SET.view = 'conn'; SET.form = { form: 'conn', conn: connDefaults('s3') }; renderSettings(); },
@@ -389,6 +442,7 @@ const SET_CHANGES: Record<string, SetChange> = {
   'lds-project': () => { pickLabelingTask(formOf('labeling')); renderSettings(); },
   'lds-task': () => renderSettings(),
   'mode-pick': () => document.querySelectorAll('.radio-card').forEach((c) => c.classList.toggle('sel', !!c.querySelector<HTMLInputElement>('input')?.checked)),
+  'unit-pick': () => renderSettings(),             // the folder-classes switch shows for "one point per image" only
   'dist-toggle': (el) => { if (el instanceof HTMLInputElement) $req<HTMLInputElement>('show-dist').checked = el.checked; updateMarks(); saveSettings(); },
   ...MODEL_CHANGES,
   ...LLM_CHANGES,
@@ -428,6 +482,7 @@ export function bindSettings(): void {
     if (t instanceof HTMLInputElement && t.dataset.adm) { admInput(t); return; }
     if (isControl(t)) write(t);
     if (SET.sec === 'llm') llmInput(t);       // live step locks, capability guess, token budget
+    else if (t.classList.contains('un-alias')) unionInput();      // alias checks in place
   });
   body.addEventListener('change', (e) => {
     const t = e.target;

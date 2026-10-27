@@ -51,9 +51,16 @@ def init(url, pool_size=10, echo=False):
 
     with _lock:
         old, _engine = _engine, eng
+    _reset_listener()
     if old is not None:
         old.dispose()
     return eng
+
+
+def _reset_listener():
+    """The LISTEN thread (listen.py) follows the engine: stopped here, restarted lazily on the new database."""
+    from . import listen
+    listen.reset()
 
 
 def engine():
@@ -66,6 +73,7 @@ def dispose():
     global _engine
     with _lock:
         old, _engine = _engine, None
+    _reset_listener()
     if old is not None:
         old.dispose()
 

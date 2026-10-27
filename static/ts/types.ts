@@ -64,7 +64,17 @@ export interface DatasetInfo {
 }
 /** What the page may offer for the open session (server/deps.py `capabilities`): an embeddings session has rows with
  *  metadata instead of boxes in images, so no curation, no models and no image viewer. */
-export interface Caps { boxes: boolean; images: boolean; curation: boolean; models: boolean; meta: boolean }
+export interface Caps {
+  boxes: boolean; images: boolean; curation: boolean; models: boolean; meta: boolean;
+  /** what one point is: a labelled box, a whole image (data/views.py ImageView) or a row of an embeddings session */
+  unit?: 'box' | 'image' | 'embeddings';
+  /** local / S3: 'yolo' (images/ + labels/) or 'flat' (plain images) */
+  layout?: 'yolo' | 'flat' | null;
+  /** a combined dataset (data/union.py): the Compare tab, origin / diff colours */
+  union?: boolean;
+  /** the session has a live change feed (GET api/live: labeling sessions, promoted unions) */
+  live?: boolean;
+}
 /** Page defaults from config.yaml `ui` (+ analysis.groups / duplicate_threshold). */
 export interface UiDefaults {
   page_size: number; similar_k: number; check_list_size: number; duplicate_threshold: number;
@@ -98,7 +108,11 @@ export interface Meta {
   palette_light?: string[];
   knn_k: number;
   index_stats: Record<string, unknown>;
+  /** a combined dataset: its members in order (origin = the position); null / absent otherwise */
+  members?: UnionMember[] | null;
 }
+/** One member of a combined dataset (GET api/meta members[]). */
+export interface UnionMember { alias: string; name: string; sid: string; n: number; n_images: number; offset: number; unit: string | null }
 
 // ------------------------------------------------------------------ points / projection / groups
 /** GET api/points (columnar, one entry per label box = sample id) + the columns added client side. */
@@ -139,6 +153,11 @@ export interface Points {
   text?: string[] | null;
   meta?: Record<string, Array<number | string | null>>;
   meta_types?: Record<string, 'num' | 'cat' | 'text'>;
+  // combined datasets: member index of each box, and the same-content image group (-1 = none)
+  origin?: ArrayLike<number>;
+  hgroup?: number[];
+  // live feed: 1 = the box moved since the index (its dot is at the old place)
+  moved?: Uint8Array;
 }
 /** Names of the numeric Points columns (colour-by / sort / filter fields). */
 export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score' |
@@ -310,4 +329,54 @@ export interface AppState {
   filterMask?: Uint8Array | null;      // filter bar result: 1 = shown
   edited: Set<string>;                 // images saved from the dialog this session
   model: ModelState;
+  /** combined datasets only (views/compare.ts) */
+  cmp?: CmpState | null;
+  /** live feed: new boxes drawn elsewhere, placed in projection `proj` (core/live.ts; the 'live-new' trace) */
+  liveNew?: LiveNew | null;
+}
+
+// ------------------------------------------------------------------ compare (routes/compare.py, views/compare.ts)
+/** Matching parameters of a compare run. */
+export interface CmpParams { iou_match?: number; iou_same?: number; name_key?: 'rel' | 'stem' | 'basename' }
+export interface CmpImageCounts { only_a: number; only_b: number; same: number; labels_changed: number; pixels_changed: number; dup_a: number; dup_b: number }
+export interface CmpBoxCounts { same: number; moved: number; reclass: number; removed: number; added: number; image_only_a: number; image_only_b: number }
+export interface CmpClassRow { cls: number; a: number; b: number; added: number; removed: number; reclass_in: number; reclass_out: number }
+/** POST api/compare/run → summary. a / b = member indices. confusion: row = class in A, column = class in B. */
+export interface CmpSummary {
+  a: number; b: number; a_alias: string; b_alias: string; params: CmpParams;
+  images: CmpImageCounts; boxes: CmpBoxCounts; classes: CmpClassRow[]; confusion: number[][];
+}
+export interface CmpRunResult { ready: true; key: string; summary: CmpSummary }
+export type CmpListKey = 'only_a' | 'only_b' | 'same' | 'labels_changed' | 'pixels_changed' | 'dup';
+/** GET api/compare/result. */
+export interface CmpResult { key: string; summary: CmpSummary; image_lists: Record<CmpListKey, string[]>; truncated: Partial<Record<CmpListKey, number>> }
+/** One box of GET api/compare/image (xyxy normalised 0..1). */
+export interface CmpImgBox { sid: number; cls: number; xyxy: [number, number, number, number]; status: number; pair: number; iou: number }
+export interface CmpImgSide { name: string; origin: number; img_w: number | null; img_h: number | null; boxes: CmpImgBox[] }
+/** GET api/compare/image. status: 1 only A, 2 only B, 3 same, 4 labels changed, 5 pixels changed. */
+export interface CmpImage { status: number; how: number; dup: boolean; a: CmpImgSide | null; b: CmpImgSide | null }
+/** POST api/compare/quickmap (ready): a projection + the similarity of each box to its nearest box of `ref`. */
+export interface QuickMap extends ProjectionReady { novel: number[] }
+export type QuickMapResult = QuickMap | NotReady;
+/** GET api/union/status. */
+export interface UnionStatus { union: boolean; stale?: boolean; members?: Array<{ alias: string; name: string; sid: string; n: number; stale: boolean }> }
+export type OriginShow = 'a' | 'b' | 'both' | 'diff';
+/** One compare run in the page: its key, summary, image lists and the per-box columns (sample id order). */
+export interface CmpRun {
+  key: string; summary: CmpSummary; lists: CmpResult['image_lists'] | null;
+  status: Uint8Array; pair: Int32Array; iou: Float32Array;
+}
+/** The density-difference layer under the map (compare-core densityDiff). */
+export interface CmpDensity { on: boolean; G: number; blur: number; novelty: number | null; nA: number; nB: number }
+/** One provisional box of the live feed: a box drawn after the index, placed at (x, y) of projection `proj`. */
+export interface LivePlaced { ann: string; proj: string; x: number; y: number; sim: number; cls: number; image: string }
+export interface LiveNew { byAnn: Map<string, LivePlaced> }
+/** S.cmp: a combined dataset's compare state (views/compare.ts owns it, plot/render.ts reads it). */
+export interface CmpState {
+  origin: Uint8Array;                  // member index per box
+  a: number; b: number;                // the two members compared (indices)
+  show: OriginShow;
+  mask: Uint8Array | null;             // originMask(show): 1 = drawn; null = no origin filter
+  run: CmpRun | null;
+  density: CmpDensity;
 }

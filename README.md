@@ -148,6 +148,7 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 DATAVIZ_TEST_DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:15432/postgres \
   .venv/bin/python -m pytest -q tests      # ~4 min; without the variable a pgvector container is started via docker
                                            # (on a port docker picks, so it never collides with a running database)
+.venv/bin/python -m pytest -q -n auto tests   # ~75 s on 128 cores; auto = 12 workers (~2.5 GiB each), DATAVIZ_TEST_WORKERS=<n> to change
 DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_page_smoke.py   # a browser of your own
 ```
 

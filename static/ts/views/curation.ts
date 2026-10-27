@@ -56,9 +56,15 @@ export function applyPatch(patch: CurPatch | null | undefined): void {
   for (const [id, c] of Object.entries(patch.cls || {})) { P.cls[+id] = c; n++; }
   for (const id of patch.deleted || []) { del[id] = 1; n++; }
   for (const id of patch.restored || []) { del[id] = 0; n++; }
+  // live feed: a box whose geometry changed keeps its dot (features are for the old crop) with a stale note
+  if (patch.moved?.length) {
+    const mv = P.moved ?? (P.moved = new Uint8Array(P.cls.length));
+    for (const m of patch.moved) if (m.id >= 0 && m.id < mv.length) { mv[m.id] = 1; n++; }
+  }
   if (!n) return;
   invalidateHover();
   labelsChanged();
+  window.dispatchEvent(new CustomEvent('labels-patched'));    // views/compare.ts refreshes its diff
   if (patch.deleted && patch.deleted.length && S.sel.length) {
     S.sel = S.sel.filter((id) => !del[id]);
     S.highlight = S.highlight.filter((id) => !del[id]);

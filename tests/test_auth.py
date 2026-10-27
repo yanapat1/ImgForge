@@ -98,6 +98,7 @@ def test_failure_lock_schedule():
 
 
 def test_per_ip_rate_limit(app):
+    app.state.login_limiter.clock = lambda: 0.0     # frozen: 21 slow logins on a busy machine must not refill a token
     c = client(app)
     codes = [login(c, 'nobody', 'whatever!!').status_code for _ in range(21)]
     assert codes[:20] == [401] * 20 and codes[20] == 429

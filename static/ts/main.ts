@@ -34,6 +34,8 @@ import { allRows, bindMedia, isRows, metaCols, rowsPills, tipMedia, unit } from 
 import { bindUserButton, mountUserMenu } from './views/usermenu.js';
 // filters + curation (WP-D)
 import { fixToSuggested, initCuration } from './views/curation.js';
+import { initCompare } from './views/compare.js';
+import { startLive } from './core/live.js';
 import { initFilterBar } from './views/filter-bar.js';
 
 declare const Plotly: typeof import('plotly.js');
@@ -159,8 +161,11 @@ async function init(st: Status): Promise<void> {
   document.documentElement.dataset['role'] = st.my_role || 'owner';
   // an embeddings session (rows + metadata): no boxes, images or models; css/states.css hides every .needs-boxes
   const caps = st.caps ?? { boxes: true, images: true, curation: true, models: true, meta: false };
-  document.documentElement.classList.toggle('no-boxes', !caps.boxes);
-  if (!caps.boxes) adaptToRows(points);
+  const imageUnit = caps.unit === 'image';         // one point per image: images, no labels to edit or score
+  document.documentElement.classList.toggle('image-unit', imageUnit);
+  document.documentElement.classList.toggle('no-boxes', !caps.boxes && !imageUnit);
+  if (imageUnit) adaptToImages();
+  else if (!caps.boxes) adaptToRows(points);
   loadViewerPrefs();
   const sessions = [...new Set(points.session)].sort();
   S.sessionIdx = new Map(sessions.map((s, i) => [s, i]));
@@ -170,6 +175,8 @@ async function init(st: Status): Promise<void> {
   $req('ds-info').innerHTML = `<button id="ds-switch" class="pill name" title="${esc(meta.dataset_uri || '')}\nclick: datasets & sources">` +
     `${icon(ds.kind === 's3' ? 'cloud' : ds.kind === 'labeling' ? 'tag' : isRows() ? 'vectors' : 'folder')}<b>${esc(meta.dataset)}</b><span class="src">${isRows() ? 'embeddings' : src}</span></button>` +
     (isRows() ? rowsPills(Number(meta.n_samples), meta.classes.length)
+      : imageUnit ? pill(Number(meta.n_images).toLocaleString(), 'images') + pill('1 point', 'per image', 'muted') +
+        (meta.classes.length > 1 ? pill(meta.classes.length, 'folders') : '')
       : pill(Number(meta.n_images).toLocaleString(), 'images') + pill(Number(meta.n_samples).toLocaleString(), 'boxes') + pill(meta.classes.length, 'classes')) +
     (ds.stale ? `<button id="ds-refresh" class="pill stale" title="The dataset files changed after this cache was built (${esc(staleBuilt(ds))}). Click to re-index and recompute features for the new files.">${icon('refresh')}<b>Dataset changed</b>Update cache</button>` : '');
   if (ds.stale) {
@@ -224,12 +231,28 @@ async function init(st: Status): Promise<void> {
       (w.others.length ? `\nother versions of this dataset: ${w.others.map((o) => o.name).join(', ')}` : '');
   }).catch(() => {});
   await refreshSavedViews();
+  // a combined dataset: S.cmp, the Compare tab (opened right away by a #compare link from the Sessions home)
+  if (meta.members && meta.members.length > 1) {
+    initCompare(points);
+    if (location.hash === '#compare') switchTab('compare');
+  }
   // nothing heavy runs until the user asks: a cached startup view loads at once, otherwise wait for "Compute embedding"
   if (st.startup && st.startup.cached) await loadView();
   else showIdle();
+  startLive();                         // labels edited elsewhere (labeling page, promoted union) patch the map live
 }
 
 // an embeddings session: the controls that read box geometry / images go, its metadata columns come in
+// one point per image (data/views.py ImageView): every "box" is the whole image, so box size and shape say nothing
+function adaptToImages(): void {
+  const colorBy = $req<HTMLSelectElement>('color-by');
+  for (const v of ['area', 'aspect']) colorBy.querySelector(`option[value="${v}"]`)?.remove();
+  colorBy.querySelector('optgroup[data-needs="model"]')?.remove();
+  const sort = $req<HTMLSelectElement>('sort');
+  for (const v of ['area-asc', 'area-desc', 'm-status', 'm-score']) sort.querySelector(`option[value="${v}"]`)?.remove();
+  $req('stat-counts-h').textContent = 'Images per class';
+}
+
 function adaptToRows(points: Points): void {
   // modules that read box geometry (filters, stats) see zeros instead of missing columns; their controls are hidden
   const zeros = (): number[] => new Array<number>(points.id.length).fill(0);

@@ -8,7 +8,7 @@ export type StatusKind = 'busy' | 'ok' | 'err' | '';
 export interface StatusLine { kind: StatusKind; text: string }
 
 export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace' | 'account' | 'users';
-export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'labeling' | 'embeddings' | 'conn' | 'model' | 'llm-form' | 'llm-add';
+export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'labeling' | 'embeddings' | 'union' | 'conn' | 'model' | 'llm-form' | 'llm-add';
 
 /** openSettings options (the Sessions home opens the dialog in solo mode). */
 export interface OpenSettingsOpts {
@@ -19,7 +19,7 @@ export interface OpenSettingsOpts {
 }
 
 // ------------------------------------------------------------------ browsing
-export interface FolderEntry { name: string; yolo?: boolean; embeddings?: boolean }
+export interface FolderEntry { name: string; yolo?: boolean; embeddings?: boolean; images?: number | null }
 export interface YoloInfo { images: number; labels: number; classes: boolean; bytes?: number }
 /** GET api/fs/browse, POST api/connections/browse */
 export interface BrowseResult {
@@ -29,6 +29,8 @@ export interface BrowseResult {
   yolo?: boolean;
   info?: YoloInfo | null;
   embeddings?: boolean;
+  /** image files directly in this folder (local browse with images=1, S3 browse); capped at 10,000 */
+  images?: number | null;
 }
 /** GET api/fs/embeddings: what an embeddings session on that folder would hold (data/embedding_source.py check). */
 export interface EmbeddingsSummary {
@@ -71,15 +73,21 @@ export interface ConnTestResult {
 }
 
 // ------------------------------------------------------------------ datasets (sessions)
+/** One member of a combined dataset (kind 'union'), in priority order: its alias prefixes its classes (A:cat). */
+export interface UnionPart { id: string; alias: string; name?: string; kind?: DatasetItem['kind'] }
 export interface DatasetItem {
   id: string; name: string;
-  kind: 's3' | 'local' | 'labeling' | 'embeddings';
+  kind: 's3' | 'local' | 'labeling' | 'embeddings' | 'union';
+  /** union: its members, in order (data/connections.py _add_parts); not `members`, which lists whom it is shared with */
+  parts?: UnionPart[];
   uri?: string;
   modality?: string[];
   mode?: 'stream' | 'cache' | undefined;
   connection_id?: string; connection?: string | null;
   bucket?: string; prefix?: string; path?: string;
   project_id?: string; task_id?: string; only_done?: boolean;
+  /** local / S3: what one point is (data/views.py) and whether sub-folder names are the classes */
+  unit?: MapUnit; class_from_folder?: boolean;
   error?: string;
   exists?: boolean;
   mirror?: { path: string; files: number; bytes: number; synced: number };
@@ -95,16 +103,20 @@ export interface LabProjectTask { id: string; name: string; task_type: string; d
 export interface LabProject { id: string; name: string; n_media?: number; tasks?: LabProjectTask[] }
 
 // ------------------------------------------------------------------ forms (SET.form)
+/** What one point of a local / S3 session is: its labelled boxes, its images, or auto (images when there are no labels). */
+export type MapUnit = 'auto' | 'boxes' | 'images';
 export type S3Form = {
   form: 's3';
   id?: string | undefined; connId: string; conn: ConnDraft;
   bucket?: string | undefined; prefix?: string | undefined; mode?: 'stream' | 'cache' | undefined; name?: string | undefined;
+  unit?: MapUnit | undefined; cff?: boolean | undefined;
   buckets?: string[] | null | undefined; browse?: BrowseResult | null | undefined;
   connStatus?: StatusLine | null | undefined; locStatus?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
 export type LocalForm = {
   form: 'local';
   id?: string | undefined; path?: string | undefined; name?: string | undefined;
+  unit?: MapUnit | undefined; cff?: boolean | undefined;
   browse?: BrowseResult | null | undefined;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
@@ -119,6 +131,15 @@ export type LabelingForm = {
   id?: string | undefined; project_id: string; task_id: string; only_done: boolean; name: string; direct: boolean;
   projects: LabProject[] | null;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
+};
+/** A combined dataset: 2–8 visualize sessions in priority order, each with an alias (data/union.py ALIAS_RE). */
+export type UnionForm = {
+  form: 'union';
+  id?: string | undefined; name?: string | undefined;
+  parts: UnionPart[];
+  /** the session picked in the "Add" select ('' = none) */
+  pick: string;
+  saveStatus?: StatusLine | null | undefined;
 };
 export type ConnForm = {
   form: 'conn';
@@ -234,7 +255,7 @@ export type LlmForm = {
   lastTest: { ok: boolean; sig: string } | null; saveStatus: StatusLine | null;
 };
 
-export type SetForm = S3Form | LocalForm | EmbeddingsForm | LabelingForm | ConnForm | ModelForm | LlmForm;
+export type SetForm = S3Form | LocalForm | EmbeddingsForm | LabelingForm | UnionForm | ConnForm | ModelForm | LlmForm;
 
 // ------------------------------------------------------------------ the dialog state
 export interface SetState {

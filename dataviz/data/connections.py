@@ -49,13 +49,17 @@ DEFAULT_PORTS = {'ftp': 21, 'sftp': 22, 'postgres': 5432, 'mssql': 1433}
 SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')      # blank in an update = keep the stored one
 _BOOL_FIELDS = ('verify_ssl', 'tls', 'passive', 'encrypt')
 DS_FIELDS = ('name', 'kind', 'path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
+# app.viz_sessions.options of a local / S3 session: what one point is (data/views.py UNITS) and folder classes
+DS_OPTIONS = ('unit', 'class_from_folder')
 # labeling: one task of a labeling session, read live (labeling_source); embeddings: a folder of .npy vectors + a
 # metadata table (embedding_source)
-DS_KINDS = ('local', 's3', 'labeling', 'embeddings')
+# union: a combined dataset over other visualize sessions (data/union.py), its members in app.union_members
+DS_KINDS = ('local', 's3', 'labeling', 'embeddings', 'union')
 _DS_KIND_FIELDS = {'local': ('path',), 's3': ('connection_id', 'bucket', 'prefix', 'mode'),
-                   'labeling': ('project_id', 'task_id', 'only_done'), 'embeddings': ('path',)}
+                   'labeling': ('project_id', 'task_id', 'only_done'), 'embeddings': ('path',), 'union': ()}
 _SRC_COLS = ('path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
 _JSONB_CFG = bindparam('cfg', type_=JSONB)
+_JSONB_OPTS = bindparam('options', type_=JSONB)
 OUTSIDE = 'that folder is outside the folders this server allows (storage.allowed_roots)'
 
 
@@ -110,7 +114,7 @@ def _conn_dict(r):
 
 _DS_SQL = """
     SELECT s.id, s.name, s.owner_id, s.visibility, s.tags, s.created_at, s.updated_at, v.source_kind, v.path,
-           v.connection_id, v.bucket, v.prefix, v.mode, v.project_id, v.task_id, v.only_done
+           v.connection_id, v.bucket, v.prefix, v.mode, v.project_id, v.task_id, v.only_done, v.options
     FROM app.sessions s JOIN app.viz_sessions v ON v.session_id = s.id
     WHERE s.kind = 'viz'"""
 
@@ -130,7 +134,64 @@ def _ds_dict(r):
     if kind == 'labeling':
         d['only_done'] = bool(r.only_done)
         d.setdefault('project_id', None)           # its labeling session was deleted
+    if kind in ('local', 's3'):
+        opts = r.options or {}
+        d['unit'] = opts.get('unit') or 'auto'
+        d['class_from_folder'] = bool(opts.get('class_from_folder'))
     return d
+
+
+def _options(body, kind):
+    """app.viz_sessions.options from a saved session's body (only local / S3 sessions have any)."""
+    if kind not in ('local', 's3'):
+        return {}
+    from .views import UNITS
+    unit = body.get('unit') if body.get('unit') in UNITS else 'auto'
+    return {'unit': unit, 'class_from_folder': body.get('class_from_folder') in (True, 1, '1', 'true', 'on')}
+
+
+_PARTS_SQL = """
+    SELECT u.union_id, u.member_id, u.alias, u.position, s.name, v.source_kind
+    FROM app.union_members u JOIN app.sessions s ON s.id = u.member_id
+    JOIN app.viz_sessions v ON v.session_id = u.member_id
+    WHERE u.union_id = ANY(:ids) ORDER BY u.union_id, u.position"""
+
+
+def _add_parts(rows, c):
+    """d['parts'] = [{id, alias, name, kind}] of every combined dataset among the dataset dicts `rows`."""
+    ids = [d['id'] for d in rows if d['kind'] == 'union']
+    if not ids:
+        return rows
+    by = {}
+    for r in c.execute(text(_PARTS_SQL), {'ids': ids}):
+        by.setdefault(r.union_id, []).append({'id': r.member_id, 'alias': r.alias, 'name': r.name,
+                                              'kind': r.source_kind})
+    for d in rows:
+        if d['kind'] == 'union':
+            d['parts'] = by.get(d['id'], [])
+    return rows
+
+
+def _parts(body):
+    """[(member id, alias)] of a combined dataset's body: 2..8 distinct members, aliases unique (default A, B, ..)."""
+    from .union import ALIAS_RE, MAX_MEMBERS, default_alias
+    raw = body.get('parts') or body.get('union') or []
+    if not isinstance(raw, list) or not 2 <= len(raw) <= MAX_MEMBERS:
+        raise ValueError(f'a combined dataset needs 2 to {MAX_MEMBERS} datasets')
+    out, seen_ids, seen = [], set(), set()
+    for i, m in enumerate(raw):
+        mid = (m.get('id') if isinstance(m, dict) else m) or ''
+        alias = ((m.get('alias') if isinstance(m, dict) else None) or default_alias(i)).strip()
+        if not ALIAS_RE.match(alias):
+            raise ValueError(f'alias {alias!r}: 1 to 24 letters, digits, - or _')
+        if mid in seen_ids:
+            raise ValueError('the same dataset is listed twice')
+        if alias.casefold() in seen:
+            raise ValueError(f'alias {alias!r} is used twice')
+        seen_ids.add(mid)
+        seen.add(alias.casefold())
+        out.append((str(mid), alias))
+    return out
 
 
 class Scoped:
@@ -297,6 +358,7 @@ class Registry:
         with db.connect() as c:
             rows = {r.id: _ds_dict(r) for r in c.execute(text(_DS_SQL + ' AND s.id = ANY(:ids)'),
                                                          {'ids': [h['id'] for h in heads]})}
+            _add_parts(list(rows.values()), c)
         out = []
         for h in heads:
             d = rows.get(h['id'])
@@ -314,7 +376,29 @@ class Registry:
         r = conn.execute(text(_DS_SQL + ' AND s.id = :id'), {'id': did or ''}).first()
         if r is None:
             raise KeyError(f'no dataset {did!r}')
-        return _ds_dict(r)
+        return _add_parts([_ds_dict(r)], conn)[0]
+
+    def find_union(self, owner_id, member_ids):
+        """owner_id's combined dataset over exactly these members in this order, or None (Compare reuses it)."""
+        with db.connect() as c:
+            rows = c.execute(text("""SELECT u.union_id, array_agg(u.member_id ORDER BY u.position) AS m
+                                     FROM app.union_members u JOIN app.sessions s ON s.id = u.union_id
+                                     WHERE s.owner_id = :o GROUP BY u.union_id"""), {'o': owner_id}).all()
+        want = [str(m) for m in member_ids]
+        for r in rows:
+            if list(r.m) == want:
+                return self.dataset(r.union_id)
+        return None
+
+    def unions_using(self, did, conn=None, owner_id=None):
+        """Names of the combined datasets that have `did` as a member (owner_id: only that owner's)."""
+        q = text('SELECT s.name FROM app.union_members u JOIN app.sessions s ON s.id = u.union_id '
+                 'WHERE u.member_id = :id AND (CAST(:o AS text) IS NULL OR s.owner_id = :o) ORDER BY s.name')
+        a = {'id': did, 'o': owner_id}
+        if conn is None:
+            with db.connect() as c:
+                return list(c.execute(q, a).scalars())
+        return list(conn.execute(q, a).scalars())
 
     def upsert_dataset(self, body, owner_id=None, check=None, roots=None):
         """Validate + save a dataset: a new session owned by owner_id, or (body.id) an edit of an existing one,
@@ -325,7 +409,7 @@ class Registry:
         ds = {k: body[k] for k in DS_FIELDS if body.get(k) is not None}
         kind = ds.get('kind')
         if kind not in DS_KINDS:
-            raise ValueError('kind must be local, s3, labeling or embeddings')
+            raise ValueError('kind must be local, s3, labeling, embeddings or union')
         for k in set(DS_FIELDS) - {'name', 'kind', *_DS_KIND_FIELDS[kind]}:
             ds.pop(k, None)                              # a kind's fields only (an edit may switch kinds)
         old = None
@@ -353,12 +437,30 @@ class Registry:
                 raise ValueError('a dataset needs an S3 connection')
             ds['prefix'] = (ds.get('prefix') or '').strip('/')
             ds['mode'] = ds.get('mode') if ds.get('mode') in ('stream', 'cache') else 'stream'
+        elif kind == 'union':
+            parts = _parts(body)
+            names = []
+            for mid, _ in parts:
+                try:
+                    m = self.dataset(mid)
+                except KeyError:
+                    raise ValueError(f'no dataset {mid!r} to combine') from None
+                if m['kind'] in ('union', 'embeddings'):
+                    raise ValueError(f'“{m["name"]}” cannot be combined: '
+                                     + ('it is a combined dataset itself' if m['kind'] == 'union' else
+                                        'an embeddings session has no images or boxes'))
+                if old is not None and m['id'] == old['id']:
+                    raise ValueError('a combined dataset cannot contain itself')
+                names.append(m['name'])
+            ds['parts'] = [{'id': mid, 'alias': a} for mid, a in parts]
+            ds.setdefault('name', ' vs '.join(names) if len(names) == 2 else ' + '.join(names))
         else:
             if not ds.get('project_id') or not ds.get('task_id'):
                 raise ValueError('pick the labeling session and its task')
             ds['only_done'] = ds.get('only_done') in (True, 1, '1', 'true', 'on')
         ds['name'] = (ds.get('name') or '').strip() or (Path(ds['path']).name if kind in ('local', 'embeddings') else
                                                          'labeling session' if kind == 'labeling' else
+                                                         'combined' if kind == 'union' else
                                                          (ds['prefix'].rsplit('/', 1)[-1] or ds['bucket']))
         typed = ds['name']
         if check is not None:
@@ -367,6 +469,7 @@ class Registry:
         sid = old['id'] if old else uuid.uuid4().hex
         cols = {k: ds.get(k) for k in _SRC_COLS}
         cols['only_done'] = bool(cols['only_done'])
+        cols['options'] = _options(body, kind)
         with db.begin() as c:
             others = sessions.names(owner, 'viz', c, exclude=sid)
             if ds['name'].casefold() != ((old or {}).get('name') or '').casefold() and name_taken(ds['name'], others):
@@ -376,15 +479,22 @@ class Registry:
             if old is None:
                 sessions.create('viz', owner, ds['name'], sid=sid, conn=c)
                 c.execute(text("""INSERT INTO app.viz_sessions(session_id, source_kind, path, connection_id, bucket,
-                                                               prefix, mode, project_id, task_id, only_done)
+                                                               prefix, mode, project_id, task_id, only_done, options)
                                   VALUES (:sid, :k, :path, :connection_id, :bucket, :prefix, :mode, :project_id,
-                                          :task_id, :only_done)"""), {'sid': sid, 'k': kind, **cols})
+                                          :task_id, :only_done, :options)""").bindparams(_JSONB_OPTS),
+                          {'sid': sid, 'k': kind, **cols})
             else:
                 sessions.update(sid, name=ds['name'], conn=c)
                 c.execute(text("""UPDATE app.viz_sessions SET source_kind = :k, path = :path,
                                   connection_id = :connection_id, bucket = :bucket, prefix = :prefix, mode = :mode,
-                                  project_id = :project_id, task_id = :task_id, only_done = :only_done
-                                  WHERE session_id = :sid"""), {'sid': sid, 'k': kind, **cols})
+                                  project_id = :project_id, task_id = :task_id, only_done = :only_done,
+                                  options = :options
+                                  WHERE session_id = :sid""").bindparams(_JSONB_OPTS), {'sid': sid, 'k': kind, **cols})
+            if kind == 'union' or (old or {}).get('kind') == 'union':
+                c.execute(text('DELETE FROM app.union_members WHERE union_id = :sid'), {'sid': sid})
+                for pos, p in enumerate(ds.get('parts') or []):
+                    c.execute(text('INSERT INTO app.union_members(union_id, member_id, position, alias) '
+                                   'VALUES (:u, :m, :p, :a)'), {'u': sid, 'm': p['id'], 'p': pos, 'a': p['alias']})
             return self.dataset(sid, c)
 
     def set_dataset_tags(self, did, tags):
@@ -410,7 +520,13 @@ class Registry:
         """Delete a visualize session (its members, opens, prefs cascade). KeyError when there is none."""
         from . import sessions
         with db.begin() as c:
-            self.dataset(did, c)
+            ds = self.dataset(did, c)
+            # the owner's own combined datasets: say so first. Another user's combined dataset never blocks a delete
+            # (its member row goes with the session, ON DELETE CASCADE; it then reports the missing member)
+            used = self.unions_using(did, c, owner_id=ds['owner_id'])
+            if used:
+                raise ValueError(f'used by the combined dataset{"s" if len(used) > 1 else ""} '
+                                 f'{", ".join("“" + n + "”" for n in used)}: remove it there first')
             sessions.delete(did, c)
 
     # ------------------------------------------------------------ sources
@@ -425,6 +541,8 @@ class Registry:
         if ds['kind'] == 'embeddings':
             from .embedding_source import EmbeddingSource
             return EmbeddingSource(ds['path'], name=ds.get('name'))
+        if ds['kind'] == 'union':
+            return self.union_source(ds, s3cfg, labeling)
         if ds['kind'] == 'labeling':
             if labeling is None:
                 raise ValueError('labeling sessions are not enabled in this server')
@@ -441,4 +559,27 @@ class Registry:
             raise ValueError('its connection was deleted') from None
         return sources.S3Source(conn, ds['bucket'], ds.get('prefix', ''), name=ds.get('name'), mode=ds.get('mode', 'stream'),
                                 mirror_root=self.mirror_root(), s3cfg=s3cfg)
+
+    def union_source(self, ds, s3cfg=None, labeling=None, check_write=None):
+        """UnionSource of a combined dataset: each member's source as its own session indexes it (same unit, so the
+        same workspace). check_write(member id): raise unless the current user may write that member's labels."""
+        from . import views
+        from .union import Member, UnionSource
+        members = []
+        for pos, p in enumerate(ds.get('parts') or []):
+            try:
+                m = self.dataset(p['id'])
+            except KeyError:
+                raise ValueError(f'member {p["alias"]} was deleted') from None
+            if m['kind'] in ('union', 'embeddings'):
+                raise ValueError(f'member {p["alias"]} ({m["name"]}) cannot be combined')
+            src = views.view_for(self.source(m, s3cfg, labeling), m.get('unit', 'auto'), m.get('class_from_folder'))
+            members.append(Member(p['alias'], m['id'], m['name'], src, pos))
+        if len(members) < 2:
+            raise ValueError('a combined dataset needs at least 2 datasets: one of its datasets was deleted, '
+                             'edit it to add another')
+        if check_write is None:
+            from ..auth import access, context
+            check_write = access.member_writer(context.user)
+        return UnionSource(ds, members, self.root, check_write=check_write)
 

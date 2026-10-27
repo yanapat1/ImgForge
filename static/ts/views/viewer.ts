@@ -39,7 +39,8 @@ const Z = { s: 1, x: 0, y: 0 };
 const ZMAX = 16;
 
 const savePrefs = (): void => { try { localStorage.setItem(userKey(PREF_KEY), JSON.stringify(show)); } catch (e) { /* ignore */ } };
-const svgEl = (tag: string, attrs: Record<string, string | number>): SVGElement => {
+/** An SVG element with attributes (also views/compare-viewer.ts). */
+export const svgEl = (tag: string, attrs: Record<string, string | number>): SVGElement => {
   const el = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   return el;
@@ -321,7 +322,8 @@ export function draw(): void {
     frag.append(g);
   }
   if (ED.active()) frag.append(ED.render(k, { names: show.names, color, nameOf, tag }));
-  else if (show.labels) {
+  // one point per image: its only "box" is the image itself, nothing to outline
+  else if (show.labels && !document.documentElement.classList.contains('image-unit')) {
     const g = svgEl('g', { class: 'vw-labels' });
     for (const b of V.boxes) {
       const [x, y, w, h] = px(b);
@@ -350,9 +352,14 @@ function textWidth(text: string): number {
 // a class tag above the box (inside it when the box touches the top edge); with `bottom` (the box's lower edge)
 // it goes below the box instead (inside it when the box touches the bottom edge)
 export function tag(x: number, y: number, text: string, col: string, k: number, dashed = false, bottom?: number): [SVGElement, SVGElement] {
+  return tagIn(V.H, x, y, text, col, k, dashed, bottom);
+}
+
+/** tag() for any image of height H (image pixels): the side-by-side compare viewer draws two images at once. */
+export function tagIn(H: number, x: number, y: number, text: string, col: string, k: number, dashed = false, bottom?: number): [SVGElement, SVGElement] {
   const fs = 12 * k, pad = 3 * k, h = fs + 2 * pad;
   const w = textWidth(text) * k + 2 * pad;
-  const ty = bottom != null ? (bottom + h > V.H ? bottom - h : bottom) : (y - h < 0 ? y : y - h);
+  const ty = bottom != null ? (bottom + h > H ? bottom - h : bottom) : (y - h < 0 ? y : y - h);
   const bg = svgEl('rect', { x, y: ty, width: w, height: h, fill: col, class: dashed ? 'vw-tag-bg dashed' : 'vw-tag-bg' });
   const t = svgEl('text', { x: x + pad, y: ty + pad + fs * 0.85, 'font-size': fs, class: `vw-tag ${textOn(col)}` });
   t.textContent = text;

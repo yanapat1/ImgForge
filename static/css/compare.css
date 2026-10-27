@@ -1,0 +1,134 @@
+/* The Compare tab of a combined dataset (views/compare.ts) and the side-by-side viewer (views/compare-viewer.ts).
+   Colours of members and diff kinds come from core/theme.ts (ORIGIN_COLORS, DIFF_STYLE) as an inline --c. */
+
+/* ---- side panel */
+.cmp-side { display: flex; flex-direction: column; gap: var(--s2); padding-bottom: var(--s5); }
+.cmp-h { font-size: var(--fs-sm); font-weight: 600; margin: var(--s3) 0 0; color: var(--text); }
+.cmp-h .muted { font-weight: 400; font-size: var(--fs-xs); margin-left: 4px; }
+.cmp-pick { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; padding-top: var(--s2); }
+.cmp-sel { display: flex; align-items: center; gap: 6px; flex: 1 1 120px; min-width: 0; }
+.cmp-sel select { flex: 1; min-width: 0; }
+.cmp-tag { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: var(--r-sm);
+  font: 700 var(--fs-xs) / 1 var(--mono); color: var(--bg); background: var(--c, var(--text-muted)); flex: none; }
+.cmp-params summary { cursor: pointer; font-size: var(--fs-xs); }
+.cmp-params .m-ctl { margin-top: 6px; }
+.cmp-params .num { width: 3em; text-align: right; }
+.cmp-status:empty { display: none; }
+.cmp-status .ico { margin-right: 4px; }
+.cmp-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); cursor: pointer; }
+
+/* ---- summary cards: a number and what it counts, with the category colour as a left rule */
+.cmp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.cmp-card { position: relative; display: flex; flex-direction: column; gap: 1px; padding: 7px 10px 7px 12px; min-width: 0;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer;
+  box-shadow: inset 3px 0 0 var(--c, var(--border-strong)); transition: border-color var(--dur-fast, .12s), background var(--dur-fast, .12s); }
+.cmp-card:hover { border-color: var(--border-hover); background: var(--surface-3); }
+.cmp-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cmp-card b { font-size: var(--fs-lg); line-height: 1.2; }
+.cmp-card > span { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 18px; }
+.cmp-card.zero { cursor: default; opacity: .62; }
+.cmp-card.zero:hover { border-color: var(--border); background: var(--surface-2); }
+.cmp-sbs { position: absolute; right: 3px; bottom: 3px; width: 22px; height: 22px; padding: 0; }
+.cmp-sbs .ico { width: 13px; height: 13px; }
+
+/* ---- legends */
+.cmp-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--fs-xs); color: var(--text-muted); }
+.cmp-legend:empty { display: none; }
+.cmp-li { display: inline-flex; align-items: center; gap: 5px; }
+.cmp-li .dot, .cmp-member .dot, .cmp-prio .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.cmp-dens { display: flex; flex-direction: column; gap: 4px; padding-left: 22px; }
+.cmp-dens .num { width: 2.6em; text-align: right; }
+.cmp-grad { height: 8px; border-radius: 4px; border: 1px solid var(--border);
+  background: linear-gradient(90deg, var(--ca), color-mix(in srgb, var(--ca) 25%, transparent) 38%, transparent 50%,
+    color-mix(in srgb, var(--cb) 25%, transparent) 62%, var(--cb)); }
+.cmp-grad-l { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--text-muted); }
+
+/* ---- shared map, novel in B */
+.linkish { background: none; border: 0; padding: 0; height: auto; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+.cmp-novel { display: flex; flex-direction: column; gap: 6px; }
+.cmp-novel .num { min-width: 3em; }
+.cmp-novel-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-sm); }
+.cmp-novel-row button { margin-left: auto; }
+.cmp-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.cmp-strip:empty { display: none; }
+.cmp-strip img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-sm); background: var(--surface-3); }
+
+/* ---- class table */
+.cmp-table-wrap { overflow-x: auto; }
+.cmp-classes td, .cmp-classes th { padding: 5px 6px; white-space: nowrap; }
+.cmp-classes tbody tr[data-c] { cursor: pointer; }
+.cmp-classes tbody tr[data-c]:hover { background: var(--surface-2); }
+.cmp-classes .up { color: var(--text); font-weight: 600; }
+.cmp-classes .down { color: var(--text); font-weight: 600; }
+.cmp-bar-c { width: 26%; min-width: 60px; }
+.cmp-dbar { position: relative; display: block; height: 8px; border-radius: 2px; background: var(--surface-3); }
+.cmp-dbar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--border-strong); }
+.cmp-dbar > span { position: absolute; top: 0; bottom: 0; background: var(--c); border-radius: 2px; }
+.cmp-dbar > .pos { left: 50%; }
+.cmp-dbar > .neg { right: 50%; }
+
+/* ---- charts (drawn when their section is opened) */
+.cmp-sec { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
+.cmp-sec > summary { cursor: pointer; padding: 8px 10px; font-size: var(--fs-sm); font-weight: 600; }
+.cmp-sec > summary .muted { font-weight: 400; font-size: var(--fs-xs); margin-left: 4px; }
+.cmp-chart { height: 280px; min-width: 0; }
+.cmp-chart.sm { height: 170px; }
+.cmp-hists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 0 4px 6px; }
+.cmp-none { padding: var(--s3); }
+
+/* ---- members + promote */
+.cmp-members { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+.cmp-member { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cmp-member a { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cmp-member .muted { margin-left: auto; font-size: var(--fs-xs); white-space: nowrap; }
+.cmp-member .pill { flex: none; }
+.cmp-foot { margin-top: var(--s3); }
+.cmp-prio { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cmp-prio li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-2); }
+.cmp-prio li .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp-prog:empty { display: none; }
+
+/* ---- image browser: the Compare tab's image list in place of every image (views/image-grid.ts) */
+.img-subset { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); font-weight: 600; }
+.img-subset button { margin-left: auto; height: 26px; font-size: var(--fs-xs); }
+
+/* ---- live badge in the dataset strip (core/live.ts) */
+.pill.live .live-dot { color: var(--err-tp); animation: cmp-pulse 2s ease-in-out infinite; }
+@keyframes cmp-pulse { 50% { opacity: .35; } }
+
+/* ---- side-by-side viewer */
+.cmpv-wrap { z-index: var(--z-modal, 50); }
+.cmpv { display: flex; flex-direction: column; width: min(1500px, 96vw); height: min(920px, 92vh); outline: none; overflow: hidden; }
+.cmpv .modal-head { flex: none; }
+.cmpv-count { min-width: 4em; text-align: center; font-size: var(--fs-sm); }
+.cmpv-stage { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px;
+  background: var(--plot-bg); user-select: none; touch-action: none; cursor: grab; }
+.cmpv-stage.panning { cursor: grabbing; }
+.cmpv-pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cmpv-label { flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 4px 6px; font-size: var(--fs-sm); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmpv-label .muted { font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.cmpv-view { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: var(--r-sm); background: var(--surface); }
+.cmpv-layer { position: absolute; line-height: 0; }
+.cmpv-layer img { width: 100%; height: 100%; display: block; }
+.cmpv-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.cmpv-svg rect:not(.vw-tag-bg) { fill: transparent; }
+.cmpv-svg rect { vector-effect: non-scaling-stroke; }
+.cmpv-box { stroke-width: calc(2px / var(--zs, 1)); pointer-events: all; cursor: help; }
+.cmpv-box.k0 { stroke-dasharray: 5 3; }
+.cmpv-box.hl { stroke-width: calc(4px / var(--zs, 1)); filter: drop-shadow(0 0 3px var(--bg)); }
+.cmpv-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-muted); font-size: var(--fs-sm); }
+/* flicker / swipe: the two panes on top of each other, B above */
+.cmpv-stage[data-mode="flicker"], .cmpv-stage[data-mode="swipe"] { grid-template-columns: 1fr; }
+.cmpv-stage[data-mode="flicker"] .cmpv-pane, .cmpv-stage[data-mode="swipe"] .cmpv-pane { grid-area: 1 / 1; }
+.cmpv-stage[data-mode="flicker"] .cmpv-pane[data-side="b"].off { visibility: hidden; }
+.cmpv-stage[data-mode="swipe"] .cmpv-pane[data-side="b"] .cmpv-label { justify-content: flex-start; }
+.cmpv-stage[data-mode="swipe"] .cmpv-pane[data-side="a"] .cmpv-label { justify-content: flex-end; }
+.cmpv-swipe-line { position: absolute; top: 6px; bottom: 6px; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.cmpv-foot { flex: none; display: flex; align-items: center; gap: var(--s3); padding: 8px 12px; border-top: 1px solid var(--border); font-size: var(--fs-xs); flex-wrap: wrap; }
+.cmpv-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-muted); }
+.cmpv-info { flex: 1; min-width: 160px; text-align: right; }
+.cmpv-foot .hint { flex-basis: 100%; text-align: right; }
+@media (max-width: 900px) {
+  .cmpv-stage { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+}

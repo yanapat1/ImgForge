@@ -2,7 +2,7 @@
 // light / dark / system switch and the palette (data-palette) + look (data-look) choices. THEME and SCALE are exported live bindings: only this module reassigns them.
 
 import type { ColorScale } from '../types.js';
-import { $req } from './dom.js';
+import { $req, rgba } from './dom.js';
 import { pref, rememberPref } from './auth.js';
 import { S, meta } from './state.js';
 import { invalidateHover, renderPlot } from '../plot/render.js';
@@ -105,6 +105,44 @@ export const ERR: readonly ErrKind[] = [
 /** Colour of model outcome `k` (index into ERR; anything else = ungrouped grey). */
 export const errColor = (k: number): string => { const e = ERR[k]; return k >= 0 && e ? THEME[e.token] : THEME.ungrouped; };
 
+// ---- compare (views/compare.ts): one colour per member of a combined dataset, one per box diff kind
+// (same = muted grey so the changes stand out; the "only in one image" kinds are darker variants of removed / added).
+// Every colour keeps >= 3:1 on its --plot-bg; the colour-blind palettes swap red / green for orange / blue.
+/** A box diff kind: its key, legend label and colour. Indices are what diffKey() returns. */
+export interface DiffKind { key: string; label: string; color: string }
+type DiffColors = [same: string, moved: string, reclass: string, removed: string, added: string, onlyA: string, onlyB: string];
+const DIFF_COLORS: Record<ThemeName, { std: DiffColors; cb: DiffColors }> = {
+  dark: { std: ['#79828e', '#ffc24b', '#b98cff', '#ff7b7b', '#6fe08a', '#d9443a', '#2fa84f'],
+    cb: ['#79828e', '#f0e442', '#e08fc0', '#ffb04a', '#5ab8ff', '#c26f00', '#2f7fc0'] },
+  light: { std: ['#a3abb5', '#c27c00', '#7c4ddb', '#e53935', '#2e9e4a', '#9b1c1c', '#17602c'],
+    cb: ['#a3abb5', '#8a7600', '#a8467f', '#d17a00', '#1f78c8', '#8a4a00', '#0b4a80'] },
+};
+const DIFF_LABELS: ReadonlyArray<readonly [string, string]> = [['same', 'same'], ['moved', 'moved'], ['reclass', 'class changed'],
+  ['removed', 'removed (A only)'], ['added', 'added (B only)'], ['only_a', 'image only in A'], ['only_b', 'image only in B']];
+const ORIGIN: Record<ThemeName, string[]> = {
+  dark: ['#5aa9ff', '#ff9f43', '#2fc79a', '#e08fc0', '#f0e442', '#b8c0cc', '#8fa8ff', '#ffd27a'],
+  light: ['#1f6fd6', '#cc6500', '#007a5a', '#a8467f', '#8a7600', '#5b6470', '#2a4d9b', '#8a5400'],
+};
+const diffFor = (t: Theme): DiffKind[] => {
+  const c = DIFF_COLORS[t.name][isCb(t.palette) ? 'cb' : 'std'];
+  return DIFF_LABELS.map(([key, label], i) => ({ key, label, color: c[i] ?? t.ungrouped }));
+};
+
+/**
+ * Diff kind of a box (index into DIFF_STYLE) from its compare status (compare-core BOX) and its side; -1 = not
+ * compared (another member, or no status). Side A: unmatched = removed, image only = only in A; side B: added / only in B.
+ */
+export function diffKey(status: number, sideB: boolean): number {
+  switch (status) {
+    case 1: return 0;                       // BOX.SAME
+    case 2: return 1;                       // MOVED
+    case 3: case 4: return 2;               // RECLASS, RECLASS_MOVED
+    case 5: return sideB ? 4 : 3;           // UNMATCHED
+    case 6: return sideB ? 6 : 5;           // IMAGE_ONLY
+    default: return -1;
+  }
+}
+
 // colours come from the CSS tokens in css/tokens.css, so the plots match the page chrome; re-read on a theme switch
 function readTheme(): Theme {
   const css = getComputedStyle(document.documentElement);
@@ -125,6 +163,17 @@ const scalesFor = (t: Theme): ScaleSet => (isCb(t.palette) ? CB_SCALES : SCALES)
 
 /** Live binding, like THEME. */
 export let SCALE: ScaleSet = scalesFor(THEME);
+
+/** Box diff kinds of the current theme (live binding, like THEME): same, moved, reclass, removed, added, only A, only B. */
+export let DIFF_STYLE: readonly DiffKind[] = diffFor(THEME);
+/** Colour of member `k` of a combined dataset (live binding, wraps around). */
+export let ORIGIN_COLORS: readonly string[] = ORIGIN[THEME.name];
+export const originColor = (k: number): string => (k < 0 ? THEME.ungrouped : ORIGIN_COLORS[k % ORIGIN_COLORS.length] ?? THEME.ungrouped);
+export const diffColor = (k: number): string => (k < 0 ? THEME.ungrouped : DIFF_STYLE[k]?.color ?? THEME.ungrouped);
+
+/** Density-difference colour scale: A denser (z < 0) in A's colour, B denser in B's, ~0 transparent. */
+export const densityScale = (): ColorScale => [[0, rgba(originColor(0), 0.8)], [0.38, rgba(originColor(0), 0.22)], [0.5, rgba(THEME.plot, 0)],
+  [0.62, rgba(originColor(1), 0.22)], [1, rgba(originColor(1), 0.8)]];
 
 /** Layout fields every Plotly chart shares (background, font, hover label). */
 export const plotBase = (bg: string, size = 12): Partial<Plotly.Layout> => ({
@@ -215,6 +264,8 @@ function applyTheme(): void {
   html.dataset.palette = pal;
   THEME = readTheme();
   SCALE = scalesFor(THEME);
+  DIFF_STYLE = diffFor(THEME);
+  ORIGIN_COLORS = ORIGIN[THEME.name];
   if (!S.meta) return;
   invalidateHover();                     // hover text carries the outlier colour
   buildClassFilter();
@@ -228,6 +279,7 @@ function applyTheme(): void {
   invalidateEval();
   if (curTab === 'eval') renderEval();
   if (!$req('settings').classList.contains('hidden')) renderSettings();
+  window.dispatchEvent(new CustomEvent('theme-changed'));     // views/compare.ts redraws its charts and chips
 }
 
 darkQuery.addEventListener('change', () => { if (themeMode() === 'system') applyTheme(); });

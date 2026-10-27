@@ -1333,6 +1333,30 @@ class ProjectStore:
                                               'AND task_id = :t'), a).one()))
         return tuple(out)
 
+    def change_cursor(self, tid):
+        """The newest lbl.change_seq of task `tid` (its shapes + statuses; 0 = none): where a live feed starts
+        (data/live.py). Read BEFORE a snapshot so a write committed during it is replayed, never lost."""
+        a = {'p': self.pid, 't': tid}
+        with self._read() as c:
+            return int(c.execute(_q(
+                'SELECT GREATEST((SELECT MAX(change_seq) FROM lbl.annotations WHERE project_id = :p AND task_id = :t), '
+                '(SELECT MAX(change_seq) FROM lbl.media_task_status WHERE project_id = :p AND task_id = :t))'),
+                a).scalar() or 0)
+
+    def changed_media(self, tid, since, limit=2000):
+        """(media ids whose shapes or status of task `tid` changed after cursor `since`, the new cursor).
+        Up to limit + 1 ids (more than `limit` = a bulk change: the caller re-indexes instead of patching).
+        Writes to a project hold its advisory lock (write()), so per project change_seq follows commit order."""
+        a = {'p': self.pid, 't': tid, 's': int(since), 'n': int(limit) + 1}
+        with self._read() as c:
+            rows = c.execute(_q(
+                'SELECT media_id, MAX(seq) AS seq FROM ('
+                'SELECT media_id, change_seq AS seq FROM lbl.annotations WHERE project_id = :p AND task_id = :t '
+                'AND change_seq > :s UNION ALL '
+                'SELECT media_id, change_seq FROM lbl.media_task_status WHERE project_id = :p AND task_id = :t '
+                'AND change_seq > :s) x GROUP BY media_id ORDER BY MAX(seq) LIMIT :n'), a).all()
+        return [r[0] for r in rows], max((int(r[1]) for r in rows), default=int(since))
+
     def parent_boxes(self, ids):
         """[{id, class_id, geometry}] of the live boxes among `ids` (pose boxes another task's keypoints link)."""
         if not ids:
