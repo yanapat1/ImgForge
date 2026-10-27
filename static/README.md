@@ -25,14 +25,14 @@ static/
    `<link rel="preload">` for it, and `main.js` runs it before the first plot. The Sessions home never
    downloads it. Both find it from their own script URL, never from the page URL.
 
-## Four screens, one page
+## Five screens, one page
 
 `index.html` holds them all: the **sign-in page** (`#login`, path `/login`), the **Sessions home** (`#home`, `/`),
-the **labeling page** (`#label`, `/?label=<pid>`) and the **visualizer** (everything marked `.viz-only`,
-`/s/<session id>/`). `theme-boot.js` sets `html[data-screen=login|home|label|viz]` before the first paint, so the
+the **labeling page** (`#label`, `/?label=<pid>`), the **Data Center** (`#datacenter`, `/?data[=<bucket>&path=…]`) and the **visualizer** (everything marked `.viz-only`,
+`/s/<session id>/`). `theme-boot.js` sets `html[data-screen=login|home|label|data|viz]` before the first paint, so the
 other screens never flash, and sends an old `?session=<id>` link to `s/<id>/`. The server renders the same
 `index.html` for `/login` and for `/s/<id>/` (there with `../../` in front of every asset URL); every link the
-page builds goes through `js/core/nav.js` (`homeUrl`, `vizUrl`, `labelUrl`, `loginUrl`), so a proxy prefix
+page builds goes through `js/core/nav.js` (`homeUrl`, `vizUrl`, `labelUrl`, `dataUrl`, `loginUrl`), so a proxy prefix
 (`/user/x/proxy/5151/`) is kept. Every request goes through `js/core/api.js` `apiFetch` (header
 `X-Requested-With: dataviz`; a 401 goes to the sign-in page with `next=`).
 

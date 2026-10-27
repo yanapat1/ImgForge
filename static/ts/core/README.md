@@ -4,7 +4,7 @@
 |---|---|
 | `dom.js` | `$` (getElementById), `esc` (HTML escape), `icon(name)` + `ICONS` (sprite URL), `rgba`, `mixHex` (blend two colours), `fmtEta`, `sleep`, `syncRanges` (slider fill). No app state. |
 | `api.js` | `apiFetch` (every request: `X-Requested-With` header, cookie, 401 → sign-in page once), `api`, `getJSON`, `postJSON`, `sendJSON` (non-2xx → `Error("path: status body")`), `isStatus`, `errText` (the server's `detail` message from such an error). |
-| `nav.js` | The page's URLs: `appRoot`, `homeUrl`, `vizUrl(id)` (`s/<id>/`), `labelUrl(pid)`, `loginUrl(next)`, `sessionIdFromPath`, `safeNext`. No imports. |
+| `nav.js` | The page's URLs: `appRoot`, `homeUrl`, `vizUrl(id)` (`s/<id>/`), `labelUrl(pid)`, `dataUrl(bucket?, path?)` (`?data…`), `loginUrl(next)`, `sessionIdFromPath`, `safeNext`. No imports. |
 | `auth.js` | The signed-in user (`loadMe`, `ME`, `setMe`, `isAdmin`), their prefs (`pref`, `setPrefs`, `rememberPref`), `userKey`, `signOut`. |
 | `avatar.js` | `avatarHTML` (picture or initials on a colour hashed from the id), `avatarStackHTML` (overlapping, `+N`), `ownerChipHTML`. |
 | `state.js` | `S` (the page state), `UI` (defaults from `config.yaml ui`), `featureLabel`. |

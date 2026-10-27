@@ -3,7 +3,8 @@
 // "palette" = default | cbsafe | contrast | fjord | ember | orchid; retired names map to their replacement, as in core/theme.ts)
 // so the page never flashes the wrong colours; these are this browser's mirror of the signed-in user's prefs
 // (core/auth.ts syncs them from /api/me/prefs once the app is loaded). Then it picks the screen (html[data-screen]):
-// 'login' (path ends in /login), 'viz' (path /s/<session id>/), 'label' (?label=<pid>), else the Sessions 'home'.
+// 'login' (path ends in /login), 'viz' (path /s/<session id>/), 'label' (?label=<pid>), 'data' (the Data Center:
+// ?data or ?data=<bucket id>), else the Sessions 'home'.
 // An old link ?session=<id> is sent to its s/<id>/ URL. Only the visualizer needs Plotly (~1.5 MB), so only it
 // preloads it here, in parallel with the stylesheets. The UI font is preloaded on every screen but the labeling page
 // (it paints its canvas first and fetches the font through the stylesheet: a preload there went unused).
@@ -31,7 +32,8 @@
   var login = /\/login\/?$/.test(path);
   var viz = !login && /\/s\/[^/]+\/$/.test(path);
   var label = !login && !viz && /[?&]label=[^&]/.test(location.search);
-  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : 'home');
+  var data = !login && !viz && !label && /[?&]data(=|&|$)/.test(location.search);
+  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : data ? 'data' : 'home');
   var me = document.currentScript instanceof HTMLScriptElement ? document.currentScript.src : '';
   var base = me || document.baseURI;
   var url = function (rel: string): string { try { return new URL(rel, base).href; } catch (e) { return rel; } };

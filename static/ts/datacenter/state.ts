@@ -21,6 +21,8 @@ export interface DCState {
   listing: Listing | null;
   listErr: string | null;
   loading: boolean;
+  /** a next page of the listing is on its way (load more on scroll) */
+  more: boolean;
   /** listing request sequence: a stale answer is dropped */
   seq: number;
   /** selected entry paths (in the open folder) and the anchor of a Shift range */
@@ -51,16 +53,20 @@ export interface DCState {
   /** narrow screens: details overlay / tree overlay open */
   detailsOpen: boolean;
   treeOpen: boolean;
+  /** the tree's tag list shows every tag (else the first few + "+N") */
+  allTags: boolean;
+  /** an upload into the open folder: its progress line in the strip */
+  upload: { done: number; total: number; files: number; err: string | null } | null;
 }
 
 export const D: DCState = {
   buckets: [], summary: null, tags: [], loadErr: null,
-  bid: null, path: '', listing: null, listErr: null, loading: false, seq: 0,
+  bid: null, path: '', listing: null, listErr: null, loading: false, more: false, seq: 0,
   sel: new Set(), anchor: null,
   view: 'thumbs', cards: 'grid', sort: 'name', bucketSort: 'recent',
   q: '', tagFilter: new Set(), fmtFilter: null, nameQ: '', focus: null,
   expanded: new Set(), children: new Map(), stats: new Map(), samples: new Map(), retag: new Map(),
-  search: null, detailsOpen: false, treeOpen: false,
+  search: null, detailsOpen: false, treeOpen: false, allTags: false, upload: null,
 };
 
 /** App-level actions, set by app.ts start(). */
@@ -72,7 +78,20 @@ export const hooks = {
   render: (): void => {},
   /** repaint only the selection-dependent parts (classes, selbar, details) */
   selChanged: (): void => {},
+  /** repaint the details panel only (stats arrived, a tag changed) */
+  details: (): void => {},
 };
+
+/** User prefs (core/auth.ts pref / rememberPref) of the page. */
+export const PREF = { view: 'dc_view', cards: 'dc_cards', sort: 'dc_sort', bucketSort: 'dc_bucket_sort', ai: 'dc_ai_open' } as const;
+
+/** Whether the user may change data here (tier permission data.manage; an S3 bucket is read-only). */
+export const writable = (): boolean => !!(D.listing ? D.listing.writable : curBucket()?.writable);
+
+/** Image file names by extension (the listing's `kind` is preferred when the server sends it). */
+export const IMG_RE = /\.(jpe?g|png|webp|bmp|gif|tiff?)$/i;
+export const isImage = (e: { name: string; type: string; kind?: string | undefined }): boolean =>
+  e.type === 'file' && (e.kind ? e.kind === 'image' : IMG_RE.test(e.name));
 
 export const key = (bid: string, path: string): string => `${bid}\u0000${path}`;
 export const bucketOf = (bid: string | null): Bucket | undefined => (bid ? D.buckets.find((b) => b.id === bid) : undefined);
@@ -152,9 +171,9 @@ export function fmtDate(t: number | string | null | undefined): string {
 }
 export const timeOf = (t: number | string | null | undefined): number => { const ms = toMs(t); return Number.isFinite(ms) ? ms : 0; };
 
-/** A tag chip (auto tags: dashed + lock). */
+/** A tag chip (auto tags: dashed + lock); extra 'on' = the accent look of the details panel and the folder strip. */
 export const tagChip = (t: string, auto = false, extra = ''): string =>
-  `<span class="dc-tag${auto ? ' auto' : ' on'}${extra ? ` ${extra}` : ''}">${auto ? icon('lock') : ''}${esc(t)}</span>`;
+  `<span class="dc-tag${auto ? ' auto' : ''}${extra && !auto ? ` ${extra}` : ''}">${auto ? icon('lock') : ''}${esc(t)}</span>`;
 
 /** The entries currently selected, in listing order. */
 export const selEntries = (): Entry[] => (D.listing ? D.listing.entries.filter((e) => D.sel.has(e.path)) : []);

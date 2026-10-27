@@ -2,11 +2,12 @@
 
 ```
 js/
-├── theme-boot.js      classic script, runs before the first paint (saved theme, login / home / label / viz screen, Plotly preload)
+├── theme-boot.js      classic script, runs before the first paint (saved theme, login / home / label / data / viz screen, Plotly preload)
 ├── main.js            entry: boot → init → bindEvents; nothing imports it
 ├── core/              no UI: DOM helpers, API, state, theme, jobs   → core/README.md
 ├── plot/              the embedding plot and its mouse interactions → plot/README.md
 ├── views/             the Sessions home, the other panels and controls → views/README.md
+├── datacenter/        the Data Center page (?data), loaded on demand → datacenter/README.md
 └── settings/          the Settings dialog                          → settings/README.md
 ```
 

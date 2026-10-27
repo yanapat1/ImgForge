@@ -1,5 +1,6 @@
 // Anchored popovers: a trigger button + a .popover panel (in a .popover-anchor). Click toggles, a click outside or
 // Escape closes (focus back on the trigger), aria-expanded follows. Used by the bar above the plot and the filter bar.
+// floatPopover: the same behaviour for a panel shown next to a trigger that is re-rendered (Data Center menus, tag editor).
 
 import { $req } from './dom.js';
 
@@ -49,3 +50,48 @@ export function arrowNav(popId: string, selector = 'button:not([disabled]):not(.
     items[next]?.focus();
   });
 }
+
+/** Show `pop` (position: fixed, appended to the body by the caller) under `from`, right-aligned, flipped up when there is
+ *  no room. A mousedown outside both, Escape, or calling the returned function closes it (onClose runs once). */
+export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () => void, align: 'left' | 'right' = 'right'): () => void {
+  for (const p of all) p.close();
+  floatClose?.();
+  const place = (): void => {
+    pop.classList.remove('hidden');
+    const r = from.getBoundingClientRect();
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    const x = align === 'right' ? r.right - w : r.left;
+    pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, x))}px`;
+    pop.style.top = `${r.bottom + 4 + h <= innerHeight - 8 ? r.bottom + 4 : Math.max(8, r.top - 4 - h)}px`;
+  };
+  place();
+  from.setAttribute('aria-expanded', 'true');
+  const down = (e: MouseEvent): void => {
+    const t = e.target;
+    if (t instanceof Node && !pop.contains(t) && !from.contains(t)) close();
+  };
+  const key = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    close();
+    if (document.contains(from)) from.focus();
+  };
+  const close = (): void => {
+    if (floatClose !== close) return;
+    floatClose = null;
+    document.removeEventListener('mousedown', down, true);
+    pop.removeEventListener('keydown', key);
+    window.removeEventListener('resize', close);
+    pop.classList.add('hidden');
+    from.setAttribute('aria-expanded', 'false');
+    if (onClose) onClose();
+  };
+  floatClose = close;
+  document.addEventListener('mousedown', down, true);
+  pop.addEventListener('keydown', key);
+  window.addEventListener('resize', close);
+  return close;
+}
+let floatClose: (() => void) | null = null;
+/** Close the open floating popover, if any. */
+export const closeFloat = (): void => { floatClose?.(); };

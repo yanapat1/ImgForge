@@ -1,6 +1,6 @@
 // The page's URLs: the app root (any proxy prefix kept), the visualizer of a session (s/<id>/), the labeling page
-// (?label=<pid>), the Sessions home and the sign-in page. Every navigation goes through these, never through a
-// hard-coded './': under s/<id>/ a relative './' is the visualizer itself, not the home.
+// (?label=<pid>), the Data Center (?data[=<bucket>&path=…]), the Sessions home and the sign-in page. Every navigation
+// goes through these, never through a hard-coded './': under s/<id>/ a relative './' is the visualizer itself.
 // No imports: theme-boot.ts repeats the two path rules (it is a classic script).
 
 const VIZ_PATH = /\/s\/([^/]+)\/?$/;
@@ -24,6 +24,12 @@ export function sessionIdFromPath(): string | null {
 export const homeUrl = (): string => appRoot();
 export const vizUrl = (id: string): string => `${appRoot()}s/${encodeURIComponent(id)}/`;
 export const labelUrl = (pid: string): string => `${appRoot()}?label=${encodeURIComponent(pid)}`;
+
+/** The Data Center: all buckets (no bucket), one bucket's root, or a folder inside it. */
+export function dataUrl(bucket?: string | null, path?: string | null): string {
+  if (!bucket) return `${appRoot()}?data`;
+  return `${appRoot()}?data=${encodeURIComponent(bucket)}${path ? `&path=${encodeURIComponent(path)}` : ''}`;
+}
 
 /** The sign-in page; `next` (a path of this app) is where it goes after signing in. */
 export const loginUrl = (next?: string): string => `${appRoot()}login${next ? `?next=${encodeURIComponent(next)}` : ''}`;

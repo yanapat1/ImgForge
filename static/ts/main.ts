@@ -1,5 +1,6 @@
-// Dataset Visualizer frontend: the sign-in page (/login), the Sessions home (/), the labeling page (?label=<pid>) or
-// the visualizer of one session (/s/<id>/): 2D projection plot (right) + lasso-selection gallery (left).
+// Dataset Visualizer frontend: the sign-in page (/login), the Sessions home (/), the labeling page (?label=<pid>), the
+// Data Center (?data, js/datacenter/) or the visualizer of one session (/s/<id>/): 2D projection plot (right) +
+// lasso-selection gallery (left).
 // Entry point: boot (the signed-in user first, then the screen; the startup screen until the session's index is
 // ready), init (first render) and every event binding of the page. Loaded by index.html as <script type="module">.
 
@@ -7,7 +8,7 @@ import type { DatasetInfo, Job, Meta, Points, Sample, Status } from './types.js'
 import type { DuplicatesPayload, SimilarPayload, TextSearchResult, WorkspacePayload } from './types-plot.js';
 import { errText, getJSON, postJSON, waitForServer } from './core/api.js';
 import { loadMe } from './core/auth.js';
-import { homeUrl, sessionIdFromPath } from './core/nav.js';
+import { dataUrl, homeUrl, sessionIdFromPath } from './core/nav.js';
 import { $, $req, esc, fmtEta, icon, sleep, syncRanges } from './core/dom.js';
 import { showError, installCrashHandlers } from './core/errorpage.js';
 import { toast } from './core/toast.js';
@@ -43,6 +44,7 @@ declare const Plotly: typeof import('plotly.js');
 const SCREEN = document.documentElement.dataset['screen'];
 const SESSION = SCREEN === 'viz' ? sessionIdFromPath() : null;
 const LABEL = SCREEN === 'label' ? new URLSearchParams(location.search).get('label') : null;
+const DATA = SCREEN === 'data';
 
 // Plotly (~1.5 MB) only on the visualizer: theme-boot.js already preloads it, this runs it. Found from this module's
 // URL (static/js/main.js -> /plotly.min.js), the same absolute URL as the preload, never from the s/<id>/ page URL.
@@ -91,7 +93,10 @@ async function boot(): Promise<void> {
   initLLM();                                   // ◆ AI features: hidden until the server says they are usable
   // the user menu: the home's header here, the visualizer's activity bar; the label page mounts its own (label/app.js)
   const homeActions = document.querySelector<HTMLElement>('#home .header-actions');
-  if (!SESSION && !LABEL && homeActions) mountUserMenu(homeActions);
+  if (!SESSION && !LABEL && !DATA && homeActions) mountUserMenu(homeActions);
+  const navS = $<HTMLAnchorElement>('home-nav-sessions'), navD = $<HTMLAnchorElement>('home-nav-data');
+  if (navS) navS.href = homeUrl();
+  if (navD) navD.href = dataUrl();
   if (SESSION) {
     bindUserButton($req<HTMLButtonElement>('act-user'));
     $req<HTMLAnchorElement>('brand-home').href = homeUrl();
@@ -99,6 +104,10 @@ async function boot(): Promise<void> {
   // the labeling page loads its own code on demand: the home and the visualizer never download it
   if (LABEL) { import('./label/app.js').then((m) => m.start(LABEL)).catch((e: unknown) => {
     $req('label').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the labeling page: ${esc(errText(e))}</div>`;
+  }); return; }
+  // the Data Center loads its own code on demand too (it mounts its own header, user menu included)
+  if (DATA) { import('./datacenter/app.js').then((m) => m.start()).catch((e: unknown) => {
+    $req('datacenter').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the Data Center: ${esc(errText(e))}</div>`;
   }); return; }
   if (!SESSION) { void renderHome(); return; }      // the first page: no Plotly, no job polling
   const plotly = loadPlotly();
