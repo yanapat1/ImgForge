@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ...auth import access, deps
+from ...auth import access, deps, tiers
 from ...auth import context as auth_context
 from ...core import logging as vlog
 from ...llm import budget, context, providers, tasks
@@ -80,7 +80,8 @@ def router(state, ctx):
         return ctx.llm
 
     def need(feature):
-        """The caller's connected provider for a feature they switched on, else 403."""
+        """The caller's connected provider for a feature they switched on, else 403 (also: their tier has no llm.use)."""
+        tiers.check(auth_context.user(), 'llm.use')
         s = store()
         if not s.on(feature):
             raise HTTPException(403, f'AI feature "{feature}" is off (Settings › AI assistant)')

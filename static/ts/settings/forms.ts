@@ -1,11 +1,13 @@
 // Settings dialog renderers: one function per section / form, returning HTML from SET state.
 
 import { getJSON } from '../core/api.js';
+import { can, cannot } from '../core/auth.js';
 import { $req, esc, icon } from '../core/dom.js';
 import { lookName, PALETTES, paletteName, themeMode, THEME } from '../core/theme.js';
 import type { PaletteSpec } from '../core/theme.js';
 import { MAX_DIST_PICKS } from '../plot/marks.js';
-import type { ConnDraft, ConnItem, ConnKind, ConnTestResult, EmbeddingsSummary, FolderEntry, SectionId, SetForm, StatusLine, YoloInfo } from '../types-settings.js';
+import type { BrowseResult, ConnDraft, ConnItem, ConnKind, ConnTestResult, DatasetItem, EmbeddingsSummary, FolderEntry, LocalForm, S3Form, SectionId, SetForm, StatusLine, UnionForm,
+  UnionPart, YoloInfo } from '../types-settings.js';
 import { SET } from './dialog.js';
 
 /** `el.dataset[k]` as a string ('' when the attribute is missing). */
@@ -58,21 +60,27 @@ export const tagc = (text: string, cls = '', ico = ''): string => `<span class="
 // ---- datasets
 export function renderDatasetsSec(): string {
   if (SET.view === 'add') {
-    return '<section><div class="tiles">' +
-      `<button class="tile" data-act="new-s3"><span class="ds-icon s3">${icon('cloud')}</span><b>S3 / RustFS bucket</b>` +
-      '<span>A bucket prefix in YOLO format (images/, labels/, classes.txt). Stream it, or sync a local cache for the fastest browsing.</span></button>' +
-      `<button class="tile" data-act="new-local"><span class="ds-icon">${icon('folder')}</span><b>Local folder</b>` +
-      '<span>A YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.</span></button>' +
-      `<button class="tile" data-act="new-labeling"><span class="ds-icon labeling">${icon('tag')}</span><b>Labeling session</b>` +
-      '<span>One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.</span></button>' +
-      `<button class="tile" data-act="new-embeddings"><span class="ds-icon embeddings">${icon('vectors')}</span><b>Embeddings folder</b>` +
-      '<span>Vectors you computed anywhere (audio, video, text, tables) as .npy files, plus a meta.csv of labels, previews and columns.</span></button>' +
+    const add = can('dataset.create');           // combining datasets they can already open needs no permission
+    const tile = (act: string, cls: string, ico: string, title: string, text: string): string =>
+      `<button class="tile" data-act="${act}"><span class="ds-icon${cls ? ` ${cls}` : ''}">${icon(ico)}</span><b>${title}</b><span>${text}</span></button>`;
+    return '<section>' + (add ? '' : `<p class="sec-note">${esc(cannot('add new datasets'))}. You can still combine the ones you can open.</p>`) +
+      '<div class="tiles">' + (add ? tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
+        'A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.') +
+      tile('new-local', '', 'folder', 'Local folder',
+        'A folder of images (labels optional) or a YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.') +
+      tile('new-labeling', 'labeling', 'tag', 'Labeling session',
+        'One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.') +
+      tile('new-embeddings', 'embeddings', 'vectors', 'Embeddings folder',
+        'Vectors you computed anywhere (audio, video, text, tables) as .npy files, plus a meta.csv of labels, previews and columns.') : '') +
+      tile('new-union', 'union', 'layers', 'Combined datasets',
+        `2 to ${UNION_MAX} of your visualize sessions as one map, to compare them (what was added, removed, moved or relabelled) or to explore them together. Nothing is copied.`) +
       '</div><div class="form-foot"><button class="ghost" data-act="back">Cancel</button></div></section>';
   }
   if (SET.view === 's3') return renderS3Form();
   if (SET.view === 'local') return renderLocalForm();
   if (SET.view === 'labeling') return renderLabelingForm();
   if (SET.view === 'embeddings') return renderEmbeddingsForm();
+  if (SET.view === 'union') return renderUnionForm();
   const cards = SET.datasets.map((d) => {
     const active = d.id === SET.active;
     const tags: string[] = [];
@@ -87,6 +95,9 @@ export function renderDatasetsSec(): string {
       if (d.labeling && d.labeling.task) tags.push(tagc(`${d.labeling.project} › ${d.labeling.task}`));
       if (d.only_done) tags.push(tagc('finished images only', '', 'check'));
       if (d.error) tags.push(tagc(d.error, 'bad', 'alert'));
+    } else if (d.kind === 'union') {
+      tags.push(tagc('combined', 'on', 'layers'));
+      for (const p of d.parts || []) tags.push(tagc(`${p.alias} · ${p.name || p.id}`));
     } else if (d.kind === 'embeddings') {
       tags.push(tagc('vectors + metadata', 'on', 'vectors'));
       for (const m of d.modality || []) tags.push(tagc(m, '', MODALITY_ICON[m] || 'vectors'));
@@ -96,9 +107,10 @@ export function renderDatasetsSec(): string {
       if (d.exists === false) tags.push(tagc('folder not found', 'bad', 'alert'));
     }
     return `<div class="ds-card${active ? ' active' : ''}" data-id="${esc(d.id)}">` +
-      `<div class="ds-icon ${d.kind}">${icon(d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : d.kind === 'embeddings' ? 'vectors' : 'folder')}</div>` +
+      `<div class="ds-icon ${d.kind}">${icon(DS_ICON[d.kind])}</div>` +
       `<div class="ds-main"><div class="ds-title">${esc(d.name)}${active ? tagc('open now', 'on', 'check') : ''}</div>` +
-      `<div class="ds-uri" title="${esc(d.uri || '')}">${esc(d.uri || '')}</div><div class="ds-meta">${tags.join('')}</div></div>` +
+      (d.kind === 'union' ? '' : `<div class="ds-uri" title="${esc(d.uri || '')}">${esc(d.uri || '')}</div>`) +
+      `<div class="ds-meta">${tags.join('')}</div></div>` +
       '<div class="ds-actions">' +
       (active ? '' : `<button class="primary" data-act="open-ds">${icon('play')}Open</button>`) +
       (d.kind === 's3' && d.mode === 'cache' ? `<button data-act="sync-ds" title="Download new / changed files">${icon('refresh')}Sync</button>` : '') +
@@ -111,6 +123,9 @@ export function renderDatasetsSec(): string {
     '<span class="sec-note">Opening a session reloads the page; its crops, features and views are cached per dataset.</span></div>' +
     cards + '</section>';
 }
+
+/** The icon of a session's kind (cards, member rows). */
+export const DS_ICON: Record<DatasetItem['kind'], string> = { s3: 'cloud', local: 'folder', labeling: 'tag', embeddings: 'vectors', union: 'layers' };
 
 // ---- S3 dataset form: 1 connection · 2 bucket + prefix · 3 load mode
 type ConnFields = ConnDraft & { access_key_masked?: string | undefined };
@@ -144,6 +159,7 @@ function foldersHTML(list: FolderEntry[] | null | undefined, act: string, emptyT
   return '<div class="folders">' + list.map((f) =>
     `<button class="folder${f.yolo || f.embeddings ? ' yolo' : ''}" data-act="${act}" data-name="${esc(f.name)}">${icon('folder')}` +
     `<span class="name">${esc(f.name)}</span>${f.yolo ? tagc('YOLO', 'on', 'check') : ''}${f.embeddings ? tagc('vectors', 'on', 'vectors') : ''}` +
+    (!f.yolo && f.images ? tagc(`${f.images.toLocaleString()}${f.images >= 1000 ? '+' : ''} image${f.images === 1 ? '' : 's'}`, '', 'image') : '') +
     `${icon('chev-r')}</button>`).join('') + '</div>';
 }
 
@@ -152,13 +168,54 @@ function yoloSummary(info: YoloInfo): string {
     `${info.classes ? 'class names ✓' : 'no classes.txt / data.yaml (ids are shown)'}${info.bytes ? ` · ${fmtBytes(info.bytes)}` : ''}`;
 }
 
+/** Images in a browsed folder that is not a YOLO folder: [here, in its direct sub-folders]. */
+function plainImages(b: BrowseResult | null | undefined): [number, number] {
+  if (!b || b.yolo) return [0, 0];
+  return [b.images || 0, (b.folders || []).reduce((n, f) => n + (f.images || 0), 0)];
+}
+
+/** The location step's status line: a YOLO summary, a count of plain images, or what to open. */
+function locationStatus(b: BrowseResult | null | undefined): StatusLine | null {
+  if (!b) return null;
+  if (b.yolo) return { kind: 'ok', text: b.info ? yoloSummary(b.info) : 'YOLO folder' };
+  const [here, below] = plainImages(b);
+  if (here + below) {
+    const parts = [here ? `${here.toLocaleString()} here` : '', below ? `${below.toLocaleString()}${below >= 1000 ? '+' : ''} in sub-folders` : ''];
+    return { kind: 'ok', text: `Images found: ${parts.filter(Boolean).join(' · ')} (deeper folders are included too) · no labels` };
+  }
+  return { kind: '', text: 'No images here yet: open a folder of images (any depth) or a YOLO folder (images/ + labels/, marked YOLO).' };
+}
+
+/** The location is good to save: a YOLO folder, or a folder with images in it / one level down. */
+function locationOk(b: BrowseResult | null | undefined): boolean {
+  const [here, below] = plainImages(b);
+  return !!(b && (b.yolo || here + below));
+}
+
+/** "What each point is": boxes or images for a YOLO folder; images (and the folder-classes switch) for plain images. */
+function unitHTML(f: S3Form | LocalForm, b: BrowseResult | null | undefined): string {
+  const yolo = !!(b && b.yolo);
+  const unit = f.unit && f.unit !== 'auto' ? f.unit : yolo ? 'boxes' : 'images';
+  const card = (v: string, ico: string, title: string, text: string, on: boolean, off = false) =>
+    `<label class="radio-card${on ? ' sel' : ''}${off ? ' off' : ''}"><input type="radio" name="unit" value="${v}" data-f="unit" data-act-change="unit-pick" ` +
+    `${on ? 'checked' : ''} ${off ? 'disabled' : ''}><div><b>${icon(ico)}${title}</b><p>${text}</p></div></label>`;
+  const folders = !yolo && (b?.folders || []).some((x) => x.images);
+  return '<div class="radio-cards">' +
+    card('images', 'image', 'One point per image', 'Each whole image is one point on the map: find similar scenes, duplicates, outliers and odd ' +
+      'cameras, even with no labels. Label them later in a label session.', unit === 'images') +
+    card('boxes', 'box', 'One point per labelled box', yolo ? 'Each box of labels/ is one point (crops of the objects): label quality, curation and model scoring.'
+      : 'Needs YOLO label files (images/ + labels/): none here.', unit === 'boxes', !yolo) + '</div>' +
+    (unit === 'images' ? `<label class="check"><input type="checkbox" data-f="cff" data-act-change="unit-pick" ${f.cff ? 'checked' : ''} ${folders || f.cff ? '' : 'disabled'}>` +
+      `Sub-folder names are the classes${folders ? ` <span class="muted">(${(b?.folders || []).filter((x) => x.images).map((x) => esc(x.name)).slice(0, 4).join(', ')}…)</span>` : ' <span class="muted">(no sub-folders with images here)</span>'}</label>` : '');
+}
+
 function renderS3Form(): string {
   const f = formOf('s3');
   const saved = f.connId !== 'new';
   const conn: ConnDraft = saved ? (SET.conns.find((c) => c.id === f.connId) ?? {}) : f.conn;
   const okConn = !!f.buckets;
   const b = f.browse;
-  const okLoc = !!(b && b.yolo);
+  const okLoc = locationOk(b);
   const step = (n: number, title: string, done: boolean, locked: boolean, inner: string) =>
     `<div class="form-card${done ? ' done' : ''}${locked ? ' locked' : ''}"><div class="step-head"><span class="step-n">${done ? '✓' : n}</span>${title}</div>${inner}</div>`;
   const connOpts = SET.conns.map((c) => `<option value="${esc(c.id)}" ${c.id === f.connId ? 'selected' : ''}>${esc(c.name)} — ${esc(c.endpoint)}</option>`).join('') +
@@ -171,9 +228,9 @@ function renderS3Form(): string {
   const s2 = '<div class="form-grid">' +
     `<label class="fld">Bucket<select data-f="bucket" data-act-change="bucket-pick">${(f.buckets || []).map((x) =>
       `<option ${x === f.bucket ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>` +
-    `<label class="fld mono">Prefix (folder with images/ + labels/)<input type="text" data-f="prefix" value="${esc(f.prefix || '')}" placeholder="datasets/my-yolo" data-enter="go-prefix"></label></div>` +
+    `<label class="fld mono">Prefix (a folder of images, or a YOLO folder)<input type="text" data-f="prefix" value="${esc(f.prefix || '')}" placeholder="datasets/my-images" data-enter="go-prefix"></label></div>` +
     (f.bucket ? `<div class="browser">${crumbsHTML(f.bucket, parts, 's3-crumb')}${foldersHTML(b && b.folders, 's3-folder', 'no sub-folders here')}</div>` : '') +
-    statusHTML(f.locStatus || (b && okLoc ? { kind: 'ok', text: b.info ? yoloSummary(b.info) : 'YOLO folder' } : b ? { kind: '', text: 'Open the folder that holds images/ and labels/ (marked YOLO).' } : null));
+    statusHTML(f.locStatus || locationStatus(b));
   const est = b && b.info && b.info.bytes ? ` (~${fmtBytes(b.info.bytes)} on disk)` : '';
   const s3 = '<div class="radio-cards">' +
     `<label class="radio-card${f.mode !== 'cache' ? ' sel' : ''}"><input type="radio" name="s3mode" value="stream" data-f="mode" data-act-change="mode-pick" ${f.mode !== 'cache' ? 'checked' : ''}><div><b>${icon('cloud')}Stream from S3</b>` +
@@ -184,7 +241,8 @@ function renderS3Form(): string {
   return '<section>' +
     step(1, 'Connection', okConn, false, s1) +
     step(2, 'Bucket and prefix', okLoc, !okConn, s2) +
-    step(3, 'How to load it', false, !okLoc, s3) +
+    step(3, 'What each point is', okLoc, !okLoc, unitHTML(f, b)) +
+    step(4, 'How to load it', false, !okLoc, s3) +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-s3" ${okLoc ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-s3" data-open="1" ${okLoc ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
@@ -193,15 +251,16 @@ function renderS3Form(): string {
 function renderLocalForm(): string {
   const f = formOf('local');
   const b = f.browse;
-  const ok = !!(b && b.yolo);
+  const ok = locationOk(b);
   const parts = b ? b.path.split('/').filter(Boolean) : [];
-  return '<section><div class="form-card done"><div class="step-head">' + icon('folder') + 'YOLO folder on this machine</div>' +
-    `<div class="sec-actions"><input class="txt mono" style="flex:1" type="text" data-f="path" value="${esc(f.path || '')}" placeholder="/data/my-yolo-dataset" data-enter="go-path">` +
+  return '<section><div class="form-card done"><div class="step-head">' + icon('folder') + 'Folder on this machine: images, or a YOLO folder</div>' +
+    `<div class="sec-actions"><input class="txt mono" style="flex:1" type="text" data-f="path" value="${esc(f.path || '')}" placeholder="/data/my-images" data-enter="go-path">` +
     `<button data-act="go-path">${icon('arrow-r')}Go</button>${b && b.parent ? `<button class="icon-btn" data-act="up-path" aria-label="Parent folder" title="Parent folder">${icon('up')}</button>` : ''}</div>` +
     (b ? `<div class="browser">${crumbsHTML('/', parts, 'local-crumb')}${foldersHTML(b.folders, 'local-folder', 'no sub-folders here')}</div>` : '') +
-    statusHTML(f.status || (b && ok ? { kind: 'ok', text: b.info ? yoloSummary(b.info) : 'YOLO folder' } : b ? { kind: '', text: 'Open a folder that holds images/ and labels/ (marked YOLO).' } : null)) +
-    '<p class="sec-note">Read in place: nothing is copied. Only the small crops, features and projections go to the workspace cache.</p>' +
-    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label></div>` +
+    statusHTML(f.status || locationStatus(b)) +
+    '<p class="sec-note">Read in place: nothing is copied. Only the small crops, features and projections go to the workspace cache.</p></div>' +
+    (ok ? `<div class="form-card"><div class="step-head">${icon('image')}What each point is</div>${unitHTML(f, b)}</div>` : '') +
+    `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label></div>` +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-local" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-local" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
@@ -293,6 +352,107 @@ function renderLabelingForm(): string {
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-labeling" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-labeling" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
+}
+
+// ---- combined dataset (kind 'union', data/union.py): 2–8 visualize sessions in priority order, each with an alias.
+// The order is the priority (the first member's class order and image wins); the alias prefixes its class names (A:cat).
+// The Sessions home builds one from 2+ selected cards (Compare / Combine); this form edits it, or builds one by hand.
+export const UNION_MAX = 8;
+const ALIAS_RE = /^[A-Za-z0-9_-]{1,24}$/;                 // = data/union.py ALIAS_RE
+export const defaultAlias = (i: number): string => (i < 26 ? String.fromCharCode(65 + i) : `M${i + 1}`);
+/** The name the server gives a combined dataset with no name of its own: 'A vs B', or 'A + B + C'. */
+export const unionName = (names: string[]): string => names.join(names.length === 2 ? ' vs ' : ' + ');
+
+const KIND_TEXT: Record<DatasetItem['kind'], string> = { s3: 'S3', local: 'local folder', labeling: 'labeling task', embeddings: 'embeddings', union: 'combined' };
+
+/** Why a session cannot be a member of a combined dataset ('' = it can). */
+export function unionBlock(d: Pick<DatasetItem, 'kind'>): string {
+  if (d.kind === 'union') return 'A combined dataset cannot be combined again: edit its members instead';
+  if (d.kind === 'embeddings') return 'An embeddings session has no images or boxes to compare or combine';
+  return '';
+}
+
+/** What is wrong with the alias of member i ('' = nothing). */
+function aliasProblem(parts: UnionPart[], i: number): string {
+  const a = (parts[i]?.alias ?? '').trim();
+  if (!a) return 'needs an alias';
+  if (!ALIAS_RE.test(a)) return '1 to 24 letters, digits, - or _';
+  if (parts.some((p, k) => k !== i && p.alias.trim().toLowerCase() === a.toLowerCase())) return 'used twice';
+  return '';
+}
+
+/** The first problem that stops a save ('' = ready). */
+function unionProblem(f: UnionForm): string {
+  if (f.parts.length < 2) return `Add at least 2 sessions (up to ${UNION_MAX}).`;
+  const bad = f.parts.findIndex((_, i) => aliasProblem(f.parts, i));
+  return bad < 0 ? '' : `Alias of “${f.parts[bad]?.name || f.parts[bad]?.id}”: ${aliasProblem(f.parts, bad)}.`;
+}
+
+/** The sessions that may still be added: mine to see, not a union / embeddings, not this one, not already in. */
+export function unionCandidates(f: UnionForm): DatasetItem[] {
+  const have = new Set(f.parts.map((p) => p.id));
+  return SET.datasets.filter((d) => !unionBlock(d) && d.id !== f.id && !have.has(d.id));
+}
+
+function unionRowHTML(f: UnionForm, p: UnionPart, i: number): string {
+  const d = SET.datasets.find((x) => x.id === p.id);
+  const kind = d?.kind ?? p.kind;
+  const name = d?.name || p.name || p.id;
+  const err = aliasProblem(f.parts, i);
+  const btn = (act: string, ico: string, label: string, off: boolean, cls = '') =>
+    `<button class="icon-btn ghost ${cls}" data-act="${act}" aria-label="${esc(label)}" title="${esc(label)}" ${off ? 'disabled' : ''}>${icon(ico)}</button>`;
+  return `<li class="un-row${err ? ' bad' : ''}" data-i="${i}"><span class="un-n num" title="Priority ${i + 1}">${i + 1}</span>` +
+    `<input class="txt mono un-alias" type="text" data-f="parts.${i}.alias" value="${esc(p.alias)}" maxlength="24" spellcheck="false" ` +
+    `autocomplete="off" aria-label="Alias of ${esc(name)}" aria-invalid="${!!err}" aria-describedby="un-err-${i}">` +
+    `<span class="un-name">${icon(kind ? DS_ICON[kind] : 'folder')}<b title="${esc(name)}">${esc(name)}</b>` +
+    `<span class="muted">${esc(kind ? KIND_TEXT[kind] : d ? '' : 'not visible to you')}</span></span>` +
+    btn('un-up', 'up', `Move ${name} up`, i === 0) + btn('un-down', 'up', `Move ${name} down`, i === f.parts.length - 1, 'un-flip') +
+    btn('un-rm', 'x', `Remove ${name} from the list`, false, 'danger') +
+    `<span class="un-err" id="un-err-${i}" role="alert">${esc(err)}</span></li>`;
+}
+
+function renderUnionForm(): string {
+  const f = formOf('union');
+  const cand = unionCandidates(f);
+  const full = f.parts.length >= UNION_MAX;
+  const problem = unionProblem(f);
+  const names = f.parts.map((p) => SET.datasets.find((x) => x.id === p.id)?.name || p.name || p.id);
+  const opts = cand.length ? '<option value="">Pick a session…</option>' + cand.map((d) =>
+    `<option value="${esc(d.id)}" ${d.id === f.pick ? 'selected' : ''}>${esc(d.name)} — ${esc(KIND_TEXT[d.kind])}</option>`).join('')
+    : '<option value="" disabled selected>no other session to add</option>';
+  return '<section><div class="form-card done"><div class="step-head">' + icon('layers') + 'Sessions, in priority order</div>' +
+    (f.parts.length ? `<ol class="un-list">${f.parts.map((p, i) => unionRowHTML(f, p, i)).join('')}</ol>`
+      : '<p class="sec-note">No sessions yet: add 2 or more below.</p>') +
+    `<div class="sec-actions un-add"><select data-f="pick" aria-label="Session to add" ${cand.length && !full ? '' : 'disabled'}>${opts}</select>` +
+    `<button data-act="un-add" ${cand.length && !full ? '' : 'disabled'}>${icon('plus')}Add</button>` +
+    `<span class="sec-note">${full ? `That is the limit: ${UNION_MAX} sessions.` : `${f.parts.length} of 2–${UNION_MAX}`}</span></div>` +
+    '<p class="sec-note">The first session wins where two disagree (its class order, its copy of an image). ' +
+    'The alias goes in front of each class name (A:cat), so the members stay apart on the map. ' +
+    'Combined datasets and embeddings sessions cannot be members. Nothing is copied: the members’ own crops and features are reused.</p>' +
+    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(unionName(names) || 'combined')}"></label></div>` +
+    `<div class="form-foot"><div id="un-problem">${statusHTML(f.saveStatus || (problem && f.parts.length ? { kind: '', text: problem } : null))}</div>` +
+    '<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>' +
+    `<button data-act="save-union" ${problem ? 'disabled' : ''}>Save</button>` +
+    `<button class="primary" data-act="save-union" data-open="1" ${problem ? 'disabled' : ''}>${icon('play')}Save &amp; open</button></div></section>`;
+}
+
+/** After an alias was typed (no re-render, the focus stays): each row's message, the save buttons, the footer line. */
+export function unionInput(): void {
+  const f = SET.form;
+  if (!f || f.form !== 'union') return;
+  f.saveStatus = null;
+  document.querySelectorAll<HTMLElement>('#settings-body .un-row').forEach((row) => {
+    const i = Number(row.dataset['i']);
+    const err = aliasProblem(f.parts, i);
+    row.classList.toggle('bad', !!err);
+    row.querySelector('.un-alias')?.setAttribute('aria-invalid', String(!!err));
+    const out = row.querySelector('.un-err');
+    if (out) out.textContent = err;
+  });
+  const problem = unionProblem(f);
+  document.querySelectorAll<HTMLElement>('#settings-body [data-act="save-union"]').forEach((b) => setDisabled(b, !!problem));
+  const line = document.getElementById('un-problem');
+  if (line) line.innerHTML = statusHTML(problem ? { kind: '', text: problem } : null);
 }
 
 // ---- connections: one kind each (dataviz/labeling/README.md): s3 (the default, datasets + labeling images),
@@ -440,7 +600,9 @@ export function renderConnsSec(): string {
       `<button class="icon-btn ghost" data-act="remove-conn" aria-label="Delete" title="Delete">${icon('trash')}</button></div>` +
       `<div class="ds-progress" id="cst-${esc(c.id)}"></div></div>`;
   }).join('') || '<p class="sec-note">No connections yet. Add one here, while adding an S3 dataset, or while creating a labeling session.</p>';
-  return `<section><div class="sec-actions"><button class="primary" data-act="new-conn">${icon('plus')}New connection</button></div>${cards}</section>`;
+  const add = can('connection.add') ? `<button class="primary" data-act="new-conn">${icon('plus')}New connection</button>`
+    : `<span class="sec-note">${esc(cannot('add connections'))}</span>`;
+  return `<section><div class="sec-actions">${add}</div>${cards}</section>`;
 }
 
 // ---- appearance / plot / workspace

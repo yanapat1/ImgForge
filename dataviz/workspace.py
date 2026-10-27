@@ -79,16 +79,21 @@ def _read_meta(path):
     return meta
 
 
-def find_workspace(root, uri):
+def find_workspace(root, uri, session_id=None, alt_uris=()):
     """(folder, workspace.json dict) of the most recently opened workspace of the dataset at `uri`, or None.
 
-    Matched by the dataset uri, not the folder name, so a renamed session still finds its results.
+    Matched by the session id the workspace was last opened from (State._finish_index writes it) or by the
+    dataset uri (`uri` or any of `alt_uris`: an images-only view stores '<uri>#images', data/views.py), not the
+    folder name, so a renamed session still finds its results.
     Reads only the small workspace.json files (never samples.json): cheap enough for every page load.
     """
+    uris = {u for u in (uri, *alt_uris) if u}
     best = None
     for m in Path(root).glob('*/workspace.json'):
         meta = _read_meta(m)
-        if meta and meta.get('dataset') == uri and (best is None or
-                                                    (meta.get('last_opened') or '') > (best[1].get('last_opened') or '')):
+        if not meta:
+            continue
+        hit = meta.get('dataset') in uris or (session_id is not None and meta.get('session_id') == session_id)
+        if hit and (best is None or (meta.get('last_opened') or '') > (best[1].get('last_opened') or '')):
             best = (m.parent, meta)
     return best

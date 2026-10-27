@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import patching
 from .sources import Conflict, sha1_bytes
 from .indexer import find_image, yolo_to_pixel
 
@@ -302,6 +303,10 @@ class Curation:
         self.splits = {}          # image base name -> 'train' | 'val' | 'test' (models.split_source), for split_leak
         self._flat = None
         self._fp = getattr(state, 'fingerprint', None)
+        try:
+            state._curation = self          # the live feed (data/live.py) patches under self.lock, tracks patch_cls
+        except AttributeError:
+            pass
         self._migrate_backups()
 
     # ------------------------------------------------------------ helpers
@@ -333,12 +338,7 @@ class Curation:
         return Path(self.state.cache_dir) / f'curation_{(self._fp or "none")[:12]}.json'
 
     def _deleted(self):
-        st = self.state
-        d = getattr(st, 'deleted', None)
-        if d is None or len(d) != len(st.samples):
-            d = np.zeros(len(st.samples), bool)
-            st.deleted = d
-        return d
+        return patching.deleted_mask(self.state)
 
     def _img_wh(self, image):
         ids = self.state.by_image.get(image) if self.state.by_image else None
@@ -412,8 +412,12 @@ class Curation:
             datas = self._read_all(src, labels, progress)
             progress(0, len(labels), 'checking labels')
             files, file_items = {}, {}
+            # a source that names each label's image itself (combined datasets, labeling, views): no stem lookup
+            image_for = getattr(src, 'image_for_label', None)
             for name, data in zip(labels, datas):
-                img = find_image(image_set, Path(name).stem)
+                img = image_for(name) if image_for else find_image(image_set, Path(name).stem)
+                if img is not None and img not in image_set:
+                    img = None
                 files[name], file_items[name] = self._scan_file(name, img, data)
             self._check_boxes(files, file_items, labels)
             progress(stage='checking images')
@@ -1132,6 +1136,9 @@ class Curation:
                     with self.lock:
                         self._derive()
                         self._invalidate()
+                    diff = patching.boxes_patched(self.state, [r['image'] for r in records if r['image']])
+                    if diff:
+                        patch['diff'] = diff                # the Compare tab's diffs, updated (data/compare.py)
                 elif bdir.is_dir():
                     shutil.rmtree(bdir, ignore_errors=True)
             return {'applied': applied, 'files': len(records), 'conflicts': conflicts, 'errors': errors,
@@ -1205,9 +1212,7 @@ class Curation:
 
     def _invalidate(self):
         """The State changed under the index: drop the points payload, bump the edit counter (eval / groups caches)."""
-        st = self.state
-        st.payloads.pop('points', None)
-        st.edit_seq = getattr(st, 'edit_seq', 0) + 1
+        patching.invalidate(self.state)
 
     def _label_of(self, image):
         for name, fi in self.files.items():
@@ -1252,22 +1257,13 @@ class Curation:
                     cls_before[sid] = int(st.labels[sid])
                     self._set_cls(sid, b[1])
                     patch['cls'][sid] = b[1]
-                bb = _px_box(b, smp['img_w'], smp['img_h'])
-                if bb != list(smp['bbox']):
-                    smp['bbox'] = bb
-                    st.stale_ids = getattr(st, 'stale_ids', None) or set()
-                    st.stale_ids.add(sid)
+                if patching.set_bbox(st, sid, _px_box(b, smp['img_w'], smp['img_h'])):
                     patch.setdefault('moved', []).append(sid)
             return None if any(i is None for i in ids) else ids
 
         self._rescan(name, fi['image'], data, carry)
-        for sid in gone:
-            deleted[sid] = True
-            st.samples[sid]['box_idx'] = None              # no line in the file any more
-            patch['deleted'].append(sid)
-        if gone and fi['image'] in st.by_image:
-            g = set(gone)
-            st.by_image[fi['image']] = [i for i in st.by_image[fi['image']] if i not in g]
+        patching.delete(st, gone, deleted)                 # no line in the file any more
+        patch['deleted'].extend(gone)
         return {str(k): v for k, v in cls_before.items()}, gone
 
     def _ids_by_line(self, image, boxes):
@@ -1287,11 +1283,7 @@ class Curation:
         return ids                      # None entries: lines an earlier edit added
 
     def _set_cls(self, sid, c):
-        st = self.state
-        st.labels[sid] = c
-        s = st.samples[sid]
-        s['cls'] = c
-        s['cls_name'] = st.classes[c] if c < len(st.classes) else f'class_{c}'
+        patching.set_cls(self.state, sid, c)
         self.patch_cls[sid] = c
 
     def _rescan(self, name, image, data, ids_fn):
@@ -1353,6 +1345,7 @@ class Curation:
                 raise KeyError(undo_id)
             meta = json.loads((bdir / 'meta.json').read_text())
             same = meta.get('fingerprint') == self._fp
+            touched = [r['image'] for r in meta['files'] if r.get('image')]
             patch = {'cls': {}, 'restored': []}
             conflicts, errors, left, restored = [], [], [], 0
             rows_api = hasattr(src, 'restore_rows')
@@ -1415,7 +1408,37 @@ class Curation:
                     if self.ready:
                         self._derive()
                     self._invalidate()
+                diff = patching.boxes_patched(self.state, touched)
+                if diff:
+                    patch['diff'] = diff
             return {'restored': restored, 'conflicts': conflicts, 'errors': errors, 'patch': patch, 'stale': not same}
+
+    def forget_files(self, labels):
+        """Labels changed outside curation (the live feed, data/live.py, after its State patch): re-read and re-scan
+        the ones this scan knows, so sha1 / box ids / issues match the store again. Box ids come from the live
+        samples' box_idx (what the live patch left). Returns the names re-scanned."""
+        out = []
+        for name in labels:
+            with self.lock:
+                fi = self.files.get(name)
+            if fi is None:
+                continue
+            try:
+                data = self._read_one(name)
+            except Exception:  # noqa: BLE001 - the next scan sees it
+                continue
+            image = fi['image']
+
+            def ids_of(info, image=image):
+                return self._ids_by_line(image, info['boxes'])
+            with self.lock:
+                self._rescan(name, image, data, ids_of)
+                out.append(name)
+        if out:
+            with self.lock:
+                if self.ready:
+                    self._derive()
+        return out
 
     def state_patch(self):
         """Every in-memory change since the index was built: {'cls': {id: c}, 'deleted': [ids]}."""

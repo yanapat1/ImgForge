@@ -9,6 +9,7 @@ import { reapplyInspect, saveSettings } from './controls.js';
 import { showAiTab } from './assistant.js';
 import { EVAL_PLOTS, showEvalTab } from './eval.js';
 import { closestOf } from './ev-util.js';
+import { CMP_PLOTS, showCompareTab } from './compare.js';
 import { MODEL_PLOTS, showModelTab } from './model.js';
 import { renderClassTable, renderStats } from './stats.js';
 
@@ -90,7 +91,7 @@ export function syncClassFilter(): void {
 // activity bar: each view has a left panel and a right panel
 // (curation.js also syncs its two panels from the act-curation aria-selected attribute: same ids, same result)
 // (ai: the ◆ assistant chat on the left, the plot stays on the right so you can lasso and ask)
-const VIEWS: Record<string, string[]> = { ai: ['ai-side', 'tab-embed'], explore: ['gallery-panel', 'tab-embed'], stats: ['stats-side', 'tab-stats'], model: ['model-side', 'tab-model'], eval: ['eval-side', 'tab-eval'], curation: ['cur-side', 'tab-curation'] };
+const VIEWS: Record<string, string[]> = { ai: ['ai-side', 'tab-embed'], explore: ['gallery-panel', 'tab-embed'], compare: ['cmp-side', 'tab-embed'], stats: ['stats-side', 'tab-stats'], model: ['model-side', 'tab-model'], eval: ['eval-side', 'tab-eval'], curation: ['cur-side', 'tab-curation'] };
 
 export let curTab = 'explore';
 
@@ -114,11 +115,13 @@ export function switchTab(tab: string): void {
   if (tab === 'model') void showModelTab();
   if (tab === 'eval') void showEvalTab();
   if (tab === 'ai') showAiTab();
+  if (tab === 'compare') void showCompareTab();
   resizePlots();
 }
 
 export function resizePlots(): void {
-  const ids = curTab === 'stats' ? ['stat-counts', 'stat-area', 'stat-confusion'] : curTab === 'model' ? MODEL_PLOTS : curTab === 'eval' ? EVAL_PLOTS : ['plot'];
+  const ids = curTab === 'stats' ? ['stat-counts', 'stat-area', 'stat-confusion'] : curTab === 'model' ? MODEL_PLOTS : curTab === 'eval' ? EVAL_PLOTS
+    : curTab === 'compare' ? ['plot', ...CMP_PLOTS] : ['plot'];
   for (const id of ids) { const el = $<Plotly.PlotlyHTMLElement>(id); if (el && el.data) Plotly.Plots.resize(el); }
 }
 

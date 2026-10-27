@@ -35,7 +35,7 @@ def test_create_list_update(app):
                                               'password': PW}).status_code == 400
     users = {u['username']: u for u in adm.get('/api/admin/users').json()['users']}
     assert set(users) == {'root', 'bob'}
-    assert set(users['bob']) == {'id', 'username', 'email', 'name', 'is_admin', 'is_active', 'avatar_ver',
+    assert set(users['bob']) == {'id', 'username', 'email', 'name', 'is_admin', 'is_active', 'avatar_ver', 'tier_id',
                                  'created', 'last_login', 'n_sessions'}
     assert users['root']['last_login'] is not None and users['bob']['last_login'] is None
 

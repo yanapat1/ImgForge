@@ -25,7 +25,10 @@ services:
       retries: 30
 
   image-tools:
-    build: .
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.12-slim}   # see the Dockerfile: an earlier build skips reinstalling torch
     image: image-tools:latest
     container_name: image-tools
     restart: unless-stopped
@@ -43,6 +46,7 @@ services:
       DATAVIZ_ADMIN_USERNAME: ${DATAVIZ_ADMIN_USERNAME:-admin}
       DATAVIZ_ADMIN_EMAIL: ${DATAVIZ_ADMIN_EMAIL:-admin@localhost}
       DATAVIZ_ADMIN_PASSWORD: ${DATAVIZ_ADMIN_PASSWORD:-}   # empty: a random one is printed once in the log
+      DATAVIZ_ADMIN_RESET: ${DATAVIZ_ADMIN_RESET:-false}    # true: every start sets that admin password from .env
       DATAVIZ_COOKIE_SECURE: ${DATAVIZ_COOKIE_SECURE:-auto}
     volumes:
       - dataviz_cache:/workspace/.dataviz_cache  # crops, features, projections (caches) + uploaded images

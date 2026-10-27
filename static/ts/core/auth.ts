@@ -7,6 +7,8 @@ import { loginUrl } from './nav.js';
 
 export interface Me {
   id: string; username: string; email?: string; display_name: string; is_admin: boolean; avatar_ver: number;
+  /** the user's tier (dataviz/auth/tiers.py) and what it lets them add; admins have every permission */
+  tier?: { id: string; name: string } | null; perms?: string[];
 }
 export type Prefs = Record<string, unknown>;
 interface MePayload { user: Me; prefs?: Prefs | null }
@@ -42,6 +44,11 @@ export function setMe(u: Me): void {
 }
 
 export const isAdmin = (): boolean => !!ME && !!ME.is_admin;
+/** Whether the user's tier grants `perm` (e.g. 'dataset.create'); the server checks it again. Unknown (an older
+ *  server without tiers): allowed. */
+export const can = (perm: string): boolean => !!ME && (ME.is_admin || !ME.perms || ME.perms.includes(perm));
+/** The toast when a tier lacks a permission. */
+export const cannot = (what: string): string => `Your tier${ME?.tier ? ` (${ME.tier.name})` : ''} cannot ${what}: ask an administrator`;
 export const userKey = (k: string): string => `${k}:${ME ? ME.id : 'anon'}`;
 export const displayName = (u: { display_name?: string | null; name?: string | null; username?: string | null } | null): string =>
   (u && (u.display_name || u.name || u.username)) || '';

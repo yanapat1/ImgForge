@@ -1,3 +1,5 @@
+ARG BASE_IMAGE=python:3.12-slim
+
 # front end: compile static/ts -> static/js
 FROM node:20-slim AS frontend
 WORKDIR /build
@@ -7,7 +9,10 @@ COPY tsconfig.json build.mjs ./
 COPY static/ts static/ts
 RUN npm run typecheck && npm run build
 
-FROM python:3.12-slim
+# BASE_IMAGE (set in .env) can be an earlier build of this image, e.g. image-tools:torch-base made with
+#   docker tag image-tools:latest image-tools:torch-base
+# torch etc. are then already installed, so the uv pip install below only adds what requirements.txt changed
+FROM ${BASE_IMAGE}
 
 # opencv needs libgl1/libglib2.0-0; curl is for the healthcheck
 RUN apt-get update \
@@ -18,7 +23,9 @@ RUN apt-get update \
 #   /workspace (project root) / scripts / image-tools (app)
 WORKDIR /workspace/scripts/image-tools
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# pinned: a moving :latest tag invalidates this layer (and the pip install below) on every new uv release
+# (uv 0.13.1, the image already pulled here, pinned by digest so the existing layer cache still matches)
+COPY --from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 /uv /usr/local/bin/uv
 
 COPY requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt

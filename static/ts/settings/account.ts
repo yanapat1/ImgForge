@@ -14,7 +14,7 @@ import { renderSettings } from './dialog.js';
 import { statusHTML } from './forms.js';
 
 const USERNAME = /^[a-z0-9._-]{3,32}$/;
-const PW_MIN = 10;
+const PW_MIN = 8;
 
 interface AccState {
   name: string | null; username: string | null; email: string | null;
@@ -89,7 +89,7 @@ export function renderAccountSec(): string {
     `<span id="acc-pw-help" class="hint full">At least ${PW_MIN} characters. Changing it signs you out on your other devices.</span></div>` +
     `<div class="sec-actions"><button class="primary" data-act="acc-pw">${icon('lock')}Change password</button>${statusHTML(ACC.pwStatus)}</div></div>`;
   const devices = '<div class="form-card"><div class="step-head">' + icon('monitor') + 'Devices</div>' +
-    `<p class="sec-note">Signed in as <b>${esc(displayName(u))}</b> (@${esc(u.username)})${u.is_admin ? ' · administrator' : ''}.</p>` +
+    `<p class="sec-note">Signed in as <b>${esc(displayName(u))}</b> (@${esc(u.username)})${u.is_admin ? ' · administrator' : u.tier ? ` · tier <b>${esc(u.tier.name)}</b>` : ''}.</p>` +
     `<div class="sec-actions"><button data-act="acc-others">${icon('logout')}Sign out other devices</button>` +
     `<button class="ghost" data-act="acc-signout">${icon('logout')}Sign out</button>${statusHTML(ACC.devStatus)}</div></div>`;
   return `<section class="acc-sec">${avatar}${profile}${pw}${devices}</section>`;

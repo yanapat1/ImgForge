@@ -150,7 +150,8 @@ def test_import_everything(pg, ws):
     assert {r['owner_id'] for r in ss.values()} == {admin['id']}
     vz = {r['session_id']: r for r in _all('SELECT * FROM app.viz_sessions')}
     assert vz['d1'] == {'session_id': 'd1', 'source_kind': 's3', 'path': None, 'connection_id': 'cs3', 'bucket': 'bkt',
-                        'prefix': 'a/b', 'mode': 'stream', 'project_id': None, 'task_id': None, 'only_done': False}
+                        'prefix': 'a/b', 'mode': 'stream', 'project_id': None, 'task_id': None, 'only_done': False,
+                        'options': {}}
     assert vz['d2']['project_id'] == PID and vz['d2']['task_id'] == 't1' and vz['d2']['only_done'] is True
     assert vz['d3']['project_id'] is None and vz['d3']['task_id'] == 'tx'
     assert vz['d4']['source_kind'] == 'local' and vz['d4']['path']

@@ -48,6 +48,18 @@ def _session_fk(name='session_id', **kw):
 
 # ==================================================================================================== app
 
+tiers = Table(                                        # what a non-admin may create (auth/tiers.py); admins: everything
+    'tiers', metadata,
+    Column('id', String(32), primary_key=True),
+    Column('name', String(40), nullable=False),
+    Column('description', Text, nullable=False, server_default=text("''")),
+    Column('permissions', JSONB, nullable=False, server_default=text("'[]'::jsonb")),   # keys of tiers.PERMS
+    Column('is_default', Boolean, nullable=False, server_default=text('false')),        # users.tier_id NULL + sign-ups
+    _now('created_at'),
+    Index('ux_tiers_name', func.lower(text('name')), unique=True),
+    Index('ux_tiers_is_default', 'is_default', unique=True, postgresql_where=text('is_default')),
+    schema='app')
+
 users = Table(
     'users', metadata,
     Column('id', String(32), primary_key=True),
@@ -57,6 +69,7 @@ users = Table(
     Column('password_hash', Text, nullable=False),
     Column('is_admin', Boolean, nullable=False, server_default=text('false')),
     Column('is_active', Boolean, nullable=False, server_default=text('true')),
+    Column('tier_id', String(32), ForeignKey('app.tiers.id', ondelete='SET NULL')),     # NULL: the default tier
     Column('avatar', LargeBinary),                       # 256 px WebP, re-encoded by the server
     Column('avatar_mime', String(40)),
     Column('avatar_ver', Integer, nullable=False, server_default=text('0')),   # bumps on change: cache-busting URL
@@ -169,7 +182,7 @@ sessions = Table(
 viz_sessions = Table(
     'viz_sessions', metadata,
     Column('session_id', String(36), ForeignKey('app.sessions.id', ondelete='CASCADE'), primary_key=True),
-    Column('source_kind', String(12), nullable=False),            # local | s3 | labeling | embeddings
+    Column('source_kind', String(12), nullable=False),            # local | s3 | labeling | embeddings | union
     Column('path', Text),
     Column('connection_id', String(36), ForeignKey('app.connections.id', ondelete='RESTRICT')),
     Column('bucket', String(255)),
@@ -178,7 +191,20 @@ viz_sessions = Table(
     Column('project_id', String(36), ForeignKey('app.sessions.id', ondelete='SET NULL')),   # gone: card shows broken
     Column('task_id', String(36)),
     Column('only_done', Boolean, nullable=False, server_default=text('false')),
-    CheckConstraint("source_kind IN ('local', 's3', 'labeling', 'embeddings')", name='source_kind'),   # 0002
+    Column('options', JSONB, nullable=False, server_default=text("'{}'::jsonb")),   # 0003: unit, class_from_folder
+    CheckConstraint("source_kind IN ('local', 's3', 'labeling', 'embeddings', 'union')", name='source_kind'),  # 0004
+    schema='app')
+
+# the members of a combined ('union') visualize session, in order; alias = the name prefix of its images (data/union.py)
+union_members = Table(
+    'union_members', metadata,
+    Column('union_id', String(36), ForeignKey('app.sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('member_id', String(36), ForeignKey('app.sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('position', Integer, nullable=False),
+    Column('alias', String(24), nullable=False),
+    PrimaryKeyConstraint('union_id', 'member_id'),
+    Index('ux_union_members_union_id_alias', 'union_id', 'alias', unique=True),
+    Index('ix_union_members_member_id', 'member_id'),
     schema='app')
 
 label_projects = Table(
@@ -336,6 +362,7 @@ lbl_media = Table(
     Column('created_at', Float),
     Index('ix_lbl_media_order', 'project_id', 'position', 'id'),
     Index('ux_lbl_media_name', 'project_id', 'file_name', unique=True),
+    Index('ix_media_project_id_checksum', 'project_id', 'checksum'),                     # 0004
     schema='lbl')
 
 lbl_annotations = Table(
@@ -361,10 +388,12 @@ lbl_annotations = Table(
     Column('created_at', Float), Column('updated_at', Float),
     Column('version', Integer, nullable=False, server_default=text('1')),
     Column('is_deleted', Boolean, nullable=False, server_default=text('false')),
+    Column('change_seq', BigInteger),        # 0004: set by a trigger from lbl.change_seq on every write (data/live.py)
     Index('ix_lbl_ann_task_media', 'task_id', 'media_id'),
     Index('ix_lbl_ann_media_live', 'media_id', postgresql_where=text('NOT is_deleted')),
     Index('ix_lbl_ann_class_live', 'class_id', postgresql_where=text('NOT is_deleted')),
     Index('ix_lbl_ann_project', 'project_id'),
+    Index('ix_annotations_project_id_change_seq', 'project_id', 'change_seq'),
     schema='lbl')
 
 lbl_annotation_relations = Table(
@@ -390,9 +419,11 @@ lbl_media_task_status = Table(
     Column('committed_at', Float), Column('updated_at', Float),
     Column('model_run_at', Float),
     Column('review', String(10)),
+    Column('change_seq', BigInteger),        # 0004: as lbl.annotations
     PrimaryKeyConstraint('media_id', 'task_id'),
     Index('ix_lbl_mts_task_status', 'task_id', 'status'),
     Index('ix_lbl_mts_project', 'project_id'),
+    Index('ix_media_task_status_project_id_change_seq', 'project_id', 'change_seq'),
     schema='lbl')
 
 lbl_export_runs = Table(

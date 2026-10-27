@@ -96,6 +96,13 @@ def _embed(body):
     return out
 
 
+def _acting_can(perm):
+    """Whether the signed-in user's tier grants `perm` (auth/tiers.py); no user: False (the caller decides)."""
+    from ..auth import context, tiers
+    u = context.user()
+    return u is not None and tiers.has(u, perm)
+
+
 def _acting_admin():
     """Whether env: secrets may be saved: the signed-in user is an admin; no user = an internal caller (scripts)."""
     from ..auth import context
@@ -160,15 +167,17 @@ class ModelRegistry:
             raise ValueError(f'{rp} does not exist')
         return str(rp)
 
-    def upsert(self, body, owner_id=None, admin=None):
+    def upsert(self, body, owner_id=None, admin=None, trusted=None):
         """Save a model of owner_id (new, or one of theirs: KeyError for someone else's id). An edit keeps its
         owner; owner_id None only edits (internal). admin: may `env:` secrets be saved (None = the signed-in user
-        is an admin, or there is no user)."""
+        is an admin, or there is no user). trusted: may files / folders on the server be loaded (None = admin, or
+        the signed-in user's tier has model.upload)."""
         base = dict(self.model(body['id'], owner_id=owner_id)) if body.get('id') else {}
         owner = base.get('owner_id') or owner_id
         if not owner:
             raise ValueError('a model needs an owner (sign in first)')
         admin = _acting_admin() if admin is None else admin
+        trusted = (admin or _acting_can('model.upload')) if trusted is None else trusted
         m = {k: v for k, v in base.items() if k not in ('owner_id',)}
         for k in FIELDS:
             if k in body and body[k] is not None:
@@ -190,8 +199,8 @@ class ModelRegistry:
                 raise ValueError('Hugging Face model id (owner/name) or folder is required')
             if check_hf_path(path):
                 m['path'] = path                # a hub id: downloaded as safetensors, no remote code: anyone may
-            elif not admin:
-                raise ValueError('only admins can load a model folder from this server: use a Hugging Face id')
+            elif not trusted:
+                raise ValueError('your tier cannot load a model folder from this server: use a Hugging Face id')
             else:
                 m['path'] = self.check_path(path)
             m.pop('api', None)
@@ -212,11 +221,11 @@ class ModelRegistry:
             m['api'] = api
             m.pop('path', None)
         else:
-            # weights / adapters run code in the server process (pickle, torch.load, custom .py): admins only,
-            # because anyone can sign up
-            if not admin:
-                raise ValueError('only admins can add models that load files on this server (weights, adapters): '
-                                 'add an API model instead')
+            # weights / adapters run code in the server process (pickle, torch.load, custom .py): admins and
+            # tiers with model.upload only, because anyone can sign up
+            if not trusted:
+                raise ValueError('your tier cannot add models that load files on this server (weights, adapters): '
+                                 'add an API model instead, or ask an administrator for the model.upload permission')
             if not m.get('path'):
                 raise ValueError('model file path is required')
             m['path'] = self.check_path(m['path'])

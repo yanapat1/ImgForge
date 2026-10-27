@@ -34,9 +34,11 @@ import yaml
 from PIL import Image
 
 from ..core import logging as vlog
+from . import imagehash
 
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
 INDEX_VERSION = 1
+IMAGE_COUNT_CAP = 10000             # folder browser badges stop counting here, so huge folders stay instant
 _log = vlog.get_logger('s3')
 
 
@@ -154,6 +156,17 @@ def parse_classes(classes_txt=None, data_yaml=None):
 
 # ---------------------------------------------------------------- local folder
 
+def _walk_images(root):
+    """Relative posix paths of the (non-hidden) image files below root, any depth, hidden folders skipped."""
+    root = str(root)
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if not x.startswith('.')]
+        rel = os.path.relpath(d, root)
+        for f in files:
+            if not f.startswith('.') and _is_image(f):
+                yield f if rel == '.' else f'{rel}/{f}'.replace(os.sep, '/')
+
+
 class LocalSource:
     kind = 'local'
 
@@ -163,13 +176,30 @@ class LocalSource:
         self.uri = str(self.root)
         self._images = None
 
+    @property
+    def layout(self):
+        """'yolo' (images/ [+ labels/]) or 'flat' (image files anywhere below the folder, no labels)."""
+        return 'yolo' if (self.root / 'images').is_dir() else 'flat'
+
+    @property
+    def label_writable(self):              # data curation: only a YOLO folder has label files to write
+        return self.layout == 'yolo'
+
     def check(self):
-        """Raise ValueError unless this is a YOLO folder."""
-        if not (self.root / 'images').is_dir() or not (self.root / 'labels').is_dir():
-            raise ValueError(f'{self.root} must contain images/ and labels/')
+        """Raise ValueError unless the folder holds images (a YOLO folder, or plain images with no labels)."""
+        if not self.root.is_dir():
+            raise ValueError(f'not a folder: {self.root}')
+        if self.layout == 'flat' and not self.list_images():      # a YOLO folder may still be empty (filled later)
+            raise ValueError(f'{self.root} has no images (.jpg, .png, .bmp, .webp), neither in images/ nor below it')
 
     def fingerprint(self):
         """Hash of label/image names, sizes and mtimes; changes when data changes."""
+        if self.layout == 'flat':
+            h = hashlib.sha1(f'{INDEX_VERSION}|flat'.encode())
+            for name in self.list_images():
+                st = (self.root / name).stat()
+                h.update(f'{name}:{st.st_size}:{int(st.st_mtime)}'.encode())
+            return h.hexdigest()
         h = hashlib.sha1(str(INDEX_VERSION).encode())
         for sub in ('labels', 'images'):
             d = self.root / sub
@@ -187,17 +217,22 @@ class LocalSource:
         return sorted(p.name for p in (self.root / 'labels').glob('*.txt'))
 
     def list_images(self):
+        """Image names: files of images/ (YOLO), or relative paths of every image below the folder (flat)."""
         if self._images is None:
             d = self.root / 'images'
-            self._images = sorted(p.name for p in d.iterdir() if _is_image(p.name)) if d.is_dir() else []
+            if d.is_dir():
+                self._images = sorted(p.name for p in d.iterdir() if _is_image(p.name))
+            else:
+                self._images = sorted(rel for rel in _walk_images(self.root))
         return self._images
+
+    def image_path(self, name):
+        return self.root / 'images' / name if self.layout == 'yolo' else self.root / name
 
     def read_label(self, name):
         return (self.root / 'labels' / name).read_text()
 
     # -- writing labels (data curation)
-    label_writable = True
-
     def _label_path(self, name):
         if '/' in name or '\\' in name or name in ('', '.', '..'):
             raise ValueError(f'bad label name {name!r}')
@@ -230,10 +265,23 @@ class LocalSource:
         return parse_classes(txt.read_text() if txt.exists() else None, yml.read_text() if yml.exists() else None)
 
     def open_image(self, name):
-        return Image.open(self.root / 'images' / name)
+        return Image.open(self.image_path(name))
 
     def image_ref(self, name):
-        return str(self.root / 'images' / name)
+        return str(self.image_path(name))
+
+    # -- content identity (data/imagehash.py)
+    def image_sig(self, name):
+        """Cheap identity of an image file (size + mtime): a stored hash is still valid while it is unchanged."""
+        st = os.stat(self.image_path(name))
+        return f'{st.st_size}:{st.st_mtime_ns}'
+
+    def read_image_bytes(self, name):
+        return self.image_path(name).read_bytes()
+
+    def read_image_part(self, name):
+        """(quick hash, first bytes) of an image, reading at most 128 KiB (imagehash.quick)."""
+        return imagehash.quick_file(self.image_path(name))
 
     def label_ref(self, name):
         return str(self.root / 'labels' / name)
@@ -273,26 +321,37 @@ def list_objects(client, bucket, prefix):
     return out
 
 
+def _image_key(key):
+    """An image object that is not hidden (no path part starting with '.')."""
+    return _is_image(key) and not any(part.startswith('.') for part in key.split('/'))
+
+
 def browse(conn, bucket=None, prefix='', s3cfg=None):
-    """Buckets (no bucket given) or the folders directly under prefix, flagged when they look like YOLO."""
+    """Buckets (no bucket given) or the folders directly under prefix, flagged when they look like YOLO, with the
+    image files directly in the prefix and in each folder counted (capped: the browser stays instant)."""
     client = make_client(conn, s3cfg)
     if not bucket:
         return {'buckets': sorted(b['Name'] for b in client.list_buckets().get('Buckets', []))}
     prefix = _norm_prefix(prefix)
-    folders = []
+    folders, images = [], 0
     for page in client.get_paginator('list_objects_v2').paginate(Bucket=bucket, Prefix=prefix, Delimiter='/'):
         folders += [p['Prefix'][len(prefix):].rstrip('/') for p in page.get('CommonPrefixes', [])]
+        if images < IMAGE_COUNT_CAP:
+            images += sum(1 for o in page.get('Contents', []) if _image_key(o['Key'][len(prefix):]))
     here = set(folders)
 
-    def is_yolo(sub):
-        r = client.list_objects_v2(Bucket=bucket, Prefix=f'{prefix}{sub}/', Delimiter='/', MaxKeys=200)
+    def probe(sub):
+        """(looks like YOLO, direct image files) of one folder, from a single listing call."""
+        r = client.list_objects_v2(Bucket=bucket, Prefix=f'{prefix}{sub}/', Delimiter='/', MaxKeys=1000)
         names = {p['Prefix'].rstrip('/').rsplit('/', 1)[-1] for p in r.get('CommonPrefixes', [])}
-        return {'images', 'labels'} <= names
+        n = len(prefix) + len(sub) + 1
+        return {'images', 'labels'} <= names, sum(1 for o in r.get('Contents', []) if _image_key(o['Key'][n:]))
 
     with ThreadPoolExecutor(8) as ex:
-        flags = dict(zip(folders, ex.map(is_yolo, folders)))
-    return {'bucket': bucket, 'prefix': prefix.rstrip('/'), 'yolo': {'images', 'labels'} <= here,
-            'folders': [{'name': f, 'yolo': flags[f]} for f in folders]}
+        flags = dict(zip(folders, ex.map(probe, folders)))
+    return {'bucket': bucket, 'prefix': prefix.rstrip('/'), 'path': prefix.rstrip('/'),
+            'yolo': {'images', 'labels'} <= here, 'images': min(images, IMAGE_COUNT_CAP),
+            'folders': [{'name': f, 'yolo': flags[f][0], 'images': flags[f][1]} for f in folders]}
 
 
 class S3Source:
@@ -330,26 +389,45 @@ class S3Source:
                 _log.info(f'listed {len(self._listing):,} objects in {vlog.esc(self.uri)} [dim]({time.time() - t0:.1f}s)[/]')
             return self._listing
 
+    @property
+    def layout(self):
+        """'yolo' (images/ [+ labels/]) or 'flat' (image objects anywhere below the prefix, no labels)."""
+        return 'yolo' if any(k.startswith('images/') and _is_image(k) for k in self.listing()) else 'flat'
+
+    @property
+    def label_writable(self):              # data curation: only a YOLO prefix has label files to write
+        return self.layout == 'yolo'
+
     def check(self):
         try:
             self.client.head_bucket(Bucket=self.bucket)
         except Exception as e:  # noqa: BLE001
             raise ValueError(f'cannot open bucket {self.bucket!r}: {e}') from e
         st = self.summary(refresh=True)
-        if not st['images'] or not st['labels']:
-            raise ValueError(f'{self.uri} must contain images/ and labels/ '
-                             f'(found {st["images"]} images, {st["labels"]} labels)')
+        if not st['images']:
+            raise ValueError(f'{self.uri} has no images (.jpg, .png, .bmp, .webp), neither in images/ nor below it')
         return st
 
     def summary(self, refresh=False):
         lst = self.listing(refresh)
+        if self.layout == 'flat':
+            imgs = [k for k in lst if _image_key(k)]
+            return {'layout': 'flat', 'images': len(imgs), 'labels': 0, 'classes': False,
+                    'bytes': sum(lst[k][0] for k in imgs)}
         imgs = [k for k in lst if k.startswith('images/') and _is_image(k)]
-        return {'images': len(imgs), 'labels': sum(1 for k in lst if k.startswith('labels/') and k.endswith('.txt')),
+        return {'layout': 'yolo', 'images': len(imgs),
+                'labels': sum(1 for k in lst if k.startswith('labels/') and k.endswith('.txt')),
                 'classes': 'classes.txt' in lst or 'data.yaml' in lst,
                 'bytes': sum(s for k, (s, _) in lst.items() if k.startswith(('images/', 'labels/')) or '/' not in k)}
 
     def fingerprint(self):
         # always from the bucket listing (not the mirror's mtimes): stream and cache mode share one workspace
+        if self.layout == 'flat':
+            h = hashlib.sha1(f'{INDEX_VERSION}|s3|flat'.encode())
+            for k, (size, etag) in sorted(self.listing().items()):
+                if _image_key(k):
+                    h.update(f'{k}:{size}:{etag}'.encode())
+            return h.hexdigest()
         h = hashlib.sha1(f'{INDEX_VERSION}|s3'.encode())
         for k, (size, etag) in sorted(self.listing().items()):
             if k.startswith(('images/', 'labels/')) or k == 'classes.txt':
@@ -364,7 +442,13 @@ class S3Source:
     def list_images(self):
         if self.local:
             return self.local.list_images()
+        if self.layout == 'flat':
+            return sorted(k for k in self.listing() if _image_key(k))
         return sorted(k[7:] for k in self.listing() if k.startswith('images/') and _is_image(k) and '/' not in k[7:])
+
+    def image_key(self, name):
+        """The object key (relative to the prefix) of an image name."""
+        return f'images/{name}' if self.layout == 'yolo' else name
 
     def get(self, rel):
         return self.client.get_object(Bucket=self.bucket, Key=self.prefix + rel)['Body'].read()
@@ -379,8 +463,6 @@ class S3Source:
         return list(self.pool.map(self.read_label, names))
 
     # -- writing labels (data curation): the bucket is the truth; cache mode also updates the mirror
-    label_writable = True
-
     def read_label_bytes(self, name):
         if self.local:
             return self.local.read_label_bytes(name)
@@ -445,10 +527,32 @@ class S3Source:
     def open_image(self, name):
         if self.local:
             return self.local.open_image(name)
-        return Image.open(io.BytesIO(self.get(f'images/{name}')))
+        return Image.open(io.BytesIO(self.get(self.image_key(name))))
 
     def image_ref(self, name):
-        return self.local.image_ref(name) if self.local else f'{self.uri}/images/{name}'
+        return self.local.image_ref(name) if self.local else f'{self.uri}/{self.image_key(name)}'
+
+    # -- content identity (data/imagehash.py); from the listing in both modes, like the fingerprint
+    def image_sig(self, name):
+        size, etag = self.listing().get(self.image_key(name), (None, None))
+        return f'{size}:{etag}'
+
+    def read_image_bytes(self, name):
+        return self.local.read_image_bytes(name) if self.local else self.get(self.image_key(name))
+
+    def read_image_part(self, name):
+        """(quick hash, first bytes) with two ranged GETs (head + tail) instead of the whole object."""
+        if self.local:
+            return self.local.read_image_part(name)
+        key = self.prefix + self.image_key(name)
+        size = self.listing().get(self.image_key(name), (None, None))[0]
+        if size is None:
+            size = self.client.head_object(Bucket=self.bucket, Key=key)['ContentLength']
+        part = imagehash.PART
+        get = lambda a, b: self.client.get_object(Bucket=self.bucket, Key=key, Range=f'bytes={a}-{b}')['Body'].read()  # noqa: E731
+        head = get(0, part - 1) if size else b''
+        tail = get(max(part, size - part), size - 1) if size > part else b''
+        return imagehash.quick(head, tail, size), head
 
     def label_ref(self, name):
         return self.local.label_ref(name) if self.local else f'{self.uri}/labels/{name}'
@@ -463,8 +567,12 @@ class S3Source:
             raise RuntimeError('no mirror folder configured for this dataset')
         sync_log = vlog.get_logger('sync')
         progress(stage='listing bucket')
-        lst = {k: v for k, v in self.listing(refresh=refresh).items()
-               if (k.startswith(('images/', 'labels/')) and '/' not in k.split('/', 1)[1]) or k in ('classes.txt', 'data.yaml')}
+        full = self.listing(refresh=refresh)
+        flat = self.layout == 'flat'
+        lst = {k: v for k, v in full.items()
+               if (_image_key(k) if flat else
+                   (k.startswith(('images/', 'labels/')) and '/' not in k.split('/', 1)[1]))
+               or k in ('classes.txt', 'data.yaml')}
         self.mirror.mkdir(parents=True, exist_ok=True)
         man_path = self.mirror / '.manifest.json'
         manifest = json.loads(man_path.read_text()) if man_path.exists() else {}
@@ -477,13 +585,15 @@ class S3Source:
         total_bytes = sum(lst[k][0] for k in todo)
         sync_log.info(f'{vlog.esc(self.uri)} → {vlog.esc(self.mirror)}: {len(todo):,} to download '
                       f'({total_bytes / 1e6:.1f} MB), {len(lst) - len(todo):,} up to date, {len(stale)} removed')
-        (self.mirror / 'images').mkdir(exist_ok=True)
-        (self.mirror / 'labels').mkdir(exist_ok=True)
+        if not flat:
+            (self.mirror / 'images').mkdir(exist_ok=True)
+            (self.mirror / 'labels').mkdir(exist_ok=True)
         t0, got, done = time.time(), 0, 0
         progress(0, len(todo), 'downloading')
 
         def fetch(k):
             dst = self.mirror / k
+            dst.parent.mkdir(parents=True, exist_ok=True)          # flat layout: the sub-folders are kept
             tmp = dst.with_name(dst.name + '.part')
             # plain streamed GET: download_file() starts its own transfer thread pool per file, and
             # 32 x 10 threads starve everything else of the GIL (progress froze until the very end)
@@ -534,8 +644,6 @@ def _write_json(path, data):
     tmp.write_text(json.dumps(data))
     tmp.replace(path)
 
-
-IMAGE_COUNT_CAP = 10000             # folder browser badges stop counting here, so huge folders stay instant
 
 
 def count_images(path, cap=IMAGE_COUNT_CAP):

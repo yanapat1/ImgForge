@@ -181,13 +181,22 @@ class LabelingSource:
             task = self.check()
             cmap, names = formats.class_map(task['classes'])
             ttype = task['task_type']
-            images, uris, mids, labels, refs = [], {}, {}, {}, {}
+            # the change-feed cursor BEFORE the read: a write committed meanwhile is replayed (data/live.py)
+            seq = self._store().change_cursor(self.task_id)
+            images, uris, mids, labels, refs, sigs, label_image = [], {}, {}, {}, {}, {}, {}
+            # a cheap identity per image (data/reuse.py): uploaded files never change in place, so their media row
+            # is enough; a folder / bucket file can be replaced under the same row, so without a checksum: none
+            # (reuse then compares content hashes instead)
+            immutable = ((self.labeling.get(self.pid).get('source') or {}).get('kind') or 'upload') == 'upload'
             for m, rows in self._store().iter_task_export(self.task_id):
                 fn = m['file_name']
                 images.append(fn)
                 uris[fn] = m['uri']
+                sigs[fn] = (f"m:{m['id']}:{m['checksum']}" if m.get('checksum') else
+                            f"m:{m['id']}:{m.get('size_bytes') or ''}" if immutable else None)
                 name = f'{_stem(fn)}.txt'
                 mids[name] = m['id']
+                label_image[name] = fn
                 if self.only_done:
                     if m['status'] != 'done':
                         continue
@@ -195,7 +204,8 @@ class LabelingSource:
                     continue
                 labels[name], refs[name] = label_lines(ttype, rows, cmap)
             snap = {'images': images, 'uris': uris, 'mids': mids, 'labels': labels, 'refs': refs,
-                    'classes': names, 'cmap': cmap, 'task_type': ttype}
+                    'classes': names, 'cmap': cmap, 'task_type': ttype, 'sigs': sigs, 'label_image': label_image,
+                    'seq': seq}
             self._snap = (fp, snap)
             return snap
 
@@ -219,6 +229,34 @@ class LabelingSource:
 
     def read_classes(self):
         return list(self._snapshot()['classes'])
+
+    def image_for_label(self, name):
+        """The media file name behind a label (names may hold '/': no stem lookup)."""
+        return self._snapshot()['label_image'].get(name)
+
+    def snapshot_info(self):
+        """What the index of this source was built from: the change-feed cursor + the shapes behind every label
+        line ({label: [ann ids per line]}) and the media id of every label (data/live.py)."""
+        snap = self._snapshot()
+        return {'seq': snap['seq'], 'refs': snap['refs'], 'mids': snap['mids']}
+
+    # -- content identity (data/imagehash.py)
+    def image_sig(self, name):
+        return self._snapshot()['sigs'].get(name)
+
+    def _image_path(self, name):
+        uri = self._snapshot()['uris'].get(name)
+        if uri is None:
+            raise FileNotFoundError(f'no image {name!r} in {self.uri}')
+        return self._image_cache().path(uri)
+
+    def read_image_bytes(self, name):
+        with open(self._image_path(name), 'rb') as f:      # raw bytes: the hash is of the file, not the EXIF turn
+            return f.read()
+
+    def read_image_part(self, name):
+        from . import imagehash
+        return imagehash.quick_file(self._image_path(name))
 
     def _image_cache(self):
         from ..labeling import media                    # FTP / SFTP / S3 clients: imported only when used

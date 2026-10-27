@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from ...auth import access, deps
+from ...auth import access, deps, tiers
 from ...core import logging as vlog
 from ...data import connections, sessions, sources
 from ...data.embedding_source import EmbeddingSource
@@ -73,7 +73,22 @@ def router(state, ctx):
             return f"s3://{d['bucket']}/{d.get('prefix', '')}".rstrip('/')
         if d['kind'] == 'labeling':                 # = LabelingSource.uri (workspaces are matched by it)
             return f"label://{d.get('project_id')}/{d.get('task_id')}" + ('?only_done=1' if d.get('only_done') else '')
+        if d['kind'] == 'union':                    # = UnionSource.uri
+            return f"union://{d['id']}"
         return d.get('path')
+
+    def dataset_uris(d):
+        """Every uri a workspace of this session may carry: one point per image stores '<uri>#images'
+        (data/views.py ImageView), which an 'auto' session becomes when its folder has no labels."""
+        base = dataset_uri(d)
+        if d['kind'] not in ('local', 's3') or not base:
+            return [base]
+        unit = d.get('unit') or 'auto'
+        return [base + '#images'] if unit == 'images' else [base] if unit == 'boxes' else [base, base + '#images']
+
+    def workspace_of(d):
+        uris = dataset_uris(d)
+        return find_workspace(reg.root, uris[0], session_id=d['id'], alt_uris=uris[1:])
 
     def labeling_info(d):
         """{project, task, task_type} of a labeling-backed session, or {error} when its session / task is gone."""
@@ -107,6 +122,8 @@ def router(state, ctx):
             except (KeyError, TypeError):
                 out['connection'] = None
                 out['error'] = 'its connection was deleted'
+        elif d['kind'] == 'union':
+            out['uri'] = dataset_uri(d)
         elif d['kind'] == 'labeling':
             out['uri'] = dataset_uri(d)
             out['labeling'] = labeling_info(d)
@@ -116,7 +133,7 @@ def router(state, ctx):
             out['uri'] = dataset_uri(d)
             out['exists'] = Path(d.get('path', '')).is_dir()
         # card stats from the newest workspace of this dataset (small workspace.json only, memoised by mtime)
-        ws = find_workspace(reg.root, dataset_uri(d))
+        ws = workspace_of(d)
         if ws:
             folder, meta = ws
             classes = meta.get('classes') or []
@@ -138,6 +155,8 @@ def router(state, ctx):
             rows = reg.datasets(user, scope)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        # a combined dataset whose members the caller cannot all see is not theirs to see either (as /s/<id>/)
+        rows = [d for d in rows if d['kind'] != 'union' or access.viz_role(user, d['id']) is not None]
         return {'datasets': [dataset_public(d) for d in rows]}
 
     @r.get('/api/datasets')
@@ -150,7 +169,7 @@ def router(state, ctx):
         """One crop of the card's mosaic: crops spread evenly over the session's boxes (already 224 px jpgs)."""
         need_registry()
         try:
-            ws = find_workspace(reg.root, dataset_uri(reg.dataset(did)))
+            ws = workspace_of(reg.dataset(did))
         except KeyError as e:
             raise HTTPException(404, str(e))
         n = (ws[1].get('n_boxes') or 0) if ws else 0
@@ -176,6 +195,14 @@ def router(state, ctx):
                 ds['name'] = src.name
         return check
 
+    def check_union(user):
+        def check(ds):
+            """Before a combined dataset is saved: the caller can open every member (else it looks unknown)."""
+            for p in ds.get('parts') or []:
+                if access.role(user, p['id'], kind='viz') is None:
+                    raise ValueError(f'no dataset {p["id"]!r} to combine')
+        return check
+
     @r.post('/api/datasets')
     async def save_dataset(body: dict, user=Depends(deps.current_user)):
         """A new session owned by the caller, or (body.id) an edit of the caller's own session's source / name."""
@@ -186,10 +213,21 @@ def router(state, ctx):
                 body = {k: v for k, v in body.items() if k != 'id'}
             elif have != 'owner':
                 raise HTTPException(403, 'only the owner of this session can do that')
+        if not body.get('id') and body.get('kind') != 'union':     # combining what they can already open: no tier
+            tiers.check(user, 'dataset.create')
+        if body.get('kind') == 'union' and not body.get('id') and body.get('reuse'):
+            # Compare / Combine on the home page: the caller's existing union over the same members, if any
+            ids = [(m.get('id') if isinstance(m, dict) else m) for m in (body.get('parts') or [])]
+            found = await run_io(reg.find_union, user['id'], ids)
+            if found is not None:
+                return await run_io(dataset_public, found, user)
         try:
             check = check_labeling(user) if body.get('kind') == 'labeling' else \
-                (lambda ds: EmbeddingSource(ds['path']).check()) if body.get('kind') == 'embeddings' else None
+                (lambda ds: EmbeddingSource(ds['path']).check()) if body.get('kind') == 'embeddings' else \
+                check_union(user) if body.get('kind') == 'union' else None
             ds = await run_io(reg.upsert_dataset, body, user['id'], check, roots())
+            if body.get('id') and ds['kind'] == 'union':
+                unload(ds['id'])                 # new members: the next open assembles them
             if ds['kind'] == 'local':
                 await run_io(sources.LocalSource(ds['path']).check)
         except (ValueError, KeyError) as e:
@@ -409,6 +447,7 @@ def router(state, ctx):
     async def check_embeddings(path: str, user=Depends(deps.current_user)):
         """What an embeddings session on `path` would hold (rows, feature spaces, columns), or 400 with why not."""
         need_registry()
+        tiers.check(user, 'dataset.create')
         try:
             where = connections.check_local(path, roots() or [])
             return {'path': where, **await run_io(EmbeddingSource(where).check)}
@@ -418,6 +457,8 @@ def router(state, ctx):
     @r.get('/api/fs/browse')
     async def browse_folder(path: str = '', images: int = 0, user=Depends(deps.current_user)):
         need_registry()
+        if not (tiers.has(user, 'dataset.create') or tiers.has(user, 'label.create')):     # both pick a folder
+            tiers.check(user, 'dataset.create')
         try:
             return await run_io(browse_allowed, path, bool(images))
         except ValueError as e:

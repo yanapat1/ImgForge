@@ -99,6 +99,8 @@ button.big { height: 40px; padding: 0 var(--s5); font-size: var(--fs); border-ra
 .session-card:hover .sc-mosaic img { transform: scale(1.04); filter: none; }
 .sc-cover.empty { display: flex; align-items: center; justify-content: center;
   background: repeating-linear-gradient(135deg, var(--surface-2) 0 10px, var(--surface) 10px 20px); }
+/* components.css .empty (the "nothing here" line) also matches: undo its margin / max-width / padding on a cover */
+.sc-cover.empty { width: auto; max-width: none; margin: 0; padding: 0; }
 .sc-glyph { display: flex; flex-direction: column; align-items: center; gap: var(--s2); padding: var(--s4); text-align: center;
   font-size: var(--fs-xs); color: var(--text-faint); }
 .sc-glyph .ico { width: 30px; height: 30px; color: var(--text-muted); stroke-width: 1.4; }
@@ -427,3 +429,50 @@ button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color
 .pw-meter[data-s="4"] i { background: var(--err-tp); }
 .pw-meter-text { margin-top: -6px; }
 @media (max-width: 600px) { .login-card { padding: var(--s5) var(--s4) var(--s4); } }
+
+/* ---------------------------------------------------------------- Compare / Combine (views/home.ts): pick boxes, combined cards, the bar */
+/* the pick box: top-left of a Visualize card's cover, shown on hover / focus / once anything is picked (always on touch) */
+.sc-pick { position: absolute; top: 8px; left: 8px; z-index: 3; width: 26px; height: 26px; margin: 0; display: grid; place-items: center;
+  border-radius: var(--r-sm); background: var(--overlay); backdrop-filter: blur(4px); box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  opacity: 0; cursor: pointer; transition: opacity var(--t-fast) var(--ease); }
+.sc-pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.sc-pick.off, .sc-pick.off input { cursor: not-allowed; }
+:root[data-theme="dark"] .sc-pick input { color-scheme: dark; }          /* no white box on a dark card */
+.sc-pick:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sc-src { transition: left var(--t-fast) var(--ease); }
+.session-card:hover .sc-pick, .session-card:focus-within .sc-pick, .session-card.picked .sc-pick, .selecting .sc-pick { opacity: 1; }
+.session-card:hover .sc-pick.off, .session-card:focus-within .sc-pick.off, .selecting .sc-pick.off { opacity: .55; }
+.session-card:hover .sc-pick ~ .sc-cover .sc-src, .session-card:focus-within .sc-pick ~ .sc-cover .sc-src,
+.session-card.picked .sc-cover .sc-src, .selecting .sc-pick ~ .sc-cover .sc-src { left: 40px; }
+.session-card.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-2); }
+@media (hover: none) {
+  .sc-pick { opacity: 1; }
+  .sc-pick ~ .sc-cover .sc-src { left: 40px; }
+}
+
+/* a combined card: its members (alias + name) instead of a path */
+.sc-src.uni .ico { color: var(--warn-text); }
+.sc-parts { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.sc-part, .hs-item { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 22px; padding: 0 9px 0 3px;
+  border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11.5px; color: var(--text-muted); }
+.sc-part b, .hs-item b { flex: none; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-text); font: 700 10.5px var(--mono); }
+.sc-part .nm, .hs-item .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the bar of the picked cards: sticks to the bottom of the scrolling home while the grid scrolls under it */
+.home-selbar { position: sticky; bottom: var(--s4); z-index: 5; margin-top: var(--s5); display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--s2) var(--s3); padding: var(--s2) var(--s2) var(--s2) var(--s4); border: 1px solid var(--accent-line); border-radius: var(--r-lg);
+  background: var(--surface); box-shadow: var(--shadow-3); }
+.hs-n { font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }
+.hs-n b { color: var(--text); font-size: var(--fs); margin-right: 2px; }
+.hs-list { flex: 1 1 240px; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.hs-item { height: 26px; max-width: 240px; padding-right: 2px; font-size: var(--fs-xs); color: var(--text); }
+.hs-item .icon-btn { width: 22px; height: 22px; min-width: 22px; padding: 0; border-radius: 50%; }
+.hs-item .icon-btn .ico { width: 12px; height: 12px; }
+.hs-acts { flex: none; display: flex; gap: 6px; margin-left: auto; }
+.hs-err { order: 5; flex: 1 1 100%; margin: 0; }
+@media (max-width: 700px) {
+  .home-selbar { padding: var(--s2) var(--s3); bottom: var(--s2); }
+  .hs-acts { flex: 1 1 100%; }
+  .hs-acts button { flex: 1 1 0; justify-content: center; padding: 0 var(--s2); }
+}

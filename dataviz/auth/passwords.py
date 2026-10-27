@@ -8,7 +8,7 @@ names no account, dummy_verify() still runs one verification so the answer takes
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-MIN_LEN = 10
+MIN_LEN = 8
 MAX_LEN = 256
 
 _ph = PasswordHasher()           # tests swap this for one with other parameters (rehash path)

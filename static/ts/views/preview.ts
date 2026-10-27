@@ -8,6 +8,8 @@ import { pts, S } from '../core/state.js';
 
 /** True in an embeddings session (rows with metadata, no boxes / images / models). */
 export const isRows = (): boolean => S.status?.dataset?.kind === 'embeddings';
+/** One point per image (data/views.py ImageView): images with no labels, each "box" is the whole image. */
+export const isImageUnit = (): boolean => S.status?.caps?.unit === 'image';
 
 /** "3 boxes" in a YOLO session, "3 rows" in an embeddings one. */
 export const unit = (n: number): string => (isRows() ? (n === 1 ? 'row' : 'rows') : (n === 1 ? 'box' : 'boxes'));

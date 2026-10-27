@@ -19,7 +19,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from ...auth import context, deps
+from ...auth import context, deps, tiers
 from ...ml import analysis
 from ...paths import STATIC_DIR
 from ...workspace import list_workspaces
@@ -28,7 +28,9 @@ from ..static import NO_CACHE, render_index
 
 
 def public_user(u):
-    return {k: u.get(k) for k in ('id', 'username', 'display_name', 'is_admin', 'avatar_ver')} if u else None
+    if not u:
+        return None
+    return {**{k: u.get(k) for k in ('id', 'username', 'display_name', 'is_admin', 'avatar_ver')}, **tiers.describe(u)}
 
 
 def router(state, ctx):
@@ -173,6 +175,9 @@ def router(state, ctx):
             'palette_light': state.palette_light,
             'knn_k': state.knn_k,
             'index_stats': state.index['stats'],
+            # a combined dataset: its members, in order (alias = the name prefix; origin = the position)
+            'members': [{k: m.get(k) for k in ('alias', 'name', 'sid', 'n', 'n_images', 'offset', 'unit')}
+                        for m in state.members] or None,
         }
 
     @r.get('/api/points', dependencies=viewer)
@@ -194,15 +199,23 @@ def router(state, ctx):
                 'meta': {c: [x['meta'].get(c) for x in s] for c in types},
                 'meta_types': types,
             }))
-        return json_bytes(state.payload('points', lambda: {
-            'id': list(range(len(s))),
-            'cls': state.labels,
-            'image': [x['image'] for x in s],
-            'session': [x['session'] for x in s],
-            'area': [x['area'] for x in s],
-            'aspect': [x['aspect'] for x in s],
-            'brightness': [x['brightness'] for x in s],
-            'blur': [x['blur'] for x in s],
-        }))
+        def build():
+            out = {
+                'id': list(range(len(s))),
+                'cls': state.labels,
+                'image': [x['image'] for x in s],
+                'session': [x['session'] for x in s],
+                'area': [x['area'] for x in s],
+                'aspect': [x['aspect'] for x in s],
+                'brightness': [x['brightness'] for x in s],
+                'blur': [x['blur'] for x in s],
+            }
+            if state.origin is not None:               # combined dataset: member of each box + same-content group
+                from ...data import imagehash
+                imgs = (imagehash.load(state.cache_dir) or {}).get('images') or {}
+                out['origin'] = state.origin
+                out['hgroup'] = [(imgs.get(x['image']) or {}).get('g', -1) for x in s]
+            return out
+        return json_bytes(state.payload('points', build))
 
     return r

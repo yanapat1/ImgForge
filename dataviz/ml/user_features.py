@@ -13,7 +13,7 @@ FeatureSpec (key model:<id>:<hash>) offered next to the config's features, so it
 Detector runners are reused (models/runners.py: loading, letterbox, device fallback, one model loaded at a time),
 so a model scores in the Model tab and embeds in the plot from the same file. Every embedding is L2-normalized
 (metric cosine). Loading a file model runs code (pickle / torch.load / adapters): runners.load_runner still refuses
-one whose owner is not an admin. A Hugging Face id is loaded from safetensors without remote code, so any user
+one whose owner may not upload model files (admins, tiers with model.upload). A Hugging Face id is loaded from safetensors without remote code, so any user
 may add one.
 """
 
@@ -319,11 +319,9 @@ class OwnerModels:
         self._lock = threading.Lock()
 
     def _owner_admin(self):
-        from sqlalchemy import text
-        from .. import db
-        with db.connect() as c:
-            return bool(c.execute(text('SELECT is_admin AND is_active FROM app.users WHERE id = :u'),
-                                  {'u': self.owner_id}).scalar())
+        """Whether the owner's model files / folders are trusted (admin, or a tier with model.upload)."""
+        from ..auth import tiers
+        return tiers.owner_has(self.owner_id, 'model.upload')
 
     def __call__(self):
         with self._lock:

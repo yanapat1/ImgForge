@@ -21,13 +21,13 @@ def _set_cookie(r):
 
 def test_signup_and_login_by_username_or_email(app):
     c = client(app)
-    assert c.get('/api/auth/config').json() == {'signup_enabled': True, 'password_min': 10}
+    assert c.get('/api/auth/config').json() == {'signup_enabled': True, 'password_min': 8}
     r = c.post('/api/auth/signup', json={'username': 'Alice', 'email': 'Alice@Example.test',
                                          'display_name': '  Alice  A ', 'password': PW})
     assert r.status_code == 200, r.text
     u = r.json()['user']
     assert u['username'] == 'alice' and u['display_name'] == 'Alice A' and u['is_admin'] is False
-    assert set(u) == {'id', 'username', 'email', 'display_name', 'is_admin', 'avatar_ver'}
+    assert set(u) == {'id', 'username', 'email', 'display_name', 'is_admin', 'avatar_ver', 'tier_id'}
     assert c.get('/api/ping').json()['user']['id'] == u['id']            # signed in straight away
     me = c.get('/api/auth/me').json()
     assert me['user']['id'] == u['id'] and me['prefs'] == {}
@@ -98,6 +98,7 @@ def test_failure_lock_schedule():
 
 
 def test_per_ip_rate_limit(app):
+    app.state.login_limiter.clock = lambda: 0.0     # frozen: 21 slow logins on a busy machine must not refill a token
     c = client(app)
     codes = [login(c, 'nobody', 'whatever!!').status_code for _ in range(21)]
     assert codes[:20] == [401] * 20 and codes[20] == 429
@@ -293,7 +294,7 @@ def test_prefs(app):
 def test_password_policy_and_hash():
     from dataviz.auth import passwords
     with pytest.raises(ValueError):
-        passwords.check_policy('x' * 9)
+        passwords.check_policy('x' * 7)
     with pytest.raises(ValueError):
         passwords.check_policy('x' * 257)
     with pytest.raises(ValueError):

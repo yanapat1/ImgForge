@@ -2,41 +2,45 @@
 // the server settings (sign-up on / off, who can add connections: PUT api/admin/settings), the user table
 // (GET api/admin/users: admin and active switches through PATCH api/admin/users/{id}, reset password, delete with
 // their sessions moved to another user or deleted), a create-user form (POST api/admin/users) and the recent audit
-// log (GET api/admin/audit?limit=100). Loaded when the section opens; every change re-reads the list.
+// log (GET api/admin/audit?limit=100), and the tiers (GET / POST / PATCH / DELETE api/admin/tiers: named permission
+// sets, every user in one, the default one for sign-ups). Loaded when the section opens; every change re-reads the list.
 
 import { errText, getJSON, postJSON, sendJSON } from '../core/api.js';
 import { avatarHTML } from '../core/avatar.js';
 import { ME } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { openDialog } from '../views/dialog.js';
-import type { AdminSettings, AdminUser, AuditEvent, SetAction, SetChange, StatusLine } from '../types-settings.js';
+import type { AdminSettings, AdminTier, AdminUser, AuditEvent, SetAction, SetChange, StatusLine, TierPerm } from '../types-settings.js';
 import { renderSettings } from './dialog.js';
 import { dd, rowAttr, statusHTML } from './forms.js';
 
 const USERNAME = /^[a-z0-9._-]{3,32}$/;
-const PW_MIN = 10;
+const PW_MIN = 8;
 
+interface Draft { username: string; display_name: string; email: string; password: string; is_admin: boolean; tier_id: string }
 interface UsersState {
-  users: AdminUser[] | null; settings: AdminSettings | null; audit: AuditEvent[] | null;
-  loading: boolean; error: string | null; status: StatusLine | null; setStatus: StatusLine | null;
-  createOpen: boolean; draft: { username: string; display_name: string; email: string; password: string; is_admin: boolean };
-  createStatus: StatusLine | null;
+  users: AdminUser[] | null; settings: AdminSettings | null; audit: AuditEvent[] | null; tiers: AdminTier[] | null; perms: TierPerm[];
+  loading: boolean; error: string | null; status: StatusLine | null; setStatus: StatusLine | null; tierStatus: StatusLine | null;
+  createOpen: boolean; draft: Draft; createStatus: StatusLine | null;
 }
-const US: UsersState = { users: null, settings: null, audit: null, loading: false, error: null, status: null, setStatus: null, createOpen: false,
-  draft: { username: '', display_name: '', email: '', password: '', is_admin: false }, createStatus: null };
+const EMPTY_DRAFT: Draft = { username: '', display_name: '', email: '', password: '', is_admin: false, tier_id: '' };
+const US: UsersState = { users: null, settings: null, audit: null, tiers: null, perms: [], loading: false, error: null, status: null,
+  setStatus: null, tierStatus: null, createOpen: false, draft: { ...EMPTY_DRAFT }, createStatus: null };
 
 /** Read users, settings and the audit log (each failing alone shows its own line). */
 export async function loadUsersData(): Promise<void> {
   US.loading = true;
-  const [u, s, a] = await Promise.allSettled([
+  const [u, s, a, t] = await Promise.allSettled([
     getJSON<{ users: AdminUser[] }>('api/admin/users'),
     getJSON<AdminSettings>('api/admin/settings'),
     getJSON<{ events: AuditEvent[] }>('api/admin/audit?limit=100'),
+    getJSON<{ tiers: AdminTier[]; permissions: TierPerm[] }>('api/admin/tiers'),
   ]);
   US.loading = false;
   US.users = u.status === 'fulfilled' ? u.value.users : US.users;
   US.settings = s.status === 'fulfilled' ? s.value : US.settings;
   US.audit = a.status === 'fulfilled' ? a.value.events : US.audit;
+  if (t.status === 'fulfilled') { US.tiers = t.value.tiers; US.perms = t.value.permissions; }
   US.error = u.status === 'rejected' ? errText(u.reason) : null;
 }
 
@@ -69,6 +73,79 @@ function settingsHTML(): string {
     statusHTML(US.setStatus) + '</div>';
 }
 
+const defaultTier = (): AdminTier | undefined => (US.tiers ?? []).find((t) => t.is_default);
+const permLabel = (k: string): string => US.perms.find((p) => p.key === k)?.label ?? k;
+
+/** A tier <select>: '' = the default tier (what a NULL tier_id means on the server). */
+function tierSelect(value: string | null | undefined, attrs: string): string {
+  const dflt = defaultTier();
+  const opts = (US.tiers ?? []).filter((t) => !t.is_default).map((t) =>
+    `<option value="${esc(t.id)}"${value === t.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('');
+  return `<select ${attrs}><option value=""${!value || value === dflt?.id ? ' selected' : ''}>${esc(dflt ? `${dflt.name} (default)` : 'Default')}</option>${opts}</select>`;
+}
+
+function tiersHTML(): string {
+  if (!US.tiers) return '';
+  const rows = US.tiers.map((t) => {
+    const perms = t.permissions.length
+      ? t.permissions.map((p) => `<span class="chip tier-perm" title="${esc(p)}">${esc(permLabel(p))}</span>`).join('')
+      : '<span class="hint">nothing: opens only what is shared with them</span>';
+    return `<li class="tier-row" data-tid="${esc(t.id)}"><div class="tier-head"><b>${esc(t.name)}</b>` +
+      (t.is_default ? '<span class="tier-dflt">default</span>' : '') +
+      `<span class="num muted">${t.n_users ?? 0} user${t.n_users === 1 ? '' : 's'}</span><span class="tier-acts">` +
+      (t.is_default ? '' : '<button class="ghost" data-act="tier-default" title="New sign-ups and users without a tier get this one">Make default</button>') +
+      `<button class="icon-btn ghost" data-act="tier-edit" aria-label="${esc(`Edit the tier ${t.name}`)}" title="Edit">${icon('edit')}</button>` +
+      (t.is_default ? '' : `<button class="icon-btn ghost danger" data-act="tier-delete" aria-label="${esc(`Delete the tier ${t.name}`)}" title="Delete">${icon('trash')}</button>`) +
+      '</span></div>' + (t.description ? `<p class="hint">${esc(t.description)}</p>` : '') + `<div class="chips">${perms}</div></li>`;
+  }).join('');
+  return '<div class="form-card"><div class="step-head">' + icon('users') + 'Tiers</div>' +
+    '<p class="sec-note">What each user may add to the server. Administrators have every permission; what someone may do on a ' +
+    'shared session still comes from its sharing (viewer / labeler).</p>' +
+    `<ul class="tier-list">${rows}</ul><div class="sec-actions"><button class="primary" data-act="tier-new">${icon('plus')}New tier</button>` +
+    `${statusHTML(US.tierStatus)}</div></div>`;
+}
+
+function tierDialog(t: AdminTier | null): void {
+  const have = new Set(t ? t.permissions : []);
+  const boxes = US.perms.map((p) => `<label class="check full"><input type="checkbox" data-perm="${esc(p.key)}" ${have.has(p.key) ? 'checked' : ''}> ` +
+    `<span><b>${esc(p.label)}</b> <span class="hint">${esc(p.key)}</span></span></label>`).join('');
+  void openDialog({
+    title: t ? `Edit the tier ${t.name}` : 'New tier', ok: t ? 'Save' : 'Create tier',
+    body: `<label class="fld">Name<input type="text" id="tier-name" maxlength="40" value="${esc(t?.name ?? '')}" autocomplete="off"></label>` +
+      `<label class="fld">Description<input type="text" id="tier-desc" maxlength="300" value="${esc(t?.description ?? '')}" autocomplete="off"></label>` +
+      `<fieldset class="tier-perms"><legend>Permissions</legend>${boxes}</fieldset>`,
+    onOk: async (root) => {
+      const name = root.querySelector<HTMLInputElement>('#tier-name')?.value.trim() ?? '';
+      if (!name) return 'Give the tier a name';
+      const permissions = [...root.querySelectorAll<HTMLInputElement>('[data-perm]')].filter((x) => x.checked).map((x) => x.dataset['perm'] ?? '');
+      const body = { name, description: root.querySelector<HTMLInputElement>('#tier-desc')?.value.trim() ?? '', permissions };
+      try {
+        if (t) await sendJSON('PATCH', `api/admin/tiers/${encodeURIComponent(t.id)}`, body);
+        else await postJSON('api/admin/tiers', body);
+      } catch (e) { return errText(e); }
+      US.tierStatus = { kind: 'ok', text: t ? `Saved ${name}` : `Created the tier ${name}` };
+      await reload(null);
+      return null;
+    },
+  });
+}
+
+function deleteTier(t: AdminTier): void {
+  const n = t.n_users ?? 0;
+  void openDialog({
+    title: `Delete the tier ${t.name}?`, ok: 'Delete tier', okClass: 'danger-btn',
+    body: `<p class="muted">${n ? `Its ${n} user${n === 1 ? '' : 's'} move${n === 1 ? 's' : ''} to ${esc(defaultTier()?.name ?? 'the default tier')}.` : 'Nobody is in it.'}</p>`,
+    onOk: async () => {
+      try { await sendJSON('DELETE', `api/admin/tiers/${encodeURIComponent(t.id)}`); } catch (e) { return errText(e); }
+      US.tierStatus = { kind: 'ok', text: `Deleted the tier ${t.name}` };
+      await reload(null);
+      return null;
+    },
+  });
+}
+
+const tierOf = (b: HTMLElement): AdminTier | undefined => (US.tiers ?? []).find((t) => t.id === rowAttr(b, '[data-tid]', 'tid'));
+
 function rowHTML(u: AdminUser): string {
   const self = ME && ME.id === u.id;
   const sw = (field: 'is_admin' | 'is_active', on: boolean, label: string): string =>
@@ -78,6 +155,8 @@ function rowHTML(u: AdminUser): string {
     `<td><span class="adm-user">${avatarHTML(u, 28, { title: false })}<span class="adm-who"><b>${esc(u.name || u.username)}</b>` +
     `<span class="muted">@${esc(u.username)}${self ? ' · you' : ''}</span></span></span></td>` +
     `<td class="adm-email"><bdi>${esc(u.email)}</bdi></td>` +
+    `<td>${tierSelect(u.tier_id, `data-act-change="adm-tier" aria-label="${esc(`Tier of ${u.username}`)}"` +
+      (u.is_admin ? ' title="Administrators have every permission; the tier applies if they stop being one"' : ''))}</td>` +
     `<td class="c">${sw('is_admin', u.is_admin, 'Administrator')}</td><td class="c">${sw('is_active', u.is_active, 'Active')}</td>` +
     `<td title="${esc(fullTime(u.last_login))}">${esc(when(u.last_login))}</td><td class="num c">${u.n_sessions ?? 0}</td>` +
     `<td class="adm-acts"><button class="icon-btn ghost" data-act="adm-reset" aria-label="${esc(`Reset the password of ${u.username}`)}" title="Reset password">${icon('lock')}</button>` +
@@ -93,6 +172,7 @@ function createHTML(): string {
     `<label class="fld">Display name<input type="text" data-adm="display_name" data-enter="adm-create" value="${esc(d.display_name)}" autocomplete="off" maxlength="80"></label>` +
     `<label class="fld">Email<input type="email" data-adm="email" data-enter="adm-create" value="${esc(d.email)}" autocomplete="off" autocapitalize="none" spellcheck="false"></label>` +
     `<label class="fld">Password<input type="password" data-adm="password" data-enter="adm-create" value="${esc(d.password)}" autocomplete="new-password" aria-describedby="adm-pw-help"></label>` +
+    (US.tiers ? `<label class="fld">Tier${tierSelect(d.tier_id, 'data-act-change="adm-draft-tier"')}</label>` : '') +
     `<label class="check full"><input type="checkbox" data-adm="is_admin" ${d.is_admin ? 'checked' : ''}> Administrator</label>` +
     `<span id="adm-pw-help" class="hint full">At least ${PW_MIN} characters; tell the person to change it under Account.</span></div>` +
     `<div class="sec-actions"><button class="primary" data-act="adm-create">${icon('check')}Create user</button>` +
@@ -114,9 +194,9 @@ export function renderUsersSec(): string {
     return `<section>${statusHTML({ kind: 'busy', text: 'loading users…' })}</section>`;
   }
   const table = US.users ? '<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th scope="col">User</th><th scope="col">Email</th>' +
-    '<th scope="col" class="c">Admin</th><th scope="col" class="c">Active</th><th scope="col">Last sign-in</th><th scope="col" class="c">Sessions</th>' +
+    '<th scope="col">Tier</th><th scope="col" class="c">Admin</th><th scope="col" class="c">Active</th><th scope="col">Last sign-in</th><th scope="col" class="c">Sessions</th>' +
     `<th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>${US.users.map(rowHTML).join('')}</tbody></table></div>` : '';
-  return '<section class="adm-sec">' + (US.error ? statusHTML({ kind: 'err', text: US.error }) : '') + settingsHTML() +
+  return '<section class="adm-sec">' + (US.error ? statusHTML({ kind: 'err', text: US.error }) : '') + settingsHTML() + tiersHTML() +
     `<h3 class="sec-sub">Users${US.users ? ` <span class="num muted">${US.users.length}</span>` : ''}</h3>` + createHTML() + statusHTML(US.status) + table +
     auditHTML() + '</section>';
 }
@@ -151,8 +231,8 @@ async function createUser(): Promise<void> {
   renderSettings();
   try {
     await postJSON('api/admin/users', { username: d.username, email: d.email.trim(), display_name: d.display_name.trim() || d.username,
-      password: d.password, is_admin: d.is_admin });
-    US.draft = { username: '', display_name: '', email: '', password: '', is_admin: false };
+      password: d.password, is_admin: d.is_admin, tier_id: d.tier_id });
+    US.draft = { ...EMPTY_DRAFT };
     US.createOpen = false;
     US.createStatus = null;
     await reload({ kind: 'ok', text: `Created @${d.username}` });
@@ -220,12 +300,35 @@ export const USERS_ACTIONS: Record<string, SetAction> = {
   'adm-create': createUser,
   'adm-reset': (b) => { const u = userOf(b); if (u) resetPassword(u); },
   'adm-delete': (b) => { const u = userOf(b); if (u) deleteUser(u); },
+  'tier-new': () => tierDialog(null),
+  'tier-edit': (b) => { const t = tierOf(b); if (t) tierDialog(t); },
+  'tier-delete': (b) => { const t = tierOf(b); if (t) deleteTier(t); },
+  'tier-default': async (b) => {
+    const t = tierOf(b);
+    if (!t) return;
+    try {
+      await sendJSON('PATCH', `api/admin/tiers/${encodeURIComponent(t.id)}`, { is_default: true });
+      US.tierStatus = { kind: 'ok', text: `${t.name} is now the default tier` };
+    } catch (e) { US.tierStatus = { kind: 'err', text: errText(e) }; }
+    await reload(null);
+  },
 };
 
 export const USERS_CHANGES: Record<string, SetChange> = {
   'adm-signup': (el) => { if (el instanceof HTMLInputElement) void saveSettings({ signup_enabled: el.checked }); },
   'adm-conns': (el) => {
     if (el instanceof HTMLSelectElement) void saveSettings({ who_can_add_connections: el.value === 'admins' ? 'admins' : 'everyone' });
+  },
+  'adm-draft-tier': (el) => { if (el instanceof HTMLSelectElement) US.draft.tier_id = el.value; },
+  'adm-tier': async (el) => {
+    const u = el instanceof HTMLSelectElement ? userOf(el) : undefined;
+    if (!u || !(el instanceof HTMLSelectElement)) return;
+    const name = el.selectedOptions[0]?.textContent ?? '';
+    el.disabled = true;
+    try {
+      await sendJSON('PATCH', `api/admin/users/${encodeURIComponent(u.id)}`, { tier_id: el.value });
+      await reload({ kind: 'ok', text: `@${u.username}: now in ${name}` });
+    } catch (e) { await reload({ kind: 'err', text: errText(e) }); }
   },
   'adm-flag': async (el) => {
     const u = el instanceof HTMLInputElement ? userOf(el) : undefined;

@@ -76,7 +76,8 @@ def test_session_routes(emb):
     base = f'/s/{sid}/api'
     st = c.get(f'{base}/status').json()
     assert st['dataset']['kind'] == 'embeddings'
-    assert st['caps'] == {'boxes': False, 'images': False, 'curation': False, 'models': False, 'meta': True}
+    assert st['caps'] == {'union': False, 'live': False, 'boxes': False, 'images': False, 'curation': False, 'models': False, 'meta': True,
+                          'unit': 'embeddings', 'layout': None}
     assert [f['key'] for f in st['features']] == ['byo-emb'] and st['default_feature'] == 'byo-emb'
 
     p = c.get(f'{base}/points').json()

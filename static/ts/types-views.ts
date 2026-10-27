@@ -115,7 +115,11 @@ export interface CurInfo {
   history: CurHistoryEntry[];
 }
 /** The in-memory change of the points a fix / undo / edit made. */
-export interface CurPatch { cls?: Record<string, number>; deleted?: number[]; restored?: number[] }
+export interface CurPatch {
+  cls?: Record<string, number>; deleted?: number[]; restored?: number[];
+  /** live feed: boxes whose geometry changed after the index (their dot keeps the old place: a stale ring) */
+  moved?: Array<{ id: number; bbox: number[] }>;
+}
 export interface CurFileError { file: string; error: string }
 /** POST api/curation/fix, api/edits and api/curation/undo answers (the fields the page reads). */
 export interface CurResult {

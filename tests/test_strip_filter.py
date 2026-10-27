@@ -1,6 +1,7 @@
 """The label page's image-strip filter: GET /api/label/projects/{pid}/media with q / cls / cls_mode / min_ann /
 max_ann (store.media_page -> _media_filtered)."""
 
+import os
 import uuid
 
 import pytest
@@ -9,6 +10,9 @@ from conftest import make_jpeg, wait_job
 
 pytest.importorskip('dataviz.labeling.media')
 pytestmark = pytest.mark.usefixtures('tmp_roots')     # the test images live in tmp_path
+
+# a parallel run (pytest -n, xdist) shares the CPUs: the budgets catch seconds-long backtracking, not load
+SLOW = 3 if os.environ.get('PYTEST_XDIST_WORKER') else 1
 
 
 def hid():
@@ -115,13 +119,13 @@ def test_catastrophic_regex_is_refused_fast(store, client):
         t0 = time.perf_counter()
         with pytest.raises(ValueError, match='regular expression'):
             store.media_page(q=pat)
-        assert time.perf_counter() - t0 < 1
+        assert time.perf_counter() - t0 < 1 * SLOW
     assert store.media_page(q='/^a+0!/')['total'] == 1                          # a plain one still works
     if store_mod._regex is not None:                                          # overlapping alternation: the timeout
         t0 = time.perf_counter()
         with pytest.raises(ValueError, match='too long'):
             store.media_page(q='/(a|aa)+$/')
-        assert time.perf_counter() - t0 < 1.5
+        assert time.perf_counter() - t0 < 1.5 * SLOW
     # through the route: 400, quickly
     r = client.post('/api/label/projects', json={'name': 'R', 'source': {'kind': 'upload'},
                                                   'tasks': [{'name': 'D', 'task_type': 'object_detection', 'classes': ['a']}]})
@@ -129,4 +133,4 @@ def test_catastrophic_regex_is_refused_fast(store, client):
     client.ctx.labeling.store(pid).add_media([{'file_name': n, 'uri': n, 'width': 10, 'height': 10} for n in long_names])
     t0 = time.perf_counter()
     r = client.get(f'/api/label/projects/{pid}/media', params={'q': '/(a+)+$/'})
-    assert r.status_code == 400 and 'regular expression' in r.json()['detail'] and time.perf_counter() - t0 < 1
+    assert r.status_code == 400 and 'regular expression' in r.json()['detail'] and time.perf_counter() - t0 < 1 * SLOW

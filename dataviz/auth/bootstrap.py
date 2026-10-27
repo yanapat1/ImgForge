@@ -4,6 +4,9 @@ Start-up: make sure the server has an active admin and its settings rows.
 ensure_first_admin() creates the admin from DATAVIZ_ADMIN_USERNAME / _EMAIL / _PASSWORD when no active admin
 exists (or promotes an existing account with that username). With no password given it generates one and
 returns it, so the CLI banner can print it once; it is not stored anywhere in clear.
+
+sync_env_admin() runs after it: with DATAVIZ_ADMIN_RESET=true every start makes DATAVIZ_ADMIN_USERNAME an active
+admin with DATAVIZ_ADMIN_PASSWORD (the .env stays the source of truth for that one account).
 """
 
 import os
@@ -12,7 +15,9 @@ import secrets
 from sqlalchemy import text
 
 from .. import db
-from . import audit, settings, users
+from . import audit, passwords, settings, tokens, users
+
+TRUE = ('1', 'true', 'yes', 'on')
 
 
 def ensure_first_admin(env=None, log=print):
@@ -39,6 +44,33 @@ def ensure_first_admin(env=None, log=print):
             action = 'admin_bootstrap'
     audit.log(action, target=u['id'], meta={'username': u['username']})
     return u, generated
+
+
+def sync_env_admin(env=None, log=print):
+    """DATAVIZ_ADMIN_RESET=true + a password: (re)set that admin from the env -> user dict, else None."""
+    env = os.environ if env is None else env
+    password = env.get('DATAVIZ_ADMIN_PASSWORD') or ''
+    if str(env.get('DATAVIZ_ADMIN_RESET') or '').strip().lower() not in TRUE or not password:
+        return None
+    username = (env.get('DATAVIZ_ADMIN_USERNAME') or 'admin').strip().lower()
+    email = (env.get('DATAVIZ_ADMIN_EMAIL') or 'admin@localhost').strip()
+    with db.begin() as c:
+        c.execute(text('LOCK TABLE app.users IN SHARE ROW EXCLUSIVE MODE'))
+        row = c.execute(text('SELECT id, password_hash FROM app.users WHERE lower(username) = :u'),
+                        {'u': username}).first()
+        if row is None:
+            u = users.create(username, email, 'Administrator', password, is_admin=True, conn=c)
+            changed = True
+        else:
+            u = users.update(row.id, is_admin=True, is_active=True, conn=c)
+            changed = not passwords.verify(row.password_hash, password)
+            if changed:
+                users.set_password(row.id, password, conn=c)
+    if changed:                                  # an unchanged password keeps the admin signed in
+        tokens.revoke_user(u['id'])
+        log(f'set the admin {username!r} from DATAVIZ_ADMIN_* (DATAVIZ_ADMIN_RESET=true)')
+        audit.log('admin_env_reset', target=u['id'], meta={'username': u['username']})
+    return u
 
 
 def ensure_defaults():

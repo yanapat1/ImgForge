@@ -22,7 +22,7 @@ DEFAULTS = {
     'dataset': {'path': None, 'workspace_root': '.dataviz_cache', 'workspace': None, 'rebuild': False,
                 'reuse_cache': True},   # files changed since the cache was built: show the cache + an "Update cache" button
     'hardware': {'device': 'auto', 'precision': 'auto'},   # auto = GPU if present and healthy, else CPU; DATAVIZ_DEVICE overrides
-    'index': {'thumb_size': 224, 'crop_pad': 0.1, 'workers': 'auto'},
+    'index': {'thumb_size': 224, 'crop_pad': 0.1, 'workers': 'auto', 'reuse_previous': True},
     'startup': {'feature': 'openclip-h14', 'method': 'umap', 'precompute': [],
                 'auto_compute': False},   # False: features + projection run only when the user clicks "Compute embedding"
     'features': {

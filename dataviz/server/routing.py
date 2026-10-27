@@ -67,7 +67,7 @@ class SessionRouting:
         user = context.user()
         if user is None:
             return await self._fail(scope, receive, send, 401, 'sign in first', rest)
-        role = await to_thread.run_sync(lambda: access.role(user, sid, kind='viz'))
+        role = await to_thread.run_sync(lambda: access.viz_role(user, sid))
         if role is None:
             return await self._fail(scope, receive, send, 404, f'no session {sid!r}', rest)
         try:

@@ -14,7 +14,7 @@ import { clsColor, clsName, ERR } from '../core/theme.js';
 import { applyFilterMask } from '../plot/render.js';
 import type { ClsMode, FilterSpec, NameMode, Tags } from '../types.js';
 import type { CurIds, CurSummary } from '../types-views.js';
-import { isRows } from './preview.js';
+import { isImageUnit, isRows } from './preview.js';
 import { saveSettings, SETTING_HOOKS } from './controls.js';
 import { closestOf } from './ev-util.js';
 import { setSelection } from './gallery.js';
@@ -203,6 +203,7 @@ function renderStatus(): void {
   // an embeddings session: a row is its own "image", so one count says it all
   $req('fb-count').textContent = isRows()
     ? (active ? `${fmt(res.nBox)} of ${fmt(a.n)} rows` : `${fmt(res.nBox)} rows`)
+    : isImageUnit() ? (active ? `${fmt(res.nImg)} of ${fmt(a.nImg)} images` : `${fmt(res.nImg)} images`)
     : active ? `${fmt(res.nImg)} of ${fmt(a.nImg)} images · ${fmt(res.nBox)} boxes`
       : `${fmt(res.nImg)} images · ${fmt(res.nBox)} boxes`;
   $req('fb-count').title = `filter ran in ${FB.ms.toFixed(1)} ms`;

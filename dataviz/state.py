@@ -31,6 +31,7 @@ from .core import logging as vlog
 from .core import workers as compute
 from .core.jobs import JobManager
 from .data import sources
+from .data import views
 from .data.indexer import build_index
 from .ml import analysis
 from .ml import features as feats
@@ -70,7 +71,7 @@ class State:
 
     def __init__(self, source, cache_dir, registry, default_feature=feats.DEFAULT_FEATURE,
                  jobs=None, rebuild=False, log=None, pools=None, cfg=None, workspace_root=None, dataset_id=None,
-                 refresh=False):
+                 refresh=False, unit='auto', class_from_folder=False):
         self.log = log or vlog.log_fn('app')
         self.cfg = cfg or vconfig.load_config()
         self.knn_k = int(self.cfg['analysis']['knn_k'])
@@ -92,6 +93,8 @@ class State:
         self.pools = pools or compute.InlinePools()      # main() passes worker-process pools
         self.rebuild = rebuild
         self.refresh = refresh                          # True: re-index now even if an older cache could be shown
+        self.unit_pref = unit if unit in views.UNITS else 'auto'   # what one point is (data/views.py)
+        self.class_from_folder = bool(class_from_folder)
         self.stale = None                               # set when the dataset changed after the cache shown was built
 
         self.index = None
@@ -114,6 +117,9 @@ class State:
         self.pending_new = {}                           # image -> boxes the image editor added (no dot until re-index)
         self.stale_ids = set()                          # boxes the image editor moved (crop / features from before)
         self._image_names = None                        # (fingerprint, sorted names, set): image_names()
+        self.members, self.origin = [], None            # combined dataset (data/union.py): member blocks, per box
+        self.live_base = None                           # labeling parts at index time (data/live.py capture)
+        self.live_feed = None                           # data/live.py LiveFeed, made by the first /api/live
         self._cached_keys = set()
 
     @property
@@ -179,6 +185,8 @@ class State:
         self.projections.clear()
         self.groups_cache.clear()
         self.payloads.clear()
+        if self.live_feed is not None:
+            self.live_feed.stop()
 
     def embedding_cached(self):
         """True when the startup view (default params, all classes) and its k-NN scores are already on disk."""
@@ -211,6 +219,13 @@ class State:
         elif src.kind == 'embeddings':
             job.progress(stage='checking the vectors and metadata table')
             src.check()
+        elif src.kind == 'union':
+            job.progress(stage='checking the members')
+            src.check()
+        # images with no labels (or unit 'images'): one point per image, through the same indexer
+        self.source = src = views.view_for(src, self.unit_pref, self.class_from_folder)
+        if getattr(src, 'unit', None) == 'image' and self.default_feature == 'geometry' and 'color-hist' in self.registry:
+            self.default_feature = 'color-hist'       # box geometry is the same for every whole-image "box"
         idx = None
         if self.cache_dir is None:
             job.progress(stage='checking dataset fingerprint')
@@ -225,7 +240,7 @@ class State:
         """Clicking a session should not re-index (and recompute features) just because a file was touched: when the
         files changed since the last cache was built, show that cache straight away and set `self.stale` so the page
         offers "Update cache". Returns the cached index, or None (nothing cached yet / refresh asked / not a local folder)."""
-        if (src.kind != 'local' or self.rebuild or self.refresh or not self.workspace_root
+        if (src.kind not in ('local', 'union') or self.rebuild or self.refresh or not self.workspace_root
                 or not self.cfg['dataset'].get('reuse_cache', True)):
             return None
         fp = src.fingerprint()
@@ -246,29 +261,50 @@ class State:
         return idx
 
     def _build_index(self, job, src):
+        if src.kind == 'union':                       # assembled from the members' own indexes (data/union.py)
+            return src.build_index(self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
+                                   pad=float(self.cfg['index']['crop_pad']), rebuild=self.rebuild,
+                                   progress=job.progress, workers=self.cfg['index'].get('workers', 'auto'))
         if src.kind == 'embeddings':
             return src.build_index(self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
                                    rebuild=self.rebuild, progress=job.progress)
+        donor = None
+        if src.kind == 'labeling' and self.workspace_root and self.cfg['index'].get('reuse_previous', True):
+            # every edit is a new fingerprint (a new workspace): unchanged images come from the previous one
+            from .data import reuse
+            donor = reuse.previous_donor(self.workspace_root, src.uri, self.dataset_id, self.cache_dir)
         return build_index(src, self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
                           pad=float(self.cfg['index']['crop_pad']), rebuild=self.rebuild,
-                          progress=job.progress, workers=self.cfg['index'].get('workers', 'auto'))
+                          progress=job.progress, workers=self.cfg['index'].get('workers', 'auto'), donor=donor)
 
     def _finish_index(self, job, src, idx):
         self.samples = idx['samples']
         self.classes = idx['classes']
         self.fingerprint = idx['fingerprint']
         self.labels = np.array([s['cls'] for s in self.samples], dtype=np.int64)
+        # combined dataset: the member each box comes from (data/union.py), the members' blocks
+        self.members = idx.get('members') or []
+        self.origin = np.array([s.get('origin', 0) for s in self.samples], dtype=np.uint8) if self.members else None
         self.by_image = {}
         for s in self.samples:
             self.by_image.setdefault(s['image'], []).append(s['id'])
         meta_path = self.cache_dir / 'workspace.json'
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {'created': _now()}
+        if self.dataset_id:
+            meta['session_id'] = self.dataset_id
         meta.update({'dataset': src.uri, 'fingerprint': self.fingerprint, 'n_boxes': len(self.samples),
                      'n_images': len(self.by_image), 'classes': self.classes, 'last_opened': _now()})
         if src.kind == 'embeddings':
             meta['modality'] = idx.get('modality')
         meta_path.write_text(json.dumps(meta, indent=1))
         self.index = idx
+        if src.kind in ('labeling', 'union'):           # the live feed's base: ann id per box, change cursor
+            from .data import live
+            try:
+                self.live_base = live.capture(self)
+            except Exception as e:  # noqa: BLE001 - no live updates, the session still opens
+                self.log(f'live feed unavailable: {e}')
+                self.live_base = []
         self._register_existing_projections()
         return len(self.samples)
 
@@ -306,6 +342,21 @@ class State:
                     emb = feats.vectors_restore(self.features_dir, key, self.fingerprint, len(self.samples), self.cfg)
                 if emb is None:
                     emb = self._legacy_embeddings(key)
+            if emb is None and job is not None and hasattr(self.source, 'assemble_features'):
+                # combined dataset: the members' matrices (computed in a member's workspace when it lacks one)
+                emb = self.source.assemble_features(key, self.index, self.registry, self.cfg, job.progress,
+                                                    self.features_dir)
+                if emb is not None:
+                    self.features[key] = emb
+                    return emb
+            if emb is None and job is not None:
+                # an index that reused a donor (data/reuse.py): its rows + only the missing ones computed
+                from .data import reuse
+                emb = reuse.transplant_features(self, key, job.progress)
+                if emb is not None:
+                    feats.save_cached(self.features_dir, key, self.fingerprint, emb)
+                    feats.vectors_store(self.fingerprint, key, emb, self.cfg)
+                    self._rebuilt.add(key)
             if emb is None:
                 if job is None:
                     return None
@@ -655,6 +706,12 @@ class State:
             while len(self.groups_cache) > 64:
                 self.groups_cache.popitem(last=False)
         return res
+
+    def on_boxes_patched(self, images):
+        """Boxes of `images` changed in place (curation fix / undo, the image editor, the live feed): keep the
+        Compare tab's diffs current (data/compare.py). Returns {comparison key: {status, summary}}."""
+        svc = getattr(self, '_compare', None)
+        return svc.patched(images) if svc is not None else {}
 
     def image_names(self):
         """Every image of the source, background images (no boxes) included, sorted; listed once per index."""

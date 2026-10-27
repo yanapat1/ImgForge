@@ -158,7 +158,8 @@ def main():
             reg = feats.FeatureRegistry(registry, user_features.OwnerModels(model_reg, ds.get('owner_id'), ctx.model_service.workdir)
                                         if ds.get('owner_id') else None)
         state = State(src, cache_dir, reg, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
-                      pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh)
+                      pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh,
+                      unit=ds.get('unit', 'auto'), class_from_folder=ds.get('class_from_folder', False))
         vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
                                          + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session',
                                             'embeddings': ' · vectors + metadata'}
@@ -224,6 +225,10 @@ def start_database(cfg, ws_root):
         sys.exit(f'\n{e}')
     bootstrap.ensure_defaults()
     admin, password = bootstrap.ensure_first_admin(log=dlog.info)
+    try:
+        bootstrap.sync_env_admin(log=dlog.info)
+    except ValueError as e:                     # e.g. a password the policy refuses: start anyway, say why
+        dlog.error(f'DATAVIZ_ADMIN_RESET: cannot set the admin from the env: {e}')
     if admin is None:
         with db.connect() as c:
             r = c.execute(text("""SELECT id, username FROM app.users WHERE is_admin AND is_active

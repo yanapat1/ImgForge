@@ -6,13 +6,14 @@ FastAPI dependencies that guard routes. Every one carries `__dataviz_auth__ = Tr
     admin_user                     403 'admins only'
     require_session(need, param)   access.check on the session id in path parameter `param` -> role
     require_bound(need)            the /s/<id>/ session this request is bound to (context.bound()) -> Bound
-    can_add_connections            403 when admins locked outbound connections to themselves
+    require_perm(perm)             403 unless the caller's tier has `perm` (auth/tiers.py; admins: all) -> user
+    can_add_connections            403 without connection.add, or when admins locked connections to themselves
 """
 
 from fastapi import Depends, Request
 from starlette.exceptions import HTTPException
 
-from . import access, context, settings
+from . import access, context, settings, tiers
 
 
 def _guard(f):
@@ -63,8 +64,22 @@ def require_bound(need='viewer'):
     return dep
 
 
+def require_perm(perm):
+    """Dependency: the signed-in user, 403 unless their tier grants `perm`."""
+    if perm not in tiers.PERMS:
+        raise ValueError(f'unknown permission {perm!r}')
+
+    @_guard
+    def dep(user=Depends(current_user)):
+        tiers.check(user, perm)
+        return user
+    dep.__name__ = f'require_perm_{perm.replace(".", "_")}'
+    return dep
+
+
 @_guard
 def can_add_connections(user=Depends(current_user)):
+    tiers.check(user, 'connection.add')
     if settings.get('who_can_add_connections') == 'admins' and not user.get('is_admin'):
         raise HTTPException(403, 'only admins can add connections on this server')
     return user

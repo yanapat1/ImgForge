@@ -4,7 +4,8 @@ import type * as P from 'plotly.js';
 import type { Points, ProjectionReady } from '../types.js';
 import { $req, esc, mixHex, rgba } from '../core/dom.js';
 import { pts, S } from '../core/state.js';
-import { clsColor, clsName, CONTINUOUS, ERR, errColor, isContinuous, plotBase, SCALE, THEME } from '../core/theme.js';
+import { clsColor, clsName, CONTINUOUS, densityScale, DIFF_STYLE, diffColor, diffKey, ERR, errColor, isContinuous, originColor, plotBase, SCALE, THEME } from '../core/theme.js';
+import { densityDiff } from '../core/compare-core.js';
 import { curGroups, groupList, plotDiv, restyle, viewPos, xyOf } from './access.js';
 import { isOutlier } from './groups.js';
 import { redrawLasso } from './interactions.js';
@@ -24,11 +25,13 @@ export function visibleIndices(): number[] {
   const out: number[] = [];
   if (!S.view) return out;
   const mask = S.filterMask;               // filter bar (core/filter.js): 1 = shown; also hides curation-deleted boxes
+  const om = S.cmp ? S.cmp.mask : null;    // compare: A / B / both / diff only (views/compare.ts)
   const cls = pts().cls;
   for (let i = 0; i < S.view.id.length; i++) {
     const id = S.view.id[i];
     if (id === undefined) continue;
     if (mask && !mask[id]) continue;
+    if (om && !om[id]) continue;
     if (!classShown(cls[id] ?? -1)) continue;
     out.push(i);
   }
@@ -78,6 +81,50 @@ export function applyFilterMask(): void {
     upd.name.push(`${ct.label(k)} (${idx.length})`);
   }
   void restyle(gd, upd, ct.idx);
+  // the density layer follows the filter bar (not the origin toggle: hiding B would only paint "A denser")
+  const di = gd.data.findIndex((t) => t.name === 'density');
+  const dz = densityZ(view);
+  // the grid size may have changed: its origin and cell size go with z, or the cells drift off their dots
+  if (di >= 0 && dz) void restyle(gd, { z: [dz.z], zmin: [-dz.m], zmax: [dz.m], x0: [dz.x0], dx: [dz.dx], y0: [dz.y0], dy: [dz.dy] } as never, [di]);
+  else if ((di >= 0) !== !!dz) scheduleRender();
+}
+
+// ---- compare: the density-difference layer (pB - pA per grid cell, blurred), cached per (view, filter, grid, blur)
+interface DensityCache { view: ProjectionReady; mask: Uint8Array | null | undefined; key: string; z: Array<Array<number | null>>; m: number; x0: number; y0: number; dx: number; dy: number }
+let densityCache: DensityCache | null = null;
+
+function densityZ(view: ProjectionReady): DensityCache | null {
+  const C = S.cmp, P = S.P;
+  if (!C || !C.density.on || !P) return null;
+  const d = C.density, key = `${C.a}|${C.b}|${d.G}|${d.blur}`;
+  const c = densityCache;
+  if (c && c.view === view && c.mask === S.filterMask && c.key === key) return c;
+  // minCount 0: every cell gets a value, so the blur shows (cells where both are ~equal are transparent anyway)
+  const g = densityDiff(view.x, view.y, view.id, C.origin, C.a, C.b, S.filterMask ?? null, d.G, d.blur, 0);
+  // NaN (too few boxes) -> null = a transparent gap; the range is symmetric around 0 so "equal" stays transparent
+  const z: Array<Array<number | null>> = new Array(g.G);
+  let m = 0;
+  for (let r = 0; r < g.G; r++) {
+    const row = new Array<number | null>(g.G);
+    for (let k = 0; k < g.G; k++) {
+      const v = g.z[r * g.G + k] ?? NaN;
+      row[k] = Number.isNaN(v) ? null : v;
+      if (Math.abs(v) > m) m = Math.abs(v);
+    }
+    z[r] = row;
+  }
+  d.novelty = g.novelty; d.nA = g.nA; d.nB = g.nB;
+  densityCache = { view, mask: S.filterMask, key, z, m: m || 1, x0: g.x0 + g.dx / 2, y0: g.y0 + g.dy / 2, dx: g.dx, dy: g.dy };
+  window.dispatchEvent(new CustomEvent('cmp-density'));      // the legend's novelty %
+  return densityCache;
+}
+
+function densityTrace(view: ProjectionReady): Trace | null {
+  const dz = densityZ(view);
+  if (!dz) return null;
+  return { type: 'heatmap', name: 'density', z: dz.z as unknown as number[][], x0: dz.x0, dx: dz.dx, y0: dz.y0, dy: dz.dy,
+    zmin: -dz.m, zmax: dz.m, colorscale: densityScale(), showscale: false, hoverinfo: 'skip', zsmooth: 'best',
+    showlegend: false } as Trace;
 }
 
 function hoverText(id: number): string {
@@ -97,6 +144,17 @@ function hoverText(id: number): string {
     t += `<br>model: <b style="color:${errColor(st)}">${ERR[st]?.label}</b>` +
       (pc >= 0 && st !== 0 ? ` → ${esc(clsName(pc))}` : '') + (sc > 0 ? ` (${sc.toFixed(2)})` : '');
   }
+  const C = S.cmp;
+  if (C) {
+    const o = C.origin[id] ?? -1, m = S.meta?.members?.[o];
+    if (m) t += `<br>from <b style="color:${originColor(o)}">${esc(m.alias)}</b>`;
+    const st = C.run?.status[id];
+    if (st !== undefined && (o === C.a || o === C.b)) {
+      const k = diffKey(st, o === C.b);
+      if (k >= 0) t += ` · <b style="color:${diffColor(k)}">${esc(DIFF_STYLE[k]?.label)}</b>`;
+    }
+  }
+  if (Pt.moved?.[id]) t += '<br><i>moved since the index (the dot is at its old place)</i>';
   if (S.groups) {
     const g = S.groups.of.get(id);
     t += g === -1 ? `<br><b style="color:${THEME.danger}">outlier</b> (no group)` : `<br>group ${g}`;
@@ -114,6 +172,28 @@ export function hoverOf(id: number): string {
   let t = hoverCache[id];
   if (t === undefined) t = hoverCache[id] = hoverText(id);
   return t;
+}
+
+// ---- live feed: boxes drawn after the index, placed by the server in the shown projection (hollow, dashed look)
+function liveNewTrace(dot: number): Trace {
+  const key = S.view?.key, x: number[] = [], y: number[] = [], text: string[] = [];
+  for (const p of S.liveNew?.byAnn.values() ?? []) {
+    if (p.proj !== key) continue;                 // placed in another projection: wait for the next poll
+    x.push(p.x); y.push(p.y);
+    text.push(`<b>${esc(clsName(p.cls) ?? `class ${p.cls}`)}</b> · new, not indexed yet<br>${esc(p.image)}<br>similarity to its neighbours ${p.sim.toFixed(2)}`);
+  }
+  return { type: 'scattergl', mode: 'markers', name: `new boxes (${x.length})`, showlegend: x.length > 0, x, y, text, hoverinfo: 'text',
+    marker: { size: dot + 3, symbol: 'circle-open', color: THEME.highlight, line: { color: THEME.highlight, width: 2 } } };
+}
+
+/** The live feed placed / dropped new boxes: restyle only the 'live-new' trace. */
+export function updateLiveNew(): void {
+  const gd = plotDiv();
+  if (!S.view || !gd.data) return;
+  const idx = gd.data.findIndex((t) => typeof t.name === 'string' && t.name.startsWith('new boxes ('));
+  if (idx < 0) { scheduleRender(); return; }
+  const t = liveNewTrace(+$req<HTMLInputElement>('dot-size').value);
+  void restyle(gd, { x: [t.x], y: [t.y], text: [t.text], name: [t.name], showlegend: [t.showlegend] } as never, [idx]);
 }
 
 // coalesce bursts of renders (slider drags, chip clicks) into one per animation frame
@@ -182,6 +262,16 @@ function categorical(colorBy: string): Categorical {
     return { key: (id) => { const v = mc.values[id]; return v === null || v === '' || v === undefined ? -1 : idx.get(String(v)) ?? -1; },
       label: (k) => (k < 0 ? `${mc.name}: blank` : order[k]), color: (k) => (k < 0 ? THEME.ungrouped : clsColor(k)) };
   }
+  const C = S.cmp;
+  if (colorBy === 'origin' && C) {
+    const mem = S.meta?.members ?? [];
+    return { key: (id) => C.origin[id] ?? -1, label: (k) => mem[k]?.alias ?? 'unknown', color: originColor };
+  }
+  if (colorBy === 'diff' && C) {
+    const st = C.run?.status ?? null;
+    return { key: (id) => { const o = C.origin[id]; return st && (o === C.a || o === C.b) ? diffKey(st[id] ?? 0, o === C.b) : -1; },
+      label: (k) => (k < 0 ? 'not compared' : DIFF_STYLE[k]?.label ?? '?'), color: diffColor };
+  }
   if (colorBy === 'session') {
     const idx = S.sessionIdx ?? new Map<string, number>();
     const sessions = [...idx.keys()];
@@ -212,9 +302,15 @@ function categorical(colorBy: string): Categorical {
 type Xy = Array<number | null>;
 type Trace = Partial<P.PlotData>;
 
+let lastViewKey: string | null = null;
+
 export function renderPlot(): void {
   if (!S.view) return;
   const view = S.view;
+  if (view.key !== lastViewKey) {             // core/live.ts re-polls at once so its new boxes get placed here
+    lastViewKey = view.key;
+    window.dispatchEvent(new CustomEvent('view-changed'));
+  }
   let colorBy = $req<HTMLSelectElement>('color-by').value;
   if (isContinuous(colorBy) && !pts()[colorBy]) colorBy = 'class';      // e.g. model colours before a model is scored
   if (colorBy.startsWith('meta:') && !metaColumn(colorBy)) colorBy = 'class';
@@ -227,6 +323,8 @@ export function renderPlot(): void {
   const Pt = pts();
   const traces: Trace[] = [];
   catTraces = null;
+  const dens = densityTrace(view);           // first, under everything: catTraces indices count from after it
+  if (dens) traces.push(dens);
   const showGroups = S.groups && $req<HTMLInputElement>('g-bubbles').checked;
   const dim = S.groups && $req<HTMLInputElement>('g-dim').checked;
   const idAt = (i: number): number => view.id[i] ?? -1;
@@ -294,6 +392,9 @@ export function renderPlot(): void {
   } else {
     const { key, label, color } = categorical(colorBy);
     const groups = new Map<number, number[]>();
+    // origin / diff: every key gets a trace (empty ones too), so the A / B / diff toggle stays a restyle
+    if (colorBy === 'origin' && S.cmp) (S.meta?.members ?? []).forEach((_, k) => groups.set(k, []));
+    if (colorBy === 'diff' && S.cmp?.run) DIFF_STYLE.forEach((_, k) => groups.set(k, []));
     for (const i of vis) {
       const k = key(idAt(i));
       let g = groups.get(k);
@@ -348,13 +449,14 @@ export function renderPlot(): void {
     x: hl.map((id) => xyOf(id)[0]), y: hl.map((id) => xyOf(id)[1]), customdata: hl,
     marker: { size: dot + 8, color: 'rgba(0,0,0,0)', line: { color: THEME.ring, width: 2 } },
   });
+  traces.push(liveNewTrace(dot));          // provisional dots of the live feed, after the category traces
   // gallery picks + hover: big yellow dots on top (filled by updateMarks)
   traces.push({ type: 'scattergl', mode: 'markers', name: 'picked', showlegend: false, hoverinfo: 'skip', x: [], y: [] });
   traces.push({ type: 'scattergl', mode: 'markers', name: 'hover-dot', showlegend: false, hoverinfo: 'skip', x: [], y: [] });
 
   const ev = view.info && view.info.explained_variance;
   const axis = (n: number): Partial<P.LayoutAxis> => ({
-    showgrid: false, zeroline: false, showticklabels: false,
+    showgrid: false, zeroline: false, showticklabels: false, ticks: '',     // a heatmap trace would add tick marks
     ...(ev ? { title: { text: `PC${n} (${((ev[n - 1] ?? NaN) * 100).toFixed(1)}%)`, font: { size: 12, color: THEME.muted } } } : {}),
   });
   const layout: Partial<P.Layout> = {

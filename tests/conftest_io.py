@@ -304,11 +304,29 @@ def _published(name, port):
 
 
 @contextmanager
-def docker_db(name, image, env, port, ready, timeout, pull_timeout=600):
+def docker_db(name, image, env, port, ready, timeout, pull_timeout=600, args=()):
     """Start (or reuse) a container; yields the (host, port) that answers `ready(host, port)`. Skips with a reason.
 
     The host port is picked by docker (`-p <port>`), never a fixed number: two test databases, or a test database
-    next to a dev one, used to fight over the same port and one of them skipped its tests."""
+    next to a dev one, used to fight over the same port and one of them skipped its tests.
+    args: server arguments after the image. Under pytest -n every worker shares one container: the first starts it
+    under a file lock while the rest wait and reuse it, and none removes it at the end (the next run reuses it),
+    since one worker's teardown would pull the database out from under the others."""
+    if not os.environ.get('PYTEST_XDIST_WORKER'):
+        yield from _docker_db(name, image, env, port, ready, timeout, pull_timeout, args, keep=False)
+        return
+    import fcntl
+    import tempfile
+    with open(Path(tempfile.gettempdir()) / f'{name}.docker.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        gen = _docker_db(name, image, env, port, ready, timeout, pull_timeout, args, keep=True)
+        found = next(gen)
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    yield found
+    gen.close()
+
+
+def _docker_db(name, image, env, port, ready, timeout, pull_timeout, args, keep):
     if not shutil.which('docker'):
         pytest.skip('docker CLI is not installed')
     try:
@@ -333,7 +351,7 @@ def docker_db(name, image, env, port, ready, timeout, pull_timeout=600):
     cmd = ['run', '-d', '--name', name, '-p', str(port)]        # no --rm: logs survive a crash; docker picks the port
     for k, v in env.items():
         cmd += ['-e', f'{k}={v}']
-    r = _docker(*cmd, image, timeout=120)
+    r = _docker(*cmd, image, *args, timeout=120)
     if r.returncode != 0:
         pytest.skip(f'docker run {image} failed: {r.stderr.strip()[-300:]}')
     try:
@@ -359,7 +377,8 @@ def docker_db(name, image, env, port, ready, timeout, pull_timeout=600):
                         + ('; '.join(why[:3]) or ' | '.join(lines[-3:])))
         yield found
     finally:
-        _docker('rm', '-f', name, timeout=120)
+        if not keep:
+            _docker('rm', '-f', name, timeout=120)
 
 
 def pg_ready(host, port, quick=False):

@@ -12,7 +12,7 @@ import { galleryOrder } from './gallery.js';
 import { imageOrder, onImageEdited } from './image-grid.js';
 import { markEdited, modelEval } from './model.js';
 import { closeViewer, dirty, initViewer, refreshPreds, setBoxes, showImage, V } from './viewer.js';
-import { cardMedia, detailMedia, isRows, loadVisibleMedia, metaCols, metaText, rowId, stopAudio } from './preview.js';
+import { cardMedia, detailMedia, isImageUnit, isRows, loadVisibleMedia, metaCols, metaText, rowId, stopAudio } from './preview.js';
 
 export let modalId: number | null = null;
 let predMode: { pid: number; list: number[] } | null = null;       // a model prediction with no label box (false positive) is shown
@@ -27,6 +27,18 @@ const num = (v: unknown, d = 2): string => (typeof v === 'number' ? String(+v.to
 
 export function initModal(): void {
   initViewer({ onSaved });
+  // a combined dataset with a compare run: this image as A and as B, side by side (views/compare-viewer.ts)
+  $req('m-cmp').onclick = () => {
+    const name = sampleImage;
+    if (!name || !mayLeave()) return;
+    const list = imageMode?.list ?? [name];
+    closeModal();
+    void import('./compare-viewer.js').then((m) => m.openCompareViewer(name, list));
+  };
+}
+
+function syncCmpBtn(): void {
+  $req('m-cmp').classList.toggle('hidden', !S.cmp?.run || isRows());
 }
 
 function syncPredsBtn(): void {
@@ -75,6 +87,7 @@ export async function openModal(id: number, nav: { list: CardRef[] } | null = nu
   imageMode = null;
   setMode('box');
   syncPredsBtn();
+  syncCmpBtn();
   $req<HTMLImageElement>('modal-crop').src = `api/crop/${id}`;
   $req('m-group').classList.toggle('hidden', !S.groups);
   const image = S.P && S.P.image ? S.P.image[id] ?? null : null;
@@ -202,6 +215,7 @@ export async function openImage(name: string, list: string[] | null = null): Pro
   sampleImage = name;
   setMode('image');
   syncPredsBtn();
+  syncCmpBtn();
   $req('modal-title').innerHTML = `<span class="chip"><svg class="ico" aria-hidden="true"><use href="${ICONS}#i-image"/></svg>image</span><span class="muted">${esc(name)}</span>`;
   $req('modal-meta').innerHTML = '';
   const b = await showImage(name);
@@ -212,6 +226,20 @@ export async function openImage(name: string, list: string[] | null = null): Pro
 type BoxesInfo = Pick<ImgBoxes, 'boxes' | 'img_w' | 'img_h' | 'label' | 'writable'>;
 
 function renderImageMeta(b: BoxesInfo): void {
+  if (isImageUnit()) {                             // no labels: the image, its size and its folder (= class, if on)
+    const name = V.name ?? '';
+    const sid = S.P ? S.P.image.indexOf(name) : -1;
+    const cls = sid >= 0 && S.P ? S.P.cls[sid] : undefined;
+    const folder = name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '(top folder)';
+    $req('modal-meta').innerHTML = metaHtml([
+      ['image', esc(name)],
+      ['image size', `${b.img_w}×${b.img_h}`],
+      ['folder', (cls !== undefined && (S.meta?.classes.length ?? 0) > 1 ? `<span class="dot" style="background:${clsColor(cls)}"></span>` : '') +
+        esc(folder)],
+      ['labels', 'none: one point per image. Label these images in a label session to get boxes.', true],
+    ]);
+    return;
+  }
   const counts = new Map<number, number>();
   for (const x of b.boxes) counts.set(x.cls, (counts.get(x.cls) || 0) + 1);
   const pending = b.boxes.filter((x) => x.sid == null).length;
@@ -239,6 +267,7 @@ export async function openPredModal(pid: number, list: number[] = [pid], nav: { 
   M.showPreds = true;
   setMode('pred');
   syncPredsBtn();
+  $req('m-cmp').classList.add('hidden');
   const base = `api/models/${encodeURIComponent(String(M.id))}/pred/${pid}`;
   $req<HTMLImageElement>('modal-crop').src = `${base}/crop`;
   $req('modal-meta').innerHTML = '';

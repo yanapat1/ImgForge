@@ -39,7 +39,7 @@ def test_normal_user_cannot_run_code_or_browse(pg, tmp_path):
         weights = tmp_path / 'w.onnx'
         weights.write_bytes(b'junk')
         s = c.post('/api/models', json={'family': 'custom', 'format': 'onnx', 'path': str(weights)})
-        assert s.status_code == 400 and 'only admins' in s.json()['detail']
+        assert s.status_code == 400 and 'your tier cannot' in s.json()['detail']
         r = c.get('/api/models/serving-list', params={'url': 'http://127.0.0.1:1'})
         assert r.status_code == 400 and '127.0.0.1' not in r.json()['detail']    # no remote details echoed back
     assert not marker.exists()

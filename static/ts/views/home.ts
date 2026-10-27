@@ -11,18 +11,22 @@
 // Whose: a scope filter (#home-scope: All · Mine · Shared with me · Global · Everyone's for admins, prefs 'homeScope')
 // passed to both lists as ?scope=. Each card shows its owner, the people it is shared with (views/share.ts edits
 // them), a lock (private) or globe (global) badge, and only the actions my role on it allows (viewer < labeler < owner).
+// Compare / Combine: Visualize cards can be picked (a checkbox shown on hover / focus, or Ctrl / Cmd + click; Esc clears);
+// a bar at the bottom (#home-selbar) then offers Compare (exactly 2) and Combine (2–8). Both POST a combined dataset
+// (kind 'union', reuse: the same members in the same order give back the one made before) and open its Compare tab
+// (s/<id>/#compare). Combined and embeddings sessions cannot be picked; a combined card lists its members (alias + name).
 // One innerHTML render per change, one delegated click listener on #home-body; no Plotly and no job polling here.
 
 import { api, errText, getJSON, postJSON } from '../core/api.js';
 import { toast } from '../core/toast.js';
 import { $, $req, esc, icon, ICONS } from '../core/dom.js';
-import { isAdmin, pref, rememberPref } from '../core/auth.js';
+import { can as tierCan, cannot, isAdmin, pref, rememberPref } from '../core/auth.js';
 import { avatarStackHTML, ownerChipHTML } from '../core/avatar.js';
 import { labelUrl, vizUrl } from '../core/nav.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { TASK_TYPES } from '../label/state.js';
 import type { TaskTypeInfo } from '../label/state.js';
-import { MODALITY_ICON, VIZ_TASKS } from '../settings/forms.js';
+import { MODALITY_ICON, UNION_MAX, unionBlock, VIZ_TASKS } from '../settings/forms.js';
 import { openSettings } from '../settings/dialog.js';
 import type { Role, Status } from '../types.js';
 import type { HomeExportTarget, HomeProject, HomeScope, HomeSession, HomeTask, SharedFields, WizardOpts } from '../types-home.js';
@@ -39,10 +43,14 @@ interface HomeState {
   opening: boolean; bound: boolean; tab: TabId | null;
   menuFrom: HTMLElement | null; flash: string | null; q: string; tagSel: Set<string>; raf: number; te: TagEdit | null;
   scope: HomeScope; loadSeq: number;
+  sel: string[]; selBusy: '' | 'compare' | 'combine'; selErr: string;
 }
 const H: HomeState = { sessions: [], projects: [], errs: { ds: null, lp: null }, palette: null, paletteLight: null, opening: false, bound: false, tab: null,
-  menuFrom: null, flash: null, q: '', tagSel: new Set(), raf: 0, te: null, scope: 'all', loadSeq: 0 };
+  menuFrom: null, flash: null, q: '', tagSel: new Set(), raf: 0, te: null, scope: 'all', loadSeq: 0,
+  sel: [], selBusy: '', selErr: '' };
 // q: the search text (lower-cased); tagSel: the selected filter tags (lower-cased); te: the open tag editor
+// sel: the picked Visualize cards, in the order they were picked (= the members' order: A, B, …); selBusy: creating the
+// combined dataset; selErr: why that failed (the server's 400 message)
 const TABS: readonly TabId[] = ['viz', 'label'];
 const isTab = (v: unknown): v is TabId => v === 'viz' || v === 'label';
 type Item = { d: HomeSession; p?: undefined; pid?: undefined; t: number } | { p: HomeProject; pid: string; d?: undefined; t: number };
@@ -128,11 +136,12 @@ function classColor(i: number): string {
 function sourceLabel(d: HomeSession): string {
   if (d.kind === 'labeling') return 'Labeling';
   if (d.kind === 'embeddings') return 'Embeddings';
+  if (d.kind === 'union') return 'Combined';
   if (d.kind !== 's3') return 'Local';
   return d.mode === 'cache' ? 'S3 · cached' : 'S3 · stream';
 }
 
-const KIND_ICON: Record<string, string> = { s3: 'cloud', labeling: 'tag', local: 'folder', embeddings: 'vectors' };
+const KIND_ICON: Record<string, string> = { s3: 'cloud', labeling: 'tag', local: 'folder', embeddings: 'vectors', union: 'layers' };
 // an embeddings session's cover: the glyph of what its rows are (audio, video, text...) when there are no images
 const modalityGlyph = (d: HomeSession): string => {
   const m = d.modality || [];
@@ -145,13 +154,14 @@ const kindIcon = (d: HomeSession): string => KIND_ICON[d.kind] || 'folder';
 
 function coverHTML(d: HomeSession): string {
   const st = d.stats || {};
-  const tag = `<span class="sc-src${d.kind === 'labeling' ? ' lbl' : ''}">${icon(kindIcon(d))}${esc(sourceLabel(d))}</span>` +
+  const tag = `<span class="sc-src${d.kind === 'labeling' ? ' lbl' : d.kind === 'union' ? ' uni' : ''}">${icon(kindIcon(d))}${esc(sourceLabel(d))}</span>` +
     (d.loaded ? `<span class="sc-live" title="Loaded on the server: it opens at once">${icon('check')}Loaded</span>` : '') + visBadge(d);
   if (!d.cover) {
     const emb = d.kind === 'embeddings';
-    const note = !emb ? 'Not indexed yet: the first open builds its crops'
+    const note = d.kind === 'union' ? 'Not combined yet: the first open joins its members (nothing is copied)'
+      : !emb ? 'Not indexed yet: the first open builds its crops'
       : d.stats?.n_boxes ? `${fmt(d.stats.n_boxes)} rows · ${(d.modality || ['vector']).join(' · ')}` : 'Not read yet: the first open reads its vectors';
-    return `<div class="sc-cover empty${emb ? ' emb' : ''}">${tag}<div class="sc-glyph">${icon(emb ? modalityGlyph(d) : d.kind === 's3' ? 'cloud' : d.kind === 'labeling' ? 'tag' : 'db')}` +
+    return `<div class="sc-cover empty${emb ? ' emb' : ''}">${tag}<div class="sc-glyph">${icon(emb ? modalityGlyph(d) : d.kind === 's3' || d.kind === 'labeling' || d.kind === 'union' ? kindIcon(d) : 'db')}` +
       `<span>${esc(note)}</span></div></div>`;
   }
   const v = encodeURIComponent(st.workspace || '');      // a new dataset version = a new workspace = fresh crops
@@ -168,6 +178,23 @@ function coverHTML(d: HomeSession): string {
 const editBtn = (act: string, x: { name: string; tags?: string[] | undefined }, title: string): string => `<button class="icon-btn ghost" data-act="${act}" aria-haspopup="dialog" aria-expanded="false" ` +
   `aria-label="Edit ${esc(x.name)}" title="${title} (tags ${tagsOf(x).length} / ${MAX_TAGS})">${icon('edit')}</button>`;
 
+// the pick box of a Visualize card (top-left of its cover); a session that cannot be a member gets a disabled one + why
+function pickHTML(d: HomeSession): string {
+  const why = unionBlock(d);
+  const on = H.sel.includes(d.id);
+  const tip = why || (on ? 'Selected: Compare or Combine it below (Ctrl / Cmd + click toggles too)' : 'Select to compare or combine with other sessions (Ctrl / Cmd + click)');
+  return `<label class="sc-pick${why ? ' off' : ''}" title="${esc(tip)}"><input type="checkbox" data-act="pick" ${on ? 'checked' : ''} ${why ? 'disabled' : ''} ` +
+    `aria-label="${esc(why ? `${d.name}: ${why}` : `Select ${d.name} to compare or combine`)}"></label>`;
+}
+
+// a combined dataset's members, in priority order: alias + name
+function partsHTML(d: HomeSession): string {
+  const parts = d.parts || [];
+  if (!parts.length) return '<div class="sc-uri plain">no members</div>';
+  return '<div class="sc-parts">' + parts.map((p) => `<span class="sc-part" title="${esc(`${p.alias}: ${p.name || p.id}`)}">` +
+    `<b>${esc(p.alias)}</b><span class="nm">${esc(p.name || p.id)}</span></span>`).join('') + '</div>';
+}
+
 function cardHTML(d: HomeSession): string {
   const st = d.stats || {};
   const stat = (v: number | null | undefined, label: string): string => (v == null ? '' : `<span><b class="num">${fmt(v)}</b>${label}</span>`);
@@ -183,12 +210,12 @@ function cardHTML(d: HomeSession): string {
   // a labeling-backed session names its labeling session + task (the label:// uri means nothing to people)
   const lb = d.kind === 'labeling' ? d.labeling || {} : null;
   const where = lb ? (lb.project ? `${lb.project} › ${lb.task}${d.only_done ? ' · finished images only' : ''}` : 'labeling session') : d.uri || '';
-  return `<article class="session-card${d.loaded ? ' active' : ''}${problem ? ' broken' : ''}" data-id="${esc(d.id)}" data-role="${roleOf(d)}">` +
-    coverHTML(d) +
+  return `<article class="session-card${d.loaded ? ' active' : ''}${problem ? ' broken' : ''}${H.sel.includes(d.id) ? ' picked' : ''}" data-id="${esc(d.id)}" data-role="${roleOf(d)}">` +
+    pickHTML(d) + coverHTML(d) +
     '<div class="sc-body">' +
     `<h3 class="sc-title"><button class="sc-open" data-act="open" title="Open ${esc(d.name)}">${esc(d.name)}</button></h3>` +
     tagsHTML(tagsOf(d)) +
-    `<div class="sc-uri${lb ? ' plain' : ''}" title="${esc(where)}"><bdi>${esc(where)}</bdi></div>` + modalityHTML(d) +
+    (d.kind === 'union' ? partsHTML(d) : `<div class="sc-uri${lb ? ' plain' : ''}" title="${esc(where)}"><bdi>${esc(where)}</bdi></div>`) + modalityHTML(d) +
     (stats ? `<div class="sc-stats">${stats}</div>` : '<div class="sc-stats muted">Stats appear after the first open</div>') +
     (chips ? `<div class="sc-chips">${chips}</div>` : '') +
     '</div>' +
@@ -301,7 +328,7 @@ function emptyHTML(): string {
   return '<div class="home-empty">' +
     `<div class="es-mark"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg></div>` +
     '<h2>No sessions yet</h2>' +
-    '<p class="muted">Visualize a YOLO dataset (a folder on this machine or an S3 / RustFS prefix with images/ and labels/) or a folder of your own embeddings, or label a folder of images: boxes, polygons, keypoints or tags, one or more tasks at once.</p>' +
+    '<p class="muted">Visualize a folder of images, with or without YOLO labels (on this machine or an S3 / RustFS prefix), or a folder of your own embeddings, or label a folder of images: boxes, polygons, keypoints or tags, one or more tasks at once.</p>' +
     `<div class="es-actions"><button class="primary big" data-act="new-viz">${icon('scatter')}Visualize a dataset</button>` +
     `<button class="big" data-act="new-label">${icon('tag')}Label images</button></div>` +
     '<ol class="es-steps">' +
@@ -413,6 +440,7 @@ function renderPanels(): void {
     $req(`home-panel-${t}`).innerHTML = panelHTML(t, list, all.length);
   }
   renderTagbar();
+  renderSelBar();
 }
 
 function readTab(): TabId | null {
@@ -436,6 +464,7 @@ function setTab(t: TabId, focus: boolean, remember: boolean): void {
   closeCardMenu(false);
   closeTagEdit(false);
   renderTagbar();
+  renderSelBar();
 }
 
 function render(): void {
@@ -469,6 +498,7 @@ async function fetchSessions(): Promise<void> {
   try {
     const { datasets } = await getJSON<{ datasets: HomeSession[] }>(`api/datasets${scopeQ()}`);
     H.sessions = datasets;
+    H.sel = H.sel.filter((id) => !!pickable(id));          // gone, or not visible in this scope any more
     H.errs.ds = null;
   } catch (e) { H.errs.ds = errText(e); }
 }
@@ -514,13 +544,80 @@ function open(sel: string, url: string): void {
   location.href = url;
 }
 
-const openSession = (id: string): void => open(`.session-card[data-id="${CSS.escape(id)}"]`, vizUrl(id));
+const openSession = (id: string): void => open(openSel(id), vizUrl(id));
 const openProject = (pid: string): void => open(`.session-card[data-pid="${CSS.escape(pid)}"]`, labelUrl(pid));
+
+const openSel = (id: string): string => `.session-card[data-id="${CSS.escape(id)}"]`;
+
+// ---- Compare / Combine: the picked cards (H.sel) and the bar under the grid (#home-selbar)
+const pickable = (id: string): HomeSession | undefined => H.sessions.find((d) => d.id === id && !unionBlock(d));
+
+function setPicked(id: string, on: boolean): void {
+  const d = H.sessions.find((x) => x.id === id);
+  if (!d) return;
+  const why = unionBlock(d);
+  if (on && why) { toast(why); on = false; }
+  H.sel = H.sel.filter((x) => x !== id);
+  if (on) H.sel.push(id);
+  H.selErr = '';
+  const card = document.querySelector(openSel(id));           // in place: no re-render, the focus stays
+  card?.classList.toggle('picked', on);
+  const cb = card?.querySelector<HTMLInputElement>('[data-act="pick"]');
+  if (cb) cb.checked = on;
+  renderSelBar();
+}
+
+function clearPicks(): void {
+  for (const id of [...H.sel]) setPicked(id, false);
+}
+
+function renderSelBar(): void {
+  const bar = $('home-selbar');
+  if (!bar) return;
+  const show = H.tab === 'viz' && H.sel.length > 0;
+  bar.classList.toggle('hidden', !show);
+  $('home-panel-viz')?.classList.toggle('selecting', H.sel.length > 0);
+  if (!show) { bar.innerHTML = ''; return; }
+  const n = H.sel.length;
+  const items = H.sel.map((id) => H.sessions.find((d) => d.id === id)).filter((d): d is HomeSession => !!d);
+  const busy = H.selBusy;
+  const cmpTip = n === 2 ? 'Open the two side by side: what was added, removed, moved or relabelled' : 'Compare needs exactly 2 sessions; Combine joins more';
+  const cmbTip = n < 2 ? 'Select at least 2 sessions' : n > UNION_MAX ? `At most ${UNION_MAX} sessions can be combined` : `Explore the ${n} sessions as one map (in this order: the first one wins)`;
+  bar.innerHTML = `<span class="hs-n"><b class="num">${n}</b> selected</span>` +
+    '<span class="hs-list">' + items.map((d, i) => `<span class="hs-item"><b>${esc(String.fromCharCode(65 + i))}</b><span class="nm" title="${esc(d.name)}">${esc(d.name)}</span>` +
+      `<button class="icon-btn ghost" data-act="unpick" data-id="${esc(d.id)}" aria-label="Unselect ${esc(d.name)}" title="Unselect">${icon('x')}</button></span>`).join('') + '</span>' +
+    (H.selErr ? `<span class="status-line err hs-err" role="alert">${icon('alert')}<span>${esc(H.selErr)}</span></span>` : '') +
+    '<span class="hs-acts">' +
+    `<button class="primary" data-act="sel-compare" title="${esc(cmpTip)}" ${n === 2 && !busy ? '' : 'disabled'}>${busy === 'compare' ? '<span class="spin"></span>' : icon('layers')}Compare</button>` +
+    `<button data-act="sel-combine" title="${esc(cmbTip)}" ${n >= 2 && n <= UNION_MAX && !busy ? '' : 'disabled'}>${busy === 'combine' ? '<span class="spin"></span>' : icon('plus')}Combine (${n})</button>` +
+    `<button class="ghost" data-act="sel-clear" title="Unselect all (Esc)" ${busy ? 'disabled' : ''}>Clear</button></span>`;
+}
+
+// POST the combined dataset (the one made before over the same members, if any), then open its Compare tab
+async function combine(mode: 'compare' | 'combine'): Promise<void> {
+  const items = H.sel.map(pickable).filter((d): d is HomeSession => !!d);
+  if (H.selBusy || items.length < 2 || items.length > UNION_MAX || (mode === 'compare' && items.length !== 2)) return;
+  const names = items.map((d) => d.name);
+  H.selBusy = mode;
+  H.selErr = '';
+  renderSelBar();
+  try {
+    const u = await postJSON<{ id: string }>('api/datasets', { kind: 'union', reuse: true, name: names.join(mode === 'compare' ? ' vs ' : ' + '),
+      parts: items.map((d) => ({ id: d.id })) });
+    H.opening = true;
+    document.body.classList.add('home-opening');
+    location.href = `${vizUrl(u.id)}#compare`;
+  } catch (e) {
+    H.selBusy = '';
+    H.selErr = errText(e);
+    renderSelBar();
+  }
+}
 
 async function remove(id: string): Promise<void> {
   const d = H.sessions.find((x) => x.id === id);
   if (!d || !confirm(`Remove the session "${d.name}"?\n\nNo dataset files are deleted; its cached crops and features stay on disk.`)) return;
-  try { await api(`api/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch (e) { alert(errText(e)); }
+  try { await api(`api/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch (e) { failLine(`remove “${d.name}”`, e, 'Could not'); return; }
   await load();
 }
 
@@ -582,7 +679,7 @@ function exportProject(pid: string): void {
 
 // ---- a labeling card's ⋯ menu: duplicate, manage classes, re-export (a popover built on demand)
 const actions = () => import('../label/session-actions.js');
-const failLine = (what: string, e: unknown): void => { $req('home-status').innerHTML = `<div class="status-line err">${icon('alert')}Could not open ${esc(what)}: ${esc(errText(e))}</div>`; };
+const failLine = (what: string, e: unknown, verb = 'Could not open'): void => { $req('home-status').innerHTML = `<div class="status-line err">${icon('alert')}${esc(verb)} ${esc(what)}: ${esc(errText(e))}</div>`; };
 
 function lastTargetText(p: HomeProject): string {
   const tg: HomeExportTarget | null | undefined = p.export_default && p.export_default.target;
@@ -939,6 +1036,12 @@ const CARD_MENU: Record<string, (pid: string) => unknown> = {
 const editSession = (id: string): void => { void openSettings('datasets', { solo: true, edit: id }); };
 const editProject = (pid: string): void => { void wizard({ edit: pid, names: labelNames(pid) }); };
 
+/** The new-labeling-session wizard, or why the user's tier cannot open it. */
+function newLabel(): void {
+  if (tierCan('label.create')) void wizard({ names: labelNames(null) });
+  else toast(cannot('create labeling projects'), 'err');
+}
+
 const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
   open: (b) => openSession(dataOf(b, 'id')),
   edit: (b) => editSession(dataOf(b, 'id')),
@@ -957,13 +1060,23 @@ const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
     const d = H.sessions.find((x) => x.id === dataOf(b, 'id'));
     if (d && d.project_id) open(`.session-card[data-id="${CSS.escape(d.id)}"]`, labelUrl(d.project_id));
   },
-  new: () => (H.tab === 'label' ? wizard({ names: labelNames(null) }) : openSettings('datasets', { solo: true, view: 'add' })),
+  new: () => (H.tab === 'label' ? newLabel() : openSettings('datasets', { solo: true, view: 'add' })),
   'new-viz': () => openSettings('datasets', { solo: true, view: 'add' }),
-  'new-label': () => wizard({ names: labelNames(null) }),
+  'new-label': () => newLabel(),
   reload: () => load(),
   share: (b) => { const id = dataOf(b, 'id'); return share(id, H.sessions.find((x) => x.id === id)?.name ?? ''); },
   lshare: (b) => { const pid = dataOf(b, 'pid'); return share(pid, H.projects.find((x) => x.id === pid)?.name ?? ''); },
   'scope-all': () => setScope('all', false),
+  pick: (b) => setPicked(dataOf(b, 'id'), b instanceof HTMLInputElement && b.checked),
+  unpick: (b) => { setPicked(dataOf(b, 'id'), false); $('home-selbar')?.querySelector<HTMLElement>('[data-act="unpick"], [data-act="sel-clear"]')?.focus(); },
+  'sel-compare': () => combine('compare'),
+  'sel-combine': () => combine('combine'),
+  'sel-clear': () => {
+    const first = H.sel[0];
+    const back = first ? document.querySelector<HTMLElement>(`${openSel(first)} [data-act="pick"]`) : null;
+    clearPicks();
+    back?.focus();                                 // the bar is gone: back to the first picked card
+  },
 };
 
 function bind(): void {
@@ -973,6 +1086,14 @@ function bind(): void {
     const t = e.target instanceof Element ? e.target : null;
     if (!t) return;
     const b = t.closest<HTMLElement>('[data-act]');
+    // Ctrl / Cmd + click on a Visualize card (or its title) picks it instead of opening it
+    const vcard = t.closest<HTMLElement>('.session-card[data-id]');
+    if ((e.ctrlKey || e.metaKey) && vcard && (!b || b.dataset['act'] === 'open')) {
+      e.preventDefault();
+      const id = vcard.dataset['id'] ?? '';
+      setPicked(id, !H.sel.includes(id));
+      return;
+    }
     const act = b ? ACTIONS[b.dataset['act'] ?? ''] : undefined;
     if (b && !(b instanceof HTMLButtonElement && b.disabled) && act) { act(b); return; }
     const tab = t.closest<HTMLElement>('[role=tab]');
@@ -980,12 +1101,23 @@ function bind(): void {
     if (tab && isTab(tabId)) { setTab(tabId, false, true); return; }
     // anywhere else on a card opens it (the title button is the keyboard / screen-reader way in)
     const card = t.closest<HTMLElement>('.session-card');
-    if (!card || t.closest('button, a')) return;
+    if (!card || t.closest('button, a, label, input')) return;
     if (card.dataset['pid']) openProject(card.dataset['pid']);
     else openSession(card.dataset['id'] ?? '');
   };
   const body = $req('home-body');
+  const selbar = document.createElement('div');           // the Compare / Combine bar: sticks to the bottom of the scroll
+  selbar.id = 'home-selbar';
+  selbar.className = 'home-selbar hidden';
+  selbar.setAttribute('role', 'region');
+  selbar.setAttribute('aria-label', 'Selected sessions');
+  body.appendChild(selbar);
   body.addEventListener('click', onClick);
+  body.addEventListener('keydown', (e) => {               // Esc unselects (after the search box / popovers had theirs)
+    if (e.key !== 'Escape' || e.defaultPrevented || !H.sel.length || H.selBusy) return;
+    e.preventDefault();
+    clearPicks();
+  });
   $req('home-status').addEventListener('click', onClick);
   $req('home-new').addEventListener('click', onClick);
   // the scope radiogroup: click, or arrows / Home / End (roving tabindex, the choice follows the focus)
@@ -1045,6 +1177,7 @@ function bind(): void {
   window.addEventListener('pageshow', (e) => {
     if (!e.persisted) return;
     H.opening = false;
+    H.selBusy = '';
     document.body.classList.remove('home-opening');
     void load();
   });

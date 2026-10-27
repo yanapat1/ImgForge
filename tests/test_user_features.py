@@ -102,7 +102,7 @@ def test_embed_settings_saved_and_checked(reg, tmp_path):
     m = reg.upsert({'name': 'dino', 'family': 'hf', 'format': 'hf', 'path': 'facebook/dinov2-small',
                     'embed': {'pool': 'cls'}}, owner_id=bob['id'], admin=False)    # a hub id: anyone
     assert m['task_type'] == 'embedding' and m['embed']['enabled'] and m['embed']['pool'] == 'cls'
-    with pytest.raises(ValueError, match='only admins'):
+    with pytest.raises(ValueError, match='your tier cannot'):
         reg.upsert({'name': 'local', 'family': 'hf', 'format': 'hf', 'path': str(tmp_path)}, owner_id=bob['id'],
                    admin=False)
     with pytest.raises(ValueError, match='pooling'):
