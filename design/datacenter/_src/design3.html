@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Center · Command console</title>
+<link rel="stylesheet" href="../../../static/css/tokens.css">
+<link rel="stylesheet" href="../../../static/css/base.css">
+<link rel="stylesheet" href="../../../static/css/layout.css">
+<link rel="stylesheet" href="../../../static/css/components.css">
+<script>
+  const Q = new URLSearchParams(location.search);
+  document.documentElement.dataset.theme = Q.get('theme') === 'light' ? 'light' : 'dark';
+</script>
+<style>
+/* ===================================================================== design3: command console */
+body { font-size: var(--fs-sm); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.faint { color: var(--text-faint); }
+.mutedt { color: var(--text-muted); }
+
+/* ---- header */
+.app-header { gap: var(--s4); }
+.nav { display: flex; align-self: stretch; gap: 2px; margin-left: var(--s3); }
+.nav a { display: flex; align-items: center; gap: 7px; padding: 0 14px; color: var(--text-muted); text-decoration: none; font-weight: 600;
+  font-size: var(--fs-sm); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.nav a .ico { color: var(--text-faint); }
+.nav a.on { color: var(--text); border-bottom-color: var(--accent); }
+.nav a.on .ico { color: var(--accent); }
+.nav a .n { font: 600 11px var(--mono); color: var(--text-faint); background: var(--surface-3); padding: 1px 6px; border-radius: 999px; }
+.hdr-right { margin-left: auto; display: flex; align-items: center; gap: var(--s2); }
+.ai-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); font-size: var(--fs-xs); color: var(--text-muted); }
+.ai-pill b { color: var(--text); font-weight: 600; }
+.okdot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); flex: none; }
+.gem-ico { width: 16px; height: 16px; overflow: visible; }
+.gem-ico .gem-body { fill: url(#gem-grad); fill-opacity: .2; stroke: url(#gem-grad); stroke-width: 1.6; stroke-linejoin: round; }
+.gem-ico .gem-line { fill: none; stroke: url(#gem-grad); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- omnibar row */
+.omni-row { flex: none; display: flex; align-items: center; gap: var(--s2); padding: 10px var(--s4); background: var(--bg); }
+.omni { flex: 1; min-width: 0; height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md); }
+.omni.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.omni > .ico { color: var(--text-faint); width: 17px; height: 17px; }
+.tok { display: inline-flex; align-items: center; height: 24px; border-radius: var(--r-sm); font: 600 12px/1 var(--mono);
+  background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-text); overflow: hidden; flex: none; }
+.tok .k { padding: 0 2px 0 7px; color: var(--text-muted); font-weight: 500; }
+.tok .v { padding: 0 4px 0 0; }
+.tok .x { display: grid; place-items: center; width: 20px; height: 100%; border-left: 1px solid var(--accent-line); }
+.tok .x .ico { width: 12px; height: 12px; color: var(--accent-text); }
+.tok.scope { background: var(--surface-3); border-color: var(--border-strong); color: var(--text); }
+.tok.scope .x { border-left-color: var(--border-strong); }
+.tok.scope .x .ico { color: var(--text-muted); }
+.tok.ai { background: transparent; border-color: var(--border-strong); color: var(--text); }
+.omni .ph { color: var(--text-faint); font-size: var(--fs); white-space: nowrap; }
+.omni .typed { color: var(--text); font-size: var(--fs); white-space: nowrap; }
+.caret { display: inline-block; width: 1.5px; height: 18px; background: var(--accent); vertical-align: middle; margin-left: 1px; }
+.omni .sp { flex: 1; }
+.omni .hint-r { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.omni-row button { height: 38px; }
+.omni-row .count { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; padding: 0 var(--s2); }
+.omni-row .count b { font: 600 var(--fs-sm) var(--mono); color: var(--text); }
+button .gem-ico { margin-right: -1px; }
+
+/* ---- facet strip */
+.facets { flex: none; display: flex; align-items: center; gap: var(--s4); padding: 0 var(--s4) 10px; background: var(--bg); overflow: hidden; }
+.fgroup { display: flex; align-items: center; gap: 2px; flex: none; }
+.flabel { font: 650 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); margin-right: 4px; white-space: nowrap; }
+.sbar { display: flex; width: 120px; height: 8px; border-radius: 999px; overflow: hidden; gap: 1.5px; background: var(--surface-3); flex: none; margin-right: 4px; }
+.sbar i { display: block; height: 100%; background: var(--c); }
+.fchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; border-radius: var(--r-sm); border: 1px solid transparent;
+  background: transparent; font-size: 12.5px; color: var(--text); white-space: nowrap; }
+.fchip .dot { width: 8px; height: 8px; border-radius: 2px; background: var(--c); flex: none; }
+.fchip .n { font: 600 11.5px var(--mono); color: var(--text-muted); }
+.fchip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); }
+.fchip.on .n { color: var(--accent-text); }
+.fchip.more { color: var(--text-muted); border: 1px dashed var(--border-strong); margin-left: 4px; }
+.fchip .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.legend .fchip { border-color: var(--border); background: var(--surface-2); }
+.vsep { width: 1px; height: 20px; background: var(--border); flex: none; }
+
+/* ---- workspace */
+.work { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border); background: var(--surface); }
+.mainp { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.sidep { flex: none; width: 440px; border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+
+/* ---- table */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: var(--fs-sm); }
+.tbl th { position: sticky; top: 0; z-index: 1; height: 30px; padding: 0 8px; text-align: left; font: 600 11.5px var(--font); color: var(--text-muted);
+  background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: nowrap; letter-spacing: .01em; }
+.tbl th.r, .tbl td.r { text-align: right; }
+.tbl th .sort { color: var(--accent); margin-left: 3px; }
+.tbl th .ico { width: 12px; height: 12px; vertical-align: -1px; }
+.tbl td { height: 34px; padding: 0 8px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tbl td.num, .tbl td.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.tbl td.num { text-align: right; }
+.tbl tr.cur td { background: var(--surface-2); }
+.tbl tr.cur td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.tbl tr.sel td { background: var(--accent-soft); }
+.tbl tr.sel.cur td { background: var(--accent-soft-hover); }
+.tbl tr.dim td > * , .tbl tr.dim td { opacity: .5; }
+.tbl tr.dim td:first-child { opacity: 1; }
+.tbl tr.grp td { height: 26px; background: var(--bg); font: 650 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+.tbl tr.grp td .mono { text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--accent-text); }
+.tbl tr.changed td { background: var(--warn-soft); }
+.tbl tr.changed td:first-child { box-shadow: inset 2px 0 0 var(--warn); }
+.tbl td.cb { width: 34px; padding: 0 0 0 12px; }
+.tbl input[type=checkbox] { width: 15px; height: 15px; vertical-align: middle; }
+.tbl input[type=checkbox]:checked { background-size: 11px; }
+.bname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bname b { font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.bname .ico { color: var(--text-faint); }
+.zero { color: var(--text-faint); }
+
+/* format badge */
+.fmt { vertical-align: middle; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 7px; border-radius: var(--r-sm); font-size: 12px; font-weight: 600;
+  color: var(--text); background: color-mix(in srgb, var(--c) 13%, transparent); border: 1px solid color-mix(in srgb, var(--c) 42%, transparent); }
+.fmt::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--c); }
+.fmt .sub { color: var(--text-muted); font-weight: 500; }
+.fmt.was { text-decoration: line-through; opacity: .7; background: none; border-style: dashed; margin-left: 4px; font-weight: 500; }
+.c-yolo { --c: var(--accent); } .c-coco { --c: var(--err-fp); } .c-voc { --c: var(--err-cls); } .c-cls { --c: var(--err-loc); }
+.c-img { --c: var(--text-faint); } .c-emb { --c: var(--prog-review); } .c-other { --c: var(--danger); }
+
+/* structure check */
+.chk { vertical-align: middle; display: inline-flex; gap: 7px; font: 500 11.5px var(--mono); color: var(--text-muted); }
+.chk span { display: inline-flex; align-items: center; gap: 2px; }
+.chk .ico { width: 13px; height: 13px; stroke-width: 2.6; }
+.chk .ok .ico { color: var(--ok); }
+.chk .bad { color: var(--danger-text); }
+.chk .bad .ico { color: var(--danger); }
+.chk .na { color: var(--text-faint); }
+
+/* tags */
+.tags { display: inline-flex; gap: 4px; overflow: hidden; vertical-align: middle; }
+.tg { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11.5px; font-weight: 550;
+  color: var(--text); background: var(--surface-3); border: 1px solid transparent; white-space: nowrap; }
+.tg.hit { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); }
+.tg.auto { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-muted); font-family: var(--mono); font-size: 11px; font-weight: 500; }
+.tg.auto .ico { width: 10px; height: 10px; color: var(--text-faint); }
+.tg .x { width: 11px; height: 11px; color: var(--text-faint); }
+
+.src { vertical-align: middle; max-width: 100%; display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); }
+.src .ico { color: var(--text-faint); }
+.src .p { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; }
+.sess { vertical-align: middle; display: inline-flex; align-items: center; gap: 5px; font: 600 12.5px var(--mono); }
+.sess .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.rowact { color: var(--text-faint); }
+
+/* table footer summary */
+.tfoot { flex: none; display: flex; align-items: center; gap: var(--s4); height: 32px; padding: 0 var(--s4); border-top: 1px solid var(--border);
+  background: var(--surface-2); font-size: var(--fs-xs); color: var(--text-muted); }
+.tfoot b { font: 600 12px var(--mono); color: var(--text); }
+.scroll { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+
+/* ---- bucket toolbar */
+.tbar { flex: none; display: flex; align-items: center; gap: 6px; height: 46px; padding: 0 var(--s4); border-bottom: 1px solid var(--border); background: var(--surface); }
+.crumbs { flex: none; display: flex; align-items: center; gap: 4px; font: 600 var(--fs-sm) var(--font); white-space: nowrap; min-width: 0; }
+.crumbs a { color: var(--text-muted); text-decoration: none; padding: 3px 5px; border-radius: var(--r-sm); }
+.crumbs a.cur { color: var(--text); }
+.crumbs .ico { width: 13px; height: 13px; color: var(--text-faint); }
+.crumbs .p { font-family: var(--mono); font-weight: 500; }
+.tbar > * { flex: none; }
+.tbar > .grow { flex: 1; }
+.tbar button { height: 28px; padding: 0 9px; font-size: 12.5px; }
+.tbar button.icon-btn { width: 28px; padding: 0; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--r); overflow: hidden; }
+.seg button { border: 0; border-radius: 0; height: 26px; background: var(--surface-2); color: var(--text-muted); }
+.seg button + button { border-left: 1px solid var(--border-strong); }
+.seg button.on { background: var(--accent-soft); color: var(--accent-text); }
+.seg button.on .ico { color: var(--accent); }
+.selinfo { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r); background: var(--accent-soft);
+  border: 1px solid var(--accent-line); color: var(--accent-text); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.selinfo .mono { font-size: 12px; }
+.tsep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; flex: none; }
+
+/* ---- tree table */
+.tt td.nm { overflow: hidden; }
+.tnode { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: calc(var(--d, 0) * 20px); }
+.tnode .tw { width: 16px; height: 16px; color: var(--text-faint); flex: none; }
+.tnode .tw.sp { visibility: hidden; }
+.tnode .fi { color: var(--accent); }
+.tnode .fi.file { color: var(--text-faint); }
+.tnode .fname { font-family: var(--mono); font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.tnode .fname.dir { font-family: var(--font); font-weight: 650; font-size: var(--fs-sm); }
+.tnode .cnt { font: 11.5px var(--mono); color: var(--text-faint); }
+.tt tr.gridrow td { height: auto; padding: 8px 12px 10px calc(12px + 52px); white-space: normal; background: var(--bg); }
+.tt tr.gridrow td.cb { padding: 0; }
+.st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.st i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.st.ok { --c: var(--ok); color: var(--text-muted); } .st.warn { --c: var(--warn); color: var(--warn-text); }
+.st.bad { --c: var(--danger); color: var(--danger-text); } .st.none { --c: var(--text-faint); color: var(--text-faint); }
+.tt tr.night td { background: var(--highlight-soft); }
+.tt tr.night td:first-child { box-shadow: inset 2px 0 0 var(--highlight); }
+.tt tr.night.sel td { background: color-mix(in srgb, var(--highlight) 22%, transparent); }
+.tt tr.virt td { height: 30px; color: var(--text-faint); font-size: var(--fs-xs); background: var(--surface); }
+
+/* ---- thumbnail grid (inside the tree) */
+.ghead { display: flex; align-items: center; gap: var(--s3); margin-bottom: 8px; font-size: var(--fs-xs); color: var(--text-muted); }
+.ghead b { font: 600 12px var(--mono); color: var(--text); }
+.ghead .sz { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.ghead input[type=range] { width: 80px; height: 18px; --fill: 45%; }
+.tgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+.th { position: relative; aspect-ratio: 4 / 3; border-radius: var(--r-sm); overflow: hidden; background: var(--media-bg);
+  outline: 1px solid var(--border); outline-offset: -1px; }
+.th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.th .nm { position: absolute; left: 0; right: 0; bottom: 0; padding: 1px 5px; font: 10.5px/1.45 var(--mono); color: var(--text);
+  background: var(--overlay); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th .lc { position: absolute; right: 4px; top: 4px; height: 17px; padding: 0 5px; border-radius: 4px; font: 600 10.5px/17px var(--mono);
+  background: var(--overlay); color: var(--text); }
+.th .lc.warn { background: var(--warn); color: var(--on-highlight); }
+.th input[type=checkbox] { position: absolute; left: 5px; top: 5px; width: 15px; height: 15px; background-color: var(--overlay); opacity: 0; }
+.th.sel input[type=checkbox], .th.cur input[type=checkbox] { opacity: 1; }
+.th.sel input[type=checkbox] { background: var(--accent) var(--tick) center / 11px no-repeat; border-color: var(--accent); }
+.th.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.th.sel::after { content: ""; position: absolute; inset: 0; background: var(--accent-soft); pointer-events: none; }
+.th.cur { outline: 2px solid var(--highlight); outline-offset: -2px; box-shadow: 0 0 0 3px var(--highlight-soft); }
+.th.more { display: grid; place-items: center; text-align: center; background: var(--surface-2); color: var(--text-muted); font-size: var(--fs-xs);
+  outline-style: dashed; outline-color: var(--border-strong); }
+.th.more b { display: block; font: 600 var(--fs-sm) var(--mono); color: var(--text); }
+
+/* ---- preview pane */
+.pv-head { flex: none; display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 8px 0 var(--s4); border-bottom: 1px solid var(--border); }
+.pv-head .t { font: 600 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pv-head .pos { font: 11.5px var(--mono); color: var(--text-faint); margin-left: auto; white-space: nowrap; }
+.pv-head button { height: 26px; width: 26px; padding: 0; justify-content: center; }
+.pv-body { flex: 1; min-height: 0; overflow: hidden; padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s3); }
+.stage { position: relative; border-radius: var(--r-md); overflow: hidden; background: var(--media-bg); line-height: 0; flex: none; }
+.stage img { width: 100%; display: block; }
+.stage svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.stage rect.b { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.stage rect.tb { opacity: .92; }
+.stage text { font: 600 11px var(--font); fill: var(--lb-tag-dark); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.legend .fchip { height: 22px; font-size: 12px; }
+.legend .fchip .dot { border-radius: 50%; }
+.meta { display: grid; grid-template-columns: 92px 1fr; gap: 0; font-size: 12.5px; border-top: 1px solid var(--border); }
+.meta > * { padding: 5px 0; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta dt { color: var(--text-muted); }
+.meta dd { margin: 0; font-family: var(--mono); font-size: 12px; }
+.code { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--bg); flex: none; }
+.code .ch { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+  font: 12px var(--mono); color: var(--text-muted); }
+.code .ch .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.code .ch .r { margin-left: auto; font-family: var(--font); font-size: 11.5px; color: var(--text-faint); }
+.code pre { margin: 0; padding: 6px 0; font: 12px/1.6 var(--mono); color: var(--text); }
+.code pre div { padding: 0 10px; display: flex; gap: 12px; }
+.code pre div.on { background: var(--highlight-soft); }
+.code pre .ln { color: var(--text-faint); width: 14px; text-align: right; flex: none; }
+.code pre .cid { font-weight: 700; }
+.pv-actions { display: flex; gap: 6px; flex: none; }
+.pv-actions button { height: 28px; font-size: 12.5px; }
+
+/* ---- popover (tag editor) */
+.pop { position: absolute; z-index: var(--z-popover); width: 340px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3); font-size: var(--fs-sm); }
+.pop::before { content: ""; position: absolute; top: -6px; left: 50px; width: 10px; height: 10px; transform: rotate(45deg); background: var(--surface);
+  border-left: 1px solid var(--border-strong); border-top: 1px solid var(--border-strong); }
+.pop-h { display: flex; align-items: center; gap: 6px; padding: 10px 12px 8px; font-weight: 650; }
+.pop-h .p { font: 500 12px var(--mono); color: var(--text-muted); }
+.pop-sec { padding: 4px 12px 10px; }
+.pop-sec .lbl { font: 650 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; display: flex; gap: 6px; }
+.pop-sec .lbl span { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 11px; }
+.pop .tgwrap { display: flex; flex-wrap: wrap; gap: 5px; }
+.pop .tg { height: 24px; font-size: 12px; padding: 0 7px; }
+.pop .tg.auto { font-size: 11.5px; }
+.tin { display: flex; align-items: center; gap: 6px; height: 32px; margin: 0 12px; padding: 0 10px; border: 1px solid var(--accent); border-radius: var(--r);
+  box-shadow: 0 0 0 3px var(--accent-soft); background: var(--surface-2); }
+.tin .ico { color: var(--text-faint); width: 14px; height: 14px; }
+.sugg { list-style: none; margin: 6px 0 0; padding: 4px; border-top: 1px solid var(--border); }
+.sugg li { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: var(--r-sm); }
+.sugg li.on { background: var(--accent-soft); }
+.sugg li b { font-weight: 600; } .sugg li b u { text-decoration: none; color: var(--accent-text); }
+.sugg li .r { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
+.sugg li .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.pop-f { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-faint);
+  background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.pop-f kbd { font-size: 10.5px; padding: 1px 4px; }
+.pop-note { display: flex; gap: 8px; padding: 0 12px 10px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.pop-note .ico { width: 14px; height: 14px; color: var(--text-faint); flex: none; margin-top: 1px; }
+
+/* ---- AI pane */
+.ai-h { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 var(--s4); border-bottom: 1px solid var(--border); }
+.ai-h h3 { font-size: var(--fs); }
+.ai-h .model { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); padding: 2px 8px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border); }
+.ai-h .model .mono { font-size: 11px; }
+.ai-h button { margin-left: auto; height: 26px; width: 26px; padding: 0; justify-content: center; }
+.ai-h button + button { margin-left: 0; }
+.ai-ctx { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px var(--s4); border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--text-faint); background: var(--surface-2); }
+.ai-ctx .tok { height: 20px; font-size: 11px; }
+.ai-log { flex: 1; min-height: 0; overflow: hidden; padding: 10px var(--s4) 6px; display: flex; flex-direction: column; gap: 9px; justify-content: flex-end; }
+.msg-u { align-self: flex-end; max-width: 86%; padding: 6px 10px; border-radius: 10px 10px 3px 10px; background: var(--surface-3); color: var(--text); font-size: 13px; line-height: 1.4; }
+.msg-a { font-size: 13px; line-height: 1.45; color: var(--text); display: flex; flex-direction: column; gap: 6px; }
+.msg-a p { margin: 0; }
+.msg-a p b { font-weight: 650; }
+.tools { display: flex; flex-direction: column; gap: 1px; border-left: 2px solid var(--border-strong); padding: 1px 0 1px 9px; }
+.tcall { display: flex; align-items: center; gap: 6px; font: 11.5px/1.55 var(--mono); color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+.tcall .ico { width: 12px; height: 12px; color: var(--ok); stroke-width: 2.6; flex: none; }
+.tcall .fn { color: var(--text); font-weight: 600; }
+.tcall .arg { overflow: hidden; text-overflow: ellipsis; }
+.tcall .res { color: var(--text-faint); flex: none; }
+.tcall .res b { color: var(--accent-text); font-weight: 600; }
+.tcall .ro { margin-left: auto; font: 10px var(--font); letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); flex: none; padding-left: 6px; }
+.plan { border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
+.plan-h { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; background: var(--accent-soft); font-size: 12px; font-weight: 650; color: var(--accent-text); }
+.plan-h .r { margin-left: auto; font-weight: 500; color: var(--text-muted); font-size: 11.5px; }
+.prow { display: grid; grid-template-columns: 16px 1fr 16px; gap: 8px; align-items: center; padding: 5px 8px 5px 10px; border-top: 1px solid var(--border); }
+.prow input { width: 15px; height: 15px; }
+.prow .call { font: 11.5px/1.5 var(--mono); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: baseline; }
+.prow .call .fn { font-weight: 700; color: var(--text); }
+.prow .call .eff { margin-left: auto; padding-left: 8px; font: 11px var(--font); color: var(--text-faint); }
+.prow.off .call { opacity: .5; text-decoration: line-through; }
+.tcall.ro-l { font-family: var(--font); font-size: 11px; color: var(--text-faint); }
+.tcall.ro-l .ico { color: var(--text-faint); stroke-width: 1.7; }
+.ai-box .tok { height: 22px; font-size: 11px; }
+.prow input:checked { background-size: 11px; }
+.prow .fn { font: 650 12px var(--mono); color: var(--text); }
+.prow .fn .eff { font: 500 11px var(--font); color: var(--text-faint); margin-left: 6px; }
+.prow .args { font: 11.5px/1.45 var(--mono); color: var(--text-muted); white-space: normal; word-break: break-all; }
+.prow .args q { quotes: none; color: var(--accent-text); }
+.prow .ed { color: var(--text-faint); width: 14px; height: 14px; }
+.prow.off .fn, .prow.off .args { opacity: .5; text-decoration: line-through; text-decoration-color: var(--text-faint); }
+.prow .warnl { display: block; margin-top: 2px; font: 11px var(--font); color: var(--warn-text); white-space: normal; }
+.plan-f { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.plan-f button { height: 28px; font-size: 12.5px; }
+.plan-f kbd { font-size: 10.5px; padding: 1px 4px; background: color-mix(in srgb, var(--on-accent) 18%, transparent); border-color: transparent; color: var(--on-accent); }
+.plan-f .hint { margin-left: auto; }
+.qchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.qc { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2);
+  font-size: 12px; font-weight: 550; color: var(--text); white-space: nowrap; }
+.qc .n { font: 600 11px var(--mono); color: var(--text-muted); }
+.qc.pri { border-color: var(--accent-line); color: var(--accent-text); background: var(--accent-soft); }
+.qc .ico { width: 13px; height: 13px; color: var(--text-faint); }
+.cant { display: flex; gap: 8px; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--surface-2); }
+.cant > .ico { color: var(--warn); width: 16px; height: 16px; margin-top: 2px; }
+.cant p + p { margin-top: 4px; color: var(--text-muted); }
+.ai-in { flex: none; padding: 8px var(--s4) 10px; border-top: 1px solid var(--border); }
+.ai-box { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.ai-box .ph { color: var(--text-faint); flex: 1; white-space: nowrap; overflow: hidden; }
+.ai-box button { height: 28px; width: 28px; padding: 0; justify-content: center; }
+.ai-in .hint { margin-top: 6px; display: flex; gap: 10px; }
+.ai-in .hint span { display: inline-flex; align-items: center; gap: 4px; }
+.ai-in .hint .ico { width: 12px; height: 12px; }
+.sep-t { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--text-faint); letter-spacing: .04em; text-transform: uppercase; }
+.sep-t::before, .sep-t::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+/* ---- console (activity log under the bucket table) */
+.scroll.auto { flex: none; }
+.console { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border-strong); background: var(--bg); }
+.con-h { flex: none; display: flex; align-items: stretch; gap: 2px; height: 32px; padding: 0 8px 0 var(--s4); border-bottom: 1px solid var(--border); background: var(--surface); }
+.con-h a { display: flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 12px; font-weight: 600; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.con-h a.on { color: var(--text); border-bottom-color: var(--accent); }
+.con-h a .n { font: 600 10.5px var(--mono); padding: 0 5px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
+.con-h a .n.w { background: var(--warn-soft); color: var(--warn-text); }
+.con-h .r { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text-faint); }
+.con-h .r .bar { width: 120px; height: 5px; border-radius: 999px; background: var(--prog-track); overflow: hidden; }
+.con-h .r .bar i { display: block; width: 64%; height: 100%; background: var(--prog-doing); }
+.con-b { flex: 1; min-height: 0; overflow: hidden; padding: 6px 0; font: 12px/1.75 var(--mono); }
+.ll { display: grid; grid-template-columns: 100px 84px 1fr; gap: 12px; padding: 0 var(--s4); white-space: nowrap; }
+.ll .t { color: var(--text-faint); }
+.ll .who { color: var(--text-muted); }
+.ll .who.ai { color: var(--gem-2); }
+.ll .what { overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.ll .what .m { color: var(--text-faint); }
+.ll .what .ok { color: var(--ok-text); } .ll .what .w { color: var(--warn-text); }
+.ll.new { background: var(--warn-soft); }
+.usedin { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.usedin .lbl { font: 650 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+.usedin .u { display: flex; align-items: center; gap: 8px; height: 26px; }
+.usedin .u .ico { width: 14px; height: 14px; color: var(--text-faint); }
+.usedin .u .r { margin-left: auto; color: var(--text-faint); font-size: 11.5px; }
+.usedin .u b { font-weight: 600; }
+.kind { font: 600 10.5px var(--font); padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent-text); }
+.kind.lb { background: color-mix(in srgb, var(--label-badge) 22%, transparent); color: var(--text); }
+
+/* ---- keyboard footer */
+.kbar { flex: none; height: 30px; display: flex; align-items: center; gap: 14px; padding: 0 var(--s4); border-top: 1px solid var(--border); background: var(--surface-2);
+  font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+.kbar kbd { font-size: 10.5px; padding: 1px 5px; margin-right: 3px; }
+.kbar .r { margin-left: auto; display: flex; gap: 14px; color: var(--text-faint); }
+.kbar .r b { font: 600 11.5px var(--mono); color: var(--text-muted); }
+.kbar .mode { font: 650 10.5px var(--mono); color: var(--accent-text); background: var(--accent-soft); padding: 2px 7px; border-radius: 4px; }
+
+/* ---- toast */
+.toast { position: fixed; left: 16px; bottom: 44px; z-index: calc(var(--z-modal) + 5); width: 600px; display: flex; gap: 10px; padding: 10px 10px 10px 12px;
+  border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-3);
+  border-left: 3px solid var(--warn); font-size: var(--fs-sm); }
+.toast > .ico { color: var(--warn); width: 18px; height: 18px; margin-top: 1px; }
+.toast .tx { flex: 1; min-width: 0; line-height: 1.4; }
+.toast .tx b { font-weight: 650; }
+.toast .tx .s { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.toast .tx .s .mono { font-size: 11.5px; }
+.toast .acts { display: flex; gap: 4px; align-items: flex-start; flex: none; }
+.toast button { height: 26px; font-size: 12px; }
+.toast kbd { font-size: 10px; padding: 0 4px; }
+
+/* ---- modal */
+.scrim { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--scrim); display: flex; align-items: center; justify-content: flex-end; padding-right: 170px; }
+.dlg { width: 600px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3); display: flex; flex-direction: column; }
+.dlg-h { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px 20px; }
+.dlg-h h3 { font-size: var(--fs-lg); flex: 1; }
+.dlg-h button { width: 28px; height: 28px; padding: 0; justify-content: center; }
+.dlg-b { padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 14px; }
+.flbl { font-size: 12px; font-weight: 650; color: var(--text-muted); margin-bottom: 6px; display: flex; gap: 8px; }
+.flbl .r { margin-left: auto; font-weight: 500; color: var(--text-faint); }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.opt { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.opt .ico { width: 20px; height: 20px; color: var(--text-muted); margin-top: 1px; }
+.opt b { display: block; font-size: var(--fs-sm); }
+.opt span { font-size: 12px; color: var(--text-muted); line-height: 1.35; display: block; }
+.opt.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.opt.on .ico { color: var(--accent); }
+.radio { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--border-hover); flex: none; margin-top: 2px; background: var(--surface); }
+.radio.on { border: 4.5px solid var(--accent); }
+.frow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.inp { height: 32px; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface-2);
+  font-size: var(--fs-sm); color: var(--text); gap: 6px; }
+.inp.sel { background-image: var(--chev); background-repeat: no-repeat; background-position: right 8px center; background-size: 15px; }
+.inp .mono { font-size: 12.5px; }
+.dest { display: flex; gap: 6px; }
+.dest .seg button { height: 30px; }
+.sumtbl { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.sumtbl .sr { display: grid; grid-template-columns: 14px 1fr 176px 60px 14px; white-space: nowrap; gap: 8px; align-items: center; height: 32px; padding: 0 10px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.sumtbl .sr:first-child { border-top: 0; }
+.sumtbl .sr .p { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sumtbl .sr .p b { font-family: var(--font); font-weight: 650; font-size: 12.5px; }
+.sumtbl .sr .r { text-align: right; font: 12px var(--mono); color: var(--text-muted); }
+.sumtbl .sr .ico { width: 13px; height: 13px; color: var(--text-faint); }
+.sumtbl .sr.tot { background: var(--surface-2); font-weight: 650; }
+.sumtbl .sr.tot .r { color: var(--text); font-weight: 600; }
+.callout { display: flex; gap: 10px; padding: 9px 12px; border-radius: var(--r-md); background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  font-size: 12.5px; line-height: 1.45; color: var(--text); }
+.callout > .ico { color: var(--warn); width: 16px; height: 16px; margin-top: 1px; }
+.callout button { height: 24px; font-size: 12px; margin-top: 6px; }
+.dlg-f { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.dlg-f .sp { flex: 1; }
+.dlg-f kbd { font-size: 10.5px; padding: 1px 4px; background: color-mix(in srgb, var(--on-accent) 18%, transparent); border-color: transparent; color: var(--on-accent); }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true">
+  
+  <style>.f { fill: currentColor; fill-opacity: .22; } .s { fill: currentColor; stroke: none; }</style>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m14.5 17-5-5 5-5"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9.5 17 5-5-5-5"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m7 9.5 5 5 5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M17 7 7 17M7 7l10 10"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10"/></symbol>
+  <symbol id="i-circle" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="7.5"/></symbol>
+  <symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M5 12h13.5M13 6.5l5.5 5.5-5.5 5.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path class="f" d="M10.3 4.2 2.6 17.6A2 2 0 0 0 4.3 20.6h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4"/><circle class="s" cx="12" cy="17" r="1.1"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path class="f" d="m12 3 9 4.6-9 4.6-9-4.6z"/><path d="m3 12.2 9 4.6 9-4.6M3 16.6l9 4.6 9-4.6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle class="f" cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="3"/><circle class="s" cx="8.5" cy="9.5" r="1.6"/><path d="m3.5 17.5 5-5 4 4 2.5-2.5 5.5 5"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path class="f" d="M3.5 5.5v5.3a2 2 0 0 0 .6 1.4l8.2 8.2a2 2 0 0 0 2.8 0l5.3-5.3a2 2 0 0 0 0-2.8L12.2 4.1a2 2 0 0 0-1.4-.6H5.5a2 2 0 0 0-2 2z"/><circle class="s" cx="8" cy="8" r="1.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path class="f" d="M4 15.5v2.5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5"/><path d="M12 4v10.5M7.5 10l4.5 4.5 4.5-4.5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 9A8 8 0 0 0 5 7.5M4.5 15A8 8 0 0 0 19 16.5"/><path d="M5 3.5v4h4M19 20.5v-4h-4"/></symbol>
+  <symbol id="i-scatter" viewBox="0 0 24 24"><path class="f" stroke-dasharray="2.6 2.4" d="M5.5 9.5c1-4 8-5.5 11.5-3 3.5 2.5 2.5 8-1.5 9.5-4.5 1.7-11-1.5-10-6.5z"/><circle class="s" cx="9.5" cy="10" r="1.6"/><circle class="s" cx="14" cy="8.6" r="1.6"/><circle class="s" cx="13" cy="13" r="1.6"/><circle class="s" cx="5" cy="19" r="1.4"/><circle class="s" cx="20" cy="19.5" r="1.4"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><rect class="f" x="4" y="12" width="4" height="8" rx="1.2"/><rect class="f" x="10" y="5" width="4" height="15" rx="1.2"/><rect class="f" x="16" y="9" width="4" height="11" rx="1.2"/></symbol>
+  <symbol id="i-model" viewBox="0 0 24 24"><rect class="f" x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 3v3.5M14.5 3v3.5M9.5 17.5V21M14.5 17.5V21M3 9.5h3.5M3 14.5h3.5M17.5 9.5H21M17.5 14.5H21"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle class="s" cx="12" cy="12" r="1.5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path class="f" d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15z"/><path d="M12 15V4m-4.5 4.5L12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
+  <symbol id="i-eval" viewBox="0 0 24 24"><rect class="f" x="4" y="4" width="16" height="16" rx="2.5"/><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="m7.5 13.5 2.5 2.5 3.5-5.5M15.5 8h1.5M15.5 12h1.5M15.5 16h1.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path class="f" d="M6 7h12l-.9 12.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9z"/><path d="M4 7h16M9.5 7V4.5h5V7M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path class="f" d="M10.3 3.6a1.8 1.8 0 0 1 3.4 0l.3.9a1.8 1.8 0 0 0 2.4 1l.9-.4a1.8 1.8 0 0 1 2.4 2.4l-.4.9a1.8 1.8 0 0 0 1 2.4l.9.3a1.8 1.8 0 0 1 0 3.4l-.9.3a1.8 1.8 0 0 0-1 2.4l.4.9a1.8 1.8 0 0 1-2.4 2.4l-.9-.4a1.8 1.8 0 0 0-2.4 1l-.3.9a1.8 1.8 0 0 1-3.4 0l-.3-.9a1.8 1.8 0 0 0-2.4-1l-.9.4a1.8 1.8 0 0 1-2.4-2.4l.4-.9a1.8 1.8 0 0 0-1-2.4l-.9-.3a1.8 1.8 0 0 1 0-3.4l.9-.3a1.8 1.8 0 0 0 1-2.4l-.4-.9a1.8 1.8 0 0 1 2.4-2.4l.9.4a1.8 1.8 0 0 0 2.4-1z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path class="f" d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.6A3.8 3.8 0 0 1 17.5 18.5z"/><path d="M12 11v5m-2-2 2 2 2-2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path class="f" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path class="f" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path class="f" d="M8 5.5v13l10.5-6.5z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path class="f" d="m15.5 4.5 4 4L9 19H5v-4z"/><path d="m13 7 4 4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path class="f" d="M7 9h10v3a5 5 0 0 1-10 0z"/><path d="M9.5 4v5M14.5 4v5M12 17v3.5"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path class="f" d="m3.5 15.5 12-12 5 5-12 12z"/><path d="m7.5 11.5 2 2M10.5 8.5l2 2M13.5 5.5l2 2"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse class="f" cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/></symbol>
+  
+  <symbol id="i-wave" viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="3"/><path d="M6.5 12h1M9.5 9v6M12.5 6.5v11M15.5 9.5v5M18 11.5v1"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect class="f" x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><rect class="f" x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8 8.5h8M8 12h8M8 15.5h5"/></symbol>
+  <symbol id="i-vectors" viewBox="0 0 24 24"><rect class="f" x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M8 7v10M12 7v10M16 7v10"/><circle class="s" cx="8" cy="10" r="1.5"/><circle class="s" cx="12" cy="14.5" r="1.5"/><circle class="s" cx="16" cy="9" r="1.5"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect class="f" x="6" y="5" width="4" height="14" rx="1.2"/><rect class="f" x="14" y="5" width="4" height="14" rx="1.2"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5l5.5 5.5"/></symbol>
+  
+  <symbol id="i-box" viewBox="0 0 24 24"><rect class="f" x="5" y="5" width="14" height="14" rx="1.5"/><rect class="s" x="3" y="3" width="4" height="4" rx="1"/><rect class="s" x="17" y="17" width="4" height="4" rx="1"/></symbol>
+  <symbol id="i-polygon" viewBox="0 0 24 24"><path class="f" d="M5 8.5 11 4l8 4.5-2 10.5H7.5z"/><circle class="s" cx="5" cy="8.5" r="1.7"/><circle class="s" cx="11" cy="4" r="1.7"/><circle class="s" cx="19" cy="8.5" r="1.7"/><circle class="s" cx="17" cy="19" r="1.7"/><circle class="s" cx="7.5" cy="19" r="1.7"/></symbol>
+  <symbol id="i-keypoint" viewBox="0 0 24 24"><path d="M12 6v6M12 12l-5 7M12 12l5 7M6 9.5h12"/><circle class="s" cx="12" cy="4.5" r="2"/><circle class="s" cx="6" cy="9.5" r="1.6"/><circle class="s" cx="18" cy="9.5" r="1.6"/><circle class="s" cx="7" cy="19" r="1.6"/><circle class="s" cx="17" cy="19" r="1.6"/></symbol>
+  <symbol id="i-crosshair" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="6.5"/><path d="M12 2.5v6M12 15.5v6M2.5 12h6M15.5 12h6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path class="f" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.8 6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.6 3.4M6.5 7.6C4 9.3 2.5 12 2.5 12S6 18.5 12 18.5c1.7 0 3.2-.5 4.5-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2M4 4l16 16"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect class="f" x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M9.3 10h.01M12.6 10h.01M15.9 10h.01M18 10h.01M8 14.2h8"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14.5 4.5 10 9 5.5"/><path d="M4.5 10h10a5 5 0 0 1 0 10H11"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14.5 19.5 10 15 5.5"/><path d="M19.5 10h-10a5 5 0 0 0 0 10H13"/></symbol>
+  <symbol id="i-skip" viewBox="0 0 24 24"><path class="f" d="M5 5.5v13l9-6.5z"/><path d="M18.5 5.5v13"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect class="f" x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><circle class="s" cx="7.5" cy="7.5" r="1.1"/><circle class="s" cx="7.5" cy="16.5" r="1.1"/></symbol>
+  <symbol id="i-ftp" viewBox="0 0 24 24"><path class="f" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9 13.5h6M13 11.2l2.3 2.3-2.3 2.3"/></symbol>
+  
+  <symbol id="i-brand" viewBox="0 0 32 32"><rect x="1" y="1" width="30" height="30" rx="9" fill="currentColor" fill-opacity=".14" stroke="none"/><path stroke-dasharray="3 2.6" stroke-width="1.8" d="M7.5 13c1.2-5 10.5-7 15-3.7 4.4 3.2 3 10.3-2 12.2-5.8 2.2-14.2-2-13-8.5z"/><g stroke="none" fill="currentColor"><circle cx="12.5" cy="13.5" r="2"/><circle cx="18.5" cy="11.8" r="2"/><circle cx="17" cy="17.6" r="2"/><circle cx="7" cy="24.5" r="1.5" fill-opacity=".55"/><circle cx="26" cy="25" r="1.5" fill-opacity=".55"/></g></symbol>
+  <symbol id="i-robot" viewBox="0 0 24 24"><rect class="f" x="4.5" y="8" width="15" height="11" rx="3"/><path d="M12 8V4.5M2.5 12.5v3M21.5 12.5v3M9.5 16h5"/><circle class="s" cx="12" cy="3.8" r="1.2"/><circle class="s" cx="9.2" cy="12.3" r="1.3"/><circle class="s" cx="14.8" cy="12.3" r="1.3"/></symbol>
+  
+  <symbol id="i-gem" viewBox="0 0 24 24"><path class="f" d="M6.5 4h10l4.5 5.5L11.5 21 2 9.5z"/><path d="M2 9.5h19M9.3 4 7.2 9.5l4.3 11.5 4.3-11.5L13.7 4M7.2 9.5 11.5 4l4.3 5.5"/><path d="M20 1.5v4M18 3.5h4"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path class="f" d="M11 3.5c.7 4.4 2.6 6.3 7 7-4.4.7-6.3 2.6-7 7-.7-4.4-2.6-6.3-7-7 4.4-.7 6.3-2.6 7-7z"/><path d="M19 15.5v5M16.5 18h5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect class="f" x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path class="f" d="M20.5 3.5 3.5 10.3l7 3.2 3.2 7z"/><path d="m10.5 13.5 10-10"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect class="f" x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle class="f" cx="12" cy="8.5" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle class="f" cx="9" cy="8.5" r="3.6"/><path d="M2.5 19.5a6.5 6.5 0 0 1 13 0M15.5 5.2a3.6 3.6 0 0 1 0 6.6M18 13.6a6.5 6.5 0 0 1 3.5 5.9"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path class="f" d="M5 4h7v16H5a1.5 1.5 0 0 1-1.5-1.5v-13A1.5 1.5 0 0 1 5 4z"/><path d="M12 4H5a1.5 1.5 0 0 0-1.5 1.5v13A1.5 1.5 0 0 0 5 20h7M10 12h10.5M17 8.5l3.5 3.5-3.5 3.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect class="f" x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle class="s" cx="12" cy="15.5" r="1.4"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path class="f" d="M12 3.5 19 6v5.5c0 4.4-3 7.8-7 9-4-1.2-7-4.6-7-9V6z"/><path d="m8.8 12 2.3 2.3 4.3-4.6"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle class="f" cx="17.5" cy="5.5" r="2.7"/><circle class="f" cx="6.5" cy="12" r="2.7"/><circle class="f" cx="17.5" cy="18.5" r="2.7"/><path d="m8.9 10.6 6.2-3.7M8.9 13.4l6.2 3.7"/></symbol>
+</svg>
+<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="gem-grad" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="var(--gem-1)"/><stop offset=".55" stop-color="var(--gem-2)"/><stop offset="1" stop-color="var(--gem-3)"/></linearGradient></defs></svg>
+<div id="app" style="display:contents"></div>
+<script>
+const shot = Q.get('shot') || 'img1';
+const ic = (n, c = '') => `<svg class="ico ${c}"><use href="#i-${n}"/></svg>`;
+const gem = `<svg class="gem-ico" viewBox="0 0 24 24"><path class="gem-body" d="M6.5 4h10l4.5 5.5L11.5 21 2 9.5z"/><path class="gem-line" d="M2 9.5h19M9.3 4 7.2 9.5l4.3 11.5 4.3-11.5L13.7 4"/></svg>`;
+const chk = '<svg class="ico"><use href="#i-check"/></svg>', xx = '<svg class="ico"><use href="#i-x"/></svg>';
+const kbd = k => `<kbd>${k}</kbd>`;
+
+/* ------------------------------------------------------------------ data */
+const B = [
+  { n: 'traffic-cams-2026', f: 'yolo', fl: 'YOLO', fs: 'detect', st: [['img', 1], ['lbl', 1], ['yaml', 1]], im: '12,480', lb: '12,412', cl: '9', sz: '3.2 GB',
+    tags: ['traffic', 'day', 's3'], src: ['cloud', 's3://acme-cv/traffic-2026/'], up: '2 h ago', ss: 2 },
+  { n: 'traffic-night-2025', f: 'yolo', fl: 'YOLO', fs: 'detect', st: [['img', 1], ['lbl', 1], ['yaml', 1]], im: '3,214', lb: '3,214', cl: '9', sz: '812 MB',
+    tags: ['traffic', 'night'], src: ['cloud', 's3://acme-cv/traffic-night/'], up: 'Oct 12', ss: 1 },
+  { n: 'drone-seg', f: 'yolo', fl: 'YOLO', fs: 'seg', st: [['img', 1], ['lbl', 1], ['yaml', 1]], im: '4,210', lb: '4,210', cl: '6', sz: '2.1 GB',
+    tags: ['aerial', 'traffic'], src: ['link', '/mnt/nas/drone/seg-v3'], up: 'yesterday', ss: 1 },
+  { n: 'raw-upload-oct27', f: 'img', fl: 'Images only', fs: '', st: [['img', 1], ['no labels', 0, 'na']], im: '1,936', lb: '—', cl: '—', sz: '840 MB',
+    tags: ['traffic', 'unsorted'], src: ['db', 'managed/raw-upload-oct27'], up: '09:14', ss: 0 },
+  { n: 'warehouse-pallets', f: 'coco', fl: 'COCO', fs: '', st: [['img', 1], ['json', 1]], im: '8,034', lb: '61,220', cl: '4', sz: '2.7 GB',
+    tags: ['warehouse', 'indoor'], src: ['db', 'managed/warehouse-pallets'], up: '3 d ago', ss: 3 },
+  { n: 'coco-val-subset', f: 'coco', fl: 'COCO', fs: '', st: [['img', 1], ['json', 1]], im: '5,000', lb: '36,781', cl: '80', sz: '788 MB',
+    tags: ['benchmark'], src: ['db', 'managed/coco-val-subset'], up: 'Sep 30', ss: 4 },
+  { n: 'ppe-helmets-voc', f: 'voc', fl: 'Pascal VOC', fs: '', st: [['jpg', 1], ['xml', 1], ['sets', 1]], im: '5,000', lb: '5,000', cl: '3', sz: '1.1 GB',
+    tags: ['ppe', 'safety'], src: ['link', '/data/ppe/VOC2026'], up: '1 w ago', ss: 1 },
+  { n: 'pose-gym', f: 'yolo', fl: 'YOLO', fs: 'pose', st: [['img', 1], ['lbl', 1], ['yaml', 1]], im: '2,890', lb: '2,890', cl: '1', sz: '960 MB',
+    tags: ['sports', 'people'], src: ['db', 'managed/pose-gym'], up: '2 w ago', ss: 0 },
+  { n: 'retail-shelf', f: 'yolo', fl: 'YOLO', fs: 'detect', st: [['img', 1], ['lbl', 1], ['yaml', 1]], im: '6,702', lb: '6,655', cl: '24', sz: '1.9 GB',
+    tags: ['retail', 'indoor'], src: ['link', '/mnt/nas/retail/shelf-v2'], up: '3 w ago', ss: 2 },
+  { n: 'leaf-disease', f: 'cls', fl: 'Classification', fs: '', st: [['dirs', 1], ['38 cls', 1]], im: '54,305', lb: '—', cl: '38', sz: '1.4 GB',
+    tags: ['agri', 'plants'], src: ['db', 'managed/leaf-disease'], up: 'Aug 21', ss: 1 },
+  { n: 'audio-embeds', f: 'emb', fl: 'Embeddings', fs: '', st: [['npy', 1], ['meta', 1]], im: '0', lb: '22,000', cl: '12', sz: '310 MB',
+    tags: ['audio'], src: ['cloud', 's3://acme-ml/emb/audio-v4/'], up: 'Jul 02', ss: 1, rows: true },
+  { n: 'misc-scraps', f: 'other', fl: 'Other', fs: '', st: [['layout', 0]], im: '412', lb: '37', cl: '?', sz: '95 MB',
+    tags: [], src: ['db', 'managed/misc-scraps'], up: 'Jun 18', ss: 0 },
+];
+const FMTC = { yolo: 'c-yolo', coco: 'c-coco', voc: 'c-voc', cls: 'c-cls', img: 'c-img', emb: 'c-emb', other: 'c-other' };
+const fmt = b => `<span class="fmt ${FMTC[b.f]}">${b.fl}${b.fs ? ` <span class="sub">${b.fs}</span>` : ''}</span>`;
+const strct = st => `<span class="chk">${st.map(([k, ok, na]) => na ? `<span class="na">${k}</span>` : `<span class="${ok ? 'ok' : 'bad'}">${ok ? chk : xx}${k}</span>`).join('')}</span>`;
+const SRCI = { cloud: 'cloud', link: 'folder', db: 'db' };
+const tagsH = (ts, hit) => `<span class="tags">${ts.map(t => `<span class="tg ${t === hit ? 'hit' : ''}">${t}</span>`).join('') || '<span class="zero">—</span>'}</span>`;
+
+/* ------------------------------------------------------------------ chrome */
+function header() {
+  return `<header class="app-header">
+    <div class="brand"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor"><use href="#i-brand"/></svg><h1>Dataset Visualizer</h1></div>
+    <nav class="nav"><a>${ic('layers')}Sessions <span class="n">14</span></a><a class="on">${ic('db')}Data <span class="n">12</span></a></nav>
+    <div class="hdr-right">
+      <span class="ai-pill"><span class="okdot"></span>${gem}<b>Assistant</b> connected</span>
+      <button class="ghost icon-btn">${ic('keyboard')}</button>
+      <button class="ghost icon-btn">${ic(document.documentElement.dataset.theme === 'light' ? 'moon' : 'sun')}</button>
+      <button class="ghost icon-btn">${ic('gear')}</button>
+      <button class="user-btn ghost"><span class="avatar av-c6" style="--av-size:28px">YK</span></button>
+    </div></header>`;
+}
+function kbar(mode, right) {
+  const k = [['↑↓', 'move'], ['→←', 'expand'], ['Space', 'select'], ['↵', 'open'], ['T', 'tag'], ['M', 'move'], ['S', 'send to'], ['⌘↵', 'confirm'], ['/', 'filter'], ['⌘K', 'ask']];
+  return `<footer class="kbar"><span class="mode">${mode}</span>${k.map(([a, b]) => `<span>${kbd(a)}${b}</span>`).join('')}<span class="r">${right}</span></footer>`;
+}
+function omni(inner, right, focus) {
+  return `<div class="omni-row"><div class="omni ${focus ? 'focus' : ''}">${ic('search')}${inner}<span class="sp"></span>
+    <span class="hint-r">↵ filter · ⇧↵ ask AI ${kbd('⌘K')}</span></div>${right}</div>`;
+}
+const tok = (k, v, cls = '') => `<span class="tok ${cls}"><span class="k">${k}:</span><span class="v">${v}</span><span class="x">${ic('x')}</span></span>`;
+
+/* ------------------------------------------------------------------ overview */
+function facets() {
+  const F = [['YOLO', 5, 'c-yolo'], ['COCO', 2, 'c-coco'], ['VOC', 1, 'c-voc'], ['Classif.', 1, 'c-cls'], ['Images only', 1, 'c-img'], ['Embeddings', 1, 'c-emb'], ['Other', 1, 'c-other']];
+  const T = [['traffic', 4, 1], ['indoor', 2], ['night', 1], ['day', 1], ['aerial', 1], ['s3', 1]];
+  return `<div class="facets">
+    <div class="fgroup"><span class="flabel">Format</span><span class="sbar">${F.map(([, n, c]) => `<i class="${c}" style="flex:${n}"></i>`).join('')}</span>
+      ${F.map(([l, n, c]) => `<span class="fchip ${c}"><span class="dot"></span>${l}<span class="n">${n}</span></span>`).join('')}</div>
+    <span class="vsep"></span>
+    <div class="fgroup"><span class="flabel">Tags</span>${T.map(([l, n, on]) => `<span class="fchip ${on ? 'on' : ''}">${l}<span class="n">${n}</span></span>`).join('')}<span class="fchip more">+11</span></div>
+    <span class="vsep"></span>
+    <div class="fgroup"><span class="flabel">Source</span><span class="fchip">${ic('db')}Managed<span class="n">6</span></span><span class="fchip">${ic('folder')}Local<span class="n">3</span></span><span class="fchip">${ic('cloud')}S3<span class="n">3</span></span></div>
+  </div>`;
+}
+function bucketRow(b, o = {}) {
+  const cls = [o.dim && 'dim', o.cur && 'cur', o.sel && 'sel', o.changed && 'changed'].filter(Boolean).join(' ');
+  const f = o.fmt || fmt(b), st = o.st || b.st;
+  return `<tr class="${cls}">
+    <td class="cb"><input type="checkbox" ${o.sel ? 'checked' : ''}></td>
+    <td><span class="bname">${ic('folder')}<b>${b.n}</b></span></td>
+    <td>${f}</td><td>${strct(st)}</td>
+    <td class="num">${b.rows ? `<span class="zero">${b.im}</span>` : b.im}</td><td class="num ${b.lb === '—' ? 'zero' : ''}">${o.lb || b.lb}</td>
+    <td class="num ${b.cl === '—' || b.cl === '?' ? 'zero' : ''}">${b.cl}</td><td class="num">${b.sz}</td>
+    <td>${tagsH(b.tags, o.hit)}</td>
+    <td><span class="src">${ic(SRCI[b.src[0]])}<span class="p">${b.src[1]}</span></span></td>
+    <td class="mutedt">${b.up}</td>
+    <td>${b.ss ? `<span class="sess">${ic('layers')}${b.ss}</span>` : '<span class="zero">—</span>'}</td>
+    <td class="rowact">${ic('chev-r')}</td></tr>`;
+}
+function bucketTable(rows) {
+  return `<table class="tbl"><colgroup><col style="width:36px"><col style="width:200px"><col style="width:142px"><col style="width:156px"><col style="width:78px"><col style="width:80px">
+    <col style="width:64px"><col style="width:78px"><col style="width:186px"><col><col style="width:88px"><col style="width:76px"><col style="width:34px"></colgroup>
+    <thead><tr><th style="padding-left:12px"><input type="checkbox"></th><th>Name</th><th>Format <span class="faint">auto</span></th><th>Structure</th>
+    <th class="r">Images</th><th class="r">Labels</th><th class="r">Classes</th><th class="r">Size</th><th>Tags</th><th>Source</th><th>Updated <span class="sort">↓</span></th><th>Sessions</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+function overview(o = {}) {
+  const hitIdx = [0, 1, 2, 3];
+  let rows;
+  if (o.filter) {
+    rows = `<tr class="grp"><td colspan="13">Matches <span class="mono">tag:traffic</span> · 4</td></tr>` +
+      hitIdx.map(i => bucketRow(B[i], { hit: 'traffic', cur: i === 0 })).join('') +
+      `<tr class="grp"><td colspan="13">Not matching · 8 <span style="text-transform:none;letter-spacing:0;font-weight:500"> — dimmed (press H to hide)</span></td></tr>` +
+      B.filter((_, i) => !hitIdx.includes(i)).map(b => bucketRow(b, { dim: true })).join('');
+  } else {
+    rows = B.map((b, i) => i === 0 ? bucketRow(b, {
+      changed: true, sel: true, cur: true, lb: '<span class="zero">0</span>',
+      fmt: `<span class="fmt c-other">Other</span><span class="fmt c-yolo was">YOLO</span>`, st: [['img', 1], ['lbl', 0], ['yaml', 1]]
+    }) : bucketRow(b, { sel: i === 1 })).join('');
+  }
+  const right = o.filter
+    ? `<span class="count"><b>4</b> of 12 buckets</span><button>${ic('folder')}Link source</button><button class="primary">${ic('upload')}Import</button><button>${gem}Assistant</button>`
+    : `<span class="count"><b>12</b> buckets</span><button>${ic('folder')}Link source</button><button class="primary">${ic('upload')}Import</button><button>${gem}Assistant</button>`;
+  const inner = o.filter ? `${tok('tag', 'traffic')}<span class="ph" style="margin-left:4px">Search or ask…</span>` : `<span class="ph">Search or ask…  e.g. <span class="mono">format:yolo size&gt;1GB</span> or “which buckets have no labels?”</span>`;
+  const selbar = o.filter ? '' : `<div class="tbar" style="height:42px"><span class="selinfo">${ic('check')} 2 selected · <span class="mono">4.0 GB</span></span>
+      <button class="primary">${ic('send')}Send to…</button><button>${ic('tag')}Tag</button><button>${ic('arrow-r')}Move</button><button>${ic('download')}Export</button><button class="ghost">${ic('trash')}Delete</button>
+      <span class="grow"></span><span class="hint">Sorted by updated · 12 buckets</span></div>`;
+  return header() + omni(inner, right, o.filter) + facets() + `<div class="work"><div class="mainp">${selbar}<div class="scroll auto">${bucketTable(rows)}</div>${consoleP(!o.filter)}
+    <div class="tfoot"><span><b>12</b> buckets</span><span><b>105,183</b> images</span><span><b>18.2 GB</b> total</span><span>3 sources: <b>6</b> managed · <b>3</b> local · <b>3</b> S3</span>
+    <span class="grow"></span><span>Format re-detected on every change · last scan <b>14:02</b></span></div></div></div>` +
+    kbar('TABLE', `<span>row <b>1</b>/12</span><span>disk <b>18.2 / 500 GB</b></span>`);
+}
+
+function consoleP(moved) {
+  const L = [
+    moved && ['14:06:33', 'you', '', `move <span class="m">traffic-cams-2026/</span>labels/ → <span class="m">misc-scraps/</span>labels/ <span class="m">(12,412 files)</span>  <span class="w">⚠ format YOLO detect → Other: labels/ missing</span>`, 'new'],
+    ['14:02:11', 'scanner', '', `rescan traffic-cams-2026 → <span class="ok">YOLO detect ✓</span> <span class="m">12,480 img · 12,412 lbl · data.yaml 9 names</span>`],
+    ['13:58:40', 'you', '', `upload → raw-upload-oct27/ <span class="m">1,936 files · 840 MB</span> → <span class="ok">Images only</span>`],
+    ['13:41:07', 'assistant', 'ai', `tag drone-seg +traffic <span class="m">· plan of 1 action, confirmed by YK</span>`],
+    ['12:20:15', 'sync', '', `s3://acme-cv/traffic-night/ <span class="m">→ 0 changes · 3,214 objects checked</span>`],
+    ['11:05:52', 'you', '', `send traffic-cams-2026/images/val → Visualize “traffic-v3” <span class="m">1,248 images</span>`],
+    ['10:47:30', 'assistant', 'ai', `search(format="yolo", missing="labels") <span class="m">→ retail-shelf: 47 images without labels</span>`],
+    ['09:14:03', 'import', '', `create raw-upload-oct27 <span class="m">(managed store)</span>`],
+    ['08:30:00', 'sync', '', `s3://acme-cv/traffic-2026/ <span class="m">→ +412 objects · 98 MB</span>`],
+    ['Oct 26 18:12', 'you', '', `rename ppe-helmets → ppe-helmets-voc`],
+    ['Oct 26 17:40', 'scanner', '', `rescan retail-shelf → <span class="ok">YOLO detect ✓</span> <span class="m">6,702 img · 6,655 lbl · 47 unlabeled</span>`],
+    ['Oct 26 16:05', 'assistant', 'ai', `move misc-scraps/*.mp4 → trash <span class="m">· plan of 2 actions, confirmed by YK · 14 files</span>`],
+  ].filter(Boolean);
+  return `<div class="console"><div class="con-h"><a class="on">${ic('text')}Activity</a><a>${ic('refresh')}Jobs <span class="n">1</span></a><a>${ic('alert')}Problems <span class="n w">2</span></a>
+    <span class="r">sync s3://acme-cv/traffic-2026/ <span class="bar"><i></i></span> 64% · 2,104 / 3,280 objects</span></div>
+    <div class="con-b">${L.map(([t, w, c, x, n]) => `<div class="ll ${n || ''}"><span class="t">${t}</span><span class="who ${c}">${w}</span><span class="what">${x}</span></div>`).join('')}</div></div>`;
+}
+
+/* ------------------------------------------------------------------ bucket */
+const NIGHT = new Set([3, 8, 10, 16, 24, 25, 29]);
+const fileName = i => `cam0${(i % 6) + 1}_${String(4100 + i * 173).padStart(6, '0')}.jpg`;
+const labelsOf = i => [5, 5, 5, 5, 5, 5, 4, 4, 4, 3, 5, 4, 2, 3, 5, 4, 2, 3, 2, 2, 4, 4, 2, 3, 3, 3, 3, 3, 2, 3][i];
+const IMG = i => `samples/img_${String(i).padStart(2, '0')}.jpg`;
+const SEL = new Set([2, 5, 6, 11]);
+const CUR = 1;
+
+function bucketToolbar(view, extra = '') {
+  return `<div class="tbar">
+    <span class="crumbs">${ic("db")}<a>traffic-cams-2026</a>${ic('chev-r')}<a class="p">images</a>${ic('chev-r')}<a class="cur p">train</a></span>
+    ${fmt(B[0])}
+    <span class="tsep"></span>
+    <button class="icon-btn" title="New folder">${ic('plus')}</button><button class="icon-btn" title="Upload">${ic('upload')}</button>
+    <button class="ghost icon-btn" title="Move (M)">${ic('arrow-r')}</button><button class="ghost icon-btn" title="Copy">${ic('layers')}</button><button class="ghost icon-btn" title="Rename (F2)">${ic('edit')}</button><button class="ghost icon-btn" title="Delete">${ic('trash')}</button>
+    <span class="grow"></span>${extra}
+    <span class="seg"><button class="${view === 'thumbs' ? 'on' : ''}">${ic('image')}Thumbnails</button><button class="${view === 'names' ? 'on' : ''}">${ic('text')}Names only</button></span>
+    <button class="primary">${ic('send')}Send to…</button>
+  </div>`;
+}
+function ttHead() {
+  return `<colgroup><col style="width:36px"><col><col style="width:84px"><col style="width:112px"><col style="width:74px"><col style="width:236px"><col style="width:104px"></colgroup>
+    <thead><tr><th style="padding-left:12px"><input type="checkbox"></th><th>Name <span class="sort">↑</span></th><th class="r">Size</th><th class="r">Items / dims</th><th class="r">Labels</th><th>Tags / status</th><th>Modified</th></tr></thead>`;
+}
+const autoTag = t => `<span class="tg auto">${ic('lock')}${t}</span>`;
+function folderRow(d, name, o) {
+  return `<tr class="${o.cls || ''}"><td class="cb"><input type="checkbox" ${o.sel ? 'checked' : ''}></td>
+    <td class="nm"><span class="tnode" style="--d:${d}">${ic(o.open ? 'chev-d' : 'chev-r', 'tw')}${ic('folder', 'fi')}<span class="fname dir">${name}</span></span></td>
+    <td class="num">${o.sz}</td><td class="num">${o.items}</td><td class="num">${o.lb || ''}</td><td>${o.tags || ''}</td><td class="mutedt">${o.mod}</td></tr>`;
+}
+function fileRow(d, name, o) {
+  return `<tr class="${o.cls || ''}"><td class="cb"><input type="checkbox" ${o.sel ? 'checked' : ''}></td>
+    <td class="nm"><span class="tnode" style="--d:${d}">${ic('chev-r', 'tw sp')}${ic(o.icon || 'text', 'fi file')}<span class="fname">${name}</span></span></td>
+    <td class="num">${o.sz}</td><td class="num">${o.items || ''}</td><td class="num">${o.lb ?? ''}</td><td>${o.tags || ''}</td><td class="mutedt">${o.mod}</td></tr>`;
+}
+function grid() {
+  let h = '';
+  for (let i = 0; i < 30; i++) {
+    const c = [SEL.has(i) && 'sel', i === CUR && 'cur'].filter(Boolean).join(' ');
+    const lc = i === 9 ? '<span class="lc warn">0</span>' : `<span class="lc">${labelsOf(i)}</span>`;
+    h += `<div class="th ${c}"><img src="${IMG(i)}"><input type="checkbox">${lc}<span class="nm">${fileName(i)}</span></div>`;
+  }
+  h += `<div class="th more"><div><b>+9,954</b>scroll to load</div></div>`;
+  return `<div class="ghead"><span><b>9,984</b> images in <span class="mono">images/train/</span></span><span>showing 1–30 · sorted by name</span>
+    <span class="sz">${ic('image')}<input type="range"></span></div><div class="tgrid">${h}</div>`;
+}
+const CLS = ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'person', 'traffic_light', 'van', 'sign'];
+const CCOL = ['var(--err-miss)', 'var(--err-tp)', 'var(--err-loc)', 'var(--accent)', 'var(--err-cls)', 'var(--err-fp)', 'var(--gem-1)', 'var(--err-fp)', 'var(--gem-3)'];
+const BOX = [[0, 25, 229, 80, 300], [0, 148, 280, 216, 350], [7, 292, 251, 413, 330], [0, 52, 221, 149, 263], [1, 32, 188, 161, 237]];
+function preview() {
+  const W = 480, H = 360;
+  const rects = BOX.map(([c, x1, y1, x2, y2], k) => {
+    const lw = CLS[c].length * 6.2 + 8;
+    return `<rect class="b" x="${x1}" y="${y1}" width="${x2 - x1}" height="${y2 - y1}" stroke="${CCOL[c]}" ${k === 2 ? 'stroke-width="3"' : ''}/>
+      <rect class="tb" x="${x1}" y="${y1 - 14}" width="${lw}" height="14" fill="${CCOL[c]}"/><text x="${x1 + 4}" y="${y1 - 3.5}">${CLS[c]}</text>`;
+  }).join('');
+  const lines = BOX.map(([c, x1, y1, x2, y2], k) => {
+    const f = v => v.toFixed(4);
+    return `<div class="${k === 2 ? 'on' : ''}"><span class="ln">${k + 1}</span><span><span class="cid" style="color:${CCOL[c]}">${c}</span> ${f((x1 + x2) / 2 / W)} ${f((y1 + y2) / 2 / H)} ${f((x2 - x1) / W)} ${f((y2 - y1) / H)}</span></div>`;
+  }).join('');
+  return `<aside class="sidep">
+    <div class="pv-head">${ic('image')}<span class="t">${fileName(CUR)}</span><span class="pos">2 / 9,984</span>
+      <button class="ghost">${ic('chev-l')}</button><button class="ghost">${ic('chev-r')}</button><button class="ghost">${ic('x')}</button></div>
+    <div class="pv-body">
+      <div class="stage"><img src="${IMG(CUR)}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${rects}</svg></div>
+      <div class="legend"><span class="fchip"><span class="dot" style="background:var(--err-miss)"></span>car<span class="n">3</span></span>
+        <span class="fchip"><span class="dot" style="background:var(--err-fp)"></span>van<span class="n">1</span></span>
+        <span class="fchip"><span class="dot" style="background:var(--err-tp)"></span>truck<span class="n">1</span></span></div>
+      <dl class="meta"><dt>Dimensions</dt><dd>1280 × 960 · JPEG</dd><dt>Size</dt><dd>212.4 KB</dd><dt>Captured</dt><dd>2026-04-12 13:41:07</dd>
+        <dt>Tags</dt><dd style="font-family:var(--font)">${autoTag('split:train')} <span class="tg">day</span> <span class="tg">cam-north</span></dd></dl>
+      <div class="code"><div class="ch">${ic('text')}labels/train/${fileName(CUR).replace('.jpg', '.txt')}<span class="r">YOLO · cls cx cy w h</span></div><pre>${lines}</pre></div>
+      <div class="usedin"><span class="lbl">Used in sessions</span>
+        <div class="u">${ic('scatter')}<b>traffic-v3</b><span class="kind">Visualize</span><span class="r">outlier score 0.12</span></div>
+        <div class="u">${ic('edit')}<b>night-fix-oct</b><span class="kind lb">Label</span><span class="r">reviewed by AL · Oct 20</span></div></div>
+      <div class="pv-actions"><button>${ic('edit')}Open in Label</button><button>${ic('scatter')}Visualize</button><span class="grow"></span><button class="ghost">${ic('download')}</button></div>
+    </div></aside>`;
+}
+function bucket(view, o = {}) {
+  let body;
+  const imagesRow = folderRow(0, 'images', { open: true, sz: '3.0 GB', items: '12,480', lb: '12,412', tags: autoTag('format:yolo') + ' ' + autoTag('images'), mod: '2 h ago' });
+  const trainRow = folderRow(1, 'train', { open: true, sz: '2.4 GB', items: '9,984', lb: '9,940', cls: view === 'thumbs' ? 'cur' : (o.tagpop ? 'cur' : ''),
+    tags: autoTag('split:train') + ' <span class="tg">day</span> <span class="tg">cam-north</span>', mod: '2 h ago' });
+  const tail = `${folderRow(1, 'val', { sz: '310 MB', items: '1,248', lb: '1,236', tags: autoTag('split:val') + ' <span class="tg">day</span>', mod: '2 h ago' })}
+    ${folderRow(1, 'test', { sz: '298 MB', items: '1,248', lb: '1,236', tags: autoTag('split:test'), mod: '2 h ago' })}
+    ${folderRow(0, 'labels', { sz: '4.1 MB', items: '12,412', lb: '', tags: autoTag('yolo-txt'), mod: '2 h ago' })}
+    ${fileRow(0, 'data.yaml', { sz: '412 B', items: '9 names', lb: '', tags: autoTag('config'), mod: 'Apr 12', icon: 'gear' })}
+    ${fileRow(0, 'classes.txt', { sz: '64 B', items: '9 lines', tags: autoTag('names'), mod: 'Apr 12', icon: 'text' })}
+    ${fileRow(0, 'README.md', { sz: '2.1 KB', mod: 'Apr 12', icon: 'text' })}`;
+  if (view === 'thumbs') {
+    body = imagesRow + trainRow + `<tr class="gridrow"><td colspan="7">${grid()}</td></tr>` + tail;
+  } else {
+    let files = '';
+    const N = o.ai ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+    const ST = i => i === 9 ? '<span class="st warn"><i></i>no label file</span>' : i === 13 ? '<span class="st bad"><i></i>class id 11 out of range</span>' : i === 12 ? '<span class="st none"><i></i>empty .txt (background)</span>' : '<span class="st ok"><i></i>labeled</span>';
+    N.forEach(i => {
+      const night = o.ai && NIGHT.has(i);
+      const sel = o.ai ? false : SEL.has(i);
+      files += fileRow(2, fileName(i), { sz: (180 + (i * 37) % 90) + '.' + (i % 10) + ' KB', items: '1280×960', lb: i === 9 ? '<span class="zero">—</span>' : i === 12 ? '0' : labelsOf(i),
+        tags: night ? '<span class="tg" style="background:var(--highlight-soft);color:var(--text)">AI match · night</span>' : ST(i),
+        mod: 'Apr 12 ' + String(8 + (i % 11)).padStart(2, '0') + ':' + String((i * 7) % 60).padStart(2, '0'), icon: 'image',
+        cls: [night && 'night', sel && 'sel', !o.ai && !o.tagpop && i === CUR && 'cur'].filter(Boolean).join(' '), sel });
+    });
+    files += `<tr class="virt"><td class="cb"></td><td colspan="6" style="padding-left:84px">… ${o.ai ? '9,967' : '9,969'} more files — virtualised · type to filter, or <span class="mono">/</span> to jump</td></tr>`;
+    body = imagesRow + trainRow + files + tail;
+  }
+  const extra = o.ai ? `<span class="tok" style="height:26px"><span class="k">${ic('sparkle')}</span><span class="v">38 AI matches</span><span class="x">${ic('x')}</span></span>`
+    : view === 'thumbs' || !o.ai ? `<span class="selinfo">${ic('check')} 4 selected · <span class="mono">812 KB</span></span>` : '';
+  const pop = o.tagpop ? tagPopover() : '';
+  const side = o.ai ? aiPane() : preview();
+  const inner = o.ai
+    ? `${tok('in', 'traffic-cams-2026', 'scope')}<span class="typed" style="margin-left:4px">move all night images into a new folder night/ and tag it</span><span class="tok ai" style="margin-left:8px;height:22px"><span class="k">${gem}</span><span class="v" style="padding-left:2px">sent to Assistant</span></span>`
+    : `${tok('in', 'traffic-cams-2026/images/train', 'scope')}${tok('ext', 'jpg')}<span class="ph" style="margin-left:4px">Filter files or ask…</span>`;
+  return header() + omni(inner, `<button>${gem}Assistant</button>`) +
+    `<div class="work"><div class="mainp">${bucketToolbar(view, extra)}<div class="scroll"><table class="tbl tt">${ttHead()}<tbody>${body}</tbody></table>${pop}</div></div>${side}</div>` +
+    kbar(view === 'thumbs' ? 'GRID' : 'TREE', `<span>sel <b>${o.ai ? 0 : 4}</b></span><span>focus <b>${o.tagpop ? 'images/train/' : fileName(CUR)}</b></span>`);
+}
+function tagPopover() {
+  return `<div class="pop" style="left:792px;top:94px">
+    <div class="pop-h">${ic('tag')}Tags <span class="p">traffic-cams-2026/images/train/</span></div>
+    <div class="pop-sec"><div class="lbl">On this folder <span>· apply to 9,984 files</span></div><div class="tgwrap">
+      ${autoTag('format:yolo')}${autoTag('split:train')}<span class="tg">day ${ic('x', 'x')}</span><span class="tg">cam-north ${ic('x', 'x')}</span></div></div>
+    <div class="tin">${ic('plus')}<span class="typed" style="font-size:13px">hi</span><span class="caret"></span></div>
+    <ul class="sugg">
+      <li class="on">${ic('tag')}<b><u>hi</u>ghway</b><span class="r">3 folders · 2 buckets</span></li>
+      <li>${ic('tag')}<b><u>hi</u>gh-density</b><span class="r">1 folder</span></li>
+      <li>${ic('sparkle')}<b>night</b><span class="r">suggested · 38 dark frames</span></li>
+      <li>${ic('plus')}<b>Create “hi”</b><span class="r">new tag</span></li></ul>
+    <div class="pop-note">${ic('lock')}<span><span class="mono">format:yolo</span> and <span class="mono">split:train</span> are auto tags from format detection. They can't be removed here; they change when the folder structure changes.</span></div>
+    <div class="pop-f"><span>${kbd('↵')} add</span><span>${kbd('⌫')} remove last</span><span>${kbd('Tab')} next folder</span><span>${kbd('Esc')} close</span></div></div>`;
+}
+
+/* ------------------------------------------------------------------ AI pane */
+function aiPane() {
+  return `<aside class="sidep">
+    <div class="ai-h">${gem}<h3>Assistant</h3><span class="model"><span class="okdot"></span><span class="mono">claude-sonnet</span> · your key</span>
+      <button class="ghost">${ic('refresh')}</button><button class="ghost">${ic('x')}</button></div>
+    <div class="ai-log">
+      <div class="msg-u">clean up the dataset</div>
+      <div class="msg-a">
+        <div class="tools"><div class="tcall">${chk}<span class="fn">scan</span><span class="arg">(path="/", checks=["dupes","orphans","ids"])</span><span class="res">→ <b>4 kinds</b></span></div></div>
+        <p>“Clean up” could mean several things. Which one?</p>
+        <div class="qchips"><span class="qc">Duplicate images <span class="n">212</span></span><span class="qc">Images without labels <span class="n">68</span></span>
+          <span class="qc">Empty label files <span class="n">14</span></span><span class="qc">Class ids out of range <span class="n">3</span></span><span class="qc">${ic('edit')}Other…</span></div>
+      </div>
+      <div class="msg-u">convert this to a video dataset</div>
+      <div class="msg-a"><div class="cant">${ic('alert')}<div><p><b>I can't do that.</b> Data Center can't encode video, and these frames come from 6 cameras with no shared timeline.</p>
+        <p>Instead I can group them by camera into <span class="mono">cam01/ … cam06/</span>, in capture order.</p>
+        <div class="qchips" style="margin-top:6px"><span class="qc pri">${ic('folder')}Group by camera</span><span class="qc">No thanks</span></div></div></div></div>
+      <div class="sep-t">now</div>
+      <div class="msg-u">move all night images into a new folder night/ and tag it</div>
+      <div class="msg-a">
+        <div class="tools">
+          <div class="tcall">${chk}<span class="fn">search</span><span class="arg">(path="images/", query="night")</span><span class="res">→ <b>38 matches</b></span></div>
+          <div class="tcall">${chk}<span class="fn">list</span><span class="arg">(path="labels/", match=@matches)</span><span class="res">→ 38 .txt</span></div>
+          <div class="tcall ro-l">${ic('eye')}2 read-only calls ran automatically</div>
+        </div>
+        <p>Found <b>38 night frames</b> (31 train, 7 val), highlighted at left. I'll move their labels too, so YOLO stays valid:</p>
+        <div class="plan"><div class="plan-h">${ic('edit')}Plan · needs your confirm<span class="r">click a step to edit</span></div>
+          <div class="prow"><input type="checkbox" checked><div class="call"><span class="fn">mkdir</span>(["images/night/", "labels/night/"])</div>${ic('edit', 'ed')}</div>
+          <div class="prow"><input type="checkbox" checked><div class="call"><span class="fn">move</span>(@matches, to="*/night/")<span class="eff">76 files · 9.1 MB</span></div>${ic('edit', 'ed')}</div>
+          <div class="prow"><input type="checkbox" checked><div class="call"><span class="fn">tag</span>("images/night/", +["night", "low-light"])</div>${ic('edit', 'ed')}</div>
+          <div class="prow off"><input type="checkbox"><div class="call"><span class="fn">yaml.add_split</span>("night")</div>${ic('edit', 'ed')}</div>
+          <div class="plan-f"><button class="primary">Run 3 actions ${kbd('⌘↵')}</button><button class="ghost">Cancel</button><span class="hint">undo 24 h</span></div></div>
+      </div>
+    </div>
+    <div class="ai-in"><div class="ai-box"><span class="ph">Ask, or describe a change…</span><button class="ghost">${ic('mic')}</button><button class="primary">${ic('send')}</button></div>
+      <div class="hint"><span>${ic('folder')}in traffic-cams-2026</span><span>${ic('eye')}read-only runs auto</span><span>${ic('lock')}changes need confirm</span></div></div>
+  </aside>`;
+}
+
+/* ------------------------------------------------------------------ send-to modal + toast */
+function sendModal() {
+  return `<div class="scrim"><div class="dlg">
+    <div class="dlg-h">${ic('send')}<h3>Send to session</h3><button class="ghost">${ic('x')}</button></div>
+    <div class="dlg-b">
+      <div><div class="flbl">Open in</div><div class="opts">
+        <div class="opt on"><span class="radio on"></span><div><b>Visualize</b><span>Embed, cluster and browse; find outliers and near-duplicates</span></div>${ic('scatter')}</div>
+        <div class="opt"><span class="radio"></span><div><b>Label</b><span>Draw and fix boxes, review with your team</span></div>${ic('edit')}</div></div></div>
+      <div><div class="flbl">Destination</div><div class="dest"><span class="seg"><button class="on">New session</button><button>Add to existing</button></span></div></div>
+      <div class="frow"><div><div class="flbl">Session name</div><div class="inp"><span class="mono">traffic-day-night-review</span><span class="caret"></span></div></div>
+        <div><div class="flbl">Task type <span class="r">from format</span></div><div class="inp sel">Detection (boxes)</div></div></div>
+      <div><div class="flbl">Selected data <span class="r">2 buckets</span></div><div class="sumtbl">
+        <div class="sr">${ic('folder')}<span class="p"><b>traffic-cams-2026</b> / images/</span><span class="r">12,480 img · 0 lbl</span><span class="r">3.2 GB</span>${ic('x')}</div>
+        <div class="sr">${ic('folder')}<span class="p"><b>traffic-night-2025</b> / images/, labels/</span><span class="r">3,214 img · 3,214 lbl</span><span class="r">812 MB</span>${ic('x')}</div>
+        <div class="sr">${ic('plus')}<span class="p" style="font-family:var(--font);color:var(--accent-text)">Add folders, or import new data…</span><span></span><span></span><span></span></div>
+        <div class="sr tot"><span></span><span class="p" style="font-family:var(--font)">Total</span><span class="r">15,694 images</span><span class="r">4.0 GB</span></div></div></div>
+      <div class="callout">${ic('alert')}<div><b>traffic-cams-2026 is now “Other”</b> (labels/ missing). Its images will be sent without boxes, so the session's class stats will only cover traffic-night-2025.
+        <div><button>${ic('undo')}Undo the move</button> <button class="ghost">Send images only</button></div></div></div>
+    </div>
+    <div class="dlg-f"><button class="ghost">${ic('download')}Import new data…</button><span class="sp"></span><button>Cancel</button><button class="primary">${ic('play')}Create session ${kbd('⌘↵')}</button></div>
+  </div></div>`;
+}
+function toast() {
+  return `<div class="toast">${ic('alert')}<div class="tx"><b>Format changed: YOLO detect → Other</b> <span class="mutedt">(labels/ missing)</span><span class="mutedt" style="float:none"></span>
+    <div class="s">You moved <span class="mono">labels/</span> → <span class="mono">misc-scraps/labels/</span> (12,412 files). Auto tag <span class="mono">format:yolo</span> was replaced by <span class="mono">format:other</span>.</div></div>
+    <div class="acts"><button>${ic('undo')}Undo ${kbd('⌘Z')}</button><button class="ghost">Details</button></div></div>`;
+}
+
+/* ------------------------------------------------------------------ route */
+const app = document.getElementById('app');
+const R = {
+  img1: () => overview({ filter: true }),
+  img2: () => bucket('thumbs'),
+  img3: () => bucket('names', { tagpop: true }),
+  img4: () => bucket('names', { ai: true }),
+  img5: () => overview({ filter: false }) + toast() + sendModal(),
+};
+app.innerHTML = (R[shot] || R.img1)();
+</script>
+</body>
+</html>
