@@ -1,0 +1,15 @@
+# design1 "Explorer"
+
+**Concept.** A classic three-pane file manager. The left pane is a tree of buckets and folders, with a format dot on each bucket and a small icon for its source (Managed, Local link or S3 link), then tag filters and source/storage at the bottom. The centre pane has a toolbar (breadcrumb, Thumbnails/Names toggle, sort, tag filter, New folder, Upload, Send to…) above a grid or list. The right pane shows details for the current selection. The AI assistant is a drawer docked at the bottom, under the centre and right panes. When collapsed it is a one-line prompt bar.
+
+**Shots** (1600×1000; source: `_src/design1.html?shot=imgN[&theme=light]`)
+- img1: "All buckets" view. Format filter chips and 9 bucket cards, each with a thumbnail mosaic, format badge, counts, tags, source and a warning line. The details panel for traffic-cams-2026 shows detection confidence (98%), the checks that passed, tags with locked auto tags, a train/val/test split, the sessions using this bucket, and Send to Visualize/Label.
+- img2: images/train as a thumbnail grid. 4 images are selected, the bulk-action bar is showing, and the folder tag strip is visible. The details panel shows the selection: preview stack, size and boxes, a pairing check, classes, Move/Copy/Tag/Rename/Delete, and Visualize 4 / Label 4.
+- img3: the same folder as a Names-only list (name, size, dims, label status, modified). The tag editor popover is open, with user chips, auto tags `format:yolo` and `split:train` marked "auto" with a lock, typeahead suggestions, content-based suggestions, and Save/Cancel.
+- img4: the AI drawer is expanded. It shows three read-only tool calls collapsed into one line each, highlighted night images in the grid, and a plan card (checklist, preview, "format stays YOLO detect", Confirm/Cancel/Edit). The second request gets a clarifying question with count chips, and the third gets "can't do that" with a reason and an alternative. A side column lists the scope and which tools run automatically and which need Confirm.
+- img5: labels/ has been moved out. The tree, details panel and a banner all show "Other" with failed checks. The toast reads "Format changed: YOLO detect → Other (labels/ missing)" with Undo. The Send to session modal is open (Visualize/Label, new or existing session, name, task type, a warning that no labels will be imported, the selected folders, Import new data).
+- img6 / img7: img1 and img2 in the light theme.
+
+**Strengths.** The layout is familiar, so there is nothing new to learn. It is dense and suits large monitors. Format health is visible everywhere: tree dots, badges, the checks list and auto tags. Read-only tool calls are kept visually separate from mutating ones, which go in a plan card. Undo is a single step.
+
+**Weaknesses.** Three panes plus the drawer get crowded below about 1400px. When the drawer is expanded, the file view shrinks to one row, so the AI and the files compete for height (a side-docked assistant would avoid this). The All-buckets cards repeat information that is already in the tree. The tag filter is a dropdown, which is less discoverable than an always-visible chip bar.
