@@ -10,6 +10,7 @@ someone else's session still comes from sharing (auth/access.py). Admins have ev
     model.add        register Hugging Face / API / serving models
     model.upload     upload or register model FILES and folders: loading them runs code on the server
     llm.use          the LLM features (chat, assist, pre-label)
+    data.manage      the Data Center: create buckets, change their files (ops, upload, undo), tag, send to sessions
 
 Reads are cached for a few seconds in-process like auth/settings.py; every write clears the cache.
 """
@@ -32,10 +33,12 @@ PERMS = {
     'model.add': 'Add Hugging Face / API models',
     'model.upload': 'Upload model files (runs their code on the server)',
     'llm.use': 'Use the LLM assistant',
+    'data.manage': 'Manage Data Center buckets (create, change files, tag, send)',
 }
 DENIED = {
     'dataset.create': 'add datasets', 'label.create': 'create labeling projects', 'connection.add': 'add connections',
     'model.add': 'add models', 'model.upload': 'upload model files', 'llm.use': 'use the LLM assistant',
+    'data.manage': 'manage Data Center buckets',
 }
 CACHE_TTL = 5.0
 

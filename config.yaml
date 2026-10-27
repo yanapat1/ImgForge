@@ -25,6 +25,8 @@ sessions:
 storage:
   allowed_roots: ['.']           # folders users may read datasets / models from (and browse in the page);
                                  #  relative = to the project root
+  data_root: data                # Data Center managed buckets (imports land here, always allowed; its .trash/ holds
+                                 #  deleted files until undone or a week old); relative = to the project root
 
 embeddings:                      # embeddings sessions (a folder of .npy vectors + meta.csv)
   allow_url_previews: false      # image / audio / video columns holding http(s) URLs: off, every viewer's browser would

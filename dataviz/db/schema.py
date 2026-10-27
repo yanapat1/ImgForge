@@ -286,6 +286,57 @@ curation_undo = Table(
     Index('ix_curation_undo_session', 'session_id', 'at'),
     schema='app')
 
+# ---- the Data Center (datacenter/, migration 0006): buckets of data, their tags, detections, undo log
+dc_buckets = Table(
+    'dc_buckets', metadata,
+    Column('id', String(32), primary_key=True),
+    _user_fk('owner_id'),                                # private to the owner; admins see every bucket
+    Column('name', String(200), nullable=False),
+    Column('kind', String(8), nullable=False),           # managed | local | s3 (read-only)
+    Column('root', Text, nullable=False),                # absolute folder, or s3://bucket/prefix
+    Column('connection_id', String(36), ForeignKey('app.connections.id', ondelete='SET NULL')),
+    Column('s3_bucket', String(255)),
+    Column('prefix', Text, nullable=False, server_default=text("''")),
+    _now('created_at'), _now('updated_at'),
+    CheckConstraint("kind IN ('managed', 'local', 's3')", name='kind'),
+    Index('ux_dc_buckets_owner_name', 'owner_id', func.lower(text('name')), unique=True),
+    schema='app')
+
+
+def _bucket_fk():
+    return Column('bucket_id', String(32), ForeignKey('app.dc_buckets.id', ondelete='CASCADE'), nullable=False)
+
+
+dc_tags = Table(                                         # path '' = the bucket; auto = format:<key> from detection
+    'dc_tags', metadata,
+    _bucket_fk(),
+    Column('path', Text, nullable=False, server_default=text("''")),
+    Column('tag', String(100), nullable=False),
+    Column('auto', Boolean, nullable=False, server_default=text('false')),
+    Index('ux_dc_tags_bucket_path_tag', 'bucket_id', 'path', func.lower(text('tag')), unique=True),
+    Index('ix_dc_tags_tag', func.lower(text('tag'))),
+    schema='app')
+
+dc_format_cache = Table(                                 # last detection of a folder, valid while its fingerprint is
+    'dc_format_cache', metadata,
+    _bucket_fk(),
+    Column('path', Text, nullable=False),
+    Column('fingerprint', String(64), nullable=False),
+    Column('result', JSONB, nullable=False),
+    _now('updated_at'),
+    PrimaryKeyConstraint('bucket_id', 'path'),
+    schema='app')
+
+dc_undo = Table(                                         # one ops batch: the steps that reverse it
+    'dc_undo', metadata,
+    Column('id', String(32), primary_key=True),
+    _bucket_fk(),
+    _user_fk(ondelete='SET NULL', nullable=True),
+    _now('created_at'),
+    Column('manifest', JSONB, nullable=False),
+    Index('ix_dc_undo_bucket', 'bucket_id', 'created_at'),
+    schema='app')
+
 jobs_log = Table(
     'jobs_log', metadata,
     Column('id', String(40), primary_key=True),
