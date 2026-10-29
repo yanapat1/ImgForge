@@ -69,6 +69,9 @@ class Ctx:
     seen: set = field(default_factory=set)      # names the tools returned this turn (the web guard blocks them)
     web_level: int = 0
     run_id: str = ''
+    web_cfg: dict = None            # store.clean_web of the user's settings (the route sets it)
+    web_blocked: int = 0            # web queries the guard blocked this turn (3 = no more web this turn)
+    events: list = field(default_factory=list)  # events a tool adds for the page ('search'), sent after its tool_end
 
 
 @dataclass
@@ -183,10 +186,25 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
         p['temperature'] = min(float(p.get('temperature') or 0.1), 0.1)
     return Run(run_id=run_id, user=user, role=role, provider=p, system=system, msgs=list(fitted), tools=tset, ctx=ctx,
                mode=opts['mode'], effort=opts['effort'], think=opts['think'], web=opts['web'],
-               native_web=opts['web'] >= 3, profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est)
+               native_web=_native_ok(p, opts['web']), profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est)
 
 
 # ---------------------------------------------------------------- helpers
+def _native_ok(provider, web):
+    """The provider's own web search only at level Full (its queries cannot be checked before they go out), and
+    only when the provider supports it alongside function tools (providers.native_web_ok, when present)."""
+    if web < 3:
+        return False
+    ok = getattr(providers, 'native_web_ok', None)
+    return bool(ok(provider)) if callable(ok) else True
+
+
+def _tool_events(ctx):
+    """The events tools queued on the context ('search' ...), emptied."""
+    evs, ctx.events[:] = list(ctx.events), []
+    return evs
+
+
 def _dump(result):
     s = json.dumps(result, ensure_ascii=False, default=str, separators=(',', ':'))
     return s if len(s) <= MAX_RESULT else s[:MAX_RESULT] + '… (cut: narrow the request)'
@@ -322,6 +340,8 @@ def events(run):
     """The events of one agent turn (dicts; the route writes one JSON line each)."""
     register_run(run)
     p = run.provider
+    if (run.ctx.web_cfg or {}).get('ask_before'):
+        run.native_web = False                  # every query is confirmed: the provider's own cannot be
     yield {'type': 'meta', 'run_id': run.run_id, 'role': run.role.name, 'model': p.get('model'),
            'provider': p.get('name'), 'kind': p.get('kind'), 'mode': run.mode, 'effort': run.effort,
            'think': run.think, 'web': run.web, 'profile': run.profile, 'max_steps': run.max_steps, 'in_est': run.est,
@@ -456,19 +476,28 @@ def events(run):
                 pending.append((c, t, clean, summary, t.risk_of(clean)))
                 results.append(None)                        # filled when it runs / is decided
                 continue
+            if t.confirm_if:                    # a read the user confirms first (web search: Ask before each)
+                clean, err = tools.validate(t, args)
+                if not err and t.confirm_if(run.ctx, clean):
+                    summary = t.preview(None, clean) if t.preview else f'{name} {json.dumps(clean, ensure_ascii=False)}'
+                    pending.append((c, t, clean, summary, 'web'))
+                    results.append(None)
+                    continue
             # read: run at once
             yield {'type': 'tool_start', 'id': c['id'], 'name': name, 'args': args, 'risk': 'read'}
             t1 = time.perf_counter()
             try:
                 out, summary = tools.run(run.ctx, name, args, run.tools)
                 ok, content = True, _dump(out)
-                _remember_names(run.ctx, out)
+                if t.domain != 'web':           # web results are public text, not internal names
+                    _remember_names(run.ctx, out)
             except Exception as e:  # noqa: BLE001 - reported to the model, not raised
                 ok, summary, out = False, '→ ' + _error_text(e), None
                 content = _error_text(e)
             ms = round((time.perf_counter() - t1) * 1000)
             yield {'type': 'tool_end', 'id': c['id'], 'name': name, 'ok': ok, 'summary': summary, 'ms': ms,
                    'preview': _preview(out) if ok else content}
+            yield from _tool_events(run.ctx)
             if name == 'use_skill' and ok:
                 yield {'type': 'skill', 'name': args.get('name')}
             results.append({**res, 'content': content + nudge, **({} if ok else {'is_error': True})})
@@ -511,11 +540,20 @@ def events(run):
                 yield done(step)
                 return
             res_list = []
+            edits = decision.get('edits') or {}
             for a, pc in zip(actions, need):
+                if a['id'] in decision['approve'] and a['id'] in edits:
+                    try:                            # the user edited the arguments on the card
+                        pc = _edited(run, pc, edits[a['id']])
+                    except Exception as e:  # noqa: BLE001 - reported to the model, not raised
+                        outcome[pc[0]['id']] = {'ok': False, 'content': 'the edited arguments were refused: '
+                                                + _error_text(e)}
+                        res_list.append({'id': a['id'], 'ok': False, 'summary': _error_text(e)})
+                        continue
                 if a['id'] in decision['approve']:
                     o = yield from _run_change(run, pc[0], pc[1], pc[2], pc[3], pc[4])
                     outcome[pc[0]['id']] = o
-                    changed = True
+                    changed |= pc[4] != 'web'
                     res_list.append({'id': a['id'], 'ok': o['ok'], 'summary': o['summary'], **o['extras']})
                 else:
                     outcome[pc[0]['id']] = {'ok': False, 'content': 'the user declined this action: do not do it '
@@ -537,6 +575,19 @@ def events(run):
                                       'request' + (' or a higher effort' if run.max_steps < MAX_STEPS else '')}
 
 
+def _edited(run, pc, edit):
+    """A pending call with the arguments the user edited on the card, checked again (ToolError when invalid)."""
+    c, t, clean, summary, risk = pc
+    args = {**clean, **edit}
+    if t.risk in ('change', 'danger'):
+        clean, summary = tools.prepare(run.ctx, t.name, args, run.tools)
+        return c, t, clean, summary, max(risk, t.risk_of(clean), key=('change', 'danger').index)
+    clean, err = tools.validate(t, args)
+    if err:
+        raise tools.ToolError(err)
+    return c, t, clean, t.preview(None, clean) if t.preview else summary, risk
+
+
 def _run_change(run, c, t, clean, summary, risk):
     """Runs one approved / auto change -> {ok, content, summary, extras}; yields its tool events."""
     yield {'type': 'tool_start', 'id': c['id'], 'name': t.name, 'args': clean, 'risk': risk, 'summary': summary}
@@ -545,9 +596,11 @@ def _run_change(run, c, t, clean, summary, risk):
         out, done_summary = tools.run(run.ctx, t.name, clean, run.tools)
         errs = out.get('errors') if isinstance(out, dict) else None
         ok, content, ex = not errs, _dump(out), _extras(out)
-        _remember_names(run.ctx, out)
+        if t.domain != 'web':
+            _remember_names(run.ctx, out)
     except Exception as e:  # noqa: BLE001 - one failed action does not stop the others
         ok, content, done_summary, ex = False, _error_text(e), '→ ' + _error_text(e), {}
     yield {'type': 'tool_end', 'id': c['id'], 'name': t.name, 'ok': ok, 'summary': done_summary,
            'ms': round((time.perf_counter() - t1) * 1000), 'risk': risk, **ex}
+    yield from _tool_events(run.ctx)
     return {'ok': ok, 'content': content, 'summary': done_summary, 'extras': ex}

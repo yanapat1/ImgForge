@@ -15,6 +15,9 @@ turn enders and the planner checklist, 'plugin' a user's HTTP tool) and a `risk`
     ui       a visualizer page action (switch the projection ...): an Apply button, or applied in mode auto
     control  answered by the user or the engine (ask_user, cannot_do, todo, submit_plan)
 
+A read tool may also have `confirm_if(ctx, clean)`: when it says True the call is shown on a confirm card (risk
+'web') like a change, in every mode, and the user may edit its arguments before it runs.
+
 The two agents never share data tools: the visual agent's domains do not include 'data', so a Data Center call
 from it is an unknown tool, checked on the server. `run` takes (user, args) for the data tools (the CLI shares
 them) and (ctx, args) for the tools marked `ctx=True` (they need the session, the role, the user's skills).
@@ -49,6 +52,8 @@ class Tool:
     danger_if: object = None                # (clean args) -> True when this call is dangerous (an overwrite ...)
     check: object = None                    # (user | ctx, clean args) -> (clean, bucket | None): before a proposal
     ctx: bool = False                       # run / check take the agent context instead of the user
+    confirm_if: object = None               # (ctx, clean args) -> True: this read call waits for the user first
+                                            # (risk 'web' on the confirm card: web search's "Ask before each search")
     kind: str = field(init=False, default='read')
 
     def __post_init__(self):

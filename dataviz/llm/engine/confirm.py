@@ -5,8 +5,11 @@ until POST /api/llm/agent/confirm decides it (or it times out, or the user stops
 ending it with a plan.
 
     cid = open_(user, run_id, actions)       -> id shown on the confirm card
-    decide(user, cid, approve, reject)       -> wakes the waiting run (AgentError 404 / 403 / 400)
-    wait(cid, cancel, timeout)               -> {'approve': set, 'reject': set} | 'pending' | 'timeout' | 'cancelled'
+    decide(user, cid, approve, reject, edits) -> wakes the waiting run (AgentError 404 / 403 / 400); edits =
+                                               {action id: {arg: value}}: run that approved action with these
+                                               arguments instead (the user edited a web query on the card)
+    wait(cid, cancel, timeout)               -> {'approve': set, 'reject': set, 'edits': {id: args}} | 'pending'
+                                               | 'timeout' | 'cancelled'
 
 In memory, per user, bounded: the app is one process (python app.py), and a waiting confirm is only meaningful
 while its stream is open.
@@ -54,19 +57,23 @@ def _drop(cid, why):
         p['event'].set()
 
 
-def decide(user, cid, approve=(), reject=()):
+def decide(user, cid, approve=(), reject=(), edits=None):
     approve = {str(i) for i in approve or []}
     reject = {str(i) for i in reject or []} - approve
+    if edits is not None and not (isinstance(edits, dict) and all(isinstance(v, dict) for v in edits.values())):
+        raise AgentError('edits must be an object {action id: {argument: value}}', 400)
+    edits = {str(k): dict(v) for k, v in (edits or {}).items()}
     with _lock:
         p = _pending.get(str(cid or ''))
         if p is None:
             raise AgentError('nothing waits for this confirmation any more (the answer ended or was stopped)', 404)
         if p['user_id'] != (user or {}).get('id'):
             raise AgentError('this confirmation belongs to another user', 403)
-        unknown = (approve | reject) - p['ids']
+        unknown = (approve | reject | set(edits)) - p['ids']
         if unknown:
             raise AgentError(f'no action {", ".join(sorted(unknown))} here', 400)
-        p['decision'] = {'approve': approve, 'reject': p['ids'] - approve}
+        p['decision'] = {'approve': approve, 'reject': p['ids'] - approve,
+                         'edits': {k: v for k, v in edits.items() if k in approve}}
         del _pending[cid]
         p['event'].set()
     return {'ok': True}
