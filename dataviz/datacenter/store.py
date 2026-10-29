@@ -15,6 +15,7 @@ is stat'ed (a 20k-file folder sorted by name costs one scandir + 500 stats).
 import hashlib
 import io
 import os
+import re
 import shutil
 import stat as statmod
 import time
@@ -29,8 +30,20 @@ IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.tif', '.tiff', '.gif')
 KIND_EXTS = {
     'yaml': ('.yaml', '.yml'), 'json': ('.json',), 'xml': ('.xml',), 'npy': ('.npy', '.npz'),
     'archive': ('.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar'),
-    'text': ('.txt', '.csv', '.tsv', '.md', '.log', '.cfg', '.ini', '.names', '.py', '.sh', '.parquet'),
+    'table': ('.parquet', '.feather', '.arrow'),
+    'audio': ('.wav', '.mp3', '.flac', '.ogg', '.oga', '.m4a', '.aac', '.opus', '.wma'),
+    'video': ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.wmv', '.mpg', '.mpeg'),
+    'code': ('.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs', '.py', '.sh', '.bash', '.zsh', '.html', '.htm', '.css',
+             '.scss', '.toml', '.ini', '.cfg', '.conf', '.properties', '.env', '.sql', '.dockerfile', '.r', '.go',
+             '.rs', '.java', '.c', '.cpp', '.cc', '.hpp', '.h'),
+    'text': ('.txt', '.csv', '.tsv', '.md', '.markdown', '.log', '.names', '.rst'),
 }
+CODE_NAMES = ('dockerfile', 'makefile', 'containerfile', 'gemfile', 'procfile')
+# dot files that are shown (and editable) like any file; every other dot name (the trash, .s3, upload temps,
+# dot folders such as .git or .cache) stays hidden everywhere
+DOT_FILES = ('.env', '.gitignore', '.gitattributes', '.editorconfig', '.dockerignore', '.npmrc')
+DOT_PREFIXES = ('.env.', '.prettierrc', '.eslintrc')
+_PARTIAL = re.compile(r'\.part(-[0-9a-f]{8})?$')     # a write in flight (_write_stream, S3 pull)
 SPLITS = ('train', 'val', 'valid', 'validation', 'test')
 TRASH = '.trash'
 ITEMS_CAP = 10000                   # a folder's "items" badge stops counting here
@@ -109,11 +122,33 @@ def resolve(root, rel, allowed, must_exist=False):
     return lex
 
 
+def visible(name, is_dir=False):
+    """Whether a folder entry is listed: dot names are hidden except the allowlisted config files (DOT_FILES,
+    .env.*, .prettierrc*, .eslintrc*); dot folders and half-written files never are."""
+    if _PARTIAL.search(name):
+        return False
+    if not name.startswith('.'):
+        return True
+    if is_dir:
+        return False
+    return name in DOT_FILES or name.startswith(DOT_PREFIXES)
+
+
+def is_secret(name):
+    """A .env file: it holds secrets, so reading it needs data.manage."""
+    low = os.path.basename(str(name or '')).lower()
+    return low == '.env' or low.startswith('.env.') or low.endswith('.env')
+
+
 def kind_of(name, rel=''):
     """The Entry kind of a file name; a .txt under a labels/ folder is a 'label'."""
     low = name.lower()
     if low.endswith(IMAGE_EXTS):
         return 'image'
+    if low in CODE_NAMES or low.startswith('.env'):
+        return 'code'
+    if low.startswith('.'):
+        return 'text' if low in DOT_FILES or low.startswith(DOT_PREFIXES) else 'other'
     if low.endswith('.txt') and low != 'classes.txt' and 'labels' in rel.lower().split('/'):
         return 'label'
     for k, exts in KIND_EXTS.items():
@@ -149,7 +184,7 @@ def _count_items(path):
     try:
         with os.scandir(path) as it:
             for e in it:
-                if not e.name.startswith('.'):
+                if visible(e.name, e.is_dir()):
                     n += 1
                     if n >= ITEMS_CAP:
                         break
@@ -177,12 +212,14 @@ def list_local(root, rel, allowed, offset=0, limit=500, sort='name', q=''):
     rows = []                                           # (name, is_dir, DirEntry)
     with os.scandir(absdir) as it:
         for e in it:
-            if e.name.startswith('.') or (qq and qq not in e.name.casefold()):
+            if qq and qq not in e.name.casefold():
                 continue
             try:
                 d = e.is_dir()
             except OSError:
                 d = False
+            if not visible(e.name, d):
+                continue
             rows.append((e.name, d, e))
     if field == 'name':
         rows.sort(key=lambda r: r[0].casefold(), reverse=desc)
@@ -238,13 +275,13 @@ def walk_local(root, rel, allowed, cap=300_000):
             continue
         with it:
             for e in it:
-                if e.name.startswith('.'):
+                isdir = e.is_dir(follow_symlinks=False)
+                if not visible(e.name, isdir):
                     continue
                 n += 1
                 if n > cap:
                     return
                 sub = join(r, e.name)
-                isdir = e.is_dir(follow_symlinks=False)
                 yield sub, isdir, e.path
                 if isdir:
                     stack.append((sub, e.path))
@@ -281,6 +318,21 @@ def apply_op(root, allowed, op, trash_dir, n):
         os.makedirs(p)
         rel = _rel_of(base, p)
         return {'op': 'mkdir', 'path': rel}, {'undo': 'rmdir', 'path': rel}
+    if kind == 'create':
+        p = resolve(root, op.get('path'), allowed)
+        name = os.path.basename(p)
+        if p == base or not name:
+            raise DCError('give the new file a name')
+        if not visible(name):
+            raise DCError(f'{name} would be hidden: a name not starting with . (except .env, .gitignore and similar)')
+        if os.path.lexists(p):
+            raise DCError(f'{clean_rel(op["path"])} already exists', 409)
+        if not os.path.isdir(os.path.dirname(p)):
+            raise DCError(f'{posix_parent(clean_rel(op["path"])) or "/"} is not a folder', 404)
+        with open(p, 'x', encoding='utf-8') as f:
+            f.write(str(op.get('text') or ''))
+        rel = _rel_of(base, p)
+        return {'op': 'create', 'path': rel}, {'undo': 'remove', 'path': rel}
     src = resolve(root, op.get('path'), allowed, must_exist=True)
     if src == base:
         raise DCError('the bucket root cannot be moved, renamed or deleted')
@@ -309,8 +361,10 @@ def apply_op(root, allowed, op, trash_dir, n):
         return {'op': 'copy', 'path': rel, 'to': new}, {'undo': 'remove', 'path': new}
     if kind == 'rename':
         name = str(op.get('name') or '').strip()
-        if not name or '/' in name or '\\' in name or name in ('.', '..') or name.startswith('.'):
-            raise DCError('a new name is one file or folder name (no /, not starting with .)')
+        if not name or '/' in name or '\\' in name or name in ('.', '..') \
+                or not visible(name, os.path.isdir(src) and not os.path.islink(src)):
+            raise DCError('a new name is one file or folder name (no /, not starting with . except .env, '
+                          '.gitignore and similar config files)')
         dest = os.path.join(os.path.dirname(src), name)
         if os.path.lexists(dest) and os.path.normcase(dest) != os.path.normcase(src):
             raise DCError(f'{_rel_of(base, dest)} already exists', 409)
@@ -323,7 +377,7 @@ def apply_op(root, allowed, op, trash_dir, n):
         dest = os.path.join(slot, os.path.basename(src))
         shutil.move(src, dest)
         return {'op': 'delete', 'path': rel}, {'undo': 'restore', 'trash': dest, 'path': rel}
-    raise DCError(f'unknown op {kind!r} (mkdir, move, copy, rename, delete)')
+    raise DCError(f'unknown op {kind!r} (mkdir, create, move, copy, rename, delete)')
 
 
 def undo_step(root, allowed, step, trash_root):
@@ -359,6 +413,22 @@ def undo_step(root, allowed, step, trash_root):
             raise DCError(f'{step["path"]} exists again', 409)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.move(t, dest)
+        return step['path']
+    if u == 'replace':                                  # a text save: the old content comes back over the new
+        t = os.path.realpath(step['trash'])
+        if not t.startswith(os.path.realpath(trash_root) + os.sep) or not os.path.lexists(t):
+            raise DCError(f'the previous version of {step["path"]} is no longer in the trash', 410)
+        dest = resolve(root, step['path'], allowed)
+        if os.path.isdir(dest):
+            raise DCError(f'{step["path"]} is a folder now', 409)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        try:
+            os.replace(t, dest)
+        except OSError:                                 # the trash is on another device than a linked folder
+            with open(t, 'rb') as f:
+                _write_stream(f, dest)
+            shutil.copystat(t, dest)
+            os.remove(t)
         return step['path']
     raise DCError(f'unknown undo step {u!r}')
 
@@ -500,9 +570,10 @@ class _Pipe(io.RawIOBase):
         return out
 
 
-def zip_stream(root, rel, allowed):
+def zip_stream(root, rel, allowed, secrets=True):
     """Yield a zip of folder `rel` of `root` (or of one file) chunk by chunk: names inside are relative to that
-    folder, the trash and dot files are left out. Stored, not deflated: images do not shrink."""
+    folder, the trash and hidden dot files are left out (and .env files unless `secrets`). Stored, not deflated:
+    images do not shrink."""
     rel = clean_rel(rel)
     base = resolve(root, rel, allowed, must_exist=True)
     pipe = _Pipe()
@@ -511,7 +582,7 @@ def zip_stream(root, rel, allowed):
             z.write(base, os.path.basename(base))
         else:
             for p, isdir, absp in walk_local(root, rel, allowed, cap=10_000_000):
-                if isdir:
+                if isdir or (not secrets and is_secret(p)):
                     continue
                 name = p[len(rel) + 1:] if rel else p
                 with open(absp, 'rb') as src, z.open(zipfile.ZipInfo.from_file(absp, name), 'w') as dst:
@@ -584,11 +655,11 @@ class S3View:
                                                                            Delimiter='/'):
             for p in page.get('CommonPrefixes', []):
                 n = p['Prefix'][len(pre):].rstrip('/')
-                if n and not n.startswith('.') and (not qq or qq in n.casefold()):
+                if n and visible(n, True) and (not qq or qq in n.casefold()):
                     dirs.append({'name': n, 'path': join(rel, n), 'type': 'dir', 'size': 0, 'mtime': None})
             for o in page.get('Contents', []):
                 n = o['Key'][len(pre):]
-                if not n or '/' in n or n.startswith('.') or (qq and qq not in n.casefold()):
+                if not n or '/' in n or not visible(n) or (qq and qq not in n.casefold()):
                     continue
                 lm = o.get('LastModified')
                 files.append({'name': n, 'path': join(rel, n), 'type': 'file', 'size': int(o.get('Size') or 0),
@@ -607,7 +678,8 @@ class S3View:
         for page in self.client.get_paginator('list_objects_v2').paginate(Bucket=self.bucket, Prefix=pre):
             for o in page.get('Contents', []):
                 k = o['Key'][len(pre):]
-                if k and not any(p.startswith('.') for p in k.split('/')):
+                parts = k.split('/')
+                if k and visible(parts[-1]) and all(visible(p, True) for p in parts[:-1]):
                     out[k] = int(o.get('Size') or 0)
                     if len(out) >= cap:
                         return out

@@ -68,6 +68,7 @@
   background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; font-size: var(--fs-sm); user-select: none;
   transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease); }
 .chip:hover { border-color: var(--border-hover); background: var(--surface-3); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); font-weight: 650; }
 .chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .chip .muted, .chip .n { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--fs-xs); color: var(--text-muted); }
 .chip.off { opacity: .5; text-decoration: line-through; text-decoration-color: var(--text-faint); }

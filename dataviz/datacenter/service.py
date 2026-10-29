@@ -32,7 +32,7 @@ from .store import DCError
 
 __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
            'summary', 'ls', 'read_file', 'read_text', 'ops', 'undo', 'upload', 'set_tags', 'all_tags', 'detect',
-           'stats', 'search', 'send', 'sync', 'export', 'source', 'autolabel']
+           'stats', 'search', 'send', 'sync', 'export', 'source', 'autolabel', 'write_text']
 
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
@@ -503,6 +503,48 @@ def sync(user, bid):
                                   public_result=True, owner=user['id']).id, 'result': None}
 
 
+def convert_vectors(user, bid, path='', to='parquet'):
+    """Convert the embeddings folder `path` (npy + meta.csv, embeddings.parquet or embeddings.csv) into layout `to`
+    (labeling/writers/vector.py), in a new sibling folder <name>-<to>. A job on the io lane -> {job_id, path}."""
+    from ..labeling.writers import vector
+    r = _row(user, bid)
+    _need(user)
+    _need_write(r)
+    rel = store.clean_rel(path)
+    src = _abs(r, rel)
+    if not os.path.isdir(src):
+        raise DCError(f'{rel or "/"} is not a folder')
+    if to not in vector.WRITERS:
+        raise DCError(f'unknown layout {to!r} (one of {", ".join(vector.WRITERS)})')
+    frm = vector.detect(src)
+    if frm is None:
+        raise DCError('not an embeddings folder: meta.csv + .npy files, embeddings.parquet or embeddings.csv')
+    if frm == to:
+        raise DCError(f'the folder is already {vector.LAYOUTS[to]["label"]}')
+    base = os.path.basename(src.rstrip(os.sep)) if rel else _slug(r.name)
+    dest = store._unique(os.path.join(os.path.dirname(src) if rel else src, f'{base}-{to}'))
+    out = store.join(store.posix_parent(rel), os.path.basename(dest)) if rel else os.path.basename(dest)
+
+    def fn(job=None):
+        try:
+            res = vector.convert(src, dest, to, (lambda n: job.progress(done=n)) if job is not None else None)
+        except ValueError as e:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise DCError(str(e)) from None
+        except BaseException:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+        _revalidate(_row(user, bid))
+        return {**res, 'path': out}
+
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    if jobs is None:
+        return {'job_id': None, 'path': out, 'result': fn()}
+    return {'job_id': jobs.submit(f'dc-convert:{r.id}', f'convert {base} to {vector.LAYOUTS[to]["label"]}', fn,
+                                  lane='io', public_result=True, owner=user['id']).id, 'path': out, 'result': None}
+
+
 def export(user, bid, path=''):
     """(zip file name, chunk iterator) of a folder (or one file) of a bucket with local files."""
     r = _row(user, bid)
@@ -511,7 +553,9 @@ def export(user, bid, path=''):
     rel = store.clean_rel(path)
     _abs(r, rel)
     name = _slug(rel.rsplit('/', 1)[-1] if rel else r.name) + '.zip'
-    return name, store.zip_stream(r.root, rel, _allowed())
+    if store.is_secret(rel):
+        _need_secret(user, rel)
+    return name, store.zip_stream(r.root, rel, _allowed(), secrets=vtiers.has(user, PERM))
 
 
 def delete_bucket(user, bid, delete_files=False):
@@ -582,6 +626,7 @@ def _file(r, path):
 def file_path(user, bid, path):
     """(absolute path, media type) of a local file, for streaming the raw bytes; None for an S3 bucket."""
     r = _row(user, bid)
+    _need_secret(user, path)
     if r.kind == 's3':
         return None
     p = _abs(r, _file(r, path))
@@ -594,6 +639,7 @@ def read_file(user, bid, path, w=None):
     """(bytes, media type): the raw file, or with `w` a JPEG thumbnail at most w px (cached on disk)."""
     r = _row(user, bid)
     rel = _file(r, path)
+    _need_secret(user, rel)
     if r.kind == 's3':
         view = _s3(r)
         try:
@@ -611,23 +657,158 @@ def read_file(user, bid, path, w=None):
         return f.read(), mt
 
 
+TEXT_MAX = 8 << 20                  # the text editor reads and saves at most this much
+_BOM = b'\xef\xbb\xbf'
+
+
+def _need_secret(user, rel):
+    """A .env file holds secrets: reading it needs data.manage, like changing data."""
+    if store.is_secret(rel):
+        _need(user)
+
+
+def _newline(text):
+    crlf = text.count('\r\n')
+    cr = text.count('\r') - crlf
+    lf = text.count('\n') - crlf
+    return '\r\n' if crlf > max(cr, lf) else '\r' if cr > lf else '\n'
+
+
+def _decode(data, truncated):
+    """(text, strict): UTF-8 without its BOM; strict is False when the bytes are not valid UTF-8 (a multi-byte
+    character cut by the read limit does not count)."""
+    body = data[3:] if data.startswith(_BOM) else data
+    try:
+        return body.decode('utf-8'), True
+    except UnicodeDecodeError as e:
+        if truncated and e.start >= len(body) - 3:
+            return body[:e.start].decode('utf-8', 'replace'), True
+        return body.decode('utf-8', 'replace'), False
+
+
 def read_text(user, bid, path, limit=65536):
+    """-> {text, truncated, size, mtime_ns, encoding, newline, editable, reason?}. text has '\\n' line ends (the
+    file's own style is `newline`, kept on save) and no BOM (encoding 'utf-8-sig' when there was one). mtime_ns is
+    a string (it does not fit a JS number) and goes back as write_text's expect_mtime_ns."""
     r = _row(user, bid)
     rel = _file(r, path)
-    limit = max(1, min(int(limit or 65536), 4 << 20))
+    _need_secret(user, rel)
+    limit = max(1, min(int(limit or 65536), TEXT_MAX))
+    mtime_ns = None
     if r.kind == 's3':
         view = _s3(r)
         try:
             data, _, size = view.read(rel, limit + 1)
+            if len(data) > limit:
+                size = view.size(rel) or size
         finally:
             view.close()
     else:
         p, _ = file_path(user, bid, rel)
         with open(p, 'rb') as f:
+            st = os.fstat(f.fileno())
             data = f.read(limit + 1)
+        size, mtime_ns = st.st_size, str(st.st_mtime_ns)
     if b'\x00' in data[:8192]:
         raise DCError(f'{rel} is not a text file')
-    return {'text': data[:limit].decode('utf-8', 'replace'), 'truncated': len(data) > limit}
+    truncated = len(data) > limit
+    data = data[:limit]
+    text_, strict = _decode(data, truncated)
+    nl = _newline(text_)
+    if nl != '\n':
+        text_ = text_.replace('\r\n', '\n').replace('\r', '\n')
+    reason = None
+    if truncated:
+        reason = f'only the first {limit // 1024} KB are shown' + (
+            f' (the editor opens files up to {TEXT_MAX >> 20} MB)' if size and size <= TEXT_MAX else '')
+    elif not strict:
+        reason = 'not UTF-8 text: saving would change its bytes'
+    elif not vtiers.has(user, PERM):
+        reason = 'your tier cannot change data'
+    else:
+        try:
+            _need_write(r)
+        except DCError as e:
+            reason = e.message
+    out = {'text': text_, 'truncated': truncated, 'size': size, 'mtime_ns': mtime_ns,
+           'encoding': 'utf-8-sig' if data.startswith(_BOM) else 'utf-8', 'newline': nl, 'editable': reason is None}
+    if reason is not None:
+        out['reason'] = reason
+    return out
+
+
+def write_text(user, bid, path, text, expect_mtime_ns=None, create=False):
+    """Save a text file (or create one) -> {path, size, mtime_ns, undo_id, retagged}. 409 when the file changed
+    since it was read (its mtime is not expect_mtime_ns; None overwrites). The file keeps its mode, BOM and
+    newline style; the old content goes to the trash and undo puts it back."""
+    import io
+    from sqlalchemy import text as sql                  # `text` is the file content here
+    r = _row(user, bid)
+    _need(user)
+    _need_write(r)
+    rel = _file(r, path)
+    if not isinstance(text, str):
+        raise DCError('text must be a string')
+    p = os.path.realpath(_abs(r, rel, must_exist=not create))
+    base = os.path.realpath(r.root)
+    rel = os.path.relpath(p, base).replace(os.sep, '/')
+    if not store.visible(os.path.basename(p)):
+        raise DCError(f'{rel} is a hidden file')
+    exists = os.path.lexists(p)
+    if create and exists:
+        raise DCError(f'{rel} already exists', 409)
+    body = text.replace('\r\n', '\n').replace('\r', '\n')
+    old = mode = None
+    if exists:
+        if not os.path.isfile(p):
+            raise DCError(f'{rel} is not a file')
+        st = os.stat(p)
+        if expect_mtime_ns not in (None, '') and str(expect_mtime_ns) != str(st.st_mtime_ns):
+            raise DCError(f'{rel} was changed by someone else since you opened it', 409)
+        if st.st_size > TEXT_MAX:
+            raise DCError(f'{rel} is larger than {TEXT_MAX >> 20} MB: it cannot be edited here', 413)
+        with open(p, 'rb') as f:
+            old = f.read()
+        if b'\x00' in old[:8192]:
+            raise DCError(f'{rel} is not a text file')
+        prev, strict = _decode(old, False)
+        if not strict:
+            raise DCError(f'{rel} is not UTF-8 text: saving would change its bytes', 415)
+        nl = _newline(prev)
+        if nl != '\n':
+            body = body.replace('\n', nl)
+        mode = st.st_mode & 0o7777
+    elif not os.path.isdir(os.path.dirname(p)):
+        raise DCError(f'{store.posix_parent(rel) or "/"} is not a folder', 404)
+    data = ((_BOM if old is not None and old.startswith(_BOM) else b'') + body.encode('utf-8'))
+    if len(data) > TEXT_MAX:
+        raise DCError(f'at most {TEXT_MAX >> 20} MB of text', 413)
+    undo_id = uuid.uuid4().hex
+    trash_root = store.data_root(_cfg()) / store.TRASH
+    trash = trash_root / undo_id
+    if old is not None:
+        slot = trash / '0'
+        slot.mkdir(parents=True, exist_ok=True)
+        keep = slot / os.path.basename(p)
+        shutil.copy2(p, keep)
+        step = {'undo': 'replace', 'trash': str(keep), 'path': rel}
+    else:
+        step = {'undo': 'remove', 'path': rel}
+    store._write_stream(io.BytesIO(data), p)
+    if mode is not None:
+        try:
+            os.chmod(p, mode)
+        except OSError:
+            pass
+    st = os.stat(p)
+    with db.begin() as c:
+        c.execute(sql("""INSERT INTO app.dc_undo(id, bucket_id, user_id, manifest)
+                         VALUES (:id, :b, :u, :manifest)""").bindparams(_MANIFEST),
+                  {'id': undo_id, 'b': r.id, 'u': user['id'],
+                   'manifest': {'root': r.root, 'trash': str(trash), 'steps': [step]}})
+        c.execute(sql('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
+    return {'path': rel, 'size': st.st_size, 'mtime_ns': str(st.st_mtime_ns), 'undo_id': undo_id,
+            'created': old is None, 'retagged': _revalidate(r)}
 
 
 # ---------------------------------------------------------------------------------------------- changes
@@ -967,6 +1148,9 @@ def _submit_label_import(pid, source, owner_id, name):
     return jobs.submit(f'label-import:{pid}', f'import images · {name}', fn, lane='io', session_id=pid).id
 
 
+PROBE_THREADS = 8                   # label import: image headers read side by side (I/O bound)
+
+
 def _label_import_fn(pid, source, owner_id):
     reg = _labeling()
 
@@ -981,20 +1165,27 @@ def _label_import_fn(pid, source, owner_id):
             new = [rel for rel, _ in items if rel not in known_uris]
             names = _label_names(new, known)
             added = 0
-            for i in range(0, len(new), 500):
-                rows = []
-                for rel, nm in zip(new[i:i + 500], names[i:i + 500]):
-                    try:
-                        info = media.probe(src, rel)
-                    except Exception:  # noqa: BLE001 - one unreadable file must not stop the import
-                        continue
-                    rows.append({'file_name': nm, 'uri': rel, 'mime': info.get('mime'),
-                                 'size_bytes': info.get('size_bytes'), 'width': info.get('width'),
-                                 'height': info.get('height'),
-                                 'meta': {'rel_path': rel, 'orientation': info.get('orientation')}})
-                added += st.add_media(rows)
-                if job is not None:
-                    job.progress(done=i + len(rows), total=len(new), extra=f'{added} added')
+
+            def probe(rel):
+                try:
+                    return media.probe(src, rel)
+                except Exception:  # noqa: BLE001 - one unreadable file must not stop the import
+                    return None
+
+            with ThreadPoolExecutor(PROBE_THREADS) as pool:       # header reads are I/O: probe them side by side
+                for i in range(0, len(new), 500):
+                    rows = []
+                    chunk = new[i:i + 500]
+                    for rel, nm, info in zip(chunk, names[i:i + 500], pool.map(probe, chunk)):
+                        if info is None:
+                            continue
+                        rows.append({'file_name': nm, 'uri': rel, 'mime': info.get('mime'),
+                                     'size_bytes': info.get('size_bytes'), 'width': info.get('width'),
+                                     'height': info.get('height'),
+                                     'meta': {'rel_path': rel, 'orientation': info.get('orientation')}})
+                    added += st.add_media(rows)
+                    if job is not None:
+                        job.progress(done=i + len(chunk), total=len(new), extra=f'{added} added')
             reg.set_counts(pid)
             return {'added': added}
         finally:
@@ -1060,10 +1251,12 @@ def _link_of(model):
 
 
 def autolabel(user, bid, path='', model=None, target='inplace', new_name=None, conf=None, write_yolo=True,
-              name=None):
+              name=None, formats=None):
     """Label every image of folder `path` with a model: a labeling session is made (its classes = the model's
-    classes), the model is linked and run over every image (the label-all job), and with write_yolo the result
-    is written into the bucket as YOLO files (labels next to the images, data.yaml + classes.txt in the folder).
+    classes), the model is linked and run over every image (the label-all job), and the result is written into
+    the bucket in each of `formats` (labeling/writers keys, default ['yolo']: labels/ mirroring images/,
+    data.yaml + classes.txt; coco: annotations/instances_<split>.json; voc: Annotations/; labelme: labelme/;
+    createml.json; labels.csv; ...). write_yolo=False is the older spelling of formats=[] (write nothing).
 
     target 'inplace' labels the bucket itself (it must be writable); 'copy' first copies the folder into a new
     managed bucket `new_name` and labels that (a streamed S3 bucket can only be copied).
@@ -1078,31 +1271,52 @@ def autolabel(user, bid, path='', model=None, target='inplace', new_name=None, c
     rel = store.clean_rel(path)
     if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
         raise DCError(f'{rel} is a file: pick the folder that holds the images')
-    info = _http(hooks.model_info, link, user['id'])
-    tt = info.get('task_type') or 'object_detection'
-    classes = [str(c) for c in info.get('classes') or []]
-    if tt not in AUTO_TASKS:
-        raise DCError(f'{info.get("name") or link["model_id"]} is a {tt} model: it cannot label images')
-    if not classes and tt != 'classification':
-        raise DCError(f'{info.get("name") or link["model_id"]} reports no classes')
+    if target not in ('inplace', 'copy'):
+        raise DCError('target must be inplace or copy')
     if target == 'inplace':
         _need_write(r)
-        dest = r
-    elif target == 'copy':
-        nb = create_bucket(user, new_name or f'{r.name}-labeled', 'managed')
-        dest = _row(user, nb['id'])
-    else:
-        raise DCError('target must be inplace or copy')
-    session_name = (name or '').strip() or f'{dest.name}{f" · {rel}" if rel and target == "inplace" else ""} · ' \
-                                             f'{info.get("name") or link["model_id"]}'
+    from ..labeling import writers as lw
+    try:
+        fmts = [] if write_yolo is False and formats is None else lw.check(lw.DEFAULT if formats is None else formats)
+    except ValueError as e:
+        raise DCError(str(e)) from None
+    shown = str((model or {}).get('name') or link['model_id'])     # the job label only; the job reads the model
+
+    def check_model():
+        # in the job, never in the request: a registry model may have to load (torch) to report its classes
+        info = _http(hooks.model_info, link, user['id'])
+        tt = info.get('task_type') or 'object_detection'
+        classes = [str(c) for c in info.get('classes') or []]
+        if tt not in AUTO_TASKS:
+            raise DCError(f'{info.get("name") or link["model_id"]} is a {tt} model: it cannot label images')
+        if not classes and tt != 'classification':
+            raise DCError(f'{info.get("name") or link["model_id"]} reports no classes')
+        return info, tt, classes
+
+    dest = r
+    if target == 'copy':                       # an empty managed bucket: one insert, no walk
+        dest = _row(user, create_bucket(user, new_name or f'{r.name}-labeled', 'managed')['id'])
 
     def fn(job=None):
+        if job is not None:
+            job.progress(stage='checking the model', done=0, total=None)
+        try:
+            info, tt, classes = check_model()
+        except Exception:
+            if target == 'copy':               # nothing was copied yet: do not leave an empty bucket behind
+                delete_bucket(user, dest.id, delete_files=True)
+            raise
+        session_name = (name or '').strip() or f'{dest.name}{f" · {rel}" if rel and target == "inplace" else ""} · ' \
+                                                 f'{info.get("name") or link["model_id"]}'
         out = {'bucket': dest.id, 'copied': None}
+        use = [k for k in fmts if lw.supports(k, tt)]
+        if len(use) < len(fmts):
+            out['formats_skipped'] = [k for k in fmts if k not in use]
         src_rel = rel
         if target == 'copy':
             out['copied'] = _copy_folder(r, rel, dest.root, job)
             src_rel = ''
-        if write_yolo:                         # loose images -> images/ first, so the result is a YOLO layout
+        if {'yolo', 'yolo_obb'} & set(use):    # loose images -> images/ first, so the result is a YOLO layout
             out['restructured'] = _to_yolo_layout(user, dest, src_rel, undoable=target == 'inplace')
         if target == 'copy':
             _revalidate(dest)
@@ -1134,10 +1348,10 @@ def autolabel(user, bid, path='', model=None, target='inplace', new_name=None, c
         task = st.task(tid)
         run = _http(hooks.label_all, pid, reg.get(pid), task, task['config']['model'], 'all', body.conf)
         out['labeled'] = run(job) if job is not None else run(_InlineJob())
-        if write_yolo and not out['labeled'].get('cancelled'):
+        if use and not out['labeled'].get('cancelled'):
             if job is not None:
-                job.progress(stage='writing YOLO labels', done=0, total=None)
-            out['written'] = _write_yolo(dest, src_rel, st, st.task(tid))
+                job.progress(stage=f'writing {", ".join(lw.get(k).label for k in use)} labels', done=0, total=None)
+            out['written'] = _write_labels(dest, src_rel, st, st.task(tid), use)
             _cached(_row(user, dest.id), src_rel, force=True)
             out['retagged'] = _revalidate(_row(user, dest.id))
         return out
@@ -1146,7 +1360,7 @@ def autolabel(user, bid, path='', model=None, target='inplace', new_name=None, c
     jobs = getattr(ctx, 'jobs', None)
     if jobs is None:
         return {'job_id': None, 'bucket': dest.id, 'result': fn()}
-    job = jobs.submit(f'dc-autolabel:{dest.id}:{rel}', f'label {dest.name} with {info.get("name") or link["model_id"]}',
+    job = jobs.submit(f'dc-autolabel:{dest.id}:{rel}', f'label {dest.name} with {shown}',
                       fn, lane='model', public_result=True, owner=user['id'])
     return {'job_id': job.id, 'bucket': dest.id, 'result': None}
 
@@ -1222,50 +1436,72 @@ def _copy_folder(r, rel, dest, job=None):
     return {'files': n, 'bytes': size}
 
 
-def _write_yolo(r, rel, st, task):
-    """Write the session's labels into folder `rel` of bucket `r` as YOLO: each image's .txt goes in the
-    labels/ folder that mirrors its images/ folder (next to the image when there is no images/ level, which is
-    where ultralytics looks then), plus data.yaml and classes.txt at the folder root. -> {labels, data_yaml}."""
-    from ..labeling import formats as lfmt
-    base = _abs(r, rel)
+def _write_labels(r, rel, st, task, formats=('yolo',)):
+    """Write the session's labels into folder `rel` of bucket `r` in each of `formats` (labeling/writers keys),
+    through a LocalDirSink rooted at the folder. YOLO: each image's .txt goes in the labels/ folder that mirrors
+    its images/ folder (next to the image when there is no images/ level, which is where ultralytics looks then),
+    plus data.yaml and classes.txt at the folder root. When the picked folder is images/ itself the files go one
+    level up (labels/ beside it). -> {labels, data_yaml?, classes, formats: {key: summary}, warnings?}."""
+    from ..labeling import formats as lfmt, writers as lw
+    from ..labeling.sinks import LocalDirSink
+    base, root_rel, prefix = _abs(r, rel), rel, ''
+    if rel and os.path.basename(base).lower() == 'images':                  # the picked folder is images/ itself
+        base, root_rel, prefix = os.path.dirname(base), posix_dir(rel), os.path.basename(base) + '/'
     index, names = lfmt.class_map(task['classes'])
-    n = 0
-    for m, rows in st.iter_task_export(task['id']):
-        if not rows and m['status'] != 'done':
-            continue
-        meta = m.get('meta') if isinstance(m.get('meta'), dict) else {}
-        img = str(meta.get('rel_path') or m.get('uri') or '')
-        if not img:
-            continue
+
+    def label_rel(img):
         folder, stem = posix_dir(img), os.path.splitext(img.rsplit('/', 1)[-1])[0]
         lab_dir = store.label_dir_for(folder)
-        if lab_dir is not None:
-            out = os.path.join(base, lab_dir, stem + '.txt')
-        elif rel and os.path.basename(base).lower() == 'images':          # the picked folder is images/ itself
-            out = os.path.join(os.path.dirname(base), 'labels', folder, stem + '.txt')
-        else:                                                             # no images/ level: next to the image
-            out = os.path.join(base, folder, stem + '.txt')
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out, 'w') as f:
-            f.write(lfmt.label_text(task, rows, index))
-        n += 1
-    splits = [d for d in ('train', 'val', 'valid', 'test') if os.path.isdir(os.path.join(base, 'images', d))]
-    if splits:
-        train = 'images/train' if 'train' in splits else f'images/{splits[0]}'
-        val = next((f'images/{d}' for d in ('val', 'valid') if d in splits), train)
-    else:
-        train = val = 'images' if os.path.isdir(os.path.join(base, 'images')) else '.'
-    lines = [f'# written by the Data Center from a {task["task_type"].replace("_", " ")} model', 'path: .',
-             f'train: {train}', f'val: {val}', f'nc: {len(names)}', 'names:']
-    lines += [f'  {i}: {_yaml_str(nm)}' for i, nm in enumerate(names)]
-    if task['task_type'] == 'keypoints':
-        k = len((task.get('config') or {}).get('keypoints') or [])
-        lines.append(f'kpt_shape: [{k}, 3]')
-    with open(os.path.join(base, 'data.yaml'), 'w') as f:
-        f.write('\n'.join(lines) + '\n')
-    with open(os.path.join(base, 'classes.txt'), 'w') as f:
-        f.write(lfmt.classes_txt(names))
-    return {'labels': n, 'data_yaml': store.join(rel, 'data.yaml'), 'classes': names}
+        return store.join(lab_dir if lab_dir is not None else folder, stem + '.txt')
+
+    def data_yaml(task, names):
+        splits = [d for d in ('train', 'val', 'valid', 'test') if os.path.isdir(os.path.join(base, 'images', d))]
+        if splits:
+            train = 'images/train' if 'train' in splits else f'images/{splits[0]}'
+            val = next((f'images/{d}' for d in ('val', 'valid') if d in splits), train)
+        else:
+            train = val = 'images' if os.path.isdir(os.path.join(base, 'images')) else '.'
+        lines = [f'# written by the Data Center from a {task["task_type"].replace("_", " ")} model', 'path: .',
+                 f'train: {train}', f'val: {val}', f'nc: {len(names)}', 'names:']
+        lines += [f'  {i}: {_yaml_str(nm)}' for i, nm in enumerate(names)]
+        if task['task_type'] == 'keypoints':
+            k = len((task.get('config') or {}).get('keypoints') or [])
+            lines.append(f'kpt_shape: [{k}, 3]')
+        return '\n'.join(lines) + '\n'
+
+    keys = [k for k in formats if lw.supports(k, task['task_type'])]
+    sink = LocalDirSink(base)
+    ctx = lw.bucket_ctx(base, index, label_rel, data_yaml, keys=keys, image_prefix=prefix)
+    ws = []
+    try:
+        for k in keys:
+            w = lw.get(k)()
+            w.begin(sink, task, names, ctx)
+            ws.append(w)
+        for m, rows in st.iter_task_export(task['id']):
+            if not rows and m['status'] != 'done':
+                continue
+            meta = m.get('meta') if isinstance(m.get('meta'), dict) else {}
+            if not (meta.get('rel_path') or m.get('uri')):
+                continue
+            for w in ws:
+                w.add(m, rows)
+        done = {w.key: w.finish() for w in ws}
+    except BaseException:
+        for w in ws:
+            w.abort()
+        raise
+    yolo = done.get('yolo') or done.get('yolo_obb')
+    out = {'labels': (yolo or max(done.values(), key=lambda d: d.get('n_media', 0), default={})).get('n_media', 0),
+           'classes': names, 'formats': done}
+    if yolo:
+        out['data_yaml'] = store.join(root_rel, 'data.yaml')
+    if ctx['warnings']:
+        out['warnings'] = ctx['warnings']
+    return out
+
+
+_write_yolo = _write_labels           # the older name
 
 
 def _yaml_str(s):

@@ -5,14 +5,15 @@
 // v2: per-task class chips (all on by default, label counts from class-stats; the request's `classes` lists the
 // kept ids of a task only when some are excluded, the server renumbers them 0..N-1), the choice is saved in the
 // project's export_default, and "Re-export to <last target>" repeats it in one click (overwrite after a confirm).
-// reExport(pid, project?) opens the dialog straight into that.
+// reExport(pid, project?) opens the dialog straight into that. Label formats (YOLO, COCO, VOC, LabelMe, CreateML, CSV,
+// text / audio JSONL, …: GET api/label/formats) are chips; the layout preview shows each picked format's files per task.
 
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import type { Job } from '../types.js';
 import type { LabelProject, LabelTask } from '../types-label.js';
-import type { ClassStat, ClassStatsPayload, ExportBody, ExportBrowse, ExportDefault, ExportKind, ExportRun, ExportTarget, ImportConn, JobStarted } from '../types-label-ui.js';
+import type { ClassStat, ClassStatsPayload, ExportBody, ExportBrowse, ExportDefault, ExportKind, ExportRun, ExportTarget, ImportConn, JobStarted, LabelFormat } from '../types-label-ui.js';
 import type { ConnectionsPayload, ConnTestResult } from '../types-settings.js';
 import { closestEl } from './ui-util.js';
 
@@ -35,6 +36,7 @@ interface ExportState {
   confirmRe: boolean;
   kind: ExportKind; path: string; connection_id: string; bucket: string; prefix: string;
   include_images: boolean; only_done: boolean; overwrite: boolean; create_views: boolean;
+  formats: LabelFormat[]; fmts: string[];
   browse: ExportBrowse | null; buckets: string[] | null;
   job: Partial<Job> | null; result: ExportRun | null; error: string | null; running: boolean;
   closed?: boolean;
@@ -67,10 +69,11 @@ export async function openExportDialog(pid: string, project?: LabelProject | nul
   bind();
   root.querySelector<HTMLElement>('.lbx')?.focus();
   try {
-    const [p, conns, stats] = await Promise.all([
+    const [p, conns, stats, fmts] = await Promise.all([
       project ? Promise.resolve(project as ExportProject) : getJSON<ExportProject>(`api/label/projects/${encodeURIComponent(pid)}`),
       getJSON<ConnectionsPayload>('api/connections').catch((): ConnectionsPayload => ({ connections: [] })),
       getJSON<ClassStatsPayload>(`api/label/projects/${encodeURIComponent(pid)}/class-stats`).catch((): ClassStatsPayload => ({ stats: null })),
+      getJSON<{ formats: LabelFormat[]; default: string[] }>('api/label/formats').catch(() => ({ formats: [], default: ['yolo'] })),
     ]);
     const d: ExportDefault = p.export_default || {};
     const tg: Partial<ExportTarget> = d.target || (d.kind ? d : {});
@@ -82,6 +85,7 @@ export async function openExportDialog(pid: string, project?: LabelProject | nul
       kind: tg.kind || 'zip', path: tg.path || '', connection_id: tg.connection_id || '', bucket: tg.bucket || '',
       prefix: tg.prefix || '', include_images: d.include_images !== false, only_done: !!d.only_done, overwrite: !!d.overwrite,
       create_views: tg.create_views !== false, browse: null, buckets: null, job: null, result: null, error: null, running: false,
+      formats: fmts.formats, fmts: d.formats?.length ? d.formats : fmts.default,
     };
     render();
   } catch (e) {
@@ -231,7 +235,14 @@ function treeHTML(): string {
   tasks.forEach((t) => {
     lines.push([`${slug(t.name)}/`, t.name]);
     const all = (t.classes || []).length, k = (X.classes.get(t.id) || new Set()).size;
-    lines.push(['  labels/', 'one .txt per image'], ['  classes.txt', k < all ? `${k} of ${all} classes, ids 0..${Math.max(0, k - 1)}` : `${all} classes`], ['  data.yaml', '']);
+    const fs = fmtsFor(t.task_type);
+    if (fs.some((f) => f.key === 'yolo' || f.key === 'yolo_obb')) {
+      lines.push(['  labels/', 'one .txt per image'], ['  classes.txt', k < all ? `${k} of ${all} classes, ids 0..${Math.max(0, k - 1)}` : `${all} classes`], ['  data.yaml', '']);
+    }
+    for (const f of fs.filter((x) => x.key !== 'yolo')) {
+      const head = f.export_layout.split('\n')[0]?.replace(/^[│├└─\s]+/, '').trim() ?? f.key;
+      lines.push([`  ${head.split(/\s{2,}/)[0] ?? head}`, f.label]);
+    }
   });
   lines.push(['manifest.json', '']);
   return `<pre class="lbx-tree">${esc(root)}\n${lines.map(([a, b], i) => {
@@ -240,6 +251,31 @@ function treeHTML(): string {
     const pre = sub ? `${'│   '}${lines[i + 1]?.[0].startsWith('  ') ? '├── ' : '└── '}` : last ? '└── ' : '├── ';
     return `${pre}${esc(a.trim())}${b ? `  <span class="hint">${esc(b)}</span>` : ''}`;
   }).join('\n')}</pre>`;
+}
+
+const TASK_MEDIA: Record<string, string> = { text_span: 'text', text_class: 'text', audio_segment: 'audio', transcription: 'audio' };
+const FALLBACK: Record<string, string> = { image: 'yolo', text: 'text_jsonl', audio: 'audio_jsonl' };
+
+/** The picked formats that can write a task of `taskType`, or its media's default when none can (as the server does). */
+function fmtsFor(taskType: string): LabelFormat[] {
+  const X = cur();
+  const media = TASK_MEDIA[taskType] ?? 'image';
+  const ok = (f: LabelFormat): boolean => f.tasks.includes(taskType) && f.media.includes(media);
+  const on = X.formats.filter((f) => X.fmts.includes(f.key) && ok(f));
+  if (on.length) return on;
+  const fb = X.formats.find((f) => f.key === FALLBACK[media] && ok(f));
+  return fb ? [fb] : [];
+}
+
+function formatsHTML(): string {
+  const X = cur();
+  const types = new Set((X.project.tasks || []).filter((t) => X.tasks.has(t.id)).map((t) => t.task_type));
+  const fit = X.formats.filter((f) => [...types].some((tt) => f.tasks.includes(tt) && f.media.includes(TASK_MEDIA[tt] ?? 'image')));
+  if (!fit.length) return '';
+  return `<section><h3>Label format</h3><div class="chips" role="group" aria-label="Label formats">${fit.map((f) => {
+    const on = X.fmts.includes(f.key);
+    return `<button type="button" class="chip${on ? ' on' : ''}" data-x="fmt" data-k="${esc(f.key)}" aria-pressed="${on}"${f.note ? ` title="${esc(f.note)}"` : ''}>${on ? icon('check') : ''}${esc(f.label)}</button>`;
+  }).join('')}</div><p class="hint">Several at once: each task folder gets every picked format that can hold its labels.</p></section>`;
 }
 
 function progressHTML(): string {
@@ -331,6 +367,7 @@ function renderDialog(el_: HTMLElement, X: ExportState): void {
         <label class="check"><input type="checkbox" data-f="include_images"${X.include_images ? ' checked' : ''}>Include the images (one shared <code>images/</code> folder)</label>
         <label class="check"><input type="checkbox" data-f="only_done"${X.only_done ? ' checked' : ''}>Only committed (done) images</label>
         <label class="check"><input type="checkbox" data-f="overwrite"${X.overwrite ? ' checked' : ''}>Overwrite a non-empty target</label></div></section>
+      ${formatsHTML()}
       <section><h3>Layout</h3>${treeHTML()}</section></fieldset>
       ${progressHTML()}
     </div>
@@ -365,7 +402,7 @@ async function start(): Promise<void> {
   const me = X;
   try {
     const classes = classesOption();
-    const body: ExportBody = { target, task_ids: [...X.tasks], classes, include_images: X.include_images, only_done: X.only_done, overwrite: X.overwrite };
+    const body: ExportBody = { target, task_ids: [...X.tasks], classes, include_images: X.include_images, only_done: X.only_done, overwrite: X.overwrite, formats: X.fmts };
     const r = await postJSON<JobStarted & { run_id: string }>(`api/label/projects/${encodeURIComponent(X.pid)}/export`, body);
     saveDefault(me, body);
     writeExcluded(me.pid, me.project, classes);
@@ -394,7 +431,7 @@ async function start(): Promise<void> {
 // project object so "Re-export to …" shows without a reload
 function saveDefault(me: ExportState, body: ExportBody): void {
   me.project.export_default = { ...body.target, target: body.target, task_ids: body.task_ids, classes: body.classes,
-    include_images: body.include_images, only_done: body.only_done };
+    include_images: body.include_images, only_done: body.only_done, formats: body.formats };
   document.dispatchEvent(new CustomEvent('sessions-changed'));
 }
 
@@ -406,7 +443,8 @@ function applyDefault(): void {
   const picked = (d.task_ids || []).filter((t) => live.includes(t));
   Object.assign(X, { kind: tg.kind || 'zip', path: tg.path || '', connection_id: tg.connection_id || '', bucket: tg.bucket || '',
     prefix: tg.prefix || '', create_views: tg.create_views !== false, include_images: d.include_images !== false, only_done: !!d.only_done,
-    tasks: new Set(picked.length ? picked : live), classes: keptClasses(X.pid, X.project, d.classes), browse: null });
+    tasks: new Set(picked.length ? picked : live), classes: keptClasses(X.pid, X.project, d.classes), browse: null,
+    ...(d.formats?.length ? { fmts: d.formats } : {}) });
 }
 
 async function browseLocal(path: string | null | undefined): Promise<void> {
@@ -451,6 +489,13 @@ const ACT: Record<string, (b: HTMLElement) => void | Promise<void>> = {
   close: () => closeExport(),
   start: () => start(),
   chip: toggleChip,
+  fmt: (b) => {
+    const X = cur(), k = b.dataset['k'];
+    if (!k) return;
+    X.fmts = X.fmts.includes(k) ? X.fmts.filter((x) => x !== k) : [...X.fmts, k];
+    render();
+    dlg().querySelector<HTMLElement>(`[data-x="fmt"][data-k="${CSS.escape(k)}"]`)?.focus();
+  },
   call: (b) => { const X = cur(); const t = (X.project.tasks || []).find((x) => x.id === b.dataset['t']); if (t) X.classes.set(t.id, new Set(t.classes.map((c) => c.id))); render(); },
   cnone: (b) => { const t = b.dataset['t']; if (t !== undefined) cur().classes.set(t, new Set()); render(); },
   reexport: () => {

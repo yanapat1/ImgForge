@@ -86,11 +86,16 @@ export interface ExportTarget {
 export interface ExportDefault {
   target?: ExportTarget; kind?: ExportKind; path?: string; connection_id?: string; bucket?: string; prefix?: string; create_views?: boolean;
   task_ids?: string[]; classes?: Record<string, string[]>; include_images?: boolean; only_done?: boolean; overwrite?: boolean;
+  formats?: string[];
 }
 export interface ExportBody {
   target: ExportTarget; task_ids: string[]; classes: Record<string, string[]>;
   include_images: boolean; only_done: boolean; overwrite: boolean;
+  /** labeling/writers keys (GET api/label/formats); a task none of them can write gets its media's default */
+  formats: string[];
 }
+/** GET api/label/formats */
+export interface LabelFormat { key: string; label: string; media: string[]; tasks: string[]; layout: string; export_layout: string; note?: string }
 export interface ExportSummary { tasks?: Record<string, Record<string, number>>; error?: string; [k: string]: unknown }
 /** GET api/label/exports/{run_id} */
 export interface ExportRun { run_id?: string; status?: string; summary?: ExportSummary; download?: string }

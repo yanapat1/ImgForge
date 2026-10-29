@@ -12,6 +12,8 @@ import { toast } from '../core/toast.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { openTagEditor } from './tags.js';
+import { openDialog } from '../views/dialog.js';
+import { watchJobs } from './activity.js';
 import {
   bucketOf, curBucket, D, fbadge, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, isYolo, key, selEntries,
   SOURCE, srcIcon, tagChip, timeAgo, writable,
@@ -78,12 +80,14 @@ function sessionsSec(b: Bucket): string {
     `<span class="t">${esc(s.name)}</span><span class="w">${s.progress != null ? `${Math.round(s.progress * 100)}% done` : esc(timeAgo(s.when ?? null))}</span></a>`).join('')}</section>`;
 }
 
-const sendFoot = (bid: string, paths: string[], n?: number): string => {
+const sendFoot = (bid: string, paths: string[], n?: number, fmt?: Format | null, writable = false): string => {
   const p = esc(paths.join('\n'));
+  const conv = !n && writable && fmtKey(fmt) === 'embeddings'
+    ? `<button type="button" class="ghost sm d-auto" data-act="convert" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('refresh')}Convert to npy / Parquet / CSV…</button>` : '';
   return `<div class="details-foot"><div class="send-row">` +
     `<button type="button" class="primary" data-act="send" data-target="visualize" data-bid="${esc(bid)}" data-paths="${p}">${icon('scatter')}${n ? `Visualize ${fmtN(n)}` : 'Send to Visualize'}</button>` +
     `<button type="button" data-act="send" data-target="label" data-bid="${esc(bid)}" data-paths="${p}">${icon('edit')}${n ? `Label ${fmtN(n)}` : 'Send to Label'}</button></div>` +
-    (n ? '' : `<button type="button" class="ghost sm d-auto" data-act="autolabel" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('robot')}Label all with a model…</button>`) + '</div>';
+    (n || conv ? conv : `<button type="button" class="ghost sm d-auto" data-act="autolabel" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('robot')}Label all with a model…</button>`) + '</div>';
 };
 
 const head = (ico: string, title: string, extra = ''): string =>
@@ -101,7 +105,7 @@ function bucketDetails(b: Bucket): string {
     `<div class="d-path">${icon(b.kind === 's3' ? 'cloud' : 'folder')}<span title="${esc(b.root)}">${esc(b.root)}</span></div>` +
     `<div class="d-meta">${esc(SOURCE[b.kind]?.[1] ?? b.kind)}${b.kind === 's3' ? ` · ${b.mode === 'local' ? (b.local_ready ? 'loaded locally' : 'loading…') : 'streamed'}` : ''} · ${ro}${b.updated_at ? ` · changed ${esc(timeAgo(b.updated_at))}` : ''}</div></section>` +
     formatSec(b.id, '', f) + tagsSec(b.id, '', tags, true) + contentsSec(s, b) + sessionsSec(b) + '</div>' +
-    sendFoot(b.id, ['']);
+    sendFoot(b.id, [''], undefined, f, b.writable);
 }
 
 function folderDetails(b: Bucket): string {
@@ -112,7 +116,7 @@ function folderDetails(b: Bucket): string {
     `<div class="d-path">${icon('db')}<span>${esc(b.name)}${L?.format ? ` · ${esc(L.format.label)}` : ''}</span></div></section>` +
     (L ? formatSec(b.id, D.path, L.format) : '') +
     (L ? tagsSec(b.id, D.path, L.tags, true) : '') + contentsSec(s, undefined, 'Folder') + sessionsSec(b) + '</div>' +
-    sendFoot(b.id, [D.path]);
+    sendFoot(b.id, [D.path], undefined, L?.format, b.writable);
 }
 
 function selectionDetails(b: Bucket): string {
@@ -182,7 +186,34 @@ export function renderDetails(): void {
   el.innerHTML = html;
 }
 
+/** Convert an embeddings folder into another layout (labeling/writers/vector.py), into a new sibling folder. */
+function openConvert(bid: string, path: string): void {
+  let to = 'parquet';
+  const opt = (k: string, t: string, d: string): string => `<label class="check"><input type="radio" name="dc-cv" value="${k}"${k === to ? ' checked' : ''}> <b>${t}</b> <span class="faint">· ${d}</span></label>`;
+  void openDialog({
+    title: 'Convert embeddings', ok: 'Convert', focus: 'input[name="dc-cv"]',
+    body: `<div class="dc-send"><p class="hint">The folder stays as it is; the converted copy goes into a new folder next to it.</p>` +
+      opt('parquet', 'Parquet', 'embeddings.parquet: meta columns + one vector column per feature space') +
+      opt('csv', 'CSV (wide)', 'embeddings.csv: meta columns + <space>_0 … <space>_D') +
+      opt('npy', 'npy + meta.csv', 'the app’s embeddings folder: one (N, D) .npy per feature space') + '</div>',
+    bind: (r) => r.addEventListener('change', (e) => { if (e.target instanceof HTMLInputElement && e.target.name === 'dc-cv') to = e.target.value; }),
+    onOk: async () => {
+      try {
+        const res = await api.convert(bid, path, to);
+        toast(`Converting into ${res.path}…`);
+        watchJobs();
+        if (res.job_id == null) await hooks.reload();
+        return null;
+      } catch (e) { return errText(e); }
+    },
+  });
+}
+
 export const DETAIL_ACTIONS: Record<string, Action> = {
+  convert: (el) => {
+    const bid = el.dataset['bid'] || D.bid || '';
+    if (bid) openConvert(bid, el.dataset['path'] ?? '');
+  },
   redetect: (el) => {
     const bid = el.dataset['bid'] || D.bid || '';
     const path = el.dataset['path'] ?? '';

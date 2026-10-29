@@ -465,11 +465,28 @@ def _trusted_owner(m):
     return tiers.owner_has(uid, 'model.upload')
 
 
-def load_runner(m, workdir):
+_capped = []
+
+
+def _cap_threads():
+    """torch defaults to one thread per reported CPU (64+ on this shared box): in the server process that starves
+    every request, so cap it once, the first time a model loads here."""
+    if _capped:
+        return
+    _capped.append(True)
+    try:
+        import torch
+        torch.set_num_threads(hardware.workers('omp'))
+    except Exception:  # noqa: BLE001 - no torch (API-only installs), or threads already in use
+        pass
+
+
+def load_runner(m, workdir, check_owner=True):
+    _cap_threads()
     if m['family'] == 'hf':
         raise ValueError(f'{m.get("name")!r} is a Hugging Face backbone: it embeds boxes (the plot\'s feature list), '
                          'it does not detect')
-    if m['format'] != 'api' and not _trusted_owner(m):
+    if m['format'] != 'api' and check_owner and not _trusted_owner(m):
         raise PermissionError(f'model {m.get("name")!r} loads files on the server and its owner may not upload model files')
     if m['format'] == 'api':
         from .remote import ApiRunner, LabelApiRunner

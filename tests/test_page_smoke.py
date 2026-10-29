@@ -350,7 +350,7 @@ def test_review_card_label_page_review_all_and_every_theme(server, tmp_path):
     out = _post(f'{server}/api/label/projects', {'name': 'Reviewed', 'source': {'kind': 'local', 'path': str(imgs)}, 'review': True,
                                                  'tasks': [{'name': 'Detect', 'task_type': 'object_detection', 'classes': ['cat']}]})
     pid, tid = out['project']['id'], out['project']['tasks'][0]['id']
-    for _ in range(100):
+    for _ in range(600):                          # up to 60 s: the import is slow while other workers load the box
         if _get(f"{server}/api/jobs/{out['job_id']}")['status'] == 'done':
             break
         time.sleep(0.1)

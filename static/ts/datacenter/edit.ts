@@ -10,6 +10,7 @@ import { toast } from '../core/toast.js';
 import { openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
+import { watchJobs } from './activity.js';
 import { openAutolabel } from './autolabel.js';
 import { deleteBucket } from './ops.js';
 import { openTagEditor } from './tags.js';
@@ -40,6 +41,7 @@ export function downloadZip(bid: string, path: string): void {
 /** Follow a pull job: progress in a toast, then reload the buckets. */
 export async function trackPull(jobId: number, name: string): Promise<void> {
   toast(`Loading ${name} from S3…`);
+  watchJobs();                                     // progress shows in the activity strip
   try {
     const j = await waitJob(jobId);
     const r = (j as { result?: { downloaded?: number; bytes?: number } }).result;
@@ -47,7 +49,6 @@ export async function trackPull(jobId: number, name: string): Promise<void> {
   } catch (e) {
     toast(`Loading ${name} failed: ${errText(e)}`, 'err');
   }
-  await hooks.reload();
 }
 
 function s3Sec(b: Bucket, mode: S3Mode): string {

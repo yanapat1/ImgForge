@@ -125,6 +125,7 @@ class ExportIn(BaseModel):
     only_done: bool = False
     overwrite: bool = False
     classes: dict[str, list[str]] | None = None     # {task_id: [class_id]} to export; a task not listed keeps all
+    formats: list[str] | None = None                # label writers (labeling/writers): default ['yolo']
 
 
 # ------------------------------------------------------------ labeling v2: models, bulk class delete, duplicate

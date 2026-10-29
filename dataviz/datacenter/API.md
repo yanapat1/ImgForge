@@ -38,22 +38,42 @@ export(user, bid, path='')                                     -> (zip name, chu
 source(user, bid, path='')                                     -> {source, format, classes, bucket, path, name}
     # the POST /api/label/projects `source` of a bucket folder (New label › Data Center), classes from its data.yaml
 autolabel(user, bid, path='', model={registry_id | connection_id + model_id, version}, target='inplace'|'copy',
-          new_name=None, conf=None, write_yolo=True, name=None) -> {job_id, bucket, result}
+          new_name=None, conf=None, write_yolo=True, name=None, formats=['yolo']) -> {job_id, bucket, result}
     # one model-lane job:
     #   1. copy: into the new managed bucket new_name (a streamed s3 bucket can only be copied)
     #   2. make a labeling session; its classes are the model's
     #   3. link + activate the model, then label all
-    #   4. write_yolo: loose images move into images/ first (in place: through ops, so undoable),
-    #      then labels/*.txt, data.yaml and classes.txt
-    # job result: {bucket, session: {id, name, url}, labeled, written, copied, restructured: {moved, undo_id}}
+    #   4. write each of `formats` (labeling/writers; the ones the model's task cannot use are skipped and listed in
+    #      formats_skipped). yolo / yolo_obb: loose images move into images/ first (in place: through ops, so
+    #      undoable), then labels/*.txt, data.yaml and classes.txt. Layouts, relative to the picked folder:
+    #        yolo       labels/ mirroring images/, data.yaml, classes.txt (detect / seg / pose / cls)
+    #        yolo_obb   labels/ (labels-obb/ when yolo is picked too): cls x1 y1 .. x4 y4
+    #        coco       annotations/instances_<split>.json (train / val / test from the path, else default)
+    #        voc        Annotations/<stem>.xml          (sub-folders below images/ kept)
+    #        labelme    labelme/<stem>.json, imagePath relative to the json
+    #        createml   createml.json
+    #        csv        labels.csv, one row per shape
+    #        imagefolder imagefolder/<class>/<image> (copies; classification)
+    #      write_yolo=False (the older flag) = formats=[] (label the session only)
+    # job result: {bucket, session: {id, name, url}, labeled, written: {labels, classes, data_yaml?, formats: {key:
+    #   {files, n_media, ...}}}, copied, restructured: {moved, undo_id}, formats_skipped?}
+convert_vectors(user, bid, path='', to='parquet'|'csv'|'npy') -> {job_id, path, result}
+    # an embeddings folder (meta.csv + .npy, embeddings.parquet or embeddings.csv) into another layout, in a new
+    # sibling folder <name>-<to> (labeling/writers/vector.py); an io-lane job, key dc-convert:<bid>
 delete_bucket(user, bid, delete_files=False)                   -> {ok}
 summary(user)                                                  -> {buckets, images, size, managed: {used, free}, links: {local, s3}}
 ls(user, bid, path='', offset=0, limit=500, sort='name'|'-mtime'|'size', q='')
     -> {path, total, entries: [Entry], format: Format|None, tags: [Tag], writable}
 read_file(user, bid, path, w=None) -> (bytes, media_type)      # w: scaled JPEG thumbnail (cached), else the raw file
-read_text(user, bid, path, limit=65536) -> {text, truncated}
+read_text(user, bid, path, limit=65536) -> {text, truncated, size, mtime_ns, encoding, newline, editable, reason?}
+    # limit up to 8 MB; text has '\n' line ends, no BOM (encoding 'utf-8-sig' when the file has one), newline is the
+    # file's own style; mtime_ns is a string (local files; None on S3). editable is false (with a reason) when
+    # truncated, not strict UTF-8, read-only bucket or no data.manage. .env files need data.manage to read at all.
+write_text(user, bid, path, text, expect_mtime_ns=None, create=False) -> {path, size, mtime_ns, undo_id, created, retagged}
+    # 409 when the file's mtime is not expect_mtime_ns (changed since it was read; None overwrites); keeps the mode,
+    # BOM and newline style; the old content goes to the trash (undo step 'replace'), a new file undoes as 'remove'
 ops(user, bid, ops) -> {applied: [..], errors: [{op, error}], undo_id, retagged: {...}|None}
-    op: {op:'mkdir', path} | {op:'move', path, to} | {op:'copy', path, to} | {op:'rename', path, name} | {op:'delete', path}
+    op: {op:'mkdir', path} | {op:'create', path} (empty file) | {op:'move', path, to} | {op:'copy', path, to} | {op:'rename', path, name} | {op:'delete', path}
     `to` is a destination folder; delete moves into `<data_root>/.trash/<undo_id>/`, and undo restores it.
 undo(user, bid, undo_id) -> {restored, errors, retagged}
 upload(user, bid, path, files: [(name, fileobj)], unzip=True) -> {added, skipped, retagged}
@@ -68,8 +88,10 @@ send(user, bid, paths, target='visualize'|'label', name=None, task_type='detect'
 ```
 
 `Bucket = {id, name, kind, root, writable, owner, created_at, updated_at, format, tags, stats: {images, labels, classes, size}, sessions: [{id, kind:'visualize'|'label', name, url}]}`. An s3 bucket also has `{connection_id, s3_bucket, prefix, mode, local_ready, synced_at, s3_root}`.
-`Entry = {name, path, type: 'dir'|'file', size, mtime, kind: 'image'|'label'|'yaml'|'json'|'xml'|'text'|'npy'|'archive'|'other', items?: n (dir), w?, h?, labels?: n (an image with a YOLO label file)}`
+`Entry = {name, path, type: 'dir'|'file', size, mtime, kind: 'image'|'label'|'yaml'|'json'|'xml'|'text'|'code'|'table'|'audio'|'video'|'npy'|'archive'|'other', items?: n (dir), w?, h?, labels?: n (an image with a YOLO label file)}`
 `Tag = {tag, auto}`
+
+Dot names are hidden everywhere (listing, search, export, S3) except config files: `.env`, `.env.*`, `.gitignore`, `.gitattributes`, `.editorconfig`, `.dockerignore`, `.npmrc`, `.prettierrc*`, `.eslintrc*` (store.visible). Dot folders, the trash, `.s3`, `.upload-*` and `*.part-*` stay hidden.
 
 ## HTTP: `dataviz/server/routes/datacenter.py`
 All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Permission: the new tier permission `data.manage` is needed to create buckets, run ops, upload, tag and send. Reading needs only bucket access.
@@ -82,7 +104,8 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | GET / PATCH / DELETE | `/api/dc/buckets/{bid}` | get / update / delete (`?delete_files=1`) |
 | GET | `/api/dc/buckets/{bid}/ls?path=&offset=&limit=&sort=&q=` | ls |
 | GET | `/api/dc/buckets/{bid}/file?path=&w=` | read_file (Cache-Control private, max-age=300) |
-| GET | `/api/dc/buckets/{bid}/text?path=` | read_text |
+| GET | `/api/dc/buckets/{bid}/text?path=&limit=` | read_text |
+| PUT | `/api/dc/buckets/{bid}/text` `{path, text, expect_mtime_ns, create}` | write_text |
 | POST | `/api/dc/buckets/{bid}/ops` `{ops}` | ops |
 | POST | `/api/dc/buckets/{bid}/undo` `{undo_id}` | undo |
 | POST | `/api/dc/buckets/{bid}/upload?path=` multipart `files` | upload |
@@ -95,7 +118,9 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | POST | `/api/dc/buckets/{bid}/sync` | sync |
 | GET | `/api/dc/buckets/{bid}/export?path=` | export (a streamed zip) |
 | GET | `/api/dc/buckets/{bid}/source?path=` | source |
-| POST | `/api/dc/autolabel` `{bucket, path, model, target, new_name, conf, write_yolo, name}` | autolabel |
+| POST | `/api/dc/autolabel` `{bucket, path, model, target, new_name, conf, formats, write_yolo, name}` | autolabel |
+| POST | `/api/dc/buckets/{bid}/convert` `{path, to}` | convert_vectors |
+| GET | `/api/label/formats?task_type=&media_type=` | the label writers: {formats: [{key, label, tasks, media, layout, export_layout, note}], default} |
 
 ## AI assistant: `/api/llm/dc/*` (`dataviz/llm/agent.py`, `tools.py`)
 `POST /api/llm/dc/chat` `{messages: [{role, text}], scope: {bucket, path, selection: [paths]}}` streams NDJSON, one event per line:

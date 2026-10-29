@@ -22,6 +22,7 @@ from .data import connections
 from .labeling.projects import ProjectRegistry
 from .llm.store import LLMStore
 from .ml import analysis
+from .models import proc as mproc
 from .models.registry import ModelRegistry
 from .models.service import ModelService
 from .ml import features as feats
@@ -137,6 +138,7 @@ def main():
                                     'warm_method': cfg['startup'].get('method', 'umap')}) \
         if w['enabled'] else compute.InlinePools()
     jobs = JobManager()
+    mproc.configure(w['enabled'] and w.get('model_process', True), w.get('model_idle_s', mproc.IDLE_S))
     model_reg = ModelRegistry(vconfig.resolve(cfg['models']['store_dir']) if cfg['models']['store_dir'] else ws_root,
                               allowed_roots=[PROJECT_ROOT, *connections.allowed_roots(cfg),
                                              *[vconfig.resolve(p) for p in cfg['models']['allowed_roots']]])

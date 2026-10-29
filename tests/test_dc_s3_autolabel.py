@@ -167,6 +167,54 @@ def test_autolabel_in_place_writes_yolo(dc, serving):
     assert u.status_code == 200 and os.path.isfile(os.path.join(root, 'p0.jpg'))
 
 
+def test_autolabel_coco_and_voc_leave_loose_images_in_place(dc, serving):
+    _, c = dc
+    b = new_bucket(c, name='flat')
+    c.post(f'/api/dc/buckets/{b["id"]}/upload', params={'path': ''},
+           files=[('files', (f'p{i}.jpg', jpeg_bytes(), 'image/jpeg')) for i in range(2)])
+    cid = _model_conn(c, serving)
+    m = {'connection_id': cid, 'model_id': 'yolo/obd/fake-640', 'version': 'v1'}
+    assert c.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': m, 'formats': ['nope']}).status_code == 400
+    r = c.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': m, 'formats': ['coco', 'voc']})
+    assert r.status_code == 200, r.text
+    j = wait_job(c, r.json()['job_id'], timeout=60)
+    assert j['status'] == 'done', j
+    res, root = j['result'], b['root']
+    assert set(res['written']['formats']) == {'coco', 'voc'} and not res.get('restructured')
+    assert sorted(n for n in os.listdir(root) if n.endswith('.jpg')) == ['p0.jpg', 'p1.jpg']   # not moved: no YOLO
+    import json
+    d = json.load(open(os.path.join(root, 'annotations', 'instances_default.json')))
+    assert [x['name'] for x in d['categories']] == ['cat', 'dog'] and len(d['images']) == 2
+    assert sorted(x['file_name'] for x in d['images']) == ['p0.jpg', 'p1.jpg'] and len(d['annotations']) == 4
+    assert sorted(os.listdir(os.path.join(root, 'Annotations'))) == ['p0.xml', 'p1.xml']
+    assert not os.path.exists(os.path.join(root, 'labels'))
+    fm = c.get('/api/label/formats', params={'task_type': 'object_detection', 'media_type': 'image'}).json()
+    assert {'yolo', 'coco', 'voc'} <= {f['key'] for f in fm['formats']} and fm['default'] == ['yolo']
+
+
+def test_convert_embeddings_folder(dc):
+    import csv
+    import numpy as np
+    _, c = dc
+    b = new_bucket(c, name='emb')
+    meta = io.StringIO()
+    csv.writer(meta).writerows([['id', 'label'], ['a', 'x'], ['b', 'y']])
+    npy = io.BytesIO()
+    np.save(npy, np.arange(6, dtype=np.float32).reshape(2, 3))
+    c.post(f'/api/dc/buckets/{b["id"]}/upload', params={'path': ''},
+           files=[('files', ('meta.csv', meta.getvalue().encode(), 'text/csv')),
+                  ('files', ('clip.npy', npy.getvalue(), 'application/octet-stream'))])
+    assert c.get(f'/api/dc/buckets/{b["id"]}').json()['format']['format'] == 'embeddings'
+    r = c.post(f'/api/dc/buckets/{b["id"]}/convert', json={'path': '', 'to': 'csv'})
+    assert r.status_code == 200, r.text
+    if r.json()['job_id'] is not None:
+        assert wait_job(c, r.json()['job_id'])['status'] == 'done'
+    out = os.path.join(b['root'], r.json()['path'], 'embeddings.csv')
+    assert open(out).read().splitlines()[:2] == ['id,label,clip_0,clip_1,clip_2', 'a,x,0.0,1.0,2.0']
+    assert c.post(f'/api/dc/buckets/{b["id"]}/convert', json={'path': '', 'to': 'npy'}).status_code == 400
+    assert c.post(f'/api/dc/buckets/{b["id"]}/convert', json={'path': '', 'to': 'xls'}).status_code == 400
+
+
 def test_autolabel_into_a_copy(dc, serving):
     _, c = dc
     b = new_bucket(c, name='src')
@@ -203,8 +251,17 @@ def test_autolabel_errors(dc, serving):
     m = {'connection_id': cid, 'model_id': 'yolo/obd/fake-640'}
     assert c.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': m, 'target': 'x'}).status_code == 400
     assert c.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': m, 'conf': 3}).status_code == 400
+    # the model is read in the job (it may have to load), so the POST returns at once and the job fails
     r = c.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': {'connection_id': cid, 'model_id': 'nope'}})
-    assert r.status_code in (400, 404)
+    assert r.status_code == 200, r.text
+    j = wait_job(c, r.json()['job_id'])
+    assert j['status'] == 'error' and 'nope' in (j.get('error') or '')
+    # a copy whose model is wrong leaves no empty bucket behind
+    n = len(c.get('/api/dc/buckets').json())
+    r = c.post('/api/dc/autolabel', json={'bucket': b['id'], 'target': 'copy', 'new_name': 'x-labeled',
+                                          'model': {'connection_id': cid, 'model_id': 'nope'}})
+    assert wait_job(c, r.json()['job_id'])['status'] == 'error'
+    assert len(c.get('/api/dc/buckets').json()) == n
 
 
 def test_new_label_session_from_a_managed_bucket(client_as, tmp_path_factory):

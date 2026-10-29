@@ -81,8 +81,9 @@ def test_managed_bucket_upload_ls_ops_undo(dc, tmp_path):
     r = c.get(f'/api/dc/buckets/{b["id"]}/file', params={'path': 'images/train/im0.jpg', 'w': 32})
     assert r.status_code == 200 and r.headers['content-type'] == 'image/jpeg' and 'max-age=300' in r.headers['cache-control']
     assert c.get(f'/api/dc/buckets/{b["id"]}/file', params={'path': 'data.yaml'}).content == b'names: [cat, dog]\n'
-    assert c.get(f'/api/dc/buckets/{b["id"]}/text', params={'path': 'data.yaml'}).json() == \
-        {'text': 'names: [cat, dog]\n', 'truncated': False}
+    tx = c.get(f'/api/dc/buckets/{b["id"]}/text', params={'path': 'data.yaml'}).json()
+    assert {k: tx[k] for k in ('text', 'truncated', 'editable')} == \
+        {'text': 'names: [cat, dog]\n', 'truncated': False, 'editable': True}
 
     # mkdir / copy / rename / move / delete, then undo all of it
     bid = b['id']

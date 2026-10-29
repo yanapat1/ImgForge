@@ -86,8 +86,13 @@ def router(state, ctx):
         return Response(data, media_type=mt, headers=CACHE)
 
     @r.get('/buckets/{bid}/text')
-    def read_text(bid: str, path: str, user=Depends(deps.current_user)):
-        return _call(service.read_text, user, bid, path)
+    def read_text(bid: str, path: str, limit: int = 65536, user=Depends(deps.current_user)):
+        return _call(service.read_text, user, bid, path, limit=limit)
+
+    @r.put('/buckets/{bid}/text')
+    def write_text(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.write_text, user, bid, body.get('path') or '', body.get('text'),
+                     expect_mtime_ns=body.get('expect_mtime_ns'), create=bool(body.get('create')))
 
     @r.post('/buckets/{bid}/ops')
     def ops(bid: str, body: dict, user=Depends(MANAGE)):
@@ -96,6 +101,10 @@ def router(state, ctx):
     @r.post('/buckets/{bid}/undo')
     def undo(bid: str, body: dict, user=Depends(MANAGE)):
         return _call(service.undo, user, bid, body.get('undo_id'))
+
+    @r.post('/buckets/{bid}/convert')
+    def convert(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.convert_vectors, user, bid, body.get('path') or '', to=body.get('to') or 'parquet')
 
     @r.post('/buckets/{bid}/upload')
     def upload(bid: str, path: str = '', unzip: int = 1, files: list[UploadFile] = File(...), user=Depends(MANAGE)):
@@ -139,6 +148,7 @@ def router(state, ctx):
     def autolabel(body: dict, user=Depends(MANAGE)):
         return _call(service.autolabel, user, body.get('bucket'), body.get('path') or '', model=body.get('model'),
                      target=body.get('target') or 'inplace', new_name=body.get('new_name'), conf=body.get('conf'),
-                     write_yolo=body.get('write_yolo', True) is not False, name=body.get('name'))
+                     write_yolo=body.get('write_yolo', True) is not False, name=body.get('name'),
+                     formats=body.get('formats'))
 
     return r

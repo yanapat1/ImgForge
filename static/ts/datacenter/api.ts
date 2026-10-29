@@ -5,7 +5,7 @@
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
   AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, Format, FolderStats, Listing, LsSort, Op, OpsResult,
-  S3Mode, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, UndoResult,
+  S3Mode, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult,
 } from '../types-datacenter.js';
 
 const B = (bid: string): string => `api/dc/buckets/${encodeURIComponent(bid)}`;
@@ -34,6 +34,8 @@ export const updateBucket = (bid: string, body: { name?: string; mode?: S3Mode }
 export const syncBucket = (bid: string): Promise<SyncResult> => postJSON<SyncResult>(`${B(bid)}/sync`, {});
 export const exportUrl = (bid: string, path = ''): string => `${B(bid)}/export${qs({ path })}`;
 export const source = (bid: string, path = ''): Promise<DcSource> => getJSON<DcSource>(`${B(bid)}/source${qs({ path })}`);
+export const convert = (bid: string, path: string, to: string): Promise<{ job_id: number | null; path: string }> =>
+  postJSON<{ job_id: number | null; path: string }>(`${B(bid)}/convert`, { path, to });
 export const autolabel = (body: AutolabelBody): Promise<AutolabelResult> => postJSON<AutolabelResult>('api/dc/autolabel', body);
 export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: boolean }> =>
   sendJSON<{ ok: boolean }>('DELETE', `${B(bid)}${deleteFiles ? '?delete_files=1' : ''}`);
@@ -44,8 +46,11 @@ export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSor
 
 /** URL of a file (raw), or of its scaled JPEG thumbnail when `w` is given. */
 export const fileUrl = (bid: string, path: string, w?: number): string => `${B(bid)}/file${qs({ path, w: w ?? null })}`;
-export const readText = (bid: string, path: string): Promise<{ text: string; truncated: boolean }> =>
-  getJSON<{ text: string; truncated: boolean }>(`${B(bid)}/text${qs({ path })}`);
+export const readText = (bid: string, path: string, limit?: number): Promise<TextFile> =>
+  getJSON<TextFile>(`${B(bid)}/text${qs({ path, limit: limit ?? null })}`);
+/** Save (or with create, make) a text file; 409 when it changed since `expectMtime` (null overwrites). */
+export const writeText = (bid: string, path: string, text: string, expectMtime: string | null, create = false): Promise<TextSaved> =>
+  sendJSON<TextSaved>('PUT', `${B(bid)}/text`, { path, text, expect_mtime_ns: expectMtime, create });
 
 export const ops = (bid: string, list: Op[]): Promise<OpsResult> => postJSON<OpsResult>(`${B(bid)}/ops`, { ops: list });
 export const undo = (bid: string, undoId: string): Promise<UndoResult> => postJSON<UndoResult>(`${B(bid)}/undo`, { undo_id: undoId });

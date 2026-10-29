@@ -22,7 +22,7 @@ import threading
 
 from PIL import Image, ImageOps
 
-from . import runners
+from . import proc, runners
 
 _api = {}                        # (model id, fingerprint) -> ApiRunner
 _api_lock = threading.Lock()
@@ -94,9 +94,24 @@ class RunnerAdapter:
 
     def names(self):
         if self.local:
+            if self.in_process():
+                return proc.get().names(self.m, self.fp, self.workdir)
             with runners._lock:
                 return list(runners.get_runner(self.m, self.fp, self.workdir).names or [])
         return list(_api_runner(self.m, self.fp).names or [])
+
+    def in_process(self):
+        """True when local weights run in the model worker process (proc.py) rather than in the server's own."""
+        if not (self.local and proc.enabled()):
+            return False
+        if self.m.get('family') != 'hf' and not runners._trusted_owner(self.m):
+            raise PermissionError(f'model {self.m.get("name")!r} loads files on the server and its owner may not '
+                                  'upload model files')
+        return True
+
+    def predict_files(self, items, conf=None):
+        """[(file path, name)] -> [predictions | Exception]: the worker process reads, decodes and labels them."""
+        return proc.get().predict_files(self.m, self.fp, self.workdir, [p for p, _ in items], conf)
 
     def predict(self, image, conf=None, size=None, name='image.jpg'):
         res = self.predict_batch([(image, size, name)], conf)[0]

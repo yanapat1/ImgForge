@@ -54,7 +54,7 @@ export interface Summary {
   links: { local: number; s3: number };
 }
 
-export type EntryKind = 'image' | 'label' | 'yaml' | 'json' | 'xml' | 'text' | 'npy' | 'archive' | 'other';
+export type EntryKind = 'image' | 'label' | 'yaml' | 'json' | 'xml' | 'text' | 'code' | 'table' | 'audio' | 'video' | 'npy' | 'archive' | 'other';
 export interface Entry {
   name: string; path: string; type: 'dir' | 'file'; size: number; mtime: number | string | null;
   kind?: EntryKind; items?: number; w?: number; h?: number; labels?: number;
@@ -71,10 +71,19 @@ export interface Retag { path: string; from: string; to: string; reason?: string
 
 export type Op =
   | { op: 'mkdir'; path: string }
+  | { op: 'create'; path: string }
   | { op: 'move'; path: string; to: string }
   | { op: 'copy'; path: string; to: string }
   | { op: 'rename'; path: string; name: string }
   | { op: 'delete'; path: string };
+
+/** GET /api/dc/buckets/{bid}/text: `text` has \n line ends; mtime_ns is a string (null on S3) */
+export interface TextFile {
+  text: string; truncated: boolean; size: number; mtime_ns: string | null; encoding: 'utf-8' | 'utf-8-sig';
+  newline: '\n' | '\r\n' | '\r'; editable: boolean; reason?: string;
+}
+/** PUT /api/dc/buckets/{bid}/text */
+export interface TextSaved { path: string; size: number; mtime_ns: string; undo_id: string; created: boolean; retagged: Retag | null }
 
 /** POST /api/dc/buckets/{bid}/ops */
 export interface OpsResult { applied: unknown[]; errors: Array<{ op: Op; error: string }>; undo_id: string | null; retagged: Retag | null }
@@ -106,15 +115,17 @@ export interface DcSource {
 /** POST /api/dc/autolabel */
 export interface AutolabelBody {
   bucket: string; path: string;
-  model: { registry_id?: string; connection_id?: string; model_id?: string; version?: string | null };
-  target: 'inplace' | 'copy'; new_name?: string; conf?: number; write_yolo?: boolean; name?: string;
+  model: { registry_id?: string; connection_id?: string; model_id?: string; version?: string | null; name?: string };
+  target: 'inplace' | 'copy'; new_name?: string; conf?: number; name?: string;
+  /** labeling/writers keys (GET api/label/formats); [] = keep the labels in the session only. write_yolo is the older flag */
+  formats?: string[]; write_yolo?: boolean;
 }
 export interface AutolabelResult { job_id: number | null; bucket: string }
 /** the job's result */
 export interface AutolabelDone {
   bucket: string; session?: { id: string; name: string; url: string };
   labeled?: { n_images: number; n_shapes: number; failed: number; cancelled: boolean };
-  written?: { labels: number; data_yaml: string; classes: string[] };
+  written?: { labels?: number; data_yaml?: string; classes: string[]; formats?: Record<string, { files?: number }> };
   copied?: { files: number; bytes: number } | null;
 }
 

@@ -77,7 +77,7 @@ DEFAULTS = {
         'match_iou': 0.5,
         'batch_size': 16,
     },
-    'workers': {'enabled': True, 'warmup': True, 'omp_threads': 'auto'},   # auto = hardware.workers('omp')
+    'workers': {'enabled': True, 'warmup': True, 'omp_threads': 'auto', 'model_process': True, 'model_idle_s': 120},   # auto = hardware.workers('omp')
     # PostgreSQL (accounts, sessions, settings, annotations, vectors). ${VAR} / ${VAR:-default} read the environment
     'database': {'url': '${DATABASE_URL}', 'pool_size': 10},
     'auth': {'cookie_secure': '${DATAVIZ_COOKIE_SECURE:-auto}',   # auto = Secure cookie when the request came over https

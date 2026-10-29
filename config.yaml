@@ -156,6 +156,8 @@ workers:
   enabled: true                  # heavy work in background processes (false = in the server process, for debugging)
   warmup: true                   # compile UMAP/PaCMAP/HDBSCAN at start (~20 s) so the first projection is fast
   omp_threads: 8                 # thread cap inside the workers
+  model_process: true            # label-all runs local models in their own process (the page stays responsive)
+  model_idle_s: 120              # that process (and the model's GPU memory) goes after this long unused
 
 s3:                              # S3 / RustFS datasets (added in the page: Settings › Datasets)
   concurrency: 32                # parallel downloads (sync, and indexing in stream mode)

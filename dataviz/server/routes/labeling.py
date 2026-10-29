@@ -41,8 +41,10 @@ from ...core import logging as vlog
 from ...data import connections
 from ...labeling import colors, models
 from ...labeling.export import run_export
+from ...labeling import writers as label_writers
 from ...labeling.models import ModelError
 from ...labeling.store import Conflict, InUse
+from ...models import proc as mproc
 from ..models import (ModelActivateIn, AnnotationsPut, DuplicateIn, ExportIn, LabelClassesIn, LabelClassIdsIn, LabelClassPatch,
                       LabelIdsIn, LabelImportIn, LabelProjectIn, LabelProjectPatch, LabelTaskIdsIn, LabelTaskIn, ReviewIn,
                       LabelTaskPatch, ModelDetectIn, PredictAllIn, PredictIn, RemoveModelLabelsIn, TaskModelIn)
@@ -277,6 +279,14 @@ def router(state, ctx):
 
         job = ctx.jobs.submit(f'label-import:{pid}', f'import images · {entry["name"]}', fn, lane='io', session_id=pid)
         return job.id
+
+    # ------------------------------------------------------------ label formats (labeling/writers)
+    @r.get('/api/label/formats')
+    def label_formats(task_type: str = '', media_type: str = '', user=Depends(deps.current_user)):
+        """The label writers that can write `task_type` / `media_type` (both optional): key, label, tasks, media,
+        layout (the tree written into a bucket folder), export_layout (inside <task>/ of an export), note."""
+        return {'formats': label_writers.for_task(task_type or None, media_type or None),
+                'default': list(label_writers.DEFAULT)}
 
     # ------------------------------------------------------------ projects
     @r.get('/api/label/projects')
@@ -589,15 +599,20 @@ def router(state, ctx):
             raise HTTPException(400, 'pick the folder to export into')
         run_id = uuid.uuid4().hex
         classes = {t: list(v) for t, v in (body.classes or {}).items() if t in live} or None
+        try:
+            fmts = label_writers.check(body.formats or label_writers.DEFAULT) or list(label_writers.DEFAULT)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
         options = {'task_ids': task_ids, 'include_images': body.include_images, 'only_done': body.only_done,
                    'overwrite': body.overwrite, 'run_id': run_id, 'create_views': bool(target.get('create_views')),
-                   'target': {k: v for k, v in target.items() if k != 'conn'}, 'classes': classes}
+                   'target': {k: v for k, v in target.items() if k != 'conn'}, 'classes': classes, 'formats': fmts}
         # remembered for "Re-export": the target's fields stay at the top level too (older pages read them there)
         tgt = {k: v for k, v in target.items() if k != 'conn'}
         if role == 'owner':                     # the owner's "Re-export" setting: a labeler's zip leaves it alone
             with _errors():
                 reg.update(pid, export_default={**tgt, 'target': tgt, 'task_ids': task_ids, 'classes': classes,
-                                                'include_images': body.include_images, 'only_done': body.only_done})
+                                                'include_images': body.include_images, 'only_done': body.only_done,
+                                                'formats': fmts})
         run_dir = reg.project_dir(pid) / 'exports' / run_id
 
         def image_path(m):
@@ -886,16 +901,24 @@ def router(state, ctx):
             buf = []
             fails = {'batches': 0, 'last': None}
 
+            # local weights run in the model worker process (models/proc.py), which reads the files itself:
+            # the server only maps and stores the answers, so labeling never stalls the page
+            files = getattr(ad, 'in_process', None) is not None and ad.in_process()
+            batch, in_flight = (mproc.CHUNK, mproc.IN_FLIGHT) if files else (models.BATCH, models.IN_FLIGHT)
+
             def run(chunk):
                 items, mids, missing = [], [], 0
                 for mid, uri, w, h, name in chunk:
                     try:
-                        items.append((cache.path(uri).read_bytes(), (w, h), name))
+                        p = cache.path(uri)
+                        items.append((str(p), name) if files else (p.read_bytes(), (w, h), name))
                         mids.append(mid)
                     except Exception as e:  # noqa: BLE001 - a missing image is counted, not fatal
                         _log.debug(f'label-all: {vlog.esc(uri)}: {vlog.esc(e)}')
                         missing += 1
-                return list(zip(mids, ad.predict_batch(items, conf) if items else [])), missing
+                if not items:
+                    return [], missing
+                return list(zip(mids, ad.predict_files(items, conf) if files else ad.predict_batch(items, conf))), missing
 
             def flush():
                 if buf:
@@ -929,18 +952,18 @@ def router(state, ctx):
             cancelled = False
             pending = deque()
             try:
-                with ThreadPoolExecutor(models.IN_FLIGHT, thread_name_prefix='label-model') as pool:
+                with ThreadPoolExecutor(in_flight, thread_name_prefix='label-model') as pool:
                     for rows in batches:
-                        for i in range(0, len(rows), models.BATCH):
+                        for i in range(0, len(rows), batch):
                             if job.cancelled.is_set():
                                 cancelled = True
                                 break
                             # nothing came back at all from the last 3 batches: the server is down / broken
                             if fails['batches'] >= 3 and not stats['n_images'] and not buf:
                                 break
-                            while len(pending) >= models.IN_FLIGHT:
+                            while len(pending) >= in_flight:
                                 collect(*pending.popleft())
-                            chunk = rows[i:i + models.BATCH]
+                            chunk = rows[i:i + batch]
                             pending.append((pool.submit(run, chunk), len(chunk)))
                         else:
                             continue

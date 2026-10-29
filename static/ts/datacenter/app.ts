@@ -14,6 +14,7 @@ import { setTheme, THEME } from '../core/theme.js';
 import { openSettings } from '../settings/dialog.js';
 import { mountUserMenu } from '../views/usermenu.js';
 import * as api from './api.js';
+import { ACTIVITY_ACTIONS, watchJobs } from './activity.js';
 import { AI_ACTIONS, aiScopeChanged, bindAi, renderAi } from './ai.js';
 import { BROWSER_ACTIONS, bindBrowser, loadListing, renderFolder, renderSearch, selChanged } from './browser.js';
 import { BUCKET_ACTIONS, renderOverview } from './buckets.js';
@@ -54,6 +55,7 @@ const SKELETON = (): string => `
       <svg class="ico only-dark" aria-hidden="true"><use href="${ICONS}#i-sun"/></svg><svg class="ico only-light" aria-hidden="true"><use href="${ICONS}#i-moon"/></svg></button>
   </div>
 </header>
+<div id="dc-activity" class="dc-activity hidden" role="status" aria-live="polite" aria-label="Running jobs"></div>
 <div id="dc-app" class="dc-app">
   <aside id="dc-tree" class="dc-tree" aria-label="Buckets and folders"></aside>
   <section id="dc-main" class="dc-main" aria-label="Files">
@@ -248,7 +250,7 @@ export async function start(): Promise<void> {
   if (c === 'grid' || c === 'list') D.cards = c as CardMode;
   if (s === 'name' || s === '-mtime' || s === 'size') D.sort = s as LsSort;
   if (bs === 'recent' || bs === 'name' || bs === 'size' || bs === 'images') D.bucketSort = bs as BucketSort;
-  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS);
+  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS);
   hooks.navigate = navigate;
   hooks.reload = reload;
   hooks.render = render;
@@ -264,4 +266,5 @@ export async function start(): Promise<void> {
   await loadBuckets();
   navigate(D.bid, D.path, false);
   renderAi();
+  watchJobs();
 }

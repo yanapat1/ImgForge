@@ -7,6 +7,7 @@
 import { rememberPref } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { floatPopover } from '../core/popover.js';
+import { jobBadge } from './activity.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import {
@@ -98,7 +99,7 @@ function card(b: Bucket): string {
     mosaic(b) +
     `<div class="bc-body"><div class="bc-title"><button type="button" class="bc-name" data-act="go" data-bid="${esc(b.id)}" data-path="" title="Open ${esc(b.name)}">${esc(b.name)}</button>` +
     `<span class="src">${srcIcon(b)}${esc(srcText(b))}</span>${editBtn(b)}</div>` +
-    `<div class="bc-row">${fbadge(b.format)}${warnLine(b)}</div>` +
+    `<div class="bc-row">${fbadge(b.format)}${jobBadge(b.id)}${warnLine(b)}</div>` +
     `<div class="bc-stats num">${stats(b)}</div>` +
     `<div class="bc-tags">${user.map((t) => tagChip(t.tag)).join('') || '<span class="muted">no tags</span>'}</div></div></article>`;
 }

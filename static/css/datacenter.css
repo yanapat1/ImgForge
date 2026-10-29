@@ -37,6 +37,20 @@ html[data-screen="data"] .viz-only, html[data-screen="data"] #home, html:not([da
 .dc-app.ai-open { grid-template-rows: minmax(150px, 1fr) min(560px, 64%); }
 .dc-scrim { display: none; }
 
+/* ---------------------------------------------------------------- activity strip (activity.ts) + card job badge */
+.dc-activity { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 6px var(--s4); background: var(--surface);
+  border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+.dc-act-row { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) minmax(120px, 280px) auto auto auto; gap: var(--s3); align-items: center; min-height: 28px; }
+.dc-act-l, .dc-act-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-act-row .bar { width: 100%; }
+.dc-act-more { font-size: 12px; padding-left: 2px; }
+.dc-jobb { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--r-sm); font-size: 12px; font-weight: 650;
+  background: var(--accent-soft); color: var(--accent-text); white-space: nowrap; }
+@media (max-width: 760px) {
+  .dc-act-row { grid-template-columns: minmax(0, 1fr) 90px auto auto; }
+  .dc-act-s, .dc-act-row > .muted.num { display: none; }
+}
+
 /* ---------------------------------------------------------------- format dot + badge, tags */
 .dc-fdot { --fc: var(--accent); display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--fc); }
 .dc-fdot.hollow { background: transparent; box-shadow: inset 0 0 0 1.5px var(--fc); }
@@ -285,6 +299,8 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .dc-drop .ico { width: 32px; height: 32px; color: var(--accent); }
 .dc-drop span { font: 12px var(--mono); color: var(--text-muted); }
 .dc-dragghost { position: fixed; top: -100px; left: -100px; padding: 4px 10px; border-radius: var(--r); background: var(--accent); color: var(--on-accent); font-size: var(--fs-sm); font-weight: 650; }
+.dc-al-tree { margin: 0; padding: var(--s2) var(--s3); max-height: 220px; overflow: auto; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); font: 12px/1.55 var(--mono); white-space: pre; color: var(--text); }
 .dc-text { max-height: 60vh; overflow: auto; margin: 0; padding: var(--s3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 
 /* ---------------------------------------------------------------- details */
