@@ -108,6 +108,15 @@ export interface CreateBucketBody {
 /** POST /api/dc/buckets/{bid}/sync */
 export interface SyncResult { job_id: number | null; result: { downloaded: number; bytes: number; total: number } | null }
 
+/** GET /api/dc/buckets/{bid}/export/check: the zip about to be downloaded (4xx {detail} when it cannot be made) */
+export interface ExportCheck { name: string; kind: string }
+/** POST /api/dc/buckets/{bid}/export: copy a folder to a saved connection; keys = prefix (or path) + the bucket-relative path */
+export type ExportRemoteKind = 's3' | 'ftp' | 'sftp';
+export interface ExportRemoteTarget { kind: ExportRemoteKind; connection_id: string; bucket?: string; prefix?: string; path?: string }
+export interface ExportRemoteBody { path: string; target: ExportRemoteTarget; create_bucket?: boolean; overwrite?: boolean }
+export interface ExportRemoteDone { files: number; bytes: number; uri: string }
+export interface ExportRemoteResult { job_id: number | null; result: ExportRemoteDone | null }
+
 /** GET /api/dc/buckets/{bid}/source: what New label › Data Center needs to read a bucket folder */
 export interface DcSource {
   source: { kind: 'local'; path: string } | { kind: 's3'; connection_id: string; bucket: string; prefix: string };

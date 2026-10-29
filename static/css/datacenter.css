@@ -706,3 +706,19 @@ button.icon-btn.sm { width: 26px; padding: 0; }
 .d-src { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 .d-src > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .d-src code { font-size: 11.5px; }
+
+/* ---------------------------------------------------------------- export dialog (export.ts; cards are label.css .lbx-kind) */
+.ui-dlg.wide:has(.dc-exp) { width: min(680px, 100%); }
+.dc-exp { display: flex; flex-direction: column; gap: 14px; }
+.dc-exp-kinds { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 560px) { .dc-exp-kinds { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.dc-exp .lbx-kind { cursor: pointer; font-size: var(--fs-sm); }
+.dc-exp .lbx-kind.off { opacity: .5; cursor: not-allowed; }
+.dc-exp-t { display: flex; flex-direction: column; gap: 10px; }
+.dc-exp-f { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: end; }
+@media (max-width: 560px) { .dc-exp-f { grid-template-columns: 1fr; } }
+.dc-exp-dest { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dc-exp-dest code { display: block; padding: 8px 10px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border);
+  font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
+.dc-exp-dest .hint, .dc-exp > .hint { margin: 0; }
+.dc-exp > .hint .ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }

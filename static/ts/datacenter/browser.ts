@@ -15,7 +15,7 @@ import { closeFloat, floatPopover } from '../core/popover.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } from './ops.js';
-import { downloadZip } from './edit.js';
+import { downloadZip, openExportDialog } from './export.js';
 import { openFile, TEXTY } from './editor.js';
 import { openSend } from './send.js';
 import {
@@ -464,8 +464,10 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
     `<button type="button" role="menuitem" data-act="send" data-target="label">${icon('edit')}Label<span class="faint">a labeling project</span></button>` +
     (D.sel.size ? '' : `<div class="dc-menu-h">This folder</div>` +
       `<button type="button" role="menuitem" data-act="autolabel" data-path="${esc(D.path)}">${icon('robot')}Label with model…<span class="faint">auto-label every image</span></button>` +
-      `<button type="button" role="menuitem" data-act="export-zip"${curBucket()?.kind === 's3' && !curBucket()?.local_ready ? ' disabled title="Load the bucket into local first (Edit)"' : ''}>${icon('download')}Export (zip)<span class="faint">download this folder</span></button>`)),
-  'export-zip': () => { closeFloat(); if (D.bid) downloadZip(D.bid, D.path); },
+      `<button type="button" role="menuitem" data-act="export-zip">${icon('download')}Export (zip)<span class="faint">download this folder</span></button>` +
+      `<button type="button" role="menuitem" data-act="export-to">${icon('upload')}Export to…<span class="faint">S3 · RustFS, FTP, SFTP</span></button>`)),
+  'export-zip': () => { closeFloat(); if (D.bid) void downloadZip(D.bid, D.path); },
+  'export-to': () => { closeFloat(); if (D.bid) void openExportDialog(D.bid, D.path); },
   send: (el) => {
     closeFloat();
     const bid = el.dataset['bid'] || D.bid || D.focus;

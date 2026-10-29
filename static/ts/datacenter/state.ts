@@ -83,7 +83,7 @@ export const hooks = {
 };
 
 /** User prefs (core/auth.ts pref / rememberPref) of the page. */
-export const PREF = { view: 'dc_view', cards: 'dc_cards', sort: 'dc_sort', bucketSort: 'dc_bucket_sort', ai: 'dc_ai_open' } as const;
+export const PREF = { view: 'dc_view', cards: 'dc_cards', sort: 'dc_sort', bucketSort: 'dc_bucket_sort', ai: 'dc_ai_open', exp: 'dc_export' } as const;
 
 /** Whether the user may change data here (tier permission data.manage; an S3 bucket is read-only). */
 export const writable = (): boolean => !!(D.listing ? D.listing.writable : curBucket()?.writable);

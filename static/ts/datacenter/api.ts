@@ -4,7 +4,7 @@
 
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
-  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, Format, FolderStats, ImportBody, Listing, LsSort, Op, OpsResult,
+  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats, ImportBody, Listing, LsSort, Op, OpsResult,
   S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult,
 } from '../types-datacenter.js';
 
@@ -33,6 +33,12 @@ export const renameBucket = (bid: string, name: string): Promise<Bucket> => send
 export const updateBucket = (bid: string, body: { name?: string; mode?: S3Mode }): Promise<Bucket> => sendJSON<Bucket>('PATCH', B(bid), body);
 export const syncBucket = (bid: string): Promise<SyncResult> => postJSON<SyncResult>(`${B(bid)}/sync`, {});
 export const exportUrl = (bid: string, path = ''): string => `${B(bid)}/export${qs({ path })}`;
+/** Ask first whether the zip can be made (the download itself is an anchor, so its error would be a broken file). */
+export const exportCheck = (bid: string, path = ''): Promise<ExportCheck> => getJSON<ExportCheck>(`${B(bid)}/export/check${qs({ path })}`);
+/** Copy a folder to S3 / FTP / SFTP through a saved connection (a job on the io lane, dc-export:<bid>). */
+export const exportTo = (bid: string, body: ExportRemoteBody): Promise<ExportRemoteResult> => postJSON<ExportRemoteResult>(`${B(bid)}/export`, body);
+export const createRemoteBucket = (id: string, bucket: string): Promise<{ ok: boolean; bucket: string; created: boolean }> =>
+  postJSON<{ ok: boolean; bucket: string; created: boolean }>('api/connections/create-bucket', { id, bucket });
 export const source = (bid: string, path = ''): Promise<DcSource> => getJSON<DcSource>(`${B(bid)}/source${qs({ path })}`);
 export const convert = (bid: string, path: string, to: string): Promise<{ job_id: number | null; path: string }> =>
   postJSON<{ job_id: number | null; path: string }>(`${B(bid)}/convert`, { path, to });
