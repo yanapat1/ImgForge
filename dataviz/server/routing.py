@@ -25,6 +25,9 @@ from ..core import logging as vlog
 
 _S = re.compile(r'^/s/([^/]+)(/.*)?$')
 log = vlog.get_logger('sessions')
+_MISSING_TITLE = "This session's folder is missing"
+_MISSING_TEXT = ('The dataset folder was moved, renamed or deleted, so the session cannot load. Point the session at '
+                 'its new place from Edit on its card, or find the data in Data Center.')
 
 
 def strip_raw(raw):
@@ -41,11 +44,17 @@ class SessionRouting:
         self.ctx = ctx
         self.error_page = error_page        # (code, title, message) -> Response, for browsers
 
-    async def _fail(self, scope, receive, send, code, detail, rest):
+    async def _fail(self, scope, receive, send, code, detail, rest, page=None):
+        """page: (title, message) for the browser, with `detail` shown under it as the technical part."""
         if self.error_page is not None and not rest.startswith('/api/') and \
                 'text/html' in dict(scope.get('headers') or []).get(b'accept', b'').decode('latin-1'):
-            title = 'Page not found' if code == 404 else 'Something went wrong'
-            resp = self.error_page(code, title, 'This address does not exist.' if code == 404 else detail)
+            path = scope.get('path', '/')
+            if page:
+                resp = self.error_page(code, page[0], page[1], path, detail)
+            elif code == 404:
+                resp = self.error_page(code, 'Page not found', 'This address does not exist.', path)
+            else:
+                resp = self.error_page(code, 'Something went wrong', detail, path)
         else:
             resp = JSONResponse({'detail': detail}, status_code=code, headers={'Cache-Control': 'no-store'})
         await resp(scope, receive, send)
@@ -75,7 +84,14 @@ class SessionRouting:
         except HTTPException as e:
             return await self._fail(scope, receive, send, e.status_code, e.detail, rest)
         except (ValueError, KeyError, FileNotFoundError, NotADirectoryError, PermissionError) as e:
-            return await self._fail(scope, receive, send, 409, f'cannot open this session: {str(e).strip(chr(39))}', rest)
+            why = str(e).strip(chr(39))
+            page = None
+            if isinstance(e, (FileNotFoundError, NotADirectoryError)) or 'not a folder' in why:
+                page = (_MISSING_TITLE, _MISSING_TEXT)
+            elif isinstance(e, PermissionError):
+                page = ("This session's folder cannot be read",
+                        'The server has no permission to read the dataset folder. Fix its permissions, then try again.')
+            return await self._fail(scope, receive, send, 409, f'cannot open this session: {why}', rest, page)
         except Exception as e:  # noqa: BLE001 - surface it, keep serving
             log.exception(f'opening session {vlog.esc(sid)} failed')
             return await self._fail(scope, receive, send, 500, f'cannot open this session: {type(e).__name__}: {e}', rest)

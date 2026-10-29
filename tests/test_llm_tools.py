@@ -203,6 +203,26 @@ class FakeService:
         self.calls.append(('set_tags', bid, path, tuple(add), tuple(remove)))
         return [{'tag': t, 'auto': False} for t in add]
 
+    def read_text(self, user, bid, path, limit=65536):
+        self.calls.append(('read_text', bid, path))
+        if path == 'new.txt':
+            from dataviz.datacenter.store import DCError
+            raise DCError('nothing at new.txt', 404)
+        return {'text': 'names: [cat]\n', 'truncated': False, 'mtime_ns': '42'}
+
+    def write_text(self, user, bid, path, text, expect_mtime_ns=None, create=False):
+        self.calls.append(('write_text', bid, path, text, expect_mtime_ns, create))
+        return {'path': path, 'size': len(text), 'undo_id': 'u2', 'created': create, 'retagged': None}
+
+    def inspect_source(self, user, source, ref, connection_id=None, opts=None):
+        self.calls.append(('inspect_source', source, ref, opts))
+        return {'title': 'COCO 128', 'name': 'coco128', 'ref': ref, 'files': 3, 'size': 7_000_000, 'license': 'AGPL',
+                'versions': [{'version': v} for v in range(20)]}
+
+    def import_source(self, user, source, ref, name=None, connection_id=None, opts=None, bucket=None, path=''):
+        self.calls.append(('import_source', source, ref, name, opts, bucket, path))
+        return {'job_id': 7, 'bucket': bucket or 'b9', 'result': None}
+
 
 @pytest.fixture
 def svc(monkeypatch):
@@ -438,3 +458,30 @@ def test_dc_routes_gated(client):
     msg = {'messages': [{'role': 'user', 'text': 'hi'}], 'scope': {}}
     assert client.post('/api/llm/dc/chat', json=msg).status_code == 403            # feature off
     assert client.post('/api/llm/dc/confirm', json={'plan_id': 'x', 'action_ids': ['a1']}).status_code == 403
+
+
+# ---------------------------------------------------------------- web import and text files
+def test_web_import_and_write_text_tools(svc):
+    out, summary = tools.run(ALICE, 'inspect_dataset_source', {'source': 'kaggle', 'ref': 'ultralytics/coco128', 'version': '2'})
+    assert out['title'] == 'COCO 128' and len(out['versions']) == 10 and 'COCO 128' in summary
+    assert svc.calls[-1] == ('inspect_source', 'kaggle', 'ultralytics/coco128', {'version': '2'})
+    with pytest.raises(tools.ToolError):
+        tools.run(ALICE, 'inspect_dataset_source', {'source': 'ftp', 'ref': 'x'})
+    # changes are planned with a readable line, the target bucket checked
+    clean, line = tools.prepare(ALICE, 'import_dataset', {'source': 'url', 'ref': 'https://x.org/a.zip', 'name': 'a'})
+    assert line == "Download https://x.org/a.zip from url into a new bucket 'a' (archives unpacked)"
+    clean, line = tools.prepare(ALICE, 'import_dataset', {'source': 'huggingface', 'ref': 'u/d', 'bucket': 'cars', 'path': 'hf'})
+    assert clean['bucket'] == 'b1' and 'folder hf/ of' in line
+    with pytest.raises(tools.ToolError, match='cannot be changed'):
+        tools.prepare(ALICE, 'import_dataset', {'source': 'url', 'ref': 'https://x.org/a.zip', 'bucket': 'cloud'})
+    res, _ = tools.run(ALICE, 'import_dataset', {**clean, 'extract': False})
+    assert res == {'bucket': 'b1', 'job_id': 7}
+    assert svc.calls[-1] == ('import_source', 'huggingface', 'u/d', None, {'extract': False}, 'b1', 'hf')
+    # write_text_file: an existing file is saved against the mtime it was read at, a new one is created
+    _, line = tools.prepare(ALICE, 'write_text_file', {'bucket': 'cars', 'path': 'data.yaml', 'text': 'names: [cat, dog]\nnc: 2\n'})
+    assert line.startswith('Write data.yaml in') and '2 lines' in line and 'undoable' in line
+    tools.run(ALICE, 'write_text_file', {'bucket': 'cars', 'path': 'data.yaml', 'text': 'x'})
+    assert svc.calls[-1] == ('write_text', 'b1', 'data.yaml', 'x', '42', False)
+    tools.run(ALICE, 'write_text_file', {'bucket': 'cars', 'path': 'new.txt', 'text': 'y'})
+    assert svc.calls[-1] == ('write_text', 'b1', 'new.txt', 'y', None, True)
+    assert tools.TOOLS['write_text_file'].kind == 'change' and tools.TOOLS['inspect_dataset_source'].kind == 'read'

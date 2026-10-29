@@ -5,23 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>{{code}} · Dataset Visualizer</title>
-<script src="/static/js/theme-boot.js"></script>
-<link rel="stylesheet" href="/static/css/tokens.css">
-<link rel="stylesheet" href="/static/css/base.css">
-<link rel="stylesheet" href="/static/css/states.css">
+<!-- served by the server for a browser that hits an error; every link is relative ({{base}} = ../ per level of the
+     URL asked for), so the page keeps its styles behind a path prefix (a proxy) too -->
+<script src="{{base}}static/js/theme-boot.js"></script>
+<link rel="stylesheet" href="{{base}}static/css/tokens.css">
+<link rel="stylesheet" href="{{base}}static/css/base.css">
+<link rel="stylesheet" href="{{base}}static/css/states.css">
 <style>html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}</style>
 </head>
 <body>
-<div class="errpage">
+<main class="errpage">
   <div class="errpage-box panel" role="alert">
+    <div class="errpage-icon"><svg class="ico" aria-hidden="true"><use href="{{base}}static/assets/icons.svg#i-alert"/></svg></div>
     <div class="errpage-code num">Error {{code}}</div>
     <h2>{{title}}</h2>
     <div class="errpage-msg muted">{{message}}</div>
+    {{detail}}
     <div class="errpage-actions">
-      <button class="primary" onclick="location.href='/'">All sessions</button>
-      <button onclick="history.length>1?history.back():location.reload()">Go back</button>
+      <button class="primary" type="button" onclick="location.href='{{base}}'">All sessions</button>
+      <button type="button" onclick="location.href='{{base}}?data'">Open Data Center</button>
+      <button type="button" class="ghost" onclick="location.reload()">Try again</button>
     </div>
   </div>
-</div>
+</main>
 </body>
 </html>

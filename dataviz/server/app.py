@@ -305,10 +305,15 @@ def create_app(ctx, auth=True) -> FastAPI:
     def wants_html(request):
         return 'text/html' in request.headers.get('accept', '') and not request.url.path.startswith('/api/')
 
-    def error_page(code, title, message):
+    def error_page(code, title, message, path='/', detail=''):
+        """The browser's error page. Its links are relative to `path` (the URL the browser asked for, below any
+        proxy prefix): /s/<sid>/ -> ../../static/..., so the styles load behind a path prefix too."""
         html = (STATIC_DIR / 'error.html').read_text(encoding='utf-8')
-        for k, v in (('code', code), ('title', title), ('message', message)):
+        base = '../' * max(0, path.count('/') - 1)
+        detail = f'<code class="errpage-path">{escape(str(detail))}</code>' if detail else ''
+        for k, v in (('code', code), ('title', title), ('message', message), ('base', base)):
             html = html.replace('{{%s}}' % k, escape(str(v)))
+        html = html.replace('{{detail}}', detail)
         return HTMLResponse(html, status_code=code, headers={'Cache-Control': 'no-store'})
 
     @app.exception_handler(HTTPException)       # starlette's: also covers the router's own 404 / 405
@@ -317,13 +322,15 @@ def create_app(ctx, auth=True) -> FastAPI:
             http_log.warning(f'{request.method} {vlog.esc(request.url.path)}: {vlog.esc(exc.detail)}')
         if wants_html(request):                 # a person typed a bad URL: a page, not JSON
             title = 'Page not found' if exc.status_code == 404 else 'Something went wrong'
-            return error_page(exc.status_code, title, exc.detail if exc.status_code != 404 else 'This address does not exist.')
+            return error_page(exc.status_code, title, exc.detail if exc.status_code != 404 else 'This address does not exist.',
+                              request.url.path)
         return JSONResponse({'detail': exc.detail}, status_code=exc.status_code)
 
     @app.exception_handler(Exception)
     async def crash(request: Request, exc: Exception):    # the access_log middleware already logged the traceback
         if wants_html(request):
-            return error_page(500, 'The server hit a problem', 'The request failed. Details are in the server log.')
+            return error_page(500, 'The server hit a problem', 'The request failed. Details are in the server log.',
+                              request.url.path)
         return JSONResponse({'detail': 'internal server error'}, status_code=500)
 
     for module in (system, projections, samples, datasets, models, labeling, label_import, curation, llm, compare, live, promote,

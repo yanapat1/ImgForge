@@ -1293,12 +1293,13 @@ class ProjectStore:
 
     # ------------------------------------------------------------ stats (cards)
     def stats(self):
-        """{n_media, tasks:{tid: {done, in_progress, skipped, todo}}, review:{tid: {manual, bulk}}}: two grouped
-        queries over the statuses (review = done images approved by hand / by Review all)."""
+        """{n_media, tasks:{tid: {done, in_progress, skipped, todo, auto}}, review:{tid: {manual, bulk}}}: grouped
+        queries over the statuses (review = done images approved by hand / by Review all; auto = the in_progress
+        images a model predicted, so a label-all run shows on the card before anyone commits)."""
         a = {'p': self.pid}
         with self._read() as c:
             n_media = c.execute(_q('SELECT COUNT(*) FROM lbl.media WHERE project_id = :p'), a).scalar()
-            out = {t: {'done': 0, 'in_progress': 0, 'skipped': 0, 'todo': 0} for t in self._live_tids(c)}
+            out = {t: {'done': 0, 'in_progress': 0, 'skipped': 0, 'todo': 0, 'auto': 0} for t in self._live_tids(c)}
             review = {t: {'manual': 0, 'bulk': 0} for t in out}
             for tid, status, n in c.execute(_q('SELECT task_id, status, COUNT(*) FROM lbl.media_task_status '
                                                'WHERE project_id = :p GROUP BY task_id, status'), a):
@@ -1309,6 +1310,14 @@ class ProjectStore:
                                            'GROUP BY task_id, review'), a):
                 if tid in review and rv in review[tid]:
                     review[tid][rv] = n
+            # auto: in_progress images that still carry live model rows (a subset of in_progress)
+            for tid, n in c.execute(_q("SELECT s.task_id, COUNT(*) FROM lbl.media_task_status s "
+                                       "WHERE s.project_id = :p AND s.status = 'in_progress' AND EXISTS ("
+                                       "SELECT 1 FROM lbl.annotations a WHERE a.project_id = s.project_id "
+                                       "AND a.task_id = s.task_id AND a.media_id = s.media_id "
+                                       "AND a.source = 'model' AND NOT a.is_deleted) GROUP BY s.task_id"), a):
+                if tid in out:
+                    out[tid]['auto'] = n
         for s in out.values():
             s['todo'] = max(0, n_media - s['done'] - s['in_progress'] - s['skipped'])
         return {'n_media': n_media, 'tasks': out, 'review': review}

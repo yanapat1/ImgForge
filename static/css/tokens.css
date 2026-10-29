@@ -175,6 +175,7 @@
   --prog-track: #313a46;
   --prog-review: #b79cf0;
   --prog-bulk: #e3a64f;
+  --prog-auto: #e07bd0;
   --label-badge: rgba(122, 82, 196, .9);
   --on-label-badge: #f3ecff;
   --drop-bg: rgba(138, 180, 240, .06);
@@ -192,6 +193,7 @@
   --prog-track: #e1e6ec;
   --prog-review: #7c4dcc;
   --prog-bulk: #c27a10;
+  --prog-auto: #b4369f;
   --label-badge: rgba(108, 62, 186, .92);
   --on-label-badge: #ffffff;
   --drop-bg: rgba(39, 102, 196, .04);

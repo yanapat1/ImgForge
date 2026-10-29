@@ -287,6 +287,61 @@ def _s3_sync(user, a):
     return res, f'{b["name"]}: re-sync from S3 started'
 
 
+SOURCES = ['kaggle', 'huggingface', 'roboflow', 'url', 'zenodo', 'openml']
+SOURCE_ARGS = ('version', 'revision', 'patterns', 'format')
+
+
+def _source_opts(a):
+    o = {k: a[k] for k in SOURCE_ARGS if a.get(k) not in (None, '', [])}
+    for k in ('extract', 'nested', 'keep_archive'):
+        if k in a:
+            o[k] = bool(a[k])
+    return o
+
+
+def _inspect_source(user, a):
+    res = _svc().inspect_source(user, a['source'], a['ref'], opts=_source_opts(a))
+    keep = ('title', 'name', 'ref', 'size', 'files', 'license', 'version', 'versions', 'rows', 'columns', 'url',
+            'warning', 'sample')
+    out = {k: res[k] for k in keep if res.get(k) not in (None, [], '')}
+    if isinstance(out.get('versions'), list):
+        out['versions'] = out['versions'][:10]
+    return out, f'→ {out.get("title")}' + (f', {out["files"]} files' if out.get('files') else '')
+
+
+def _import(user, a):
+    res = _svc().import_source(user, a['source'], a['ref'], name=a.get('name'), opts=_source_opts(a),
+                               bucket=a.get('bucket'), path=a.get('path', ''))
+    return {'bucket': res.get('bucket'), 'job_id': res.get('job_id')}, \
+        f'import of {a["ref"]} started (job {res.get("job_id")}): progress shows at the top of the Data Center'
+
+
+def _write_text(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    svc = _svc()
+    try:
+        cur = svc.read_text(user, b['id'], a['path'], limit=8 * 1024 * 1024)
+        mtime, exists = cur.get('mtime_ns'), True
+    except Exception as e:  # noqa: BLE001 - a missing file is created; any other error surfaces from the write
+        if getattr(e, 'status', None) != 404:
+            raise
+        mtime, exists = None, False
+    res = svc.write_text(user, b['id'], a['path'], a['text'], expect_mtime_ns=mtime, create=not exists)
+    return {k: res.get(k) for k in ('path', 'size', 'undo_id', 'created', 'retagged')}, \
+        f'{"created" if not exists else "saved"} {a["path"]} ({res.get("size")} bytes, undoable)'
+
+
+def _write_preview(b, a):
+    n = a['text'].count('\n') + (0 if a['text'].endswith('\n') or not a['text'] else 1)
+    return f'Write {a["path"]} in {_bname(b, a)}: {_plural(n, "line")} (replaces the file; the old one goes to the trash, undoable)'
+
+
+def _import_preview(b, a):
+    named = f' {a["name"]!r}' if a.get('name') else ''
+    where = f'folder {_folder(a.get("path", ""))} of {_bname(b, a)}' if b else f'a new bucket{named}'
+    return f'Download {a["ref"]} from {a["source"]} into {where}' + (' (archives unpacked)' if a.get('extract', True) else '')
+
+
 def _items(paths):
     paths = list(paths or [])
     shown = ', '.join(paths[:3]) + (f' +{len(paths) - 3} more' if len(paths) > 3 else '')
@@ -366,6 +421,33 @@ _add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files wi
                           'version, local-only files are kept.',
           _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
           lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True))
+
+_add(Tool('inspect_dataset_source', 'Preview a dataset on the web before importing it: Kaggle (owner/dataset, '
+                                    'competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), '
+                                    'a direct link (url), Zenodo (record id / DOI) or OpenML (dataset id): title, size, files, '
+                                    'license, versions.',
+          _obj({'source': {'type': 'string', 'enum': SOURCES, 'description': 'where the dataset is'},
+                'ref': S('the dataset: its id / path or its link'), 'version': S('Kaggle / Roboflow version (optional)'),
+                'revision': S('Hugging Face revision (optional)'), 'patterns': A('Hugging Face / Zenodo: only these globs'),
+                'format': S('Roboflow export format (yolov8, coco, voc ...) or OpenML parquet / arff')},
+               ['source', 'ref']), False, _inspect_source))
+_add(Tool('import_dataset', 'Download a dataset from the web into a new bucket (or a folder of a writable bucket) '
+                            'as a background job; archives are unpacked and the format is detected. The user needs the '
+                            "source's token in Settings › Connections (Kaggle, Roboflow; Hugging Face / Zenodo only for "
+                            'gated / restricted data).',
+          _obj({'source': {'type': 'string', 'enum': SOURCES, 'description': 'where the dataset is'},
+                'ref': S('the dataset: its id / path or its link'), 'name': S('new bucket name (default: from the ref)'),
+                'bucket': S('import into this existing bucket instead (id or exact name)'),
+                'path': S('folder of that bucket (default the root)'), 'version': S('Kaggle / Roboflow version'),
+                'revision': S('Hugging Face revision'), 'patterns': A('Hugging Face / Zenodo: only these globs'),
+                'format': S('Roboflow export format / OpenML parquet or arff'),
+                'extract': {'type': 'boolean', 'description': 'unpack archives (default true)'},
+                'nested': {'type': 'boolean', 'description': 'also unpack archives inside archives'}},
+               ['source', 'ref']), True, _import, _import_preview))
+_add(Tool('write_text_file', 'Write (replace or create) a text file such as data.yaml, classes.txt, a .json or .env. '
+                             'Read it first with read_text and send the whole new content. Undoable.',
+          _obj({'bucket': BUCKET, 'path': S('file path'), 'text': S('the complete new content of the file')},
+               ['bucket', 'path', 'text']), True, _write_text, _write_preview))
 
 _add(Tool('ask_user', 'Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn.',
           _obj({'question': S('one short question'), 'options': A('2-5 concrete answers the user can click')},

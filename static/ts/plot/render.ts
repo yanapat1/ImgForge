@@ -9,7 +9,7 @@ import { densityDiff } from '../core/compare-core.js';
 import { curGroups, groupList, plotDiv, restyle, viewPos, xyOf } from './access.js';
 import { isOutlier } from './groups.js';
 import { redrawLasso } from './interactions.js';
-import { updateMarks } from './marks.js';
+import { pcaLabels, updateMarks } from './marks.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -454,17 +454,14 @@ export function renderPlot(): void {
   traces.push({ type: 'scattergl', mode: 'markers', name: 'picked', showlegend: false, hoverinfo: 'skip', x: [], y: [] });
   traces.push({ type: 'scattergl', mode: 'markers', name: 'hover-dot', showlegend: false, hoverinfo: 'skip', x: [], y: [] });
 
-  const ev = view.info && view.info.explained_variance;
-  const axis = (n: number): Partial<P.LayoutAxis> => ({
-    showgrid: false, zeroline: false, showticklabels: false, ticks: '',     // a heatmap trace would add tick marks
-    ...(ev ? { title: { text: `PC${n} (${((ev[n - 1] ?? NaN) * 100).toFixed(1)}%)`, font: { size: 12, color: THEME.muted } } } : {}),
-  });
+  const axis: Partial<P.LayoutAxis> = { showgrid: false, zeroline: false, showticklabels: false, ticks: '' };  // a heatmap trace would add tick marks
   const layout: Partial<P.Layout> = {
     ...plotBase(THEME.plot),
-    margin: { l: ev ? 30 : 10, r: 10, t: 30, b: ev ? 30 : 10 }, dragmode: false, hovermode: 'closest', hoverdistance: 10,
-    xaxis: axis(1), yaxis: { ...axis(2), scaleanchor: 'x' },
+    margin: { l: 0, r: 0, t: 0, b: 0 }, dragmode: false, hovermode: 'closest', hoverdistance: 10,
+    xaxis: axis, yaxis: { ...axis, scaleanchor: 'x' },
+    annotations: pcaLabels(),     // no margins: dots draw (and are clipped) only at the plot's real edge
     legend: { bgcolor: rgba(THEME.surface2, 0.92), bordercolor: THEME.border, borderwidth: 1, itemsizing: 'constant',
-      font: { size: 12, color: THEME.text }, x: 1, xanchor: 'right', y: 0.98, yanchor: 'top' },
+      font: { size: 12, color: THEME.text }, x: 0.99, xanchor: 'right', y: 0.01, yanchor: 'bottom' },
     modebar: { bgcolor: 'rgba(0,0,0,0)', color: THEME.muted, activecolor: THEME.accent },
     uirevision: view.key,
   };

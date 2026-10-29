@@ -43,6 +43,9 @@ tools.py). `?` marks an optional argument.
 | `send_to_session` | change | bucket, paths, target, name?, task_type? | Open folders / files in the visualizer (target visualize) or as a labeling project (target label). |
 | `set_s3_mode` | change | bucket, mode | Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local (downloaded into an editable local folder that can be re-synced and exported). |
 | `sync_from_s3` | change | bucket | Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 version, local-only files are kept. |
+| `inspect_dataset_source` | read | source, ref, version?, revision?, patterns?, format? | Preview a dataset on the web before importing it: Kaggle (owner/dataset, competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), a direct link (url), Zenodo (record id / DOI) or OpenML (dataset id): title, size, files, license, versions. |
+| `import_dataset` | change | source, ref, name?, bucket?, path?, version?, revision?, patterns?, format?, extract?, nested? | Download a dataset from the web into a new bucket (or a folder of a writable bucket) as a background job; archives are unpacked and the format is detected. The user needs the source's token in Settings › Connections (Kaggle, Roboflow; Hugging Face / Zenodo only for gated / restricted data). |
+| `write_text_file` | change | bucket, path, text | Write (replace or create) a text file such as data.yaml, classes.txt, a .json or .env. Read it first with read_text and send the whole new content. Undoable. |
 | `ask_user` | control | question, options | Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn. |
 | `cannot_do` | control | reason, alternative? | Say the request cannot be done with these tools, why, and the closest thing you can do. Ends your turn. |
 

@@ -61,7 +61,7 @@ export function updateMarks(animate = false): void {
   const p = dotMarker(picked), h = dotMarker(hover, animate ? 0.3 : 1);
   const dist = distanceMarks(picked);
   void updateTraces(gd, { x: [p.x, h.x], y: [p.y, h.y], marker: [p.marker, h.marker] },
-    { shapes: [...dist.shapes, ...crosshairs([...hover, ...picked.slice().reverse()])], annotations: dist.annotations }, [pi, hi]);
+    { shapes: [...dist.shapes, ...crosshairs([...hover, ...picked.slice().reverse()])], annotations: [...pcaLabels(), ...dist.annotations] }, [pi, hi]);
   const id = hover[0];
   if (!animate || id === undefined) return;
   const t0 = performance.now();
@@ -72,6 +72,16 @@ export function updateMarks(animate = false): void {
     if (t < 1 && hoverDotId === id) hoverAnim = requestAnimationFrame(step);
   };
   hoverAnim = requestAnimationFrame(step);
+}
+
+// PCA: each axis' explained variance, inside the plot (it has no margins to hold axis titles)
+export function pcaLabels(): Array<Partial<P.Annotations>> {
+  const ev = S.view?.info?.explained_variance;
+  if (!ev) return [];
+  const text = (n: number): string => `PC${n} (${((ev[n - 1] ?? NaN) * 100).toFixed(1)}%)`;
+  const base: Partial<P.Annotations> = { font: { size: 12, color: THEME.muted }, showarrow: false, xref: 'paper', yref: 'paper' };
+  return [{ ...base, text: text(1), x: 0.5, y: 0, yanchor: 'bottom', yshift: 4 },
+    { ...base, text: text(2), x: 0, y: 0.5, xanchor: 'left', xshift: 4, textangle: '-90' }];
 }
 
 // 2+ picked cards: a line between every pair of their dots, labelled with the distance in the current

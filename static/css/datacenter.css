@@ -345,7 +345,9 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .legend span { display: inline-flex; align-items: center; gap: 5px; } .legend i { width: 8px; height: 8px; border-radius: 2px; }
 .sess { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); font-size: 12.5px; color: var(--text); text-decoration: none; }
 .sess:hover { border-color: var(--border-hover); }
-.sess .k { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; }
+/* the kind pill: a flex box so the caps sit in the middle; the extra left padding offsets the trailing letter-spacing */
+.sess .k { display: inline-flex; align-items: center; justify-content: center; flex: none; height: 18px; line-height: 1;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 0 6px 0 calc(6px + .04em); border-radius: 999px; }
 .sess .k.viz { background: var(--accent-soft); color: var(--accent-text); }
 .sess .k.lab { background: var(--label-badge); color: var(--on-label-badge); }
 .sess .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

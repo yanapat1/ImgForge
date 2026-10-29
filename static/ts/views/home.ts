@@ -206,6 +206,10 @@ function cardHTML(d: HomeSession): string {
     `<span class="sc-chip"><i style="background:${esc(classColor(i))}"></i>${esc(c)}</span>`).join('') +
     (more > 0 ? `<span class="sc-chip more">+${more}</span>` : '');
   const problem = d.error || (d.exists === false ? 'folder not found' : '');
+  // a broken session says so in the body, full width, with what to do (not squeezed into the footer)
+  const alert = !problem ? '' : `<div class="sc-alert" role="note">${icon('alert')}<div>` + (d.error
+    ? `<b>Cannot open</b><span>${esc(d.error)}</span>`
+    : '<b>Folder not found</b><span>It was moved, renamed or deleted. Edit the session to point it at the new place, or remove it.</span>') + '</div></div>';
   const when = openedText(d, d.created ? `created ${timeAgo(d.created)}` : '');
   // a labeling-backed session names its labeling session + task (the label:// uri means nothing to people)
   const lb = d.kind === 'labeling' ? d.labeling || {} : null;
@@ -215,12 +219,12 @@ function cardHTML(d: HomeSession): string {
     '<div class="sc-body">' +
     `<h3 class="sc-title"><button class="sc-open" data-act="open" title="Open ${esc(d.name)}">${esc(d.name)}</button></h3>` +
     tagsHTML(tagsOf(d)) +
-    (d.kind === 'union' ? partsHTML(d) : `<div class="sc-uri${lb ? ' plain' : ''}" title="${esc(where)}"><bdi>${esc(where)}</bdi></div>`) + modalityHTML(d) +
+    (d.kind === 'union' ? partsHTML(d) : `<div class="sc-uri${lb ? ' plain' : ''}" title="${esc(where)}"><bdi>${esc(where)}</bdi></div>`) + alert + modalityHTML(d) +
     (stats ? `<div class="sc-stats">${stats}</div>` : '<div class="sc-stats muted">Stats appear after the first open</div>') +
     (chips ? `<div class="sc-chips">${chips}</div>` : '') +
     '</div>' +
     '<footer class="sc-foot">' +
-    (problem ? `<span class="sc-problem">${icon('alert')}${esc(problem)}</span>` : '') + peopleHTML(d, problem ? '' : when) +
+    peopleHTML(d, when) +
     '<span class="grow"></span>' +
     (lb && lb.project ? `<button class="icon-btn ghost" data-act="tolabel" aria-label="Open the labeling session of ${esc(d.name)}" title="Open the labeling session ${esc(lb.project)}">${icon('tag')}</button>` : '') +
     shareBtn(d, 'viz') +
@@ -256,17 +260,23 @@ function taskHTML(t: HomeTask, total: number, review: boolean | undefined): stri
   const base = { done: t.done || 0, in_progress: t.in_progress || 0, skipped: t.skipped || 0 };
   const n: Record<StatusKey, number> = { ...base, todo: t.todo != null ? t.todo : Math.max(0, total - base.done - base.in_progress - base.skipped) };
   const sum = n.done + n.in_progress + n.skipped + n.todo || 1;
+  // model predictions are a part of in_progress: drawn and counted apart from the work people did by hand
+  const auto = Math.min(t.auto || 0, n.in_progress);
+  const doing = n.in_progress - auto;
+  const pct = (v: number): number => Math.round((100 * v) / sum);
   const tip = `${t.name} · ${taskInfo(t.task_type)?.label || t.task_type}: ` +
-    STATUS_TEXT.map(([k, label]) => `${fmt(n[k])} ${label}`).join(' · ');
-  const seg = (k: StatusKey): string => (n[k] ? `<i class="${k}" style="width:${((100 * n[k]) / sum).toFixed(2)}%"></i>` : '');
+    STATUS_TEXT.map(([k, label]) => `${fmt(k === 'in_progress' ? doing : n[k])} ${label}`).join(' · ') +
+    (auto ? ` · ${fmt(auto)} predicted by a model` : '');
+  const w = (v: number): string => `${((100 * v) / sum).toFixed(2)}%`;
+  const seg = (k: string, v: number): string => (v ? `<i class="${k}" style="width:${w(v)}"></i>` : '');
   const rv = review ? reviewState(t) : null;
-  const rseg = (k: string, v: number): string => (v ? `<i class="${k}" style="width:${((100 * v) / sum).toFixed(2)}%"></i>` : '');
   const rtip = rv ? `Review: ${fmt(rv.man)} by hand · ${fmt(rv.bulk)} by Review all · ${fmt(rv.left)} of ${fmt(rv.done)} done not reviewed` : '';
   return `<div class="lp-task" title="${esc(tip)}"><div class="lp-tname">${icon(taskInfo(t.task_type)?.icon || 'tag')}` +
     `<b>${esc(t.name)}</b><span class="lp-ncls">${fmt(t.n_classes || 0)} class${t.n_classes === 1 ? '' : 'es'}</span>` +
-    `<span class="lp-pct num">${Math.round((100 * n.done) / sum)}%</span></div>` +
-    `<div class="lp-bar" role="img" aria-label="${esc(tip)}">${seg('done')}${seg('in_progress')}${seg('skipped')}</div>` +
-    (rv ? `<div class="lp-bar lp-review" role="img" title="${esc(rtip)}" aria-label="${esc(rtip)}">${rseg('manual', rv.man)}${rseg('bulk', rv.bulk)}</div>` : '') + '</div>';
+    `<span class="lp-pcts">${auto ? `<span class="lp-auto num" title="${fmt(auto)} images predicted by a model, not committed yet">${icon('robot')}${pct(auto)}%</span>` : ''}` +
+    `<span class="lp-pct num" title="${fmt(n.done)} images done (committed)">${pct(n.done)}%</span></span></div>` +
+    `<div class="lp-bar" role="img" aria-label="${esc(tip)}">${seg('done', n.done)}${seg('auto', auto)}${seg('in_progress', doing)}${seg('skipped', n.skipped)}</div>` +
+    (rv ? `<div class="lp-bar lp-review" role="img" title="${esc(rtip)}" aria-label="${esc(rtip)}">${seg('manual', rv.man)}${seg('bulk', rv.bulk)}</div>` : '') + '</div>';
 }
 
 // one small line under the task bars: labeled every task? reviewed every task? (bulk-only review is marked)

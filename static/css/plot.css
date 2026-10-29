@@ -151,9 +151,12 @@
 .plot-idle .wait-box p { margin: var(--s2) 0 var(--s3); }
 .plot-idle .wait-box .hint { margin-bottom: 0; }
 
-/* Plotly chrome: modebar + legend in theme colours */
-#plot .modebar { padding-top: 4px; }
-#plot .modebar-group { background: transparent !important; }
+/* Plotly chrome: modebar + legend in theme colours. The plot has no margins, so the modebar floats over the dots
+   as a solid pill (like .select-tools) instead of a plot-coloured strip they vanish into. */
+#plot .modebar-container { top: 8px !important; right: 8px !important; }
+#plot .modebar { display: flex; gap: 6px; }
+#plot .modebar-group { display: flex; padding: 2px !important; margin: 0 !important; background: var(--surface) !important;
+  border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-2); }
 #plot .modebar-btn { border-radius: var(--r-sm); }
 #plot .modebar-btn:hover { background: var(--surface-3); }
 

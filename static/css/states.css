@@ -20,6 +20,10 @@
 .errpage-icon .ico { width: 22px; height: 22px; }
 .errpage-box h2 { font-size: var(--fs-xl); margin-bottom: var(--s1); }
 .errpage-msg { overflow-wrap: anywhere; }
+/* the technical part (error.html): the raw server message, e.g. the folder path that is gone */
+.errpage-path { display: block; margin-top: var(--s3); padding: var(--s2) var(--s3); font-family: var(--mono);
+  font-size: var(--fs-sm); color: var(--text-muted); background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-md); overflow-wrap: anywhere; white-space: pre-wrap; }
 .errpage-code { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: var(--s1); }
 .errpage-details { margin-top: var(--s3); font-size: var(--fs-sm); }
 .errpage-details summary { cursor: pointer; color: var(--text-muted); }

@@ -40,6 +40,8 @@ export interface HomeSession extends DatasetItem, SharedFields {
 export interface HomeTask {
   id: string; name: string; task_type: string; n_classes?: number;
   done?: number; in_progress?: number; skipped?: number; todo?: number;
+  /** in_progress images a model predicted (Label with model) that no one has committed yet */
+  auto?: number;
   review_manual?: number; review_bulk?: number;
 }
 export interface HomeProjectSource { kind?: string; path?: string; bucket?: string; prefix?: string }

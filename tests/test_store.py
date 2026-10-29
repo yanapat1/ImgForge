@@ -123,7 +123,7 @@ def test_status_commit_skip_reopen_and_stats(proj):
     s.set_status(ids[1], [det['id']], 'skip')
     st = s.stats()
     assert st['n_media'] == 5
-    assert st['tasks'][det['id']] == {'done': 1, 'in_progress': 0, 'skipped': 1, 'todo': 3}
+    assert st['tasks'][det['id']] == {'done': 1, 'in_progress': 0, 'skipped': 1, 'todo': 3, 'auto': 0}
     assert s.set_status(ids[0], [det['id']], 'reopen') == {det['id']: 'in_progress'}
     assert s.set_status(ids[1], [det['id']], 'reopen') == {det['id']: 'todo'}
     page = s.media_page(0, 2, det['id'], 'in_progress')
@@ -210,11 +210,15 @@ def test_apply_predictions_keeps_manual_rows(proj):
     s.apply_predictions(ids[3], det['id'], [pred(cat)])
     assert s.media_item(ids[3])['status'][det['id']] == 'done'
     assert s.apply_predictions_many(det['id'], [(ids[3], [pred(cat)])], skip_done=True) == {}
+    # the card counts model-predicted images apart: ids 0 and 1 carry model rows; a done one does not count
+    st = s.stats()['tasks'][det['id']]
+    assert st['in_progress'] == 2 and st['auto'] == 2 and st['done'] == 1
     # remove: model rows of every image; manual rows and counts follow
     assert s.remove_model_annotations(det['id']) == {'removed': 3, 'images': 3}
     assert [a['source'] for a in s.get_annotations(ids[0])['annotations']] == ['manual']
     assert s.media_item(ids[1])['status'][det['id']] == 'todo' and s.media_item(ids[1])['n'][det['id']] == 0
     assert s.remove_model_annotations(det['id']) == {'removed': 0, 'images': 0}
+    assert s.stats()['tasks'][det['id']]['auto'] == 0
 
 
 def test_classification_single_tag_from_model(proj):
@@ -420,7 +424,7 @@ def test_review_manual_bulk_and_clearing(proj):
     assert s.set_review([d], 'bulk') == {d: 2}
     assert s.set_review([d], 'bulk') == {d: 0}              # again: nothing left, a manual mark is never downgraded
     assert s.stats()['review'][d] == {'manual': 1, 'bulk': 2}
-    assert s.stats()['tasks'][d] == {'done': 3, 'in_progress': 1, 'skipped': 0, 'todo': 1}
+    assert s.stats()['tasks'][d] == {'done': 3, 'in_progress': 1, 'skipped': 0, 'todo': 1, 'auto': 0}
     # a person re-checking a bulk image upgrades it
     assert s.set_review([d], 'manual', [ids[1], ids[3]]) == {d: 1}
     assert s.stats()['review'][d] == {'manual': 2, 'bulk': 1}
@@ -504,7 +508,7 @@ def test_projects_never_see_each_other(store):
         assert s.media_page(0, 100, task_id=det['id'], review='bulk')['total'] == 1
         st = s.stats()
         assert st['n_media'] == n and list(st['tasks']) == [det['id']]
-        assert st['tasks'][det['id']] == {'done': 1, 'in_progress': 1, 'skipped': 0, 'todo': n - 2}
+        assert st['tasks'][det['id']] == {'done': 1, 'in_progress': 1, 'skipped': 0, 'todo': n - 2, 'auto': 0}
         assert set(s.class_stats()) == {c['id'] for c in det['classes']}
         # export iterators and raw rows
         out = list(s.iter_task_export(det['id']))
