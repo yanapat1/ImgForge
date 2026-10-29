@@ -34,7 +34,25 @@ create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_buck
     -> Bucket (+ job_id when an s3 link starts with mode='local')
 update_bucket(user, bid, name=None, mode=None)                 -> Bucket (+ job_id when switched to local)
 sync(user, bid)                                                -> {job_id, result}   # s3 + mode local: (re)pull
-export(user, bid, path='')                                     -> (zip name, chunk iterator)   # not for a streamed s3 bucket
+export(user, bid, path='')                                     -> (zip name, chunk iterator)
+    # a folder (or one file) as a stored zip, names relative to that folder (a file: its own name). Local files or a
+    # streamed s3 link alike (objects are read one by one while the zip streams). Hidden names and the trash are left
+    # out, .env files unless data.manage; symlinks and files that cannot be read are skipped (never the stream);
+    # pre-1980 / 0 mtimes are clamped. The download's Content-Disposition carries filename*=UTF-8'' (Thai names).
+export_check(user, bid, path='')                               -> {name, kind: 'file'|'dir'}
+    # only the checks export runs before streaming (bucket access, path, .env, S3 reachable): the page calls it
+    # first and toasts the error instead of starting a download that fails
+export_to(user, bid, path='', target={kind, connection_id, bucket?, prefix?, path?}, create_bucket=False, overwrite=False)
+    -> {job_id, result}   # result (the job's, or inline from the CLI): {files, bytes, uri, created, cancelled}
+    # data.manage. Copies a folder (or file) to S3 / FTP / SFTP through one of the CALLER's own connections
+    # (labeling/sinks.make_sink). Layout: destination = prefix (S3) or path (FTP / SFTP) + the path RELATIVE TO THE
+    # BUCKET ROOT, so data/image/im1.png exported with bucket Dataset, prefix 'dev/v1/new folder/' lands at
+    # s3://Dataset/dev/v1/new folder/data/image/im1.png whether data/, data/image/ or the whole bucket is exported.
+    # Same filtering as export. create_bucket (S3): the bucket is made when missing (sinks.ensure_bucket; S3 naming
+    # rules, else 400). A non-empty destination without overwrite, a missing bucket, an unreachable target: 400
+    # before the job starts (S3 unreadable for export_check / export: 502);
+    # a second export of the same bucket while one runs: 409. An io-lane job dc-export:<bid>, cancellable (stops
+    # queueing files; what is already uploaded stays).
 source(user, bid, path='')                                     -> {source, format, classes, bucket, path, name}
     # the POST /api/label/projects `source` of a bucket folder (New label › Data Center), classes from its data.yaml
 autolabel(user, bid, path='', model={registry_id | connection_id + model_id, version}, target='inplace'|'copy',
@@ -128,6 +146,9 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | POST | `/api/dc/send` `{bucket, paths, target, name, task_type}` | send |
 | POST | `/api/dc/buckets/{bid}/sync` | sync |
 | GET | `/api/dc/buckets/{bid}/export?path=` | export (a streamed zip) |
+| GET | `/api/dc/buckets/{bid}/export/check?path=` | export_check |
+| POST | `/api/dc/buckets/{bid}/export` `{path, target, create_bucket, overwrite}` | export_to (data.manage) |
+| POST | `/api/connections/create-bucket` `{id, bucket}` | not the service: `{ok, bucket, created}`, the caller's own S3 connection (routes/datasets.py) |
 | GET | `/api/dc/buckets/{bid}/source?path=` | source |
 | POST | `/api/dc/autolabel` `{bucket, path, model, target, new_name, conf, formats, write_yolo, name}` | autolabel |
 | POST | `/api/dc/buckets/{bid}/convert` `{path, to}` | convert_vectors |

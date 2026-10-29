@@ -595,6 +595,9 @@ def router(state, ctx):
                 raise HTTPException(400, 'pick a PostgreSQL or SQL Server connection')
         elif kind in ('s3', 'ftp', 'sftp') and not target.get('connection_id'):
             raise HTTPException(400, 'pick a saved connection for the export')
+        if kind == 's3' and target.get('create_bucket'):    # make_sink creates it in the job; a bad name is a 400 now
+            with _errors():
+                _sinks().check_bucket_name(target.get('bucket'))
         elif kind == 'local' and not str(target.get('path') or '').strip():
             raise HTTPException(400, 'pick the folder to export into')
         run_id = uuid.uuid4().hex

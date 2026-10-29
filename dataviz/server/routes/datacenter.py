@@ -8,6 +8,8 @@ changing routes so a refused call never reaches the service.
 Handlers are plain `def`: FastAPI runs them in its thread pool (disk and S3 work never blocks the event loop).
 """
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException
@@ -24,6 +26,13 @@ def _call(fn, *a, **kw):
         return fn(*a, **kw)
     except DCError as e:
         raise HTTPException(e.status, e.message) from None
+
+
+def attachment(name):
+    """Content-Disposition of a download named `name`: starlette sends headers as latin-1, so a Thai (any
+    non-latin-1) name goes in filename* (RFC 5987) with an ASCII stand-in in filename for old clients."""
+    ascii_name = ''.join(ch if 32 <= ord(ch) < 127 and ch not in '"\\' else '_' for ch in name)
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name, safe="")}'
 
 
 def router(state, ctx):
@@ -60,8 +69,17 @@ def router(state, ctx):
     @r.get('/buckets/{bid}/export')
     def export(bid: str, path: str = '', user=Depends(deps.current_user)):
         name, chunks = _call(service.export, user, bid, path)
-        return StreamingResponse(chunks, media_type='application/zip',
-                                 headers={'Content-Disposition': f'attachment; filename="{name}"'})
+        return StreamingResponse(chunks, media_type='application/zip', headers={'Content-Disposition': attachment(name)})
+
+    @r.get('/buckets/{bid}/export/check')
+    def export_check(bid: str, path: str = '', user=Depends(deps.current_user)):
+        # the checks GET export runs before streaming: a 4xx here is a toast, not a silently failed download
+        return _call(service.export_check, user, bid, path)
+
+    @r.post('/buckets/{bid}/export')
+    def export_to(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.export_to, user, bid, body.get('path') or '', target=body.get('target') or {},
+                     create_bucket=bool(body.get('create_bucket')), overwrite=bool(body.get('overwrite')))
 
     @r.get('/buckets/{bid}/source')
     def source(bid: str, path: str = '', user=Depends(deps.current_user)):

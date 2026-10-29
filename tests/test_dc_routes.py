@@ -257,3 +257,36 @@ def test_zip_with_one_wrapper_folder(dc):
     c.post(f'/api/dc/buckets/{b["id"]}/upload', params={'path': ''}, files=[('files', ('t.zip', z, 'application/zip'))])
     names = [e['name'] for e in c.get(f'/api/dc/buckets/{b["id"]}/ls').json()['entries']]
     assert 'traffic' in names
+
+
+def test_export_zip_thai_name_old_mtime_and_symlinks(dc):
+    """A bucket named in Thai downloads (filename* in the header: starlette encodes headers latin-1), a file with
+    mtime 0 is clamped to 1980 instead of failing ZipInfo, and symlinks (a broken one, one leaving the bucket) are
+    skipped without aborting the stream. export/check runs the same checks."""
+    from urllib.parse import quote
+    _, c = dc
+    b = new_bucket(c, name='ชุดข้อมูล')
+    data = os.path.join(b['root'], 'data')
+    os.makedirs(data)
+    with open(os.path.join(data, 'old.txt'), 'w') as f:
+        f.write('x')
+    os.utime(os.path.join(data, 'old.txt'), (0, 0))
+    with open(os.path.join(data, 'ok.txt'), 'w') as f:
+        f.write('ok')
+    os.symlink(os.path.join(b['root'], 'gone'), os.path.join(data, 'broken.txt'))
+    os.symlink('/etc/hostname', os.path.join(data, 'outside.txt'))
+    r = c.get(f'/api/dc/buckets/{b["id"]}/export')
+    assert r.status_code == 200, r.text
+    cd = r.headers['content-disposition']
+    assert cd.startswith('attachment; filename="') and f"filename*=UTF-8''{quote('ชุดข้อมูล.zip')}" in cd
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    assert z.testzip() is None and sorted(z.namelist()) == ['data/ok.txt', 'data/old.txt']
+    assert z.getinfo('data/old.txt').date_time[0] == 1980
+    one = zipfile.ZipFile(io.BytesIO(c.get(f'/api/dc/buckets/{b["id"]}/export', params={'path': 'data/ok.txt'}).content))
+    assert one.namelist() == ['ok.txt'] and one.read('ok.txt') == b'ok'
+
+    ck = c.get(f'/api/dc/buckets/{b["id"]}/export/check', params={'path': 'data'})
+    assert ck.status_code == 200 and ck.json() == {'name': 'data.zip', 'kind': 'dir'}
+    assert c.get(f'/api/dc/buckets/{b["id"]}/export/check').json()['name'] == 'ชุดข้อมูล.zip'
+    assert c.get(f'/api/dc/buckets/{b["id"]}/export/check', params={'path': 'nope'}).status_code == 404
+    assert c.get(f'/api/dc/buckets/{b["id"]}/export/check', params={'path': '../x'}).status_code == 400

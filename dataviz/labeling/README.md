@@ -169,6 +169,7 @@ scan_folder_images(path) -> int                            # direct image files 
 
 # sinks.py
 make_sink(target: dict, connections, s3cfg, run_dir: Path) -> Sink   # kind zip | local | s3 | ftp | sftp
+ensure_bucket(client, name) -> bool                        # S3: create when missing (target create_bucket: true); ValueError on a bad name
 class Sink:
     kind: str; uri: str
     def check_target(self, overwrite: bool) -> None        # ValueError if the target is not empty and not overwrite

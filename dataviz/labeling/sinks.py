@@ -3,7 +3,7 @@ File export targets. export.py writes `images/` once plus one folder per task th
 
     ZipSink(run_dir, name)            <run_dir>/<name>.zip  (ZIP_DEFLATED text, ZIP_STORED images)
     LocalDirSink(path)                a local folder, atomic writes
-    S3Sink(conn, bucket, prefix)      put_object on a 16-thread pool
+    S3Sink(conn, bucket, prefix)      put_object on a 16-thread pool (target create_bucket: made when missing)
     FTPSink(conn, path) / SFTPSink    mkdir -p + put on 4 pooled connections
 
 write(rel, data) and copy_file(rel, src) are thread-safe and may return before the upload finishes;
@@ -12,6 +12,7 @@ close() waits for every upload and raises the first error, then returns {files, 
 
 import io
 import os
+import re
 import time
 import shutil
 import ftplib
@@ -208,6 +209,7 @@ class LocalDirSink(Sink):
 
 class S3Sink(_AsyncSink):
     kind = 's3'
+    created = False                                   # make_sink made the bucket (target create_bucket)
 
     def __init__(self, conn, bucket, prefix='', s3cfg=None, workers=16):
         self.client = sources.make_client(conn, {**(s3cfg or {}), 'concurrency': max(workers, int((s3cfg or {}).get('concurrency', 0)))})
@@ -236,6 +238,33 @@ class S3Sink(_AsyncSink):
 
     def copy_file(self, rel, src):
         self._submit(self._put_file, self.prefix + _check_rel(rel), str(src))
+
+
+_BUCKET_NAME = re.compile(r'^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
+
+
+def check_bucket_name(name):
+    """An S3 bucket name (3-63 lower-case letters, digits, . and -): ValueError otherwise, before any request."""
+    name = str(name or '').strip()
+    if not _BUCKET_NAME.match(name) or '..' in name:
+        raise ValueError(f'{name!r} is not a valid S3 bucket name: 3-63 lower-case letters, digits, dots and '
+                         'hyphens, starting and ending with a letter or digit')
+    return name
+
+
+def ensure_bucket(client, name):
+    """Create S3 bucket `name` when it does not exist -> True when it was created. A bucket that exists but is
+    not ours (403) is left to the first write to report."""
+    name = check_bucket_name(name)
+    try:
+        client.head_bucket(Bucket=name)
+        return False
+    except Exception as e:  # noqa: BLE001 - botocore ClientError: only a missing bucket is created
+        code = str(getattr(e, 'response', {}).get('Error', {}).get('Code', ''))
+        if code not in ('404', 'NoSuchBucket', 'NotFound'):
+            raise
+    client.create_bucket(Bucket=name)
+    return True
 
 
 # ---------------------------------------------------------------- FTP / SFTP
@@ -368,6 +397,10 @@ def make_sink(target, connections, s3cfg, run_dir):
         if kind == 's3':
             if not target.get('bucket'):
                 raise ValueError('bucket is required')
-            return S3Sink(conn, target['bucket'], target.get('prefix', ''), s3cfg)
+            if target.get('create_bucket'):
+                check_bucket_name(target['bucket'])
+            sink = S3Sink(conn, target['bucket'], target.get('prefix', ''), s3cfg)
+            sink.created = bool(target.get('create_bucket')) and ensure_bucket(sink.client, target['bucket'])
+            return sink
         return (FTPSink if kind == 'ftp' else SFTPSink)(conn, target.get('path'))
     raise ValueError(f'unknown export target kind: {kind!r}')

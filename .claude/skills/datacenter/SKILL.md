@@ -43,6 +43,7 @@ tools.py). `?` marks an optional argument.
 | `send_to_session` | change | bucket, paths, target, name?, task_type? | Open folders / files in the visualizer (target visualize) or as a labeling project (target label). |
 | `set_s3_mode` | change | bucket, mode | Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local (downloaded into an editable local folder that can be re-synced and exported). |
 | `sync_from_s3` | change | bucket | Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 version, local-only files are kept. |
+| `export_to` | change | bucket, path?, to, connection, s3_bucket?, prefix?, create_bucket?, overwrite? | Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user's connections as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png. |
 | `inspect_dataset_source` | read | source, ref, version?, revision?, patterns?, format? | Preview a dataset on the web before importing it: Kaggle (owner/dataset, competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), a direct link (url), Zenodo (record id / DOI) or OpenML (dataset id): title, size, files, license, versions. |
 | `import_dataset` | change | source, ref, name?, bucket?, path?, version?, revision?, patterns?, format?, extract?, nested? | Download a dataset from the web into a new bucket (or a folder of a writable bucket) as a background job; archives are unpacked and the format is detected. The user needs the source's token in Settings › Connections (Kaggle, Roboflow; Hugging Face / Zenodo only for gated / restricted data). |
 | `write_text_file` | change | bucket, path, text | Write (replace or create) a text file such as data.yaml, classes.txt, a .json or .env. Read it first with read_text and send the whole new content. Undoable. |
@@ -64,6 +65,8 @@ python -m dataviz dc search --args '{"glob": "*night*.jpg", "bucket": "cars"}' -
 python -m dataviz dc move --args '{"bucket": "cars", "paths": ["train/a.jpg"], "to": "val"}' --user alice
 #   -> exit 3 + {"ok": false, "confirm": "Move 1 item (train/a.jpg) → val/ in 'cars'", "args": {...}}
 python -m dataviz dc move --args '{"bucket": "cars", "paths": ["train/a.jpg"], "to": "val"}' --user alice --yes
+python -m dataviz dc export_to --args '{"bucket": "cars", "path": "data/image", "to": "s3", "connection": "minio",
+  "s3_bucket": "dataset", "prefix": "dev/v1", "create_bucket": true}' --user alice --yes   # -> s3://dataset/dev/v1/data/image/...
 ```
 
 Output is JSON: `{ok, summary, result}` or `{ok: false, error, status}`. Exit codes: `0` ok, `1` tool / service

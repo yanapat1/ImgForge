@@ -410,6 +410,34 @@ def router(state, ctx):
                                    f'[dim]({(time.time() - t0) * 1000:.0f} ms)[/]')
         return {'ok': True, 'buckets': res['buckets'], 'ms': round((time.time() - t0) * 1000)}
 
+    @r.post('/api/connections/create-bucket')
+    async def create_bucket(body: dict, user=Depends(deps.can_add_connections)):
+        """{id, bucket}: make S3 bucket `bucket` through the caller's own saved connection (an export target's
+        New bucket) -> {ok, bucket, created: false when it already existed}."""
+        need_registry()
+        try:
+            conn = reg.connection(str(body.get('id') or ''), owner_id=user['id'])
+        except KeyError:
+            raise HTTPException(400, 'pick one of your own connections') from None
+        if (conn.get('kind') or 's3') != 's3':
+            raise HTTPException(400, 'only an S3 connection has buckets')
+        from ...labeling import sinks
+
+        def go():
+            client = sources.make_client(conn, s3cfg)
+            try:
+                return sinks.ensure_bucket(client, body.get('bucket'))
+            finally:
+                client.close()
+        try:
+            created = await run_io(go)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        except Exception as e:  # noqa: BLE001 - shown in the form
+            vlog.get_logger('s3').warning(f'create bucket {vlog.esc(body.get("bucket"))} failed: {vlog.esc(e)}')
+            raise _s3_error(e)
+        return {'ok': True, 'bucket': str(body.get('bucket')).strip(), 'created': created}
+
     @r.post('/api/connections/browse')
     async def browse_connection(body: dict, user=Depends(deps.can_add_connections)):
         """S3: folders under bucket/prefix (each flagged when it holds images/ + labels/), plus a summary when it

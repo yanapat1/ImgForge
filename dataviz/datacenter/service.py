@@ -16,6 +16,7 @@ import os
 import shutil
 import threading
 import time
+import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -32,7 +33,7 @@ from .store import DCError
 
 __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
            'summary', 'ls', 'read_file', 'read_text', 'ops', 'undo', 'upload', 'set_tags', 'all_tags', 'detect',
-           'stats', 'search', 'send', 'sync', 'export', 'source', 'autolabel', 'write_text']
+           'stats', 'search', 'send', 'sync', 'export', 'export_check', 'export_to', 'source', 'autolabel', 'write_text']
 
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
@@ -716,17 +717,150 @@ def reimport(user, bid):
                          opts=m.get('opts') or {}, bucket=r.id, path=m.get('path') or '')
 
 
-def export(user, bid, path=''):
-    """(zip file name, chunk iterator) of a folder (or one file) of a bucket with local files."""
+def _export_check(user, bid, path):
+    """What every export checks before a byte moves (export_check runs only this, so the page can say why instead
+    of a download that fails silently) -> (row, rel, is one file)."""
     r = _row(user, bid)
-    if r.kind == 's3':
-        raise DCError(f'bucket “{r.name}” is streamed from S3: switch it to “load into local” to export it')
     rel = store.clean_rel(path)
-    _abs(r, rel)
-    name = _slug(rel.rsplit('/', 1)[-1] if rel else r.name) + '.zip'
     if store.is_secret(rel):
         _need_secret(user, rel)
-    return name, store.zip_stream(r.root, rel, _allowed(), secrets=vtiers.has(user, PERM))
+    if r.kind == 's3':                                  # streamed (or still loading): read straight from S3
+        view = _s3(r)
+        try:
+            what = view.what(rel)
+        except Exception as e:  # noqa: BLE001 - botocore: endpoint down, no access ...
+            raise DCError(f'cannot read bucket “{r.name}” from S3: {e}', 502) from None
+        finally:
+            view.close()
+        if what is None:
+            raise DCError(f'nothing at {rel or "/"}', 404)
+        return r, rel, what == 'file'
+    return r, rel, os.path.isfile(_abs(r, rel))
+
+
+def _export_items(user, r, rel):
+    """The files of folder (or file) `rel`, paths below the bucket root (store.Item), local or S3 alike: what the
+    zip and export_to both read. .env files only for data.manage; the S3 client closes when the walk ends."""
+    secrets = vtiers.has(user, PERM)
+    if r.kind != 's3':
+        yield from store.local_items(r.root, rel, _allowed(), secrets)
+        return
+    view = _s3(r)
+    try:
+        yield from view.items(rel, secrets)
+    finally:
+        view.close()
+
+
+def export_check(user, bid, path=''):
+    """{name, kind} of what GET export would zip, or the DCError it would fail with."""
+    r, rel, single = _export_check(user, bid, path)
+    return {'name': _zip_name(r, rel), 'kind': 'file' if single else 'dir'}
+
+
+def _zip_name(r, rel):
+    # like _slug, but combining marks stay: a Thai name keeps its vowels (the header sends it as filename*)
+    name = rel.rsplit('/', 1)[-1] if rel else r.name
+    s = ''.join(ch if ch.isalnum() or ch in '-_.' or unicodedata.category(ch)[0] == 'M' else '-' for ch in name)
+    return (s.strip('-.') or 'bucket')[:80] + '.zip'
+
+
+def export(user, bid, path=''):
+    """(zip file name, chunk iterator) of a folder (or one file) of a bucket: local files or a streamed S3 link.
+    Names in the zip are relative to that folder (a file: just its name)."""
+    r, rel, single = _export_check(user, bid, path)
+    return _zip_name(r, rel), store.zip_items(_export_items(user, r, rel), store.posix_parent(rel) if single else rel)
+
+
+EXPORT_TARGETS = ('s3', 'ftp', 'sftp')
+
+
+def export_to(user, bid, path='', target=None, create_bucket=False, overwrite=False):
+    """Copy a folder (or one file) of a bucket to S3 / FTP / SFTP through one of the user's connections
+    (labeling/sinks). Layout: destination = target prefix (S3) or path (FTP / SFTP) + the path RELATIVE TO THE
+    BUCKET ROOT, so exporting data/image or all of the bucket puts data/image/im1.png at the same key.
+    create_bucket (S3): make the target bucket when missing. A non-empty destination needs overwrite.
+    A job on the io lane dc-export:<bid> (inline from the CLI) -> {job_id, result: {files, bytes, uri, created}}."""
+    _need(user)
+    r, rel, _ = _export_check(user, bid, path)
+    t = dict(target or {})
+    kind = t.get('kind')
+    if kind not in EXPORT_TARGETS:
+        raise DCError(f'export to one of {", ".join(EXPORT_TARGETS)} (not {kind!r})')
+    if not t.get('connection_id'):
+        raise DCError('pick one of your connections for the export')
+    conns = _datasets().scoped(user['id'])              # the caller's own connections only
+    try:
+        conns.connection(t['connection_id'])
+    except KeyError:
+        raise DCError('pick one of your own connections for the export') from None
+    tgt = {'kind': kind, 'connection_id': t['connection_id']}
+    if kind == 's3':
+        tgt.update(bucket=str(t.get('bucket') or '').strip(), prefix=t.get('prefix') or '',
+                   create_bucket=bool(create_bucket))
+        if not tgt['bucket']:
+            raise DCError('pick the S3 bucket to export into')
+        from ..data.sources import _norm_prefix
+        src = _norm_prefix('/'.join(p for p in ((r.prefix or '').strip('/'), rel) if p))     # '' = the whole bucket
+        dst = _norm_prefix('/'.join(p for p in (tgt['prefix'].strip('/'), rel) if p))
+        if r.kind == 's3' and r.connection_id == tgt['connection_id'] and r.s3_bucket == tgt['bucket'] and \
+                (dst.startswith(src) or src.startswith(dst)):     # the listing would meet its own copies
+            raise DCError('the export target overlaps the folder being exported: pick another prefix')
+    else:
+        tgt['path'] = t.get('path') or t.get('prefix') or None
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    if jobs is not None and jobs.busy(f'dc-export:{r.id}'):     # submit would hand back that job, not this target
+        raise DCError(f'bucket “{r.name}” is already being exported: wait for that job (or cancel it)', 409)
+    from ..labeling import sinks
+    sink = None
+    try:
+        if kind == 's3' and create_bucket:
+            sinks.check_bucket_name(tgt['bucket'])
+        sink = sinks.make_sink(tgt, conns, _cfg().get('s3') or {}, None)
+        sink.check_target(bool(overwrite))
+    except Exception as e:  # noqa: BLE001 - ValueError (bad name, not empty) or botocore / ftplib / paramiko
+        if sink is not None:
+            store._try(sink.close)                      # FTP / SFTP: the pooled logins
+        if isinstance(e, ValueError):
+            raise DCError(str(e)) from None
+        raise DCError(f'cannot use the export target: {type(e).__name__}: {e}') from None
+
+    def fn(job=None):
+        stop = (lambda: job.cancelled.is_set()) if job is not None else (lambda: False)
+        n, size = 0, 0
+        if job is not None:
+            job.progress(stage='listing files')
+        try:
+            for it in _export_items(user, r, rel):
+                if stop():
+                    break
+                if it.path is not None:
+                    sink.copy_file(it.rel, it.path)
+                else:
+                    body = it.open()
+                    try:
+                        sink.write(it.rel, body.read())     # one object in memory at a time per upload slot
+                    finally:
+                        body.close()
+                n, size = n + 1, size + it.size
+                if job is not None and n % 50 == 0:
+                    job.progress(n, None, 'uploading', extra=f'{size / 1e6:.1f} MB')
+        except BaseException:
+            store._try(sink.close)                      # waits for the queued uploads, frees the connections
+            raise
+        try:
+            res = sink.close()
+        except ValueError as e:
+            raise DCError(str(e)) from None
+        if job is not None:
+            job.progress(n, n, 'done')
+        return {**res, 'created': bool(getattr(sink, 'created', False)), 'cancelled': stop()}
+
+    if jobs is None:
+        return {'job_id': None, 'result': fn()}
+    return {'job_id': jobs.submit(f'dc-export:{r.id}', f'export {r.name} to {sink.uri}', fn, lane='io',
+                                  public_result=True, owner=user['id']).id, 'result': None}
 
 
 def delete_bucket(user, bid, delete_files=False):

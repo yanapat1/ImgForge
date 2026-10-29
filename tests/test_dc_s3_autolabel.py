@@ -1,5 +1,6 @@
 """Data Center: an S3 link loaded into a local folder (mode local: editable, re-sync replaces same-name files and
-keeps local-only ones, switch back to stream), zip export, the label-wizard source of a bucket folder, and
+keeps local-only ones, switch back to stream), zip export (local and streamed), export to S3 / FTP (paths kept
+from the bucket root, create the target bucket), POST /api/connections/create-bucket, the label-wizard source of a bucket folder, and
 labeling a bucket with a model (in place and into a copy) through a fake model server."""
 
 import io
@@ -57,7 +58,17 @@ def test_s3_load_into_local_resync_and_stream(dc, s3_server, s3_bucket):
     assert b['mode'] == 'stream' and not b['writable'] and not b['local_ready']
     r = c.post(f'/api/dc/buckets/{bid}/ops', json={'ops': [{'op': 'mkdir', 'path': 'x'}]})
     assert r.status_code == 400 and 'load into local' in r.json()['detail']
-    assert c.get(f'/api/dc/buckets/{bid}/export').status_code == 400
+    # export of a streamed bucket: zipped straight from the S3 objects (a folder, one object, a missing path)
+    z = zipfile.ZipFile(io.BytesIO(c.get(f'/api/dc/buckets/{bid}/export').content))
+    assert z.testzip() is None and sorted(z.namelist()) == ['data.yaml', 'images/im0.jpg', 'images/im1.jpg',
+                                                            'labels/im0.txt', 'labels/im1.txt']
+    z = zipfile.ZipFile(io.BytesIO(c.get(f'/api/dc/buckets/{bid}/export', params={'path': 'labels'}).content))
+    assert sorted(z.namelist()) == ['im0.txt', 'im1.txt'] and z.read('im0.txt') == b'0 0.5 0.5 0.2 0.2\n'
+    z = zipfile.ZipFile(io.BytesIO(c.get(f'/api/dc/buckets/{bid}/export', params={'path': 'data.yaml'}).content))
+    assert z.namelist() == ['data.yaml']
+    assert c.get(f'/api/dc/buckets/{bid}/export/check', params={'path': 'images'}).json() == \
+        {'name': 'images.zip', 'kind': 'dir'}
+    assert c.get(f'/api/dc/buckets/{bid}/export/check', params={'path': 'nope'}).status_code == 404
 
     # stream -> local: a pull job, then the bucket is an editable local copy that still says s3
     r = c.patch(f'/api/dc/buckets/{bid}', json={'mode': 'local'}).json()
@@ -280,3 +291,93 @@ def test_new_label_session_from_a_managed_bucket(client_as, tmp_path_factory):
     assert r.status_code == 200, r.text
     assert wait_job(c, r.json()['job_id'])['status'] == 'done'
     assert c.get(f'/api/label/projects/{r.json()["project"]["id"]}').json()['n_media'] == 3
+
+
+def _s3_conn(c, s3_server):
+    r = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'})
+    assert r.status_code == 200, r.text
+    return r.json()['id']
+
+
+def _keys(client, bucket, prefix=''):
+    return sorted(o['Key'] for o in client.list_objects_v2(Bucket=bucket, Prefix=prefix).get('Contents', []))
+
+
+def test_export_to_s3_keeps_paths_from_the_bucket_root(dc, s3_server, s3_bucket):
+    _, c = dc
+    client, _ = s3_bucket
+    b = new_bucket(c, name='local data')
+    for path, name in (('data/image', 'im1.png'), ('data/image', 'im2.png'), ('data', 'notes.txt')):
+        r = c.post(f'/api/dc/buckets/{b["id"]}/upload', params={'path': path},
+                   files=[('files', (name, b'x' * 10, 'application/octet-stream'))])
+        assert r.status_code == 200, r.text
+    cid = _s3_conn(c, s3_server)
+    target = {'kind': 's3', 'connection_id': cid, 'bucket': 'export-new', 'prefix': 'dev/v1/new folder/'}
+    url = f'/api/dc/buckets/{b["id"]}/export'
+
+    # the target bucket does not exist: a clear 400, unless create_bucket
+    r = c.post(url, json={'path': 'data/image', 'target': target})
+    assert r.status_code == 400, r.text
+    r = c.post(url, json={'path': 'data/image', 'target': target, 'create_bucket': True})
+    assert r.status_code == 200, r.text
+    j = wait_job(c, r.json()['job_id'])
+    assert j['status'] == 'done', j
+    assert j['result']['files'] == 2 and j['result']['created'] and j['result']['uri'].startswith('s3://export-new/')
+    assert _keys(client, 'export-new') == ['dev/v1/new folder/data/image/im1.png', 'dev/v1/new folder/data/image/im2.png']
+
+    # not empty now: 400 without overwrite; the whole bucket with overwrite lands at the same keys (+ the rest)
+    r = c.post(url, json={'path': '', 'target': target})
+    assert r.status_code == 400 and 'not empty' in r.json()['detail']
+    r = c.post(url, json={'path': '', 'target': target, 'overwrite': True})
+    assert wait_job(c, r.json()['job_id'])['status'] == 'done'
+    assert _keys(client, 'export-new') == ['dev/v1/new folder/data/image/im1.png', 'dev/v1/new folder/data/image/im2.png',
+                                           'dev/v1/new folder/data/notes.txt']
+
+    # bad input: a bad bucket name, another user's connection, an unknown kind, no data.manage
+    assert c.post(url, json={'target': {**target, 'bucket': 'Bad_Name'}, 'create_bucket': True}).status_code == 400
+    as_user, _ = dc
+    from conftest import make_user
+    bob = as_user(make_user('bob'))
+    bb = new_bucket(bob, name='bobs')
+    r = bob.post(f'/api/dc/buckets/{bb["id"]}/export', json={'target': target})
+    assert r.status_code == 400 and 'own connections' in r.json()['detail']
+    assert c.post(url, json={'target': {'kind': 'zip'}}).status_code == 400
+
+
+def test_export_to_from_a_streamed_bucket_and_to_ftp(dc, s3_server, s3_bucket, ftp_server):
+    _, c = dc
+    b, client, bucket = _s3_link(c, s3_server, s3_bucket)
+    cid = b['connection_id']
+    r = c.post(f'/api/dc/buckets/{b["id"]}/export',
+               json={'path': 'labels', 'target': {'kind': 's3', 'connection_id': cid, 'bucket': bucket, 'prefix': 'copy'}})
+    assert r.status_code == 200, r.text
+    j = wait_job(c, r.json()['job_id'])
+    assert j['status'] == 'done' and j['result']['files'] == 2, j
+    assert _keys(client, bucket, 'copy/') == ['copy/labels/im0.txt', 'copy/labels/im1.txt']
+    assert client.get_object(Bucket=bucket, Key='copy/labels/im0.txt')['Body'].read() == b'0 0.5 0.5 0.2 0.2\n'
+    r = c.post(f'/api/dc/buckets/{b["id"]}/export',                # onto itself: the listing would meet its copies
+               json={'path': 'labels', 'target': {'kind': 's3', 'connection_id': cid, 'bucket': bucket, 'prefix': 'ds'}})
+    assert r.status_code == 400 and 'overlaps' in r.json()['detail']
+
+    f = c.post('/api/connections', json={**{k: v for k, v in ftp_server['conn'].items() if k != 'id'}})
+    assert f.status_code == 200, f.text
+    r = c.post(f'/api/dc/buckets/{b["id"]}/export',
+               json={'path': 'images', 'target': {'kind': 'ftp', 'connection_id': f.json()['id'], 'path': '/out'}})
+    assert r.status_code == 200, r.text
+    assert wait_job(c, r.json()['job_id'])['status'] == 'done'
+    assert sorted(os.listdir(ftp_server['root'] / 'out' / 'images')) == ['im0.jpg', 'im1.jpg']
+
+
+def test_create_bucket_route(dc, s3_server, s3_bucket):
+    as_user, c = dc
+    client, _ = s3_bucket
+    cid = _s3_conn(c, s3_server)
+    r = c.post('/api/connections/create-bucket', json={'id': cid, 'bucket': 'made-here'})
+    assert r.status_code == 200 and r.json() == {'ok': True, 'bucket': 'made-here', 'created': True}, r.text
+    assert 'made-here' in [x['Name'] for x in client.list_buckets()['Buckets']]
+    assert c.post('/api/connections/create-bucket', json={'id': cid, 'bucket': 'made-here'}).json()['created'] is False
+    r = c.post('/api/connections/create-bucket', json={'id': cid, 'bucket': 'No_Caps'})
+    assert r.status_code == 400 and 'valid S3 bucket name' in r.json()['detail']
+    from conftest import make_user
+    bob = as_user(make_user('bob'))
+    assert bob.post('/api/connections/create-bucket', json={'id': cid, 'bucket': 'bobs-one'}).status_code == 400

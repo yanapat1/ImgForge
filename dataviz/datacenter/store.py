@@ -26,6 +26,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 from ..data import connections
 
@@ -731,22 +732,64 @@ class _Pipe(io.RawIOBase):
         return out
 
 
-def zip_stream(root, rel, allowed, secrets=True):
-    """Yield a zip of folder `rel` of `root` (or of one file) chunk by chunk: names inside are relative to that
-    folder, the trash and hidden dot files are left out (and .env files unless `secrets`). Stored, not deflated:
-    images do not shrink."""
+class Item(NamedTuple):
+    """One file an export holds: `rel` below the bucket root, `path` the local file (None for an S3 object) and
+    `open()` a binary reader (a file, an S3 body: both read(n) + close())."""
+    rel: str
+    size: int
+    mtime: float | None
+    path: str | None
+    open: object
+
+
+def local_items(root, rel, allowed, secrets=True):
+    """The Items of folder `rel` of `root` (or of that one file): hidden names and the trash are left out (and
+    .env files unless `secrets`), symlinks too (a link to a file outside would leak it; a broken one has nothing)."""
     rel = clean_rel(rel)
     base = resolve(root, rel, allowed, must_exist=True)
+    if os.path.isfile(base):                            # one file: resolve already kept it inside the bucket
+        found, look = [(rel, base)], os.stat
+    else:
+        found = ((p, a) for p, isdir, a in walk_local(root, rel, allowed, cap=10_000_000) if not isdir)
+        look = os.lstat
+    for p, absp in found:
+        if not secrets and is_secret(p):
+            continue
+        try:
+            st = look(absp)
+        except OSError:
+            continue
+        if statmod.S_ISREG(st.st_mode):                 # lstat: a symlink, a socket or a fifo is not
+            yield Item(p, st.st_size, st.st_mtime, absp, lambda a=absp: open(a, 'rb'))
+
+
+def _zinfo(name, it):
+    if it.path is not None:
+        zi = zipfile.ZipInfo.from_file(it.path, name, strict_timestamps=False)   # mtime 0 / before 1980: clamped
+    else:
+        t = time.localtime(it.mtime if it.mtime else time.time())[:6]
+        zi = zipfile.ZipInfo(name, t if t[0] >= 1980 else (1980, 1, 1, 0, 0, 0))
+        zi.external_attr = 0o644 << 16
+    zi.file_size = it.size                              # z.open picks zip64 for big files from this
+    zi.compress_type = zipfile.ZIP_STORED
+    return zi
+
+
+def zip_items(items, strip=''):
+    """Yield a zip of `items` chunk by chunk (names relative to folder `strip`). Stored, not deflated: images do
+    not shrink. A file that cannot be opened (or fails half-way: it ends short) is skipped, never the stream:
+    the browser has already been sent the headers."""
     pipe = _Pipe()
     with zipfile.ZipFile(pipe, 'w', zipfile.ZIP_STORED, allowZip64=True) as z:
-        if os.path.isfile(base):
-            z.write(base, os.path.basename(base))
-        else:
-            for p, isdir, absp in walk_local(root, rel, allowed, cap=10_000_000):
-                if isdir or (not secrets and is_secret(p)):
-                    continue
-                name = p[len(rel) + 1:] if rel else p
-                with open(absp, 'rb') as src, z.open(zipfile.ZipInfo.from_file(absp, name), 'w') as dst:
+        for it in items:
+            name = it.rel[len(strip) + 1:] if strip else it.rel
+            try:
+                zi = _zinfo(name, it)
+                src = it.open()
+            except Exception:  # noqa: BLE001 - OSError, a vanished S3 object: skip the file
+                continue
+            try:
+                with z.open(zi, 'w') as dst:
                     while True:
                         chunk = src.read(CHUNK)
                         if not chunk:
@@ -754,10 +797,21 @@ def zip_stream(root, rel, allowed, secrets=True):
                         dst.write(chunk)
                         if len(pipe.buf) >= CHUNK:
                             yield pipe.take()
-                if pipe.buf:
-                    yield pipe.take()
+            except Exception:  # noqa: BLE001 - a read error half-way: the entry ends short, the zip stays valid
+                pass
+            finally:
+                _try(src.close)
+            if pipe.buf:
+                yield pipe.take()
     if pipe.buf:
         yield pipe.take()
+
+
+def zip_stream(root, rel, allowed, secrets=True):
+    """Yield a zip of folder `rel` of `root` (or of one file, named by itself), chunk by chunk."""
+    rel = clean_rel(rel)
+    single = os.path.isfile(resolve(root, rel, allowed, must_exist=True))
+    return zip_items(local_items(root, rel, allowed, secrets), posix_parent(rel) if single else rel)
 
 
 def thumbnail(data_or_path, key, w, cfg):
@@ -845,6 +899,40 @@ class S3View:
                     if len(out) >= cap:
                         return out
         return out
+
+    def what(self, rel):
+        """'file' when `rel` is an object, 'dir' when objects lie below it (or it is the root), else None."""
+        rel = clean_rel(rel)
+        if not rel:
+            return 'dir'
+        if self.size(rel) is not None:
+            return 'file'
+        r = self.client.list_objects_v2(Bucket=self.bucket, Prefix=self.key(rel) + '/', MaxKeys=1)
+        return 'dir' if r.get('KeyCount', len(r.get('Contents', []))) else None
+
+    def items(self, rel='', secrets=True):
+        """The export Items of folder `rel` (or of that one object), filtered like local_items; listed page by page
+        (no full key list in memory) and each object read only when the zip / the copy gets to it."""
+        rel = clean_rel(rel)
+
+        def item(k, size, lm):
+            return Item(k, size, lm.timestamp() if lm is not None else None, None,
+                        lambda: self.client.get_object(Bucket=self.bucket, Key=self.base + k)['Body'])
+        if rel and self.what(rel) == 'file':
+            if secrets or not is_secret(rel):
+                h = self.client.head_object(Bucket=self.bucket, Key=self.key(rel))
+                yield item(rel, int(h.get('ContentLength') or 0), h.get('LastModified'))
+            return
+        pre = self.base + (rel + '/' if rel else '')
+        for page in self.client.get_paginator('list_objects_v2').paginate(Bucket=self.bucket, Prefix=pre):
+            for o in page.get('Contents', []):
+                sub = o['Key'][len(pre):]
+                parts = sub.split('/')
+                if not parts[-1] or not visible(parts[-1]) or not all(visible(p, True) for p in parts[:-1]):
+                    continue
+                k = join(rel, sub)
+                if secrets or not is_secret(k):
+                    yield item(k, int(o.get('Size') or 0), o.get('LastModified'))
 
     def read(self, rel, limit=None):
         kw = {'Range': f'bytes=0-{int(limit) - 1}'} if limit else {}

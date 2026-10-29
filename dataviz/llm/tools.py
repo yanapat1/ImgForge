@@ -287,6 +287,35 @@ def _s3_sync(user, a):
     return res, f'{b["name"]}: re-sync from S3 started'
 
 
+def _export_target(user, a):
+    """The export_to target of the tool args; the connection by id or exact name, the user's own only."""
+    ref = str(a.get('connection') or '').strip()
+    conns = [c for c in _svc()._datasets().connections(user['id']) if (c.get('kind') or 's3') == a['to']]
+    hit = [c for c in conns if str(c.get('id')) == ref] or [c for c in conns if c.get('name') == ref]
+    if len(hit) != 1:
+        names = ', '.join(repr(c.get('name')) for c in conns[:15]) or 'none'
+        raise ToolError(f'no single {a["to"]} connection {ref!r}; yours: {names}')
+    t = {'kind': a['to'], 'connection_id': hit[0]['id']}
+    if a['to'] == 's3':
+        t.update(bucket=a.get('s3_bucket') or '', prefix=a.get('prefix') or '')
+    else:
+        t['path'] = a.get('prefix') or None
+    return t
+
+
+def _export_to(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().export_to(user, b['id'], a.get('path', ''), target=_export_target(user, a),
+                           create_bucket=bool(a.get('create_bucket')), overwrite=bool(a.get('overwrite')))
+    return res, f'{b["name"]}: export to {a["to"]} started' if res.get('job_id') else f'{b["name"]}: exported'
+
+
+def _export_preview(b, a):
+    where = f'{a["to"]}://{a.get("s3_bucket") or a.get("connection")}/{a.get("prefix") or ""}'.rstrip('/')
+    return (f'Export {_folder(a.get("path", ""))} of {_bname(b, a)} to {where} (paths kept from the bucket root)'
+            + (', creating the bucket' if a.get('create_bucket') else '') + (', overwriting' if a.get('overwrite') else ''))
+
+
 SOURCES = ['kaggle', 'huggingface', 'roboflow', 'url', 'zenodo', 'openml']
 SOURCE_ARGS = ('version', 'revision', 'patterns', 'format')
 
@@ -421,6 +450,16 @@ _add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files wi
                           'version, local-only files are kept.',
           _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
           lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True))
+
+_add(Tool('export_to', 'Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user\'s connections '
+                      'as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png.',
+          _obj({'bucket': BUCKET, 'path': PATH,
+                'to': {'type': 'string', 'enum': ['s3', 'ftp', 'sftp'], 'description': 'target kind'},
+                'connection': S('connection id or exact name (Settings › Connections)'),
+                's3_bucket': S('S3: the target bucket'), 'prefix': S('S3 prefix / FTP or SFTP folder (optional)'),
+                'create_bucket': {'type': 'boolean', 'description': 'S3: create the bucket when missing'},
+                'overwrite': {'type': 'boolean', 'description': 'write into a non-empty target'}},
+               ['bucket', 'to', 'connection']), True, _export_to, _export_preview, s3_ok=True))
 
 _add(Tool('inspect_dataset_source', 'Preview a dataset on the web before importing it: Kaggle (owner/dataset, '
                                     'competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), '
