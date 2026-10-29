@@ -48,6 +48,7 @@ export function setSelection(ids: number[], title: string, { kind = 'samples', p
   if (highlight !== null) updateHighlight();
   updateMarks();
   window.dispatchEvent(new CustomEvent('selection-changed'));   // the ◆ assistant's "Selection · n" chip
+  window.dispatchEvent(new CustomEvent('picks-changed'));       // picks were reset: the pick bar
 }
 
 /** Boxes of the selection cleanlab would give another class (a cleanlab issue view is on screen). */
@@ -174,6 +175,7 @@ export const TIPS_HTML =
   '<li><span><kbd>click</kbd></span><span>a thumbnail (or a dot) to open the full image</span></li>' +
   '<li><span><kbd>Ctrl</kbd>+<kbd>click</kbd></span><span>thumbnails to select them (their dots are pinned on the map)</span></li>' +
   '<li><span><kbd>drag</kbd></span><span>over thumbnails to select them all (<kbd>Shift</kbd>: add to the selection)</span></li>' +
+  '<li><span><kbd>Delete</kbd></span><span>delete the picked boxes (asks first; undo from the message)</span></li>' +
   '<li><span><kbd>right-drag</kbd></span><span>pan the plot (or drag with two fingers on a touch screen)</span></li>' +
   '<li><span><kbd>middle-drag</kbd></span><span>move the lasso (re-selects the dots under it)</span></li>' +
   '<li><span><kbd>Shift</kbd>+<kbd>drag</kbd></span><span>with the circle tool: a round circle instead of an oval</span></li>' +

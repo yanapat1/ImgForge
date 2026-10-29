@@ -42,6 +42,14 @@
 .card.is-outlier { outline: 2px solid var(--danger); outline-offset: -2px; }
 .card.is-outlier .badge { max-width: calc(100% - 78px); }
 .card.is-outlier:hover { outline-color: var(--highlight); }
+/* picked thumbnails: count + bulk edits (views/pick-bar.ts) */
+.pick-bar { align-items: center; gap: var(--s2); padding: 6px var(--s2); border-radius: var(--r-md);
+  background: var(--highlight-soft); border: 1px solid var(--highlight); }
+.pick-bar .pick-count { font-weight: 650; }
+.pick-bar .pick-edit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.pick-bar .pick-edit select { max-width: 11em; }
+.pick-bar button.danger-ghost { color: var(--danger); }
+.pick-bar button.danger-ghost:hover:not(:disabled) { border-color: var(--danger); }
 /* drag-select box (views/gallery.ts enableGalleryMarquee) and the cards under it */
 .gallery .marquee { position: absolute; z-index: 3; pointer-events: none; border: 1px solid var(--highlight);
   background: var(--highlight-soft); border-radius: var(--r-sm); }

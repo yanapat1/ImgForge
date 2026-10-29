@@ -340,6 +340,16 @@ export async function fixToSuggested(): Promise<void> {
   } catch (e) { toast(`Fix failed: ${errText(e)}`); }
 }
 
+/** Explore's pick bar: delete the boxes or change them all to one class, in one fix batch (backup + undo). */
+export async function fixBoxes(ids: number[], op: 'delete' | 'set_class', cls?: number): Promise<boolean> {
+  if (!ids.length) return false;
+  try {
+    const r = await postJSON<CurResult>('api/curation/fix-boxes', op === 'delete' ? { ids, op } : { ids, op, cls });
+    afterFix(r, op === 'delete' ? `Deleted ${ids.length} box${ids.length === 1 ? '' : 'es'}` : `Changed to ${clsName(cls ?? -1)}`);
+    return true;
+  } catch (e) { toast(`Fix failed: ${errText(e)}`); return false; }
+}
+
 // called after every undo (the viewer reloads the boxes of the image it shows)
 export const UNDO_HOOKS: Array<(r: CurResult) => void> = [];
 

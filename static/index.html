@@ -235,6 +235,17 @@
         <span class="grow"></span>
         <button id="btn-clear" class="ghost" title="Clear the selection"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg>Clear</button>
       </div>
+      <!-- picked thumbnails (ctrl+click or drag over them): bulk edits, views/pick-bar.ts -->
+      <div id="pick-bar" class="row pick-bar hidden" role="group" aria-label="Picked thumbnails">
+        <span id="pick-count" class="pick-count num"></span>
+        <span id="pick-edit" class="pick-edit needs-boxes needs-labels">
+          <select id="pick-cls" aria-label="New class for the picked boxes"></select>
+          <button id="pick-setcls" title="Change every picked box to this class (label files are edited, with undo)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Change class</button>
+          <button id="pick-del" class="danger-ghost" title="Delete the picked boxes (Delete key; label files are edited, with undo)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-trash"/></svg>Delete</button>
+        </span>
+        <span class="grow"></span>
+        <button id="pick-clear" class="ghost" title="Unpick all (Esc)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg>Unpick</button>
+      </div>
     </div>
     <div id="gallery" class="gallery"></div>
     <nav id="pager" class="pager" aria-label="Gallery pages"></nav>

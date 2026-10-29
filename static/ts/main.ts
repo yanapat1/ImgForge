@@ -38,6 +38,7 @@ import { fixToSuggested, initCuration } from './views/curation.js';
 import { initCompare } from './views/compare.js';
 import { startLive } from './core/live.js';
 import { initFilterBar } from './views/filter-bar.js';
+import { initPickBar } from './views/pick-bar.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -466,6 +467,7 @@ function bindEvents(): void {
   $req('gallery').addEventListener('mouseleave', () => { if (hoverDotId !== null) showHoverDot(null); });
   // click = details, ctrl/cmd+click = pick it (add / remove; its dot is pinned on the map)
   enableGalleryMarquee();
+  initPickBar();
   $req('gallery').onclick = (e) => {
     const card = closestOf(e, '.card');
     if (!card || Date.now() - marqueeEndedAt < 300) return;
