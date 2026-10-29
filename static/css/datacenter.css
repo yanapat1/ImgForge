@@ -630,14 +630,14 @@ button.icon-btn.sm { width: 26px; padding: 0; }
 }
 
 /* ---------------------------------------------------------------- file view (editor.ts): over the centre pane */
-.dc-file { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+.dc-fview { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
 .dc-fbar { flex: none; display: flex; align-items: center; gap: var(--s2); padding: 8px var(--s3); min-height: 54px; background: var(--surface);
   border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .dc-fcrumb { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--fs-sm); overflow: hidden; white-space: nowrap; }
 .dc-fcrumb b { overflow: hidden; text-overflow: ellipsis; }
 .dc-fcrumb .sep { color: var(--text-faint); }
-.dc-file .lnk { background: none; border: 0; padding: 0; height: auto; min-height: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
-.dc-file .lnk:hover { color: var(--accent-text); text-decoration: underline; }
+.dc-fview .lnk { background: none; border: 0; padding: 0; height: auto; min-height: 0; color: var(--text-muted); font: inherit; cursor: pointer; }
+.dc-fview .lnk:hover { color: var(--accent-text); text-decoration: underline; }
 .dc-dirty { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-left: 4px; background: transparent; }
 .dc-dirty.on { background: var(--highlight); }
 .dc-flang { font: 600 11px var(--mono); padding: 1px 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
@@ -688,3 +688,19 @@ button.icon-btn.sm { width: 26px; padding: 0; }
 /* details: a selected text file's first lines */
 .dc-peek { margin: 0 0 var(--s2); max-height: 260px; overflow: auto; padding: var(--s2) var(--s3); background: var(--surface-2); border: 1px solid var(--border);
   border-radius: var(--r-md); font: 11.5px/1.5 var(--mono); white-space: pre; color: var(--text); }
+
+/* import from the web (upload.ts) and the bucket's source line (details.ts) */
+.dc-srcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin-bottom: var(--s3); }
+.dc-src { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2); font-size: var(--fs-sm); justify-content: flex-start; }
+.dc-src:hover { border-color: var(--border-hover); }
+.dc-src.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); }
+.dc-src.on .ico { color: var(--accent); }
+.dc-src-card { display: flex; flex-direction: column; gap: 4px; padding: var(--s2) var(--s3); margin: var(--s2) 0; border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2); font-size: var(--fs-sm); }
+.dc-src-card .dc-src-files { font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-src-card a { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: 12px; }
+.dc-src-opts { display: flex; flex-wrap: wrap; gap: 4px var(--s4); margin-top: var(--s2); }
+.d-src { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.d-src > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.d-src code { font-size: 11.5px; }

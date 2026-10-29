@@ -16,8 +16,11 @@ import hashlib
 import io
 import os
 import re
+import gzip
 import shutil
 import stat as statmod
+import tarfile
+import threading
 import time
 import uuid
 import zipfile
@@ -49,6 +52,10 @@ TRASH = '.trash'
 ITEMS_CAP = 10000                   # a folder's "items" badge stops counting here
 ZIP_MAX_FILES = 500_000
 CHUNK = 1 << 20
+
+
+class Cancelled(Exception):
+    """The job was cancelled (a download or an unpack): the caller cleans up."""
 
 
 class DCError(Exception):
@@ -460,48 +467,201 @@ def _write_stream(fileobj, dest):
         raise
 
 
-def _zip_member_ok(info):
-    name = info.filename.replace('\\', '/')
+def _member_rel(name):
+    """The safe relative path of an archive member, or None (absolute, .., dot names, __MACOSX)."""
+    name = str(name).replace('\\', '/')
     parts = [p for p in name.split('/') if p not in ('', '.')]
-    if info.is_dir() or not parts or name.startswith('/') or (len(name) > 1 and name[1] == ':'):
+    if not parts or name.startswith('/') or (len(name) > 1 and name[1] == ':'):
         return None
     if any(p == '..' or p.startswith('.') or p == '__MACOSX' for p in parts):
-        return None
-    if statmod.S_ISLNK(info.external_attr >> 16):       # a stored symlink could point anywhere
         return None
     return '/'.join(parts)
 
 
-def unzip_into(zpath, folder, root, allowed):
-    """Unpack a zip into `folder` (zip-slip safe: every member re-resolved inside the bucket) -> (added, skipped)."""
-    added = skipped = 0
-    with zipfile.ZipFile(zpath) as z:
-        infos = z.infolist()
-        if len(infos) > ZIP_MAX_FILES:
-            raise DCError(f'the zip has {len(infos)} entries: at most {ZIP_MAX_FILES}')
-        need = sum(i.file_size for i in infos)
+def _zip_member_ok(info):
+    if info.is_dir() or statmod.S_ISLNK(info.external_attr >> 16):   # a stored symlink could point anywhere
+        return None
+    return _member_rel(info.filename)
+
+
+ARCHIVE_EXTS = ('.zip', '.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz2', '.tar.xz', '.txz', '.gz', '.7z')
+# unpacked on upload: a bare .gz (data.csv.gz) is kept as the file it is
+UPLOAD_ARCHIVES = tuple(e for e in ARCHIVE_EXTS if e != '.gz')
+
+
+def archive_kind(path):
+    """'zip' | 'tar' | 'gz' (one compressed file) | '7z' | None, from the bytes first, then the name."""
+    low = str(path).lower()
+    try:
+        if zipfile.is_zipfile(path):
+            return 'zip'
+        if tarfile.is_tarfile(path):
+            return 'tar'
+    except OSError:
+        return None
+    if low.endswith('.gz'):
+        return 'gz'
+    if low.endswith('.7z'):
+        return '7z'
+    return None
+
+
+LAYOUT_DIRS = {'images', 'labels', 'annotations', 'jpegimages', 'train', 'val', 'valid', 'validation', 'test'}
+
+
+def _strip_wrapper(members, folder, own=None):
+    """Most dataset archives wrap everything in one folder (traffic/images/..., traffic/data.yaml): unpacked into an
+    empty folder that wrapper would hide the layout from format detection, so its contents land there instead."""
+    tops = {rel.split('/', 1)[0] for _, rel, _ in members}
+    if len(tops) == 1 and next(iter(tops)).lower() in LAYOUT_DIRS and next(iter(tops)) != own:
+        return members                                  # images/, labels/, train/ ...: part of the layout, kept
+    if len(tops) == 1 and members and all('/' in rel for _, rel, _ in members) \
+            and not any(not n.startswith('.') for n in os.listdir(folder)):
+        cut = len(next(iter(tops))) + 1
+        return [(k, rel[cut:], n) for k, rel, n in members]
+    return members
+
+
+def extract_into(path, folder, root, allowed, progress=None, cancelled=None, workers=4, overwrite=False,
+                 nested=False, own=None):
+    """Unpack the archive `path` (zip, tar / tar.gz / tar.bz2 / tar.xz, a single .gz, .7z with py7zr) into `folder`
+    of bucket `root`. Every member is re-resolved inside the bucket (no slip), only regular files are written (tar
+    links and devices are skipped), at most ZIP_MAX_FILES entries, the unpacked size must fit on the disk. Zip members
+    unpack in `workers` threads (each with its own handle: zlib releases the GIL). progress(done, total) every 256
+    files; cancelled() -> True stops it (Cancelled). nested: archives found inside are unpacked once more, each into
+    a folder named after it (its own wrapper folder of that name dropped), and removed. own: that name.
+    -> {added, skipped, replaced, nested}"""
+    kind = archive_kind(path)
+    if kind is None:
+        raise DCError(f'{os.path.basename(path)} is not an archive (zip, tar, tar.gz, tar.bz2, tar.xz, gz, 7z)')
+    frel = _rel_of(os.path.realpath(root), folder)
+    out = {'added': 0, 'skipped': 0, 'replaced': 0, 'nested': 0}
+    lock = threading.Lock()
+    written = []
+
+    def check_cancel():
+        if cancelled is not None and cancelled():
+            raise Cancelled()
+
+    def target(rel):
+        dest = resolve(root, join(frel, rel), allowed)
+        if os.path.lexists(dest):
+            if not overwrite or os.path.isdir(dest):
+                with lock:
+                    out['skipped'] += 1
+                return None
+            with lock:
+                out['replaced'] += 1
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        return dest
+
+    def done(dest, total):
+        with lock:
+            out['added'] += 1
+            written.append(dest)
+            n = out['added'] + out['skipped']
+        if progress and n % 256 == 0:
+            progress(n, total)
+
+    def precheck(n, size):
+        if n > ZIP_MAX_FILES:
+            raise DCError(f'the archive has {n} entries: at most {ZIP_MAX_FILES}')
         free = shutil.disk_usage(folder).free
-        if need > free:
-            raise DCError(f'the zip unpacks to {need / 1e9:.1f} GB but only {free / 1e9:.1f} GB are free', 507)
-        frel = _rel_of(os.path.realpath(root), folder)
-        members = [(info, rel) for info in infos if (rel := _zip_member_ok(info)) is not None]
-        # most dataset zips wrap everything in one folder (traffic/images/..., traffic/data.yaml): unpacked into an
-        # empty folder that wrapper would hide the layout from format detection, so its contents land there instead
-        tops = {rel.split('/', 1)[0] for _, rel in members}
-        if len(tops) == 1 and all('/' in rel for _, rel in members) \
-                and not any(not n.startswith('.') for n in os.listdir(folder)):
-            cut = len(next(iter(tops))) + 1
-            members = [(info, rel[cut:]) for info, rel in members]
-        for info, rel in members:
-            dest = resolve(root, join(frel, rel), allowed)
-            if os.path.lexists(dest):
-                skipped += 1
-                continue
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with z.open(info) as src:
+        if size > free:
+            raise DCError(f'the archive unpacks to {size / 1e9:.1f} GB but only {free / 1e9:.1f} GB are free', 507)
+
+    if kind == 'zip':
+        with zipfile.ZipFile(path) as z:
+            infos = z.infolist()
+            precheck(len(infos), sum(i.file_size for i in infos))
+            members = _strip_wrapper([(i, rel, i.file_size) for i in infos if (rel := _zip_member_ok(i)) is not None],
+                                     folder, own)
+        total = len(members)
+
+        def run(chunk):
+            with zipfile.ZipFile(path) as zz:
+                for info, rel, _ in chunk:
+                    check_cancel()
+                    dest = target(rel)
+                    if dest is None:
+                        continue
+                    with zz.open(info.filename) as src:
+                        _write_stream(src, dest)
+                    done(dest, total)
+        n = max(1, min(workers, len(members) // 64 or 1))
+        chunks = [members[i::n] for i in range(n)]
+        if n == 1:
+            run(chunks[0])
+        else:
+            with ThreadPoolExecutor(n) as ex:
+                for f in [ex.submit(run, c) for c in chunks]:
+                    f.result()
+    elif kind == 'tar':
+        with tarfile.open(path) as t:
+            infos = t.getmembers()
+            precheck(len(infos), sum(i.size for i in infos if i.isreg()))
+            members = _strip_wrapper([(i, rel, i.size) for i in infos
+                                      if i.isreg() and (rel := _member_rel(i.name)) is not None], folder, own)
+            total = len(members)
+            for info, rel, _ in members:
+                check_cancel()
+                dest = target(rel)
+                if dest is None:
+                    continue
+                src = t.extractfile(info)
+                if src is None:
+                    continue
+                with src:
+                    _write_stream(src, dest)
+                done(dest, total)
+    elif kind == 'gz':
+        name = os.path.basename(path)[:-3] or 'file'
+        rel = _member_rel(name)
+        dest = target(rel) if rel else None
+        if dest is not None:
+            check_cancel()
+            with gzip.open(path, 'rb') as src:
                 _write_stream(src, dest)
-            added += 1
-    return added, skipped
+            done(dest, 1)
+    else:
+        try:
+            import py7zr
+        except ImportError:
+            raise DCError('.7z archives need py7zr on the server (pip install py7zr): use zip or tar.gz') from None
+        with py7zr.SevenZipFile(path) as z:
+            infos = [i for i in z.list() if not i.is_directory]
+            precheck(len(infos), sum(int(i.uncompressed or 0) for i in infos))
+            members = _strip_wrapper([(i.filename, rel, 0) for i in infos if (rel := _member_rel(i.filename))], folder, own)
+            names = {k: rel for k, rel, _ in members}
+            for k, data in (z.read(list(names)) or {}).items():
+                check_cancel()
+                dest = target(names[k])
+                if dest is not None:
+                    _write_stream(data, dest)
+                    done(dest, len(names))
+    if progress:
+        progress(out['added'] + out['skipped'], out['added'] + out['skipped'])
+    if nested:
+        for p in [w for w in written if w.lower().endswith(ARCHIVE_EXTS) and archive_kind(w)]:
+            check_cancel()
+            base = os.path.basename(p)
+            stem = re.sub(r'(\.tar)?\.[A-Za-z0-9]{1,4}$', '', base) or base
+            sub = os.path.join(os.path.dirname(p), stem)
+            if os.path.lexists(sub) and not os.path.isdir(sub):
+                continue
+            os.makedirs(sub, exist_ok=True)
+            r = extract_into(p, sub, root, allowed, None, cancelled, workers, overwrite, nested=False, own=stem)
+            os.remove(p)
+            out['nested'] += 1
+            out['added'] += r['added'] - 1
+            out['skipped'] += r['skipped']
+    return out
+
+
+def unzip_into(zpath, folder, root, allowed):
+    """Unpack an archive into `folder` (the upload path) -> (added, skipped)."""
+    r = extract_into(zpath, folder, root, allowed)
+    return r['added'], r['skipped']
 
 
 def upload_local(root, allowed, rel, files, unzip=True):
@@ -519,14 +679,15 @@ def upload_local(root, allowed, rel, files, unzip=True):
             skipped += 1
             continue
         dest = resolve(root, join(frel, sub), allowed)
-        if unzip and sub.lower().endswith('.zip'):
-            tmp = os.path.join(folder, f'.upload-{uuid.uuid4().hex}.zip')
+        if unzip and sub.lower().endswith(UPLOAD_ARCHIVES):
+            ext = next(e for e in UPLOAD_ARCHIVES if sub.lower().endswith(e))
+            tmp = os.path.join(folder, f'.upload-{uuid.uuid4().hex}{ext}')
             try:
                 _write_stream(fobj, tmp)
                 try:
                     a, s = unzip_into(tmp, os.path.dirname(dest), root, allowed)
-                except zipfile.BadZipFile:
-                    raise DCError(f'{sub} is not a valid zip file') from None
+                except (zipfile.BadZipFile, tarfile.TarError, EOFError, OSError):
+                    raise DCError(f'{sub} is not a valid archive') from None
             finally:
                 try:
                     os.remove(tmp)

@@ -34,6 +34,8 @@ export interface Bucket {
   tags: Tag[];
   stats: BucketStats;
   sessions: BucketSession[];
+  /** imported from the web (Kaggle, Hugging Face, …): where from, when; importing = the job still runs */
+  source?: { kind: string; ref: string; imported_at: number | null; title?: string | null; version?: string | number | null; importing?: boolean };
   /** optional sample image paths for the card mosaic (not in the contract yet: else the page asks search) */
   samples?: string[];
   /** S3 links: the connection + bucket + prefix, the load mode, whether the local copy is in use (pulled at least
@@ -142,3 +144,20 @@ export type AiEvent =
   | { type: 'done'; usage?: Record<string, unknown> }
   | { type: 'error'; detail: string };
 export interface ConfirmResult { results: Array<{ id: string; ok: boolean; summary: string; error?: string }>; retagged: Retag[] }
+
+/** GET /api/dc/sources: a web dataset source (datacenter/sources) and the caller's token connections for it */
+export interface SourceField { key: string; label: string; type: 'text' | 'select' | 'bool' | 'list'; placeholder?: string; default?: unknown; options?: Array<[string, string]> }
+export interface WebSource {
+  key: string; label: string; needs: string | null; token: 'required' | 'optional' | null; fields: SourceField[];
+  examples: string[]; help: string; connections: Array<{ id: string; name: string }>;
+}
+/** POST /api/dc/sources/inspect */
+export interface SourceInfo {
+  title: string; name: string; ref: string; source: string; size?: number | null; files?: number | null; license?: string | null;
+  versions?: Array<{ version: number | string; date?: string }>; version?: number | string | null; url?: string; warning?: string;
+  sample?: string[]; rows?: number | null; columns?: number | null; archive?: boolean;
+}
+/** POST /api/dc/import */
+export interface ImportBody {
+  source: string; ref: string; name?: string; connection_id?: string | null; opts?: Record<string, unknown>; bucket?: string; path?: string;
+}

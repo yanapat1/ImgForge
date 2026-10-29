@@ -104,6 +104,7 @@ function bucketDetails(b: Bucket): string {
     head(srcIcon(b), b.name, `<button type="button" class="icon-btn ghost sm" data-act="edit-bucket" data-bid="${esc(b.id)}" aria-label="Edit bucket" title="Edit: name, tags${b.kind === 's3' ? ', load mode' : ''}, export…">${icon('edit')}</button>` +
       `<button type="button" class="icon-btn ghost sm" data-act="bucket-menu" data-bid="${esc(b.id)}" aria-haspopup="menu" aria-label="Bucket actions" title="Bucket actions">${icon('more')}</button>`) +
     `<div class="d-path">${icon(b.kind === 's3' ? 'cloud' : 'folder')}<span title="${esc(b.root)}">${esc(b.root)}</span></div>` +
+    sourceLine(b) +
     `<div class="d-meta">${esc(SOURCE[b.kind]?.[1] ?? b.kind)}${b.kind === 's3' ? ` · ${b.mode === 'local' ? (b.local_ready ? 'loaded locally' : 'loading…') : 'streamed'}` : ''} · ${ro}${b.updated_at ? ` · changed ${esc(timeAgo(b.updated_at))}` : ''}</div></section>` +
     formatSec(b.id, '', f) + tagsSec(b.id, '', tags, true) + contentsSec(s, b) + sessionsSec(b) + '</div>' +
     sendFoot(b.id, [''], undefined, f, b.writable);
@@ -118,6 +119,17 @@ function folderDetails(b: Bucket): string {
     (L ? formatSec(b.id, D.path, L.format) : '') +
     (L ? tagsSec(b.id, D.path, L.tags, true) : '') + contentsSec(s, undefined, 'Folder') + sessionsSec(b) + '</div>' +
     sendFoot(b.id, [D.path], undefined, L?.format, b.writable);
+}
+
+const SRC_LABEL: Record<string, string> = { kaggle: 'Kaggle', huggingface: 'Hugging Face', roboflow: 'Roboflow', url: 'a link', zenodo: 'Zenodo', openml: 'OpenML' };
+
+/** Imported from the web: where from and when, with Update from source. */
+function sourceLine(b: Bucket): string {
+  const s = b.source;
+  if (!s) return '';
+  const when = s.importing ? 'importing…' : s.imported_at ? `imported ${timeAgo(s.imported_at)}` : 'not finished';
+  return `<div class="d-src">${icon('globe')}<span>From ${esc(SRC_LABEL[s.kind] ?? s.kind)} · <code>${esc(s.ref)}</code>${s.version != null ? ` · v${esc(String(s.version))}` : ''} · ${esc(when)}</span>` +
+    (b.writable && !s.importing ? `<button type="button" class="ghost sm" data-act="reimport" data-bid="${esc(b.id)}" title="Download it again: newer files replace the old ones">${icon('refresh')}Update</button>` : '') + '</div>';
 }
 
 /** One text-like file selected: its first lines (filled in by editor.ts peek) and Open editor. */
@@ -220,6 +232,15 @@ function openConvert(bid: string, path: string): void {
 }
 
 export const DETAIL_ACTIONS: Record<string, Action> = {
+  reimport: (el) => {
+    const bid = el.dataset['bid'] || '';
+    if (!bid) return;
+    (el as HTMLButtonElement).disabled = true;
+    api.reimport(bid).then(() => { toast('Updating from the source…'); watchJobs(); }, (e: unknown) => {
+      (el as HTMLButtonElement).disabled = false;
+      toast(`Could not update: ${errText(e)}`, 'err');
+    });
+  },
   convert: (el) => {
     const bid = el.dataset['bid'] || D.bid || '';
     if (bid) openConvert(bid, el.dataset['path'] ?? '');

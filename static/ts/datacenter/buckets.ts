@@ -125,6 +125,7 @@ function renderBar(): void {
     `<button type="button" class="icon-btn view-btn${D.cards === 'grid' ? ' active' : ''}" data-act="cards" data-mode="grid" aria-pressed="${D.cards === 'grid'}" aria-label="Cards" title="Cards">${icon('grid')}</button>` +
     `<button type="button" class="icon-btn view-btn${D.cards === 'list' ? ' active' : ''}" data-act="cards" data-mode="list" aria-pressed="${D.cards === 'list'}" aria-label="List" title="List">${icon('list')}</button></div>` +
     `<span class="grow"></span>` +
+    `<button type="button" data-act="import-web" class="dc-wide">${icon('globe')}From the web</button>` +
     `<button type="button" data-act="link" class="dc-wide">${icon('link')}Link source</button>` +
     `<button type="button" class="primary" data-act="import">${icon('upload')}<span class="dc-wide-txt">Import data</span></button>` +
     `<button type="button" class="icon-btn dc-only-overlay" data-act="show-details" aria-label="Details" title="Details">${icon('eye')}</button>`;
@@ -156,7 +157,7 @@ function renderBody(): void {
   if (!n) {
     content = `<div class="dc-empty big">${icon('db')}<b>No data yet</b><span class="muted">Import images or a zip into a managed bucket, or link a local folder or an S3 prefix you already have. ` +
       `Data Center detects the format (YOLO, COCO, VOC, class folders…) and tags it for you.</span>` +
-      `<div class="row"><button type="button" class="primary" data-act="import">${icon('upload')}Import data</button><button type="button" data-act="link">${icon('link')}Link source</button></div></div>`;
+      `<div class="row"><button type="button" class="primary" data-act="import">${icon('upload')}Import data</button><button type="button" data-act="link">${icon('link')}Link source</button><button type="button" data-act="import-web">${icon('globe')}From the web</button></div></div>`;
   } else if (!list.length) {
     content = `<div class="dc-empty">${icon('filter')}<b>No bucket matches</b><button type="button" data-act="clear-bfilters">Clear filters</button></div>`;
   } else if (D.cards === 'list') {

@@ -13,11 +13,13 @@ import { toast } from '../core/toast.js';
 import { openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
+import { watchJobs } from './activity.js';
 import { modeCards, trackPull } from './edit.js';
+import { openSettings } from '../settings/dialog.js';
 import { showRetag } from './ops.js';
 import { bucketOf, D, fmtN, fmtSize, hooks } from './state.js';
 import type { BrowseResult, ConnectionsPayload } from '../types-settings.js';
-import type { BucketKind, CreateBucketBody, S3Mode, UploadResult } from '../types-datacenter.js';
+import type { BucketKind, CreateBucketBody, S3Mode, SourceInfo, UploadResult, WebSource } from '../types-datacenter.js';
 
 const BATCH_FILES = 8, BATCH_BYTES = 16 << 20;
 
@@ -95,9 +97,15 @@ export async function uploadFiles(bid: string, path: string, files: File[], onPr
 
 // ---------------------------------------------------------------- the Import data dialog
 
-type Way = 'managed' | 'local' | 's3';
+type Way = 'managed' | 'local' | 's3' | 'web';
+/** "From the web": the sources (GET api/dc/sources), the picked one, its ref, token, options and the inspect card */
+interface Web {
+  sources: WebSource[] | null; src: string; ref: string; conn: string; opts: Record<string, string | boolean>;
+  info: SourceInfo | null; busy: boolean; err: string | null; extract: boolean; keep: boolean; nested: boolean;
+  tok: number; named: boolean;
+}
 interface Imp {
-  way: Way; files: File[]; name: string;
+  way: Way; files: File[]; name: string; web: Web;
   browse: BrowseResult | null; path: string; berr: string | null;
   conns: Array<{ id: string; name: string }> | null; conn: string; s3buckets: string[] | null; s3bucket: string; prefix: string; s3err: string | null;
   mode: S3Mode;
@@ -126,6 +134,8 @@ function body(I: Imp): string {
         : b.folders.length ? b.folders.map((f) => `<button type="button" class="pk-row" data-fs="${esc(`${b.path.replace(/\/$/, '')}/${f.name}`)}">${icon('folder')}<span class="nm">${esc(f.name)}</span>` +
           `${f.yolo ? '<span class="dc-fb sm" style="--fc:var(--accent)">YOLO</span>' : ''}${f.images ? `<span class="num faint">${fmtN(f.images)} img</span>` : ''}</button>`).join('') : '<span class="muted">No subfolders</span>'}</div></div>` +
       `<p class="hint">Linked folders are used in place (inside <code>storage.allowed_roots</code>); nothing is copied.${b?.images ? ` This folder holds ${fmtN(b.images)} images.` : ''}</p>`;
+  } else if (I.way === 'web') {
+    pane = webPane(I.web);
   } else {
     pane = I.conns === null ? '<span class="spin sm"></span>' : !I.conns.length
       ? `<div class="note info">${icon('plug')}<span>No S3 connection yet: add one in Settings › Connections, then link a bucket here.</span></div>`
@@ -137,9 +147,50 @@ function body(I: Imp): string {
         `<p class="hint">${I.mode === 'stream' ? 'A streamed link is read-only: list, view, detect, tag and send it. Switch to Load into local later in Edit.'
           : 'The bucket is downloaded into the managed store, then you can change, label and export it. Re-sync from S3 any time (Edit).'}</p>`;
   }
-  return `<div class="dc-imp"><div class="dc-ways" role="tablist" aria-label="Where the data comes from">${wayTab(I, 'managed', 'upload', 'Upload files')}${wayTab(I, 'local', 'folder', 'Local folder')}${wayTab(I, 's3', 'cloud', 'S3 bucket')}</div>` +
+  return `<div class="dc-imp"><div class="dc-ways" role="tablist" aria-label="Where the data comes from">${wayTab(I, 'managed', 'upload', 'Upload files')}${wayTab(I, 'local', 'folder', 'Local folder')}${wayTab(I, 's3', 'cloud', 'S3 bucket')}${wayTab(I, 'web', 'globe', 'From the web')}</div>` +
     `<label class="fld"><span>Bucket name</span><input type="text" class="txt" id="dc-imp-name" value="${esc(I.name)}" placeholder="e.g. traffic-cams-2026" autocomplete="off" spellcheck="false"></label>` +
     `<div class="dc-imp-pane">${pane}</div>${I.progress ? `<div class="dc-upline" role="status">${icon('upload')}<span>${esc(I.progress)}</span></div>` : ''}</div>`;
+}
+
+const SRC_ICON: Record<string, string> = { kaggle: 'download', huggingface: 'sparkle', roboflow: 'target', url: 'link', zenodo: 'db', openml: 'grid' };
+
+function webPane(W: Web): string {
+  if (W.sources === null) return W.err ? `<div class="status-line err">${icon('alert')}${esc(W.err)}</div>` : '<span class="spin sm"></span>';
+  const S = W.sources.find((x) => x.key === W.src);
+  const grid = `<div class="dc-srcs" role="radiogroup" aria-label="Source">${W.sources.map((x) =>
+    `<button type="button" role="radio" aria-checked="${x.key === W.src}" class="dc-src${x.key === W.src ? ' on' : ''}" data-src="${esc(x.key)}">${icon(SRC_ICON[x.key] ?? 'globe')}<b>${esc(x.label)}</b></button>`).join('')}</div>`;
+  if (!S) return grid;
+  const conns = S.connections;
+  const tokenRow = S.needs ? `<div class="f2"><label class="fld"><span>Token${S.token === 'optional' ? ' <span class="faint">(optional)</span>' : ''}</span>` +
+    (conns.length ? `<select id="dc-web-conn">${S.token === 'optional' ? `<option value=""${W.conn ? '' : ' selected'}>None</option>` : ''}${conns.map((c) =>
+      `<option value="${esc(c.id)}"${c.id === W.conn ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`
+      : `<span class="muted">${S.token === 'required' ? `${esc(S.label)} needs your token.` : 'None saved.'}</span>`) + '</label>' +
+    `<span class="fld"><span>&nbsp;</span><button type="button" class="ghost sm" data-web="add-token">${icon('plus')}Add a ${esc(S.label)} token…</button></span></div>` : '';
+  const fields = S.fields.map((f) => {
+    const v = W.opts[f.key] ?? (f.default as string | boolean | undefined) ?? '';
+    if (f.type === 'select') {
+      return `<label class="fld"><span>${esc(f.label)}</span><select data-wopt="${esc(f.key)}">${(f.options ?? []).map(([k, l]) => `<option value="${esc(k)}"${k === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+    }
+    if (f.type === 'bool') return `<label class="check"><input type="checkbox" data-wopt="${esc(f.key)}"${v ? ' checked' : ''}> ${esc(f.label)}</label>`;
+    return `<label class="fld"><span>${esc(f.label)}</span><input type="text" class="txt" data-wopt="${esc(f.key)}" value="${esc(String(v))}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" spellcheck="false"></label>`;
+  }).join('');
+  const i = W.info;
+  const card = W.busy ? `<div class="dc-src-card"><span class="spin sm"></span>Looking it up…</div>`
+    : W.err ? `<div class="status-line err">${icon('alert')}${esc(W.err)}</div>`
+      : i ? `<div class="dc-src-card"><b>${esc(i.title)}</b>` +
+        `<span class="muted num">${[i.size ? fmtSize(i.size) : '', i.files ? `${fmtN(i.files)} file${i.files === 1 ? '' : 's'}` : '', i.rows ? `${fmtN(i.rows)} rows` : '',
+          i.license ? esc(i.license) : '', i.version != null ? `version ${esc(String(i.version))}` : ''].filter(Boolean).join(' · ')}</span>` +
+        (i.sample?.length ? `<span class="faint dc-src-files">${i.sample.slice(0, 6).map(esc).join(' · ')}${(i.files ?? 0) > 6 ? ' …' : ''}</span>` : '') +
+        (i.warning ? `<span class="status-line warn">${icon('alert')}${esc(i.warning)}</span>` : '') +
+        (i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${icon('link')}Open the page</a>` : '') + '</div>' : '';
+  return grid +
+    `<label class="fld"><span>${esc(S.label)} dataset</span><input type="text" class="txt mono" id="dc-web-ref" value="${esc(W.ref)}" placeholder="${esc(S.examples[0] ?? '')}" autocomplete="off" spellcheck="false"></label>` +
+    `<p class="hint">${esc(S.help)}${S.examples.length > 1 ? ` E.g. <code>${S.examples.slice(1).map(esc).join('</code>, <code>')}</code>` : ''}</p>` +
+    tokenRow + (fields ? `<div class="f2">${fields}</div>` : '') + card +
+    `<div class="dc-src-opts"><label class="check"><input type="checkbox" data-wflag="extract"${W.extract ? ' checked' : ''}> Unpack archives (zip, tar.gz, …)</label>` +
+    `<label class="check"><input type="checkbox" data-wflag="nested"${W.nested ? ' checked' : ''}${W.extract ? '' : ' disabled'}> Also unpack archives inside</label>` +
+    `<label class="check"><input type="checkbox" data-wflag="keep"${W.keep ? ' checked' : ''}${W.extract ? '' : ' disabled'}> Keep the downloaded archive</label></div>` +
+    '<p class="hint">The download runs in the background (progress at the top of the page); the format is detected when it is done.</p>';
 }
 
 async function walk(items: DataTransferItemList): Promise<File[]> {
@@ -165,7 +216,8 @@ async function walk(items: DataTransferItemList): Promise<File[]> {
 /** The Import data dialog; way 'managed' (upload) by default, 'local' / 's3' for Link source. */
 export async function openImport(way: Way = 'managed'): Promise<void> {
   if (!can('data.manage')) { toast(cannot('add data'), 'err'); return; }
-  const I: Imp = { way, files: [], name: '', browse: null, path: '', berr: null, conns: null, conn: '', s3buckets: null, s3bucket: '', prefix: '', s3err: null, progress: '', mode: 'stream' };
+  const I: Imp = { way, files: [], name: '', web: { sources: null, src: 'kaggle', ref: '', conn: '', opts: {}, info: null, busy: false, err: null,
+    extract: true, keep: false, nested: false, tok: 0, named: false }, browse: null, path: '', berr: null, conns: null, conn: '', s3buckets: null, s3bucket: '', prefix: '', s3err: null, progress: '', mode: 'stream' };
   let root: HTMLElement | null = null;
   const paint = (): void => {
     const host = root?.querySelector('.dc-imp');
@@ -202,18 +254,57 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
     paint();
     if (I.conn) await s3buckets();
   };
+  const W = I.web;
+  const pickSource = (key: string): void => {
+    W.src = key; W.info = null; W.err = null; W.opts = {};
+    const S = W.sources?.find((x) => x.key === key);
+    W.conn = S?.connections[0]?.id ?? '';
+    paint();
+    if (W.ref.trim()) inspectSoon(0);
+  };
+  const loadSources = async (): Promise<void> => {
+    try {
+      W.sources = (await api.sources()).sources;
+      W.err = null;
+      pickSource(W.sources.some((x) => x.key === W.src) ? W.src : W.sources[0]?.key ?? '');
+    } catch (e) { W.sources = null; W.err = errText(e); paint(); }
+  };
+  let inspT: ReturnType<typeof setTimeout> | undefined;
+  const inspectSoon = (ms = 400): void => {
+    clearTimeout(inspT);
+    inspT = setTimeout(() => { void inspect(); }, ms);
+  };
+  const inspect = async (): Promise<void> => {
+    const tok = (W.tok += 1);
+    if (!W.ref.trim()) { W.info = null; W.err = null; W.busy = false; paint(); return; }
+    W.busy = true; W.err = null;
+    paint();
+    try {
+      const info = await api.inspectSource(W.src, W.ref.trim(), W.conn || null, W.opts);
+      if (tok !== W.tok) return;
+      W.info = info;
+      if (!W.named || !I.name) { I.name = info.name; W.named = false; }
+    } catch (e) {
+      if (tok !== W.tok) return;
+      W.info = null; W.err = errText(e);
+    }
+    W.busy = false;
+    paint();
+  };
   const switchWay = (w: Way): void => {
     I.way = w;
     paint();
     if (w === 'local' && !I.browse) void browse('');
     if (w === 's3' && I.conns === null) void loadConns();
+    if (w === 'web' && W.sources === null) void loadSources();
   };
   await openDialog({
-    title: way === 'managed' ? 'Import data' : 'Link source', wide: true, ok: 'Create bucket', body: body(I), focus: '#dc-imp-name',
+    title: way === 'managed' || way === 'web' ? 'Import data' : 'Link source', wide: true, ok: way === 'web' ? 'Import' : 'Create bucket', body: body(I), focus: '#dc-imp-name',
     bind: (r) => {
       root = r;
       if (way === 'local') void browse('');
       if (way === 's3') void loadConns();
+      if (way === 'web') void loadSources();
       const input = document.createElement('input');
       input.type = 'file';
       input.multiple = true;
@@ -221,6 +312,18 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
       r.addEventListener('click', (e) => {
         const t = e.target instanceof Element ? e.target : null;
         const w = t?.closest<HTMLElement>('[data-way]'), fs = t?.closest<HTMLElement>('[data-fs]'), pk = t?.closest<HTMLElement>('[data-pick]');
+        const sc = t?.closest<HTMLElement>('[data-src]'), wb = t?.closest<HTMLElement>('[data-web]');
+        if (sc) { pickSource(sc.dataset['src'] ?? ''); return; }
+        if (wb?.dataset['web'] === 'add-token') {
+          // the token form lives in Settings › Connections; the source list is read again when it closes
+          void openSettings('connections');
+          const box = document.getElementById('settings');
+          if (box) {
+            const mo = new MutationObserver(() => { if (box.classList.contains('hidden')) { mo.disconnect(); void loadSources(); } });
+            mo.observe(box, { attributes: true, attributeFilter: ['class'] });
+          }
+          return;
+        }
         const md = t?.closest<HTMLElement>('[data-mode]');
         if (md) { I.mode = md.dataset['mode'] === 'local' ? 'local' : 'stream'; paint(); }
         else if (w) switchWay((w.dataset['way'] as Way | undefined) ?? 'managed');
@@ -232,8 +335,24 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
         const t = e.target;
         if (t instanceof HTMLSelectElement && t.id === 'dc-s3conn') { I.conn = t.value; void s3buckets(); }
         if (t instanceof HTMLSelectElement && t.id === 'dc-s3bucket') I.s3bucket = t.value;
+        if (t instanceof HTMLSelectElement && t.id === 'dc-web-conn') { W.conn = t.value; inspectSoon(0); }
+        if ((t instanceof HTMLSelectElement || t instanceof HTMLInputElement) && t.dataset['wopt']) {
+          W.opts[t.dataset['wopt']] = t instanceof HTMLInputElement && t.type === 'checkbox' ? t.checked : t.value;
+          inspectSoon(0);
+        }
+        if (t instanceof HTMLInputElement && t.dataset['wflag']) {
+          const k = t.dataset['wflag'];
+          if (k === 'extract') W.extract = t.checked; else if (k === 'nested') W.nested = t.checked; else if (k === 'keep') W.keep = t.checked;
+          paint();
+        }
       });
-      r.addEventListener('input', (e) => { if (e.target instanceof HTMLInputElement && e.target.id === 'dc-s3prefix') I.prefix = e.target.value; });
+      r.addEventListener('input', (e) => {
+        const t = e.target;
+        if (!(t instanceof HTMLInputElement)) return;
+        if (t.id === 'dc-s3prefix') I.prefix = t.value;
+        if (t.id === 'dc-web-ref') { W.ref = t.value; inspectSoon(); }
+        if (t.id === 'dc-imp-name' && I.way === 'web') W.named = !!t.value.trim();
+      });
       r.addEventListener('dragover', (e) => { if (I.way === 'managed') { e.preventDefault(); r.querySelector('#dc-dz')?.classList.add('over'); } });
       r.addEventListener('dragleave', () => r.querySelector('#dc-dz')?.classList.remove('over'));
       r.addEventListener('drop', (e) => {
@@ -245,6 +364,21 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
     },
     onOk: async (r) => {
       const name = r.querySelector<HTMLInputElement>('#dc-imp-name')?.value.trim() ?? '';
+      if (I.way === 'web') {
+        if (!W.ref.trim()) return 'Paste what to download';
+        const S = W.sources?.find((x) => x.key === W.src);
+        if (S?.token === 'required' && !W.conn) return `Add a ${S.label} token first (Settings › Connections)`;
+        let res;
+        try {
+          res = await api.importSource({ source: W.src, ref: W.ref.trim(), ...(name ? { name } : {}), connection_id: W.conn || null,
+            opts: { ...W.opts, extract: W.extract, nested: W.nested, keep_archive: W.keep } });
+        } catch (e) { return `Could not start: ${errText(e)}`; }
+        toast(`Downloading ${W.ref.trim()} from ${S?.label ?? W.src}…`);
+        watchJobs();
+        await hooks.reload();
+        hooks.navigate(res.bucket, '');
+        return null;
+      }
       if (!name) return 'Give the bucket a name';
       const kind: BucketKind = I.way;
       const req: CreateBucketBody = { name, kind };
@@ -284,5 +418,6 @@ export function bindUpload(): void {
 export const UPLOAD_ACTIONS: Record<string, Action> = {
   import: () => { void openImport('managed'); },
   link: () => { void openImport('local'); },
+  'import-web': () => { void openImport('web'); },
   upload: () => { $<HTMLInputElement>('dc-file')?.click(); },
 };

@@ -144,6 +144,25 @@ def router(state, ctx):
                      target=body.get('target') or 'visualize', name=body.get('name'),
                      task_type=body.get('task_type') or 'detect')
 
+    @r.get('/sources')
+    def list_sources(user=Depends(deps.current_user)):
+        return _call(service.list_sources, user)
+
+    @r.post('/sources/inspect')
+    def inspect_source(body: dict, user=Depends(MANAGE)):
+        return _call(service.inspect_source, user, body.get('source'), body.get('ref'),
+                     connection_id=body.get('connection_id'), opts=body.get('opts') or {})
+
+    @r.post('/import')
+    def import_source(body: dict, user=Depends(MANAGE)):
+        return _call(service.import_source, user, body.get('source'), body.get('ref'), name=body.get('name'),
+                     connection_id=body.get('connection_id'), opts=body.get('opts') or {},
+                     bucket=body.get('bucket'), path=body.get('path') or '')
+
+    @r.post('/buckets/{bid}/reimport')
+    def reimport(bid: str, user=Depends(MANAGE)):
+        return _call(service.reimport, user, bid)
+
     @r.post('/autolabel')
     def autolabel(body: dict, user=Depends(MANAGE)):
         return _call(service.autolabel, user, body.get('bucket'), body.get('path') or '', model=body.get('model'),

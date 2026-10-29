@@ -4,8 +4,8 @@
 
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
-  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, Format, FolderStats, Listing, LsSort, Op, OpsResult,
-  S3Mode, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult,
+  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, Format, FolderStats, ImportBody, Listing, LsSort, Op, OpsResult,
+  S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult,
 } from '../types-datacenter.js';
 
 const B = (bid: string): string => `api/dc/buckets/${encodeURIComponent(bid)}`;
@@ -36,6 +36,13 @@ export const exportUrl = (bid: string, path = ''): string => `${B(bid)}/export${
 export const source = (bid: string, path = ''): Promise<DcSource> => getJSON<DcSource>(`${B(bid)}/source${qs({ path })}`);
 export const convert = (bid: string, path: string, to: string): Promise<{ job_id: number | null; path: string }> =>
   postJSON<{ job_id: number | null; path: string }>(`${B(bid)}/convert`, { path, to });
+export const sources = (): Promise<{ sources: WebSource[] }> => getJSON<{ sources: WebSource[] }>('api/dc/sources');
+export const inspectSource = (source: string, ref: string, connectionId: string | null, opts: Record<string, unknown>): Promise<SourceInfo> =>
+  postJSON<SourceInfo>('api/dc/sources/inspect', { source, ref, connection_id: connectionId, opts });
+export const importSource = (body: ImportBody): Promise<{ job_id: number | null; bucket: string }> =>
+  postJSON<{ job_id: number | null; bucket: string }>('api/dc/import', body);
+export const reimport = (bid: string): Promise<{ job_id: number | null; bucket: string }> =>
+  postJSON<{ job_id: number | null; bucket: string }>(`${B(bid)}/reimport`);
 export const autolabel = (body: AutolabelBody): Promise<AutolabelResult> => postJSON<AutolabelResult>('api/dc/autolabel', body);
 export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: boolean }> =>
   sendJSON<{ ok: boolean }>('DELETE', `${B(bid)}${deleteFiles ? '?delete_files=1' : ''}`);

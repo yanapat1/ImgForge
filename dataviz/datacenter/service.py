@@ -158,7 +158,14 @@ def _writable(r):
     return os.path.isdir(r.root) and os.access(r.root, os.W_OK)
 
 
+def _importing(bid):
+    jobs = getattr(_conf['ctx'], 'jobs', None) if _conf['ctx'] is not None else None
+    return bool(jobs is not None and jobs.busy(f'dc-import:{bid}'))
+
+
 def _need_write(r):
+    if _importing(r.id):
+        raise DCError(f'bucket “{r.name}” is still importing: it can be changed once the download finished', 409)
     if r.kind == 's3' and r.mode == 'local':
         raise DCError(f'bucket “{r.name}” is still loading from S3: it can be changed once the download finished',
                       409)
@@ -294,6 +301,10 @@ def _shape(rows, conn):
             'stats': {'images': tree.get('images'), 'labels': tree.get('labels'),
                       'classes': (fmt or {}).get('classes'), 'size': tree.get('size')},
             'sessions': ses.get(r.id, []),
+            **({'source': {'kind': r.source_kind, 'ref': r.source_ref, 'imported_at': _epoch(r.imported_at),
+                           'title': (r.source_meta or {}).get('title'), 'version': (r.source_meta or {}).get('version'),
+                           'importing': _importing(r.id)}}
+               if getattr(r._r, 'source_kind', None) else {}),
             **({'connection_id': r.connection_id, 's3_bucket': r.s3_bucket, 'prefix': r.prefix, 'mode': r.mode,
                 'local_ready': r.local_copy, 'synced_at': _epoch(r.synced_at), 's3_root': r._r.root}
                if r.link == 's3' else {}),
@@ -543,6 +554,166 @@ def convert_vectors(user, bid, path='', to='parquet'):
         return {'job_id': None, 'path': out, 'result': fn()}
     return {'job_id': jobs.submit(f'dc-convert:{r.id}', f'convert {base} to {vector.LAYOUTS[to]["label"]}', fn,
                                   lane='io', public_result=True, owner=user['id']).id, 'path': out, 'result': None}
+
+
+# ---------------------------------------------------------------------------------------------- web sources
+def _source_conn(user, src, connection_id):
+    """The decrypted token connection for `src`: the one picked, else the user's only / first one of that kind;
+    None when the source needs none (DCError when it is required and there is none)."""
+    from ..data.connections import TOKEN_KINDS
+    if not src.needs:
+        return None
+    reg = _datasets()
+    if connection_id:
+        try:
+            c = reg.connection(connection_id, owner_id=user['id'])
+        except KeyError:
+            raise DCError('pick one of your own connections') from None
+        if c.get('kind') != src.needs:
+            raise DCError(f'that connection is not a {src.label} token')
+        return c
+    mine = [c for c in reg.connections(user['id']) if c.get('kind') == src.needs and src.needs in TOKEN_KINDS]
+    if mine:
+        return reg.connection(mine[0]['id'], owner_id=user['id'])
+    if src.token == 'required':
+        raise DCError(f'{src.label} needs your token: add it in Settings › Connections ({src.label}), then try again')
+    return None
+
+
+def list_sources(user):
+    """The web sources and, for each, the user's token connections -> {sources: [...]}."""
+    from . import sources
+    _need(user)
+    conns = [c for c in _datasets().connections(user['id'])]
+    out = []
+    for d in sources.describe():
+        d['connections'] = [{'id': c['id'], 'name': c.get('name')} for c in conns if d['needs'] and c.get('kind') == d['needs']]
+        out.append(d)
+    return {'sources': out}
+
+
+def inspect_source(user, source, ref, connection_id=None, opts=None):
+    """A cheap preview of what an import would fetch -> {title, size, files, license, versions, name, ref, ...}."""
+    from . import sources
+    _need(user)
+    src = sources.get(source)
+    pref = src.parse_ref(ref)
+    o = src.clean_opts(opts)
+    return {**src.inspect(_source_conn(user, src, connection_id), pref, o), 'name': pref['name'], 'ref': pref['ref'],
+            'source': src.key}
+
+
+IMPORT_FLAGS = ('extract', 'keep_archive', 'nested')
+
+
+def import_source(user, source, ref, name=None, connection_id=None, opts=None, bucket=None, path=''):
+    """Download a dataset from the web (Kaggle, Hugging Face, Roboflow, a link, Zenodo, OpenML) into a new managed
+    bucket (named from the ref, or `name`), or into folder `path` of an existing writable `bucket`. Archives are
+    unpacked (opts.extract, default on; opts.nested: archives inside too; opts.keep_archive keeps the download), files
+    of the same name are replaced, then the format is detected. An io-lane job keyed dc-import:<bid> (inline from
+    the CLI); a new bucket whose import fails or is cancelled is removed again. -> {job_id, bucket, result}"""
+    from . import sources
+    _need(user)
+    src = sources.get(source)
+    pref = src.parse_ref(ref)
+    raw = dict(opts or {})
+    flags = {'extract': raw.get('extract', True) is not False, 'keep_archive': bool(raw.get('keep_archive')),
+             'nested': bool(raw.get('nested'))}
+    o = src.clean_opts({k: v for k, v in raw.items() if k not in IMPORT_FLAGS})
+    conn = _source_conn(user, src, connection_id)
+    created = False
+    if bucket:
+        r = _row(user, bucket)
+        _need_write(r)
+        rel = store.clean_rel(path)
+        target = _abs(r, rel, must_exist=False)
+        os.makedirs(target, exist_ok=True)
+        if not os.path.isdir(target):
+            raise DCError(f'{rel} is not a folder')
+    else:
+        base = _clean_name(name or pref['name'])
+        for i in range(1, 50):
+            try:
+                b = create_bucket(user, base if i == 1 else f'{base}-{i}', 'managed')
+                break
+            except DCError as e:
+                if e.status != 409 or name:
+                    raise
+        else:
+            raise DCError(f'pick a name: “{base}” and its numbered variants are taken', 409)
+        r, rel, created = _row(user, b['id']), '', True
+        target = r.root
+    meta = {'connection_id': (conn or {}).get('id'), 'opts': {**o, **flags}, 'path': rel}
+    with db.begin() as c:
+        c.execute(text("""UPDATE app.dc_buckets SET source_kind = :k, source_ref = :ref, source_meta = :m,
+                          updated_at = now() WHERE id = :b""").bindparams(bindparam('m', type_=JSONB)),
+                  {'k': src.key, 'ref': pref['ref'], 'm': meta, 'b': r.id})
+
+    def fn(job=None):
+        tmp = os.path.join(r.root, f'.import-{uuid.uuid4().hex[:10]}')
+        os.makedirs(tmp)
+        cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
+
+        def prog(done=None, total=None, stage=None, extra=''):
+            if job is not None:
+                job.progress(done=done, total=total, stage=stage, extra=extra)
+        try:
+            prog(stage=f'asking {src.label}')
+            got = src.download(conn, pref, o, tmp, prog, cancelled)
+            res = {'files': 0, 'bytes': got.get('bytes', 0), 'added': 0, 'replaced': 0, 'skipped': 0, 'archives': 0}
+            for f in got['files']:
+                kind = store.archive_kind(f) if flags['extract'] else None
+                if kind:
+                    prog(done=0, total=None, stage=f'unpacking {os.path.basename(f)}')
+                    x = store.extract_into(f, target, r.root, _allowed(),
+                                           lambda d, t: prog(done=d, total=t, stage=f'unpacking {os.path.basename(f)}'),
+                                           cancelled, overwrite=True, nested=flags['nested'])
+                    res['archives'] += 1
+                    for k in ('added', 'replaced', 'skipped'):
+                        res[k] += x[k]
+                    if not flags['keep_archive']:
+                        continue
+                dest = os.path.join(target, os.path.relpath(f, tmp))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                if os.path.isdir(dest):
+                    raise DCError(f'{os.path.relpath(f, tmp)} is a folder in the bucket already', 409)
+                os.replace(f, dest)
+                res['files'] += 1
+            prog(stage='detecting the format')
+            done_meta = {**meta, **(got.get('meta') or {}), 'bytes': res['bytes']}
+            with db.begin() as c:
+                c.execute(text("""UPDATE app.dc_buckets SET imported_at = now(), updated_at = now(), source_meta = :m
+                                  WHERE id = :b""").bindparams(bindparam('m', type_=JSONB)), {'m': done_meta, 'b': r.id})
+            res['retagged'] = _revalidate(_row(user, r.id))
+            return {**res, 'bucket': r.id, 'source': src.key, 'ref': pref['ref']}
+        except BaseException as e:
+            if created:
+                try:
+                    delete_bucket(user, r.id, delete_files=True)
+                except Exception:  # noqa: BLE001 - best effort: the error below is what matters
+                    pass
+            if isinstance(e, store.Cancelled):
+                return {'cancelled': True, 'bucket': None if created else r.id}
+            raise
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    if jobs is None:
+        return {'job_id': None, 'bucket': r.id, 'result': fn()}
+    return {'job_id': jobs.submit(f'dc-import:{r.id}', f'import {pref["ref"]} from {src.label}', fn, lane='io',
+                                  public_result=True, owner=user['id']).id, 'bucket': r.id, 'result': None}
+
+
+def reimport(user, bid):
+    """Run the bucket's last web import again into the same folder (newer files replace older ones)."""
+    r = _row(user, bid)
+    if not getattr(r._r, 'source_kind', None):
+        raise DCError(f'bucket “{r.name}” was not imported from the web')
+    m = r.source_meta or {}
+    return import_source(user, r.source_kind, r.source_ref, connection_id=m.get('connection_id'),
+                         opts=m.get('opts') or {}, bucket=r.id, path=m.get('path') or '')
 
 
 def export(user, bid, path=''):

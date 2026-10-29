@@ -491,6 +491,18 @@ export const CONN_KINDS: Record<ConnKind, { label: string; icon: string; port?: 
   postgres: { label: 'PostgreSQL', icon: 'db', port: 5432, note: 'Labeling exports, upserted per task' },
   mssql: { label: 'SQL Server', icon: 'db', port: 1433, note: 'Labeling exports, merged per task' },
   model: { label: 'Model', icon: 'robot', note: 'Your model server: labels images for you (YOLO serving or the generic API)' },
+  kaggle: { label: 'Kaggle', icon: 'download', note: 'Your Kaggle API token: download datasets and competitions in Data Center' },
+  huggingface: { label: 'Hugging Face', icon: 'download', note: 'An access token for gated or private Hugging Face datasets' },
+  roboflow: { label: 'Roboflow', icon: 'download', note: 'Your Roboflow API key: download dataset versions in any format' },
+  zenodo: { label: 'Zenodo', icon: 'download', note: 'A Zenodo token, only for restricted records' },
+};
+/** The token kinds: a web dataset source of Data Center › From the web (dataviz/datacenter/sources). */
+export const TOKEN_KINDS: ReadonlySet<ConnKind> = new Set<ConnKind>(['kaggle', 'huggingface', 'roboflow', 'zenodo']);
+const TOKEN_HELP: Partial<Record<ConnKind, [string, string]>> = {
+  kaggle: ['https://www.kaggle.com/settings', 'kaggle.com › Settings › API › Create New Token (downloads kaggle.json)'],
+  huggingface: ['https://huggingface.co/settings/tokens', 'huggingface.co › Settings › Access Tokens (read)'],
+  roboflow: ['https://app.roboflow.com/settings/api', 'app.roboflow.com › Settings › API Keys'],
+  zenodo: ['https://zenodo.org/account/settings/applications/tokens/new/', 'zenodo.org › Applications › Personal access tokens'],
 };
 
 export const connKind = (c: ConnDraft | null | undefined): ConnKind => (c && c.kind) || 's3';
@@ -500,6 +512,8 @@ export function connDefaults(kind: string): ConnDraft {
   if (kind === 'ftp') return { kind, name: '', host: '', port: 21, username: '', secret_key: '', tls: false, passive: true, base_path: '/' };
   if (kind === 'sftp') return { kind, name: '', host: '', port: 22, username: '', secret_key: '', private_key: '', base_path: '/' };
   if (kind === 'model') return { kind, name: '', url: '', api_key: '', timeout_s: 60 };
+  if (kind === 'kaggle') return { kind, name: '', username: '', api_key: '' };
+  if (kind === 'huggingface' || kind === 'roboflow' || kind === 'zenodo') return { kind, name: '', api_key: '' };
   if (kind === 'postgres' || kind === 'mssql') {
     return { kind, name: '', host: '', port: CONN_KINDS[kind].port, database: '', username: '', secret_key: '',
       schema: kind === 'postgres' ? 'public' : 'dbo', table_prefix: 'lbl_', encrypt: kind === 'mssql' };
@@ -523,6 +537,7 @@ export function connUri(c: ConnDraft): string {
   const kind = connKind(c);
   if (kind === 's3') return c.endpoint || '';
   if (kind === 'model') return c.url || '';
+  if (TOKEN_KINDS.has(kind)) return `${CONN_KINDS[kind].label} token${c.username ? ` · ${c.username}` : ''}`;
   const host = `${c.host || '?'}${c.port ? `:${c.port}` : ''}`;
   if (kind === 'ftp' || kind === 'sftp') return `${kind}://${c.username ? `${c.username}@` : ''}${host}${c.base_path || '/'}`;
   return `${kind}://${host}/${c.database || ''}${c.schema ? ` · ${c.schema}` : ''}`;
@@ -545,13 +560,18 @@ export function connTestText(r: ConnTestResult): string {
     out.push(`${r.path ? `${r.path}: ` : ''}${n} folder${n === 1 ? '' : 's'}${Array.isArray(r.folders) && n ? ` (${names(r.folders)})` : ''}`);
   }
   if (r.images != null) out.push(`${Number(r.images).toLocaleString()} images here`);
+  if (r.detail) out.push(r.detail);
+  if (r.user) out.push(`as ${r.user}`);
   if (r.server_version) out.push(r.server_version);
   if (r.tables_exist != null) out.push(r.tables_exist ? `labeling tables exist${r.schema_version ? ` (schema v${r.schema_version})` : ''}` : 'no labeling tables yet (created on the first export)');
   return out.join(' · ');
 }
 
 type FieldSpec = [key: keyof ConnDraft & string, label: string, type: 'text' | 'int' | 'password' | 'textarea' | 'check', cls?: string, ph?: string];
-const KIND_FIELDS: Record<'ftp' | 'sftp' | 'model' | 'db', FieldSpec[]> = {
+const KIND_FIELDS: Record<'ftp' | 'sftp' | 'model' | 'db' | 'kaggle' | 'token', FieldSpec[]> = {
+  kaggle: [['name', 'Name', 'text', '', 'e.g. my Kaggle'], ['username', 'Username', 'text', 'mono', 'from kaggle.json'],
+    ['api_key', 'Key / API token', 'password', 'mono', 'from kaggle.json, or a KGAT_… token']],
+  token: [['name', 'Name', 'text', ''], ['api_key', 'Token / API key', 'password', 'mono']],
   ftp: [['name', 'Name', 'text', '', 'e.g. lab NAS'], ['host', 'Host', 'text', 'mono', 'ftp.example.org'], ['port', 'Port', 'int', 'mono', '21'],
     ['username', 'User', 'text', 'mono', 'anonymous'], ['secret_key', 'Password', 'password', 'mono'], ['base_path', 'Base path', 'text', 'mono', '/'],
     ['tls', 'Use TLS (FTPS)', 'check'], ['passive', 'Passive mode (behind NAT / firewalls)', 'check']],
@@ -569,7 +589,7 @@ const KIND_FIELDS: Record<'ftp' | 'sftp' | 'model' | 'db', FieldSpec[]> = {
 export function connFormHTML(c: ConnDraft, saved?: ConnItem | null): string {
   const kind = connKind(c);
   if (kind === 's3') return connFieldsHTML({ ...c, access_key_masked: saved?.access_key, has_secret: saved?.has_secret }, !!saved);
-  const fields = KIND_FIELDS[kind === 'postgres' || kind === 'mssql' ? 'db' : kind];
+  const fields = KIND_FIELDS[kind === 'postgres' || kind === 'mssql' ? 'db' : kind === 'kaggle' ? 'kaggle' : TOKEN_KINDS.has(kind) ? 'token' : kind as 'ftp'];
   const v = (k: keyof ConnDraft) => esc(c[k] == null ? '' : c[k]);
   return '<div class="form-grid">' + fields.map(([k, label, type, cls = '', ph = '']) => {
     if (type === 'check') {
@@ -583,7 +603,17 @@ export function connFormHTML(c: ConnDraft, saved?: ConnItem | null): string {
       : `<input type="${type === 'password' ? 'password' : 'text'}" ${type === 'int' ? 'inputmode="numeric" data-type="int"' : ''} data-f="conn.${k}" ` +
         `value="${v(k)}" placeholder="${place}" ${type === 'password' ? 'autocomplete="new-password"' : 'autocomplete="off"'} spellcheck="false">`;
     return `<label class="fld ${cls}">${esc(label)}${ctl}</label>`;
-  }).join('') + '</div>';
+  }).join('') + '</div>' + tokenHelpHTML(kind);
+}
+
+/** Where to get the token (+ for Kaggle: read the kaggle.json file in the browser to fill the form). */
+function tokenHelpHTML(kind: ConnKind): string {
+  const h = TOKEN_HELP[kind];
+  if (!h) return '';
+  return `<p class="sec-note">Get it at <a href="${esc(h[0])}" target="_blank" rel="noopener noreferrer">${esc(h[1])}</a>. ` +
+    'It is stored encrypted and only used for your downloads.</p>' +
+    (kind === 'kaggle' ? `<label class="fld"><span>${icon('upload')}Fill from kaggle.json</span>` +
+      '<input type="file" accept=".json,application/json" data-act-change="kaggle-json"></label>' : '');
 }
 
 export function renderConnsSec(): string {
@@ -610,6 +640,9 @@ export function renderConnsSec(): string {
       tags.push(tagc(`key ${c.access_key || '—'}`), c.has_secret ? tagc('secret stored', 'ok', 'check') : tagc('no secret', 'bad'),
         tagc(`${used} dataset${used === 1 ? '' : 's'}`));
       if (!c.verify_ssl) tags.push(tagc('TLS not verified', 'bad'));
+    } else if (TOKEN_KINDS.has(kind)) {
+      if (c.username) tags.push(tagc(`user ${c.username}`));
+      tags.push(c.has_secret ? tagc('token stored', 'ok', 'check') : tagc('no token', 'bad'));
     } else if (kind === 'model') {
       tags.push(c.has_api_key || c.has_secret ? tagc('API key stored', 'ok', 'check') : tagc('no API key'));
       if (c.timeout_s) tags.push(tagc(`timeout ${c.timeout_s} s`));

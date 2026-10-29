@@ -48,7 +48,7 @@ function loadVendor(): Promise<EditorModule> {
 const structLang = (l: Lang): 'json' | 'yaml' | 'kv' | null => (l === 'json' || l === 'yaml' ? l : l === 'env' || l === 'ini' ? 'kv' : null);
 const pkey = (p: Path): string => JSON.stringify(p);
 const dirty = (): boolean => !!F && F.cur !== F.orig;
-const $f = (): HTMLElement | null => document.getElementById('dc-file');
+const $f = (): HTMLElement | null => document.getElementById('dc-fview');
 
 export const fileOpen = (): boolean => !!F;
 
@@ -71,8 +71,8 @@ export async function openFile(bid: string, path: string): Promise<void> {
   const main = document.getElementById('dc-main');
   if (!main) return;
   const host = document.createElement('section');
-  host.id = 'dc-file';
-  host.className = 'dc-file';
+  host.id = 'dc-fview';
+  host.className = 'dc-fview';
   host.setAttribute('aria-label', `File ${baseName(path)}`);
   host.innerHTML = `<div class="dc-empty"><span class="spin" aria-hidden="true"></span>Opening ${esc(baseName(path))}…</div>`;
   main.appendChild(host);

@@ -326,7 +326,9 @@ def router(state, ctx):
             raise HTTPException(400, 'endpoint URL is required')
         if kind == 'model' and not body.get('url') and not body.get('id'):
             raise HTTPException(400, 'the model server URL is required')
-        if kind not in ('s3', 'model') and not body.get('host'):
+        if kind in connections.TOKEN_KINDS and not body.get('api_key') and not body.get('id'):
+            raise HTTPException(400, 'the API key / token is required')
+        if kind not in ('s3', 'model', *connections.TOKEN_KINDS) and not body.get('host'):
             raise HTTPException(400, 'host is required')
         if body.get('id'):
             try:
@@ -340,7 +342,7 @@ def router(state, ctx):
         if kind == 's3':
             ds_log.info(f'saved S3 connection [bold]{vlog.esc(c.get("name") or c["endpoint"])}[/] ({vlog.esc(c["endpoint"])})')
         else:
-            where = c.get('url') if kind == 'model' else c['host']
+            where = c.get('url') if kind == 'model' else c.get('host') or kind
             ds_log.info(f'saved {kind} connection [bold]{vlog.esc(c.get("name") or where)}[/] ({vlog.esc(where)})')
         return reg.public_connection(c)
 
@@ -369,9 +371,12 @@ def router(state, ctx):
         detect result ({protocol, models})."""
         kind = conn['kind']
         log = vlog.get_logger(kind)
-        where = conn.get('url') if kind == 'model' else conn.get('host')
+        where = conn.get('url') if kind == 'model' else conn.get('host') or kind
         try:
-            if kind == 'model':
+            if kind in connections.TOKEN_KINDS:
+                from ...datacenter.sources import tokens
+                res = await run_io(tokens.test, conn)
+            elif kind == 'model':
                 from ...labeling import models
                 t0 = time.time()
                 res = await run_io(models.detect, conn, True)
@@ -384,7 +389,7 @@ def router(state, ctx):
                 res = await run_io(db_export.test, conn)
         except Exception as e:  # noqa: BLE001 - shown in the form
             log.warning(f'test {vlog.esc(where)} failed: {vlog.esc(e)}')
-            raise HTTPException(400, str(e)) if kind == 'model' else _s3_error(e)
+            raise HTTPException(400, str(e)) if kind == 'model' or kind in connections.TOKEN_KINDS else _s3_error(e)
         log.info(f'test {vlog.esc(where)}: [green]ok[/] [dim]({res.get("ms")} ms)[/]')
         return res
 

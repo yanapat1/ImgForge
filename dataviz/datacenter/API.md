@@ -60,6 +60,17 @@ autolabel(user, bid, path='', model={registry_id | connection_id + model_id, ver
 convert_vectors(user, bid, path='', to='parquet'|'csv'|'npy') -> {job_id, path, result}
     # an embeddings folder (meta.csv + .npy, embeddings.parquet or embeddings.csv) into another layout, in a new
     # sibling folder <name>-<to> (labeling/writers/vector.py); an io-lane job, key dc-convert:<bid>
+list_sources(user)                                             -> {sources: [{key, label, needs, token, fields, examples, help, connections}]}
+inspect_source(user, source, ref, connection_id=None, opts={}) -> {title, size, files, license, versions, name, ref, ...}
+import_source(user, source, ref, name=None, connection_id=None, opts={}, bucket=None, path='') -> {job_id, bucket, result}
+    # source: kaggle | huggingface | roboflow | url | zenodo | openml (datacenter/sources). Into a new managed bucket
+    # (named from the ref) or folder `path` of a writable `bucket`. opts: the source's fields (version, revision,
+    # patterns, format) + extract (default true), nested, keep_archive. An io-lane job dc-import:<bid>: download
+    # (SSRF-guarded, resumable, ranged parallel parts), unpack (zip / tar.* / gz / 7z with py7zr), detect the format.
+    # A new bucket whose import fails or is cancelled is removed; while it runs the bucket is busy (409 on writes).
+    # The token comes from the picked connection, else the caller's first one of that kind (kaggle / huggingface /
+    # roboflow / zenodo connections: Settings › Connections, encrypted).
+reimport(user, bid)                                            -> {job_id, bucket}   # the last import again
 delete_bucket(user, bid, delete_files=False)                   -> {ok}
 summary(user)                                                  -> {buckets, images, size, managed: {used, free}, links: {local, s3}}
 ls(user, bid, path='', offset=0, limit=500, sort='name'|'-mtime'|'size', q='')
@@ -76,7 +87,7 @@ ops(user, bid, ops) -> {applied: [..], errors: [{op, error}], undo_id, retagged:
     op: {op:'mkdir', path} | {op:'create', path} (empty file) | {op:'move', path, to} | {op:'copy', path, to} | {op:'rename', path, name} | {op:'delete', path}
     `to` is a destination folder; delete moves into `<data_root>/.trash/<undo_id>/`, and undo restores it.
 undo(user, bid, undo_id) -> {restored, errors, retagged}
-upload(user, bid, path, files: [(name, fileobj)], unzip=True) -> {added, skipped, retagged}
+upload(user, bid, path, files: [(name, fileobj)], unzip=True) -> {added, skipped, retagged}   # zip / tar / tar.gz / tar.bz2 / tar.xz / 7z unpacked
 set_tags(user, bid, path='', add=(), remove=()) -> [Tag]
 all_tags(user) -> [{tag, count, auto}]
 detect(user, bid, path='', force=False) -> Format
@@ -87,7 +98,7 @@ send(user, bid, paths, target='visualize'|'label', name=None, task_type='detect'
     -> {target, id, url}   # creates a visualize session (dataset upsert) or a label project (source {kind:'local', path})
 ```
 
-`Bucket = {id, name, kind, root, writable, owner, created_at, updated_at, format, tags, stats: {images, labels, classes, size}, sessions: [{id, kind:'visualize'|'label', name, url}]}`. An s3 bucket also has `{connection_id, s3_bucket, prefix, mode, local_ready, synced_at, s3_root}`.
+`Bucket = {id, name, kind, root, writable, owner, created_at, updated_at, format, tags, stats: {images, labels, classes, size}, sessions: [{id, kind:'visualize'|'label', name, url}]}`. An s3 bucket also has `{connection_id, s3_bucket, prefix, mode, local_ready, synced_at, s3_root}`. A bucket imported from the web has `source: {kind, ref, imported_at, title, version, importing}`.
 `Entry = {name, path, type: 'dir'|'file', size, mtime, kind: 'image'|'label'|'yaml'|'json'|'xml'|'text'|'code'|'table'|'audio'|'video'|'npy'|'archive'|'other', items?: n (dir), w?, h?, labels?: n (an image with a YOLO label file)}`
 `Tag = {tag, auto}`
 
@@ -120,6 +131,10 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | GET | `/api/dc/buckets/{bid}/source?path=` | source |
 | POST | `/api/dc/autolabel` `{bucket, path, model, target, new_name, conf, formats, write_yolo, name}` | autolabel |
 | POST | `/api/dc/buckets/{bid}/convert` `{path, to}` | convert_vectors |
+| GET | `/api/dc/sources` | list_sources |
+| POST | `/api/dc/sources/inspect` `{source, ref, connection_id, opts}` | inspect_source |
+| POST | `/api/dc/import` `{source, ref, name, connection_id, opts, bucket, path}` | import_source |
+| POST | `/api/dc/buckets/{bid}/reimport` | reimport |
 | GET | `/api/label/formats?task_type=&media_type=` | the label writers: {formats: [{key, label, tasks, media, layout, export_layout, note}], default} |
 
 ## AI assistant: `/api/llm/dc/*` (`dataviz/llm/agent.py`, `tools.py`)

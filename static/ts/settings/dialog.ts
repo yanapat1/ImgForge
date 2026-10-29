@@ -468,6 +468,22 @@ const SET_ACTIONS: Record<string, SetAction> = {
 };
 
 const SET_CHANGES: Record<string, SetChange> = {
+  'kaggle-json': (t) => {
+    const file = t instanceof HTMLInputElement ? t.files?.[0] : undefined;
+    if (!file) return;
+    void file.text().then((txt) => {
+      const f = formOf('conn');
+      try {
+        const j = JSON.parse(txt) as { username?: unknown; key?: unknown };
+        if (typeof j.username !== 'string' || typeof j.key !== 'string') throw new Error('no username / key in it');
+        f.conn.username = j.username;
+        f.conn.api_key = j.key;
+        if (!f.conn.name) f.conn.name = `Kaggle ${j.username}`;
+        f.connStatus = { kind: 'ok', text: 'Filled from kaggle.json: save to keep it' };
+      } catch (e) { f.connStatus = { kind: 'err', text: `Not a kaggle.json file: ${errText(e)}` }; }
+      renderSettings();
+    });
+  },
   'conn-pick': () => { const f = formOf('s3'); f.buckets = null; f.browse = null; f.connStatus = null; renderSettings(); if (f.connId !== 'new') void testConn(); },
   'bucket-pick': () => { formOf('s3').prefix = ''; void s3Browse(); },
   'dc-bucket': () => { void dcBrowse(''); },

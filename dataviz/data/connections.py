@@ -43,7 +43,13 @@ CONN_KIND_FIELDS = {
     'postgres': _DB_FIELDS,
     'mssql': _DB_FIELDS,
     'model': ('name', 'url', 'api_key', 'timeout_s'),
+    # web dataset sources (Data Center › From the web): the token, encrypted like every secret
+    'kaggle': ('name', 'username', 'api_key'),
+    'huggingface': ('name', 'api_key'),
+    'roboflow': ('name', 'api_key'),
+    'zenodo': ('name', 'api_key'),
 }
+TOKEN_KINDS = ('kaggle', 'huggingface', 'roboflow', 'zenodo')
 CONN_KINDS = tuple(CONN_KIND_FIELDS)
 DEFAULT_PORTS = {'ftp': 21, 'sftp': 22, 'postgres': 5432, 'mssql': 1433}
 SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')      # blank in an update = keep the stored one
@@ -239,6 +245,9 @@ class Registry:
         if kind == 'model':
             return {'id': c['id'], 'kind': 'model', 'name': c.get('name') or c.get('url'), 'url': c.get('url', ''),
                     'has_secret': bool(c.get('api_key')), 'timeout_s': c.get('timeout_s') or 60}
+        if kind in TOKEN_KINDS:
+            return {'id': c['id'], 'kind': kind, 'name': c.get('name') or kind, 'username': c.get('username', ''),
+                    'api_key': _mask(c.get('api_key')), 'has_secret': bool(c.get('api_key'))}
         out = {'id': c['id'], 'kind': kind, 'name': c.get('name') or c.get('host'), 'host': c.get('host', ''),
                'port': c.get('port') or DEFAULT_PORTS[kind], 'username': c.get('username', ''),
                'has_secret': bool(c.get('secret_key'))}
