@@ -168,6 +168,8 @@ DATAVIZ_TEST_DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:1543
   .venv/bin/python -m pytest -q tests      # ~4 min; without the variable a pgvector container is started via docker
                                            # (on a port docker picks, so it never collides with a running database)
 .venv/bin/python -m pytest -q -n auto tests   # ~75 s on 128 cores; auto = 12 workers (~2.5 GiB each), DATAVIZ_TEST_WORKERS=<n> to change
+                                              # workers are CPU only and skip the `gpu` tests (one CUDA context each ran the GPU out of memory)
+scripts/test.sh                               # the full suite: the parallel pass, then `pytest -m gpu` in one process on the GPU
 DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_page_smoke.py   # a browser of your own
 ```
 

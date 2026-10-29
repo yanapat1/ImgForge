@@ -5,7 +5,17 @@ import pytest
 from dataviz.core import hardware
 from dataviz.ml import analysis
 
-needs_cuda = pytest.mark.skipif(hardware.device() != 'cuda', reason='no usable CUDA device')
+
+def needs_cuda(fn):
+    """A GPU test: marked `gpu` (skipped in -n workers, run by `pytest -m gpu`); the device is probed at setup, not at
+    collection, so collecting never makes a CUDA context."""
+    return pytest.mark.gpu(pytest.mark.usefixtures('_cuda')(fn))
+
+
+@pytest.fixture()
+def _cuda():
+    if hardware.device() != 'cuda':
+        pytest.skip('no usable CUDA device')
 
 
 def _data(n=3000, d=64, seed=0):

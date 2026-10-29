@@ -30,6 +30,11 @@ if os.environ.get('PYTEST_XDIST_WORKER_COUNT'):
     for _var in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMBA_NUM_THREADS',
                  'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS'):
         os.environ.setdefault(_var, str(_share))
+    # The GPU is not sliced: every worker (and every app.py it launches) that calls hardware.device() made its own CUDA
+    # context and ran its models there, and 12 of them ran the GPU out of memory, which killed the container. Workers are
+    # CPU only (the children inherit it); tests marked `gpu` are skipped here and run in one serial pass (scripts/test.sh).
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+    os.environ['DATAVIZ_DEVICE'] = 'cpu'
 
 import pytest
 
@@ -55,6 +60,16 @@ def pytest_xdist_auto_num_workers(config):
 def pytest_configure(config):
     # upstream: starlette's TestClient (fastapi 0.115.6) still names anyio.abc.BlockingPortal; not our code
     config.addinivalue_line('filterwarnings', 'ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning')
+    config.addinivalue_line('markers', 'gpu: needs a CUDA device; runs only in a serial (no -n) run: pytest -m gpu tests')
+
+
+def pytest_collection_modifyitems(config, items):
+    if not os.environ.get('PYTEST_XDIST_WORKER_COUNT'):
+        return
+    skip = pytest.mark.skip(reason='GPU tests run serially: pytest -m gpu tests')
+    for item in items:
+        if 'gpu' in item.keywords:
+            item.add_marker(skip)
 
 
 def make_jpeg(path, w=64, h=48, color=(200, 80, 40)):
