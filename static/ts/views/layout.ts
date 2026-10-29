@@ -4,7 +4,7 @@ import { $, $req, esc, icon } from '../core/dom.js';
 import { arrowNav, bindPopover } from '../core/popover.js';
 import { meta, S } from '../core/state.js';
 import { clsColor } from '../core/theme.js';
-import { renderPlot, scheduleRender } from '../plot/render.js';
+import { renderPlot, requestFit, scheduleRender } from '../plot/render.js';
 import { reapplyInspect, saveSettings } from './controls.js';
 import { showAiTab } from './assistant.js';
 import { EVAL_PLOTS, showEvalTab } from './eval.js';
@@ -62,6 +62,7 @@ export function buildClassFilter(): void {
         if (S.hidden.has(c)) S.hidden.delete(c); else S.hidden.add(c);
       }
       syncClassFilter();
+      requestFit();
       scheduleRender();
       saveSettings();
       reapplyInspect();
@@ -73,6 +74,7 @@ export function buildClassFilter(): void {
     clearTimeout(clickTimer);
     S.hidden = new Set(meta().classes.map((_, i) => i).filter((i) => i !== +(chip.dataset.c ?? NaN)));
     syncClassFilter();
+    requestFit();
     renderPlot();
     saveSettings();
     reapplyInspect();

@@ -132,6 +132,18 @@
 /* selection shape: lasso / box / circle, floating over the plot's top-left corner */
 .select-tools { position: absolute; top: 8px; left: 8px; z-index: 3; box-shadow: var(--shadow-2); }
 .select-tools > button { background: var(--surface); }
+/* Fit (zoom to the shown dots): next to the selection-shape pill (3 buttons) */
+.plot-fit { position: absolute; top: 8px; left: calc(8px + 3 * 34px + 10px); z-index: 3; background: var(--surface);
+  border: 1px solid var(--border); box-shadow: var(--shadow-2); }
+/* how many shown dots lie past each edge of the view */
+.offscreen { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.off-chip { position: absolute; pointer-events: auto; padding: 2px 8px; font: 600 var(--fs-xs)/1.4 var(--mono);
+  background: var(--surface); color: var(--text); border: 1px solid var(--highlight); border-radius: 999px; box-shadow: var(--shadow-2); }
+.off-chip[data-edge="left"] { left: 6px; top: 50%; transform: translateY(-50%); }
+.off-chip[data-edge="right"] { right: 6px; top: 50%; transform: translateY(-50%); }
+.off-chip[data-edge="top"] { top: 48px; left: 50%; transform: translateX(-50%); }
+.off-chip[data-edge="bottom"] { bottom: 6px; left: 50%; transform: translateX(-50%); }
+#plot.panning ~ .offscreen { opacity: 0; }
 #plot.lassoing, #plot.lassoing * { cursor: crosshair !important; }
 #plot.moving-lasso, #plot.moving-lasso * { cursor: move !important; }
 #plot .nsewdrag, #plot .drag { cursor: crosshair; }

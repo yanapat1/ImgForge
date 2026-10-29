@@ -531,6 +531,7 @@
               <label class="check dist-toggle" title="Pick 2+ thumbnails (ctrl+click): lines between their dots show the feature-space distance">
                 <input type="checkbox" id="show-dist" checked> Distances between picked boxes</label>
               <label class="check" title="Draw gridlines behind the dots"><input type="checkbox" id="show-grid"> Gridlines</label>
+              <label class="check" title="Switching the shown classes zooms so all their dots fit (far dots are never off screen)"><input type="checkbox" id="auto-fit" checked> Zoom to shown classes</label>
               <div class="pop-title pop-sep">Density groups</div>
               <label class="check" title="Draw a bubble around every group of dots"><input type="checkbox" id="g-bubbles"> Draw bubbles</label>
               <label class="check" title="Mark dots that belong to no group with a red cross"><input type="checkbox" id="g-outliers"> Mark outliers</label>
@@ -626,6 +627,12 @@
       <div id="plot-wrap">
         <div id="plot"></div>
         <svg id="lasso-layer" class="lasso-layer" aria-hidden="true"><path id="lasso-path" d=""/></svg>
+        <!-- dots outside the shown range, per edge (plot/interactions.ts updateOffscreen): a click fits them all in -->
+        <div id="offscreen" class="offscreen" aria-live="polite">
+          <button class="off-chip hidden" data-edge="left"></button><button class="off-chip hidden" data-edge="right"></button>
+          <button class="off-chip hidden" data-edge="top"></button><button class="off-chip hidden" data-edge="bottom"></button>
+        </div>
+        <button id="btn-fit" class="icon-btn plot-fit" aria-label="Fit to the shown dots" title="Fit to the shown dots — zoom so every visible dot is in view"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-fit"/></svg></button>
         <div id="select-tools" class="segmented select-tools" role="group" aria-label="Selection shape">
           <button class="view-btn icon-btn active" data-shape="lasso" aria-pressed="true" aria-label="Freehand lasso" title="Freehand lasso — draw around the dots"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-polygon"/></svg></button>
           <button class="view-btn icon-btn" data-shape="box" aria-pressed="false" aria-label="Box" title="Box — drag corner to corner"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg></button>

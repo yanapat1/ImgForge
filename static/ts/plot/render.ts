@@ -8,7 +8,7 @@ import { clsColor, clsName, CONTINUOUS, densityScale, DIFF_STYLE, diffColor, dif
 import { densityDiff } from '../core/compare-core.js';
 import { curGroups, groupList, plotDiv, restyle, viewPos, xyOf } from './access.js';
 import { isOutlier } from './groups.js';
-import { redrawLasso } from './interactions.js';
+import { fitToVisible, redrawLasso } from './interactions.js';
 import { pcaLabels, updateMarks } from './marks.js';
 
 declare const Plotly: typeof import('plotly.js');
@@ -195,6 +195,10 @@ export function updateLiveNew(): void {
   const t = liveNewTrace(+$req<HTMLInputElement>('dot-size').value);
   void restyle(gd, { x: [t.x], y: [t.y], text: [t.text], name: [t.name], showlegend: [t.showlegend] } as never, [idx]);
 }
+
+// the shown classes changed: the next render zooms to their dots (Display › Zoom to shown classes)
+let fitPending = false;
+export function requestFit(): void { if ($req<HTMLInputElement>('auto-fit').checked) fitPending = true; }
 
 // coalesce bursts of renders (slider drags, chip clicks) into one per animation frame
 let renderQueued = false;
@@ -484,5 +488,6 @@ export function renderPlot(): void {
   }).then(() => {
     updateMarks();
     redrawLasso();
+    if (fitPending) { fitPending = false; fitToVisible(); }
   });
 }

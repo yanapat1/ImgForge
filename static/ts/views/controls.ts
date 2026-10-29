@@ -33,7 +33,7 @@ export function buildParamInputs(): void {
 }
 
 export const SETTING_IDS: string[] = ['feature', 'method', 'mode', 'class-a', 'class-b',
-  'color-by', 'dot-size', 'g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min', 'sort', 'thumb-size', 'show-dist', 'show-grid'];
+  'color-by', 'dot-size', 'g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min', 'sort', 'thumb-size', 'show-dist', 'show-grid', 'auto-fit'];
 
 // these pick WHICH projection is shown: not restored at page load, which always opens the startup view
 // (an uncomputed saved choice used to start a long job on every load); earlier views are in "Saved views"

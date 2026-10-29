@@ -17,9 +17,9 @@ import { featureLabel, meta as metaOf, pts, S, status, UI } from './core/state.j
 import { applyThemePrefs, clsName, plotBase, THEME } from './core/theme.js';
 import { plotDiv } from './plot/access.js';
 import { isOutlier, selectGroup, selectGroupOf } from './plot/groups.js';
-import { clickOutsideLasso, enableLasso, enableMiddleDrag, enableSelectTools, enableRightPan, enableWheelZoom, lassoEndedAt, plotAxes, redrawLasso, touchGestureRecent } from './plot/interactions.js';
+import { clickOutsideLasso, enableLasso, enableMiddleDrag, enableSelectTools, enableRightPan, enableWheelZoom, enableFit, lassoEndedAt, plotAxes, redrawLasso, touchGestureRecent, updateOffscreen } from './plot/interactions.js';
 import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks } from './plot/marks.js';
-import { bubbleAt, hoverOf, scheduleRender, updateGrid } from './plot/render.js';
+import { bubbleAt, hoverOf, requestFit, scheduleRender, updateGrid } from './plot/render.js';
 import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
@@ -317,7 +317,7 @@ function bindEvents(): void {
   void Plotly.newPlot('plot', [], { ...plotBase(THEME.plot),
     xaxis: { visible: false }, yaxis: { visible: false }, margin: { l: 0, r: 0, t: 0, b: 0 } },
   { displaylogo: false, responsive: true });
-  plot.on('plotly_afterplot', redrawLasso);     // resize / relayout: keep the lasso on its dots
+  plot.on('plotly_afterplot', () => { redrawLasso(); updateOffscreen(); });   // resize / relayout: keep the lasso on its dots
   plot.on('plotly_click', (ev) => {
     if (Date.now() - lassoEndedAt < 400 || touchGestureRecent()) return;  // the end of a lasso / pinch is not a click
     const clicked = ev.points || [];
@@ -366,6 +366,7 @@ function bindEvents(): void {
   enableSelectTools();
   enableMiddleDrag(plot);
   enableWheelZoom(plot);
+  enableFit();
   document.addEventListener('change', (e) => { if (e.target instanceof HTMLElement && SETTING_IDS.includes(e.target.id)) { saveSettings(); markMethods(); } });
   document.addEventListener('input', (e) => {
     const t = e.target;
@@ -398,9 +399,9 @@ function bindEvents(): void {
   };
   $req<HTMLSelectElement>('method').onchange = () => { updateMethodControls(); void loadView(); };
   $req('btn-apply').onclick = () => { void loadView(); };
-  $req<HTMLSelectElement>('mode').onchange = () => { updateModeControls(); scheduleRender(); reapplyInspect(); };
-  $req<HTMLSelectElement>('class-a').onchange = () => { if ($req<HTMLSelectElement>('mode').value !== 'all') { scheduleRender(); reapplyInspect(); } };
-  $req<HTMLSelectElement>('class-b').onchange = () => { if ($req<HTMLSelectElement>('mode').value === 'compare') { scheduleRender(); reapplyInspect(); } };
+  $req<HTMLSelectElement>('mode').onchange = () => { updateModeControls(); requestFit(); scheduleRender(); reapplyInspect(); };
+  $req<HTMLSelectElement>('class-a').onchange = () => { if ($req<HTMLSelectElement>('mode').value !== 'all') { requestFit(); scheduleRender(); reapplyInspect(); } };
+  $req<HTMLSelectElement>('class-b').onchange = () => { if ($req<HTMLSelectElement>('mode').value === 'compare') { requestFit(); scheduleRender(); reapplyInspect(); } };
   $req<HTMLSelectElement>('color-by').onchange = () => { void onGroupControls(); };
   $req<HTMLInputElement>('dot-size').oninput = scheduleRender;
   $req<HTMLInputElement>('show-dist').onchange = () => updateMarks();

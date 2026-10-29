@@ -414,3 +414,55 @@ export function enableWheelZoom(gd: PlotDiv): void {
     onRelease: () => { touchGesture = false; gestureEndedAt = Date.now(); },
   });
 }
+
+// ---- zoom to the shown dots: the bbox of every visible dot (+6 %), so a far dot is never off screen. Switching the
+// shown classes calls it (render.ts requestFit, Display › Zoom to shown classes), and so does the Fit button.
+export function fitToVisible(): void {
+  const view = S.view, gd = plotDiv();
+  if (!view || !plotAxes()) return;
+  if (busy) { void busy.then(fitToVisible); return; }
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const i of visibleIndices()) {
+    const x = view.x[i] ?? NaN, y = view.y[i] ?? NaN;
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (!Number.isFinite(x0) || !Number.isFinite(y0)) return;
+  const px = (x1 - x0) * 0.06 || 1, py = (y1 - y0) * 0.06 || 1;
+  clearTimeout(idle);
+  T = ID;
+  paint();
+  void Plotly.relayout(gd, { 'xaxis.range': [x0 - px, x1 + px], 'yaxis.range': [y0 - py, y1 + py] }).catch(() => {});
+}
+
+// after every draw: how many shown dots lie past each edge of the view (one pass, numbers only)
+const EDGES = ['left', 'right', 'top', 'bottom'] as const;
+const ARROW: Record<(typeof EDGES)[number], string> = { left: '◀', right: '▶', top: '▲', bottom: '▼' };
+
+export function updateOffscreen(): void {
+  const view = S.view, g = plotAxes();
+  const n = { left: 0, right: 0, top: 0, bottom: 0 };
+  if (view && g) {
+    const xa = g.xa.p2l(0), xb = g.xa.p2l(g.xa._length), ya = g.ya.p2l(0), yb = g.ya.p2l(g.ya._length);
+    const xmin = Math.min(xa, xb), xmax = Math.max(xa, xb), ymin = Math.min(ya, yb), ymax = Math.max(ya, yb);
+    for (const i of visibleIndices()) {
+      const x = view.x[i] ?? NaN, y = view.y[i] ?? NaN;
+      if (x < xmin) n.left++; else if (x > xmax) n.right++;
+      else if (y > ymax) n.top++; else if (y < ymin) n.bottom++;
+    }
+  }
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#offscreen .off-chip')) {
+    const e = EDGES.find((k) => k === b.dataset.edge);
+    const c = e ? n[e] : 0;
+    b.classList.toggle('hidden', !c);
+    if (c && e) {
+      b.textContent = `${ARROW[e]} ${c.toLocaleString()}`;
+      b.title = `${c.toLocaleString()} shown dot${c === 1 ? '' : 's'} past the ${e} edge: click to fit every dot in`;
+    }
+  }
+}
+
+export function enableFit(): void {
+  $req('btn-fit').onclick = fitToVisible;
+  $req('offscreen').addEventListener('click', (e) => { if (e.target instanceof Element && e.target.closest('.off-chip')) fitToVisible(); });
+}
