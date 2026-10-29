@@ -222,7 +222,9 @@ def test_admin_max_level_caps(monkeypatch, svc):
 
 
 def test_native_search_only_at_full(monkeypatch, svc):
-    assert start('q', web=3).native_web is True
+    claude = {'kind': 'anthropic', 'model': 'claude-sonnet-4-6', 'api_key': 'k', 'base_url': 'https://api.anthropic.com'}
+    assert start('q', web=3, provider=claude).native_web is True
+    assert start('q', web=3).native_web is False              # gpt-x: not a *search* model, the server tool is used
     assert start('q', web=2).native_web is False and start('q', web=1).native_web is False
     assert 'web_search' not in start('q', web=0).tools
     monkeypatch.setattr(react.providers, 'native_web_ok', lambda p: False, raising=False)
