@@ -3,11 +3,16 @@ Server-wide switches admins change from the page (app.app_settings, one JSONB va
 
     signup_enabled            True     anyone who reaches the server may create an account
     who_can_add_connections   everyone 'admins' keeps outbound S3 / FTP / DB / model / LLM servers to admins
+    llm_web_max_level         3        the highest web search level anyone may use (0 off .. 3 full)
+    llm_org_words             []       organisation special words [{text, strength never | private}]: never searched
+    llm_chat_retention_days   730      deleted ◆ chats are purged after this many days (env DATAVIZ_LLM_CHAT_RETENTION_DAYS)
+    llm_max_sessions          20       saved ◆ chats per user and assistant (the one not opened longest goes first)
 
 Reads are cached for a few seconds in-process (can_add_connections runs on every connection request);
 update() clears the cache.
 """
 
+import os
 import threading
 import time
 
@@ -15,7 +20,9 @@ from sqlalchemy import text
 
 from .. import db
 
-DEFAULTS = {'signup_enabled': True, 'who_can_add_connections': 'everyone'}
+DEFAULTS = {'signup_enabled': True, 'who_can_add_connections': 'everyone', 'llm_web_max_level': 3, 'llm_org_words': [],
+            'llm_chat_retention_days': int(os.environ.get('DATAVIZ_LLM_CHAT_RETENTION_DAYS') or 730),
+            'llm_max_sessions': 20}
 CACHE_TTL = 5.0
 
 _lock = threading.Lock()
@@ -29,6 +36,20 @@ def _validate(key, value):
     elif key == 'who_can_add_connections':
         if value not in ('everyone', 'admins'):
             raise ValueError('who_can_add_connections must be everyone or admins')
+    elif key in ('llm_web_max_level', 'llm_chat_retention_days', 'llm_max_sessions'):
+        lo, hi = {'llm_web_max_level': (0, 3), 'llm_chat_retention_days': (30, 3650), 'llm_max_sessions': (1, 200)}[key]
+        if not isinstance(value, int) or isinstance(value, bool) or not lo <= value <= hi:
+            raise ValueError(f'{key} must be a whole number from {lo} to {hi}')
+    elif key == 'llm_org_words':
+        if not isinstance(value, list):
+            raise ValueError('llm_org_words must be a list')
+        out = []
+        for w in value[:5000]:
+            t = str((w or {}).get('text') if isinstance(w, dict) else w or '').strip()[:200]
+            st = (w or {}).get('strength') if isinstance(w, dict) else None
+            if t and not any(x['text'].lower() == t.lower() for x in out):
+                out.append({'text': t, 'strength': st if st in ('never', 'private') else 'never'})
+        value = out
     else:
         raise ValueError(f'unknown setting {key!r}')
     return value

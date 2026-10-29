@@ -147,10 +147,15 @@ def test_settings_and_can_add_connections(app):
     def add_conn(user=Depends(deps.can_add_connections)):
         return {'ok': True}
 
-    assert adm.get('/api/admin/settings').json() == {'signup_enabled': True, 'who_can_add_connections': 'everyone'}
+    from dataviz.auth.settings import DEFAULTS
+    assert adm.get('/api/admin/settings').json() == {**DEFAULTS, 'signup_enabled': True,
+                                                     'who_can_add_connections': 'everyone'}
     assert c.post('/api/conn-test').status_code == 200
     r = adm.put('/api/admin/settings', json={'who_can_add_connections': 'admins'})
-    assert r.json() == {'signup_enabled': True, 'who_can_add_connections': 'admins'}
+    assert r.json() == {**DEFAULTS, 'signup_enabled': True, 'who_can_add_connections': 'admins'}
+    assert adm.put('/api/admin/settings', json={'llm_web_max_level': 9}).status_code == 400
+    assert adm.put('/api/admin/settings', json={'llm_org_words': ['Acme X1', {'text': 'acme x1'}]}).json()[
+        'llm_org_words'] == [{'text': 'Acme X1', 'strength': 'never'}]
     r = c.post('/api/conn-test')
     assert r.status_code == 403 and r.json()['detail'] == 'only admins can add connections on this server'
     assert adm.post('/api/conn-test').status_code == 200
