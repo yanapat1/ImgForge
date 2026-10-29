@@ -1,9 +1,10 @@
 // The pick bar in the gallery head: how many thumbnails are picked (ctrl+click, or a drag over them) and the bulk
-// edits on their boxes: Delete (button or the Delete key). Label files are edited through one curation fix batch,
+// edits on their boxes: change them all to one class, Delete (button or the Delete key). Label files are edited through one curation fix batch,
 // so a toast offers Undo.
 
 import { $req, esc } from '../core/dom.js';
-import { S } from '../core/state.js';
+import { meta, pts, S } from '../core/state.js';
+import { clsName } from '../core/theme.js';
 import { clearPicked } from '../plot/marks.js';
 import { fixBoxes } from './curation.js';
 import { openDialog } from './dialog.js';
@@ -35,8 +36,26 @@ export async function deletePicked(): Promise<void> {
   });
 }
 
+/** Change every picked box to the class chosen in the bar (asks first above 20 boxes). */
+export async function setPickedClass(): Promise<void> {
+  const cls = +$req<HTMLSelectElement>('pick-cls').value, P = pts();
+  const ids = pickedIds().filter((id) => P.cls[id] !== cls);
+  if (!canEdit() || !Number.isInteger(cls) || cls < 0) return;
+  if (!ids.length) { $req('pick-count').textContent = `all already ${clsName(cls)}`; return; }
+  const run = async (): Promise<null> => { await fixBoxes(ids, 'set_class', cls); return null; };
+  if (ids.length <= 20) { await run(); return; }
+  const n = `${ids.length.toLocaleString()} ${unit(ids.length)}`;
+  await openDialog({
+    title: `Change ${n} to ${clsName(cls)}?`,
+    body: `<p>Their label files are edited. A backup is kept: undo from the message that follows, or in Curation › History.</p>`,
+    ok: 'Change class', onOk: run,
+  });
+}
+
 export function initPickBar(): void {
+  $req('pick-cls').innerHTML = meta().classes.map((c, i) => `<option value="${i}">${esc(c)}</option>`).join('');
   window.addEventListener('picks-changed', sync);
+  $req('pick-setcls').onclick = () => { void setPickedClass(); };
   $req('pick-del').onclick = () => { void deletePicked(); };
   $req('pick-clear').onclick = clearPicked;
   // Delete / Backspace anywhere on the page (not while typing, nor with a dialog open) deletes the picks

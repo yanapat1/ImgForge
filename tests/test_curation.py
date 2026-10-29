@@ -600,3 +600,22 @@ def test_fix_boxes_to_cleanlab_class_and_undo(ds, tmp_path):
         assert (ds / 'labels' / 'ok.txt').read_text() == LABELS['ok']
         d = client.post('/api/curation/fix-boxes', json={'ids': [ok[-1]], 'op': 'delete'}).json()
         assert d['applied'] == 1 and d['patch']['deleted'] == [ok[-1]]
+
+
+def test_fix_boxes_set_class_and_undo(ds, tmp_path):
+    """Gallery › Change class to: the chosen boxes get class `cls` (boxes already of that class are left alone), a bad
+    cls answers 400, undo brings the bytes back."""
+    from fastapi.testclient import TestClient
+    from dataviz.server.app import create_app
+    st = open_state(ds, tmp_path / 'ws4')
+    with TestClient(create_app(st)) as client:
+        for bad in (-1, len(st.classes), 'a', 1.5, True, None):
+            assert client.post('/api/curation/fix-boxes', json={'ids': [0], 'op': 'set_class', 'cls': bad}).status_code == 400
+        ids = [i for i, s in enumerate(st.samples) if s['image'] in ('ok.jpg', 'dup.jpg')]
+        r = client.post('/api/curation/fix-boxes', json={'ids': ids, 'op': 'set_class', 'cls': 1}).json()
+        ok = [i for i in ids if st.samples[i]['image'] == 'ok.jpg']           # dup's boxes are class 1 already
+        assert r['applied'] == 1 and r['undo_id'] and r['patch']['cls'] == {str(i): 1 for i in ok}
+        assert [ln.split()[0] for ln in (ds / 'labels' / 'ok.txt').read_text().splitlines()] == ['1']
+        assert (ds / 'labels' / 'dup.txt').read_text() == LABELS['dup']
+        assert client.post('/api/curation/undo', json={'undo_id': r['undo_id']}).status_code == 200
+        assert (ds / 'labels' / 'ok.txt').read_text() == LABELS['ok']

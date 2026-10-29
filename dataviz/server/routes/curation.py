@@ -190,11 +190,12 @@ def router(state, ctx):
     @r.post('/api/curation/fix-boxes', dependencies=labeler)
     def fix_boxes(body: dict):
         """Fix chosen boxes in one batch (with undo): op 'suggested' sets each to the class cleanlab suggests (label
-        quality of `feature`), 'delete' removes them. Scans first when the dataset was not scanned yet."""
+        quality of `feature`), 'set_class' sets each to class `cls`, 'delete' removes them. Scans first when the dataset
+        was not scanned yet."""
         st = ctx.current()
         op = body.get('op')
-        if op not in ('suggested', 'delete'):
-            raise HTTPException(400, "op must be 'suggested' or 'delete'")
+        if op not in ('suggested', 'delete', 'set_class'):
+            raise HTTPException(400, "op must be 'suggested', 'delete' or 'set_class'")
         try:
             ids = sorted({int(i) for i in body.get('ids') or []})[:50000]
         except (TypeError, ValueError):
@@ -211,6 +212,12 @@ def router(state, ctx):
             ops = {i: {'op': 'set_class', 'cls': int(per['cl_suggested'][i])} for i in ids
                    if per['cl_scored'][i] and int(per['cl_suggested'][i]) != int(st.labels[i])}
             text = f'Change {len(ops)} box{"es" if len(ops) != 1 else ""} to cleanlab\'s class'
+        elif op == 'set_class':
+            cls = body.get('cls')
+            if not isinstance(cls, int) or isinstance(cls, bool) or not 0 <= cls < len(st.classes):
+                raise HTTPException(400, f'cls must be a class index in [0, {len(st.classes)})')
+            ops = {i: {'op': 'set_class', 'cls': cls} for i in ids if int(st.labels[i]) != cls}
+            text = f'Change {len(ops)} box{"es" if len(ops) != 1 else ""} to {st.classes[cls]}'
         else:
             ops = {i: {'op': 'delete'} for i in ids}
             text = f'Delete {len(ops)} box{"es" if len(ops) != 1 else ""}'
