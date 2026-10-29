@@ -3,11 +3,13 @@ LLM provider clients over raw httpx (no SDKs): OpenAI, OpenAI-compatible servers
 OpenRouter ...), Anthropic and Gemini behind one message format.
 
     msgs = [{'role': 'user' | 'assistant' | 'tool', 'parts': [{'text': str} | {'jpeg': bytes, 'cache'?: True}
-             | {'wav': bytes} | {'tool_call': {id, name, args, sig?}} | {'tool_result': {id, name, content, is_error?}}]}]
+             | {'wav': bytes} | {'tool_call': {id, name, args, sig?}} | {'tool_result': {id, name, content, is_error?}}
+             | {'thinking': {text, sig, kind, redacted?}}]}]
 
 Tool calls are assistant parts, tool results go in a 'tool' message (sent as the user's turn to Anthropic / Gemini,
 as role 'tool' messages to OpenAI). `chat_stream()` yields ('delta', text) ... then ('usage', {'in', 'out'});
-`complete()` / `complete_json()` answer at once; `complete_tools()` is one native tool-calling step;
+`complete()` / `complete_json()` answer at once; `complete_tools()` is one native tool-calling step and
+`stream_tools()` the same step streamed for the agent engine (thinking, live text, native web search);
 `list_models()` fills the Settings model dropdown; `test()` is Test connection. Errors are LLMError with a
 human message (provider status + its own message, trimmed) and an HTTP status for the route: 400 for a setup problem
 (bad key, unknown model), 502 when the provider failed. The API key never appears in a message or a log line.
@@ -138,7 +140,15 @@ def _b64(b):
 
 
 def _keep(x):
-    return bool(x.get('text') or x.get('jpeg') or x.get('wav')) or 'tool_call' in x or 'tool_result' in x
+    return (bool(x.get('text') or x.get('jpeg') or x.get('wav')) or 'tool_call' in x or 'tool_result' in x
+            or 'thinking' in x)
+
+
+def _own_thinking(x, kind):
+    """A history thinking part this provider can take back: signed, and written by this kind of provider (a Claude
+    signature means nothing to Gemini and the other way round). Untagged parts count as Claude's."""
+    t = x.get('thinking') if isinstance(x, dict) else None
+    return isinstance(t, dict) and bool(t.get('sig')) and (t.get('kind') or 'anthropic') == kind
 
 
 def _merge(msgs):
@@ -170,7 +180,8 @@ def _openai_body(p, system, msgs, stream, json_mode, max_tokens, temperature=Tru
     for m in _merge(msgs):
         calls = [x['tool_call'] for x in m['parts'] if 'tool_call' in x]
         results = [x['tool_result'] for x in m['parts'] if 'tool_result' in x]
-        rest = [x for x in m['parts'] if 'tool_call' not in x and 'tool_result' not in x]
+        # thinking is never sent back to OpenAI-style servers (they return no signature to verify it with)
+        rest = [x for x in m['parts'] if 'tool_call' not in x and 'tool_result' not in x and 'thinking' not in x]
         # tool results are role 'tool' messages, right after the assistant message that called them
         for t in results:
             out.append({'role': 'tool', 'tool_call_id': str(t['id']), 'content': str(t.get('content') or '')})
@@ -221,12 +232,16 @@ def _anthropic_body(p, system, msgs, stream, max_tokens, tools=None):
                 last_cache = (i, j)
     out = []
     for i, m in enumerate(merged):
+        # signed thinking opens the assistant turn it belongs to (Claude checks it before the tool_use it led to)
+        content = [{'type': 'redacted_thinking', 'data': t['redacted']} if t.get('redacted') else
+                   {'type': 'thinking', 'thinking': t.get('text') or '', 'signature': t['sig']}
+                   for t in (x['thinking'] for x in m['parts'] if m['role'] == 'assistant' and _own_thinking(x, 'anthropic'))]
         # tool_result blocks must open the user turn that answers a tool_use
-        content = [{'type': 'tool_result', 'tool_use_id': str(t['id']), 'content': str(t.get('content') or ''),
-                    **({'is_error': True} if t.get('is_error') else {})}
-                   for t in (x['tool_result'] for x in m['parts'] if 'tool_result' in x)]
+        content += [{'type': 'tool_result', 'tool_use_id': str(t['id']), 'content': str(t.get('content') or ''),
+                     **({'is_error': True} if t.get('is_error') else {})}
+                    for t in (x['tool_result'] for x in m['parts'] if 'tool_result' in x)]
         for j, x in enumerate(m['parts']):
-            if 'tool_result' in x:
+            if 'tool_result' in x or 'thinking' in x:
                 continue
             if 'tool_call' in x:
                 c = x['tool_call']
@@ -300,6 +315,10 @@ def _gemini_body(p, system, msgs, json_mode, max_tokens, tools=None):
                 if c.get('sig'):
                     part['thoughtSignature'] = c['sig']      # thinking models refuse a call history without it
                 parts.append(part)
+            elif 'thinking' in x:
+                if _own_thinking(x, 'gemini'):          # a signed thought goes back as it came
+                    t = x['thinking']
+                    parts.append({'text': t.get('text') or '', 'thought': True, 'thoughtSignature': t['sig']})
             elif 'tool_result' in x:
                 t = x['tool_result']
                 parts.append({'functionResponse': {'name': t['name'], 'response': {
@@ -396,22 +415,147 @@ def _post(p, path, body, h, what):
     return r
 
 
-def _retry_without(p, r, body):
-    """Some models refuse a parameter we send by default (reasoning models: temperature). Drop it once."""
-    if r.status_code != 400 or 'temperature' not in body:
+# ---------------------------------------------------------------- parameters a server refuses
+# Optional parameters we send (sampling, usage in streams, thinking, native web search) that some models or servers
+# answer with a 400. The refused one is dropped and the request sent again; what was refused is remembered per
+# (kind, base URL, model) for the life of the process, so the next request leaves it out from the start.
+#   name: (paths in the body, words of the provider's error text that name it)
+_PARAMS = {
+    'temperature': ((('temperature',), ('generationConfig', 'temperature')), ('temperature',)),
+    'stream_options': ((('stream_options',),), ('stream_options', 'include_usage')),
+    'reasoning_effort': ((('reasoning_effort',),), ('reasoning_effort', 'reasoning effort', 'reasoning.effort')),
+    'chat_template_kwargs': ((('chat_template_kwargs',),), ('chat_template_kwargs', 'enable_thinking')),
+    'thinking': ((('thinking',),), ('thinking', 'budget_tokens', 'adaptive')),
+    'effort': ((('output_config',),), ('effort', 'output_config')),
+    'thinkingConfig': ((('generationConfig', 'thinkingConfig'),),
+                       ('thinkingconfig', 'thinking_config', 'thinking_budget', 'thinkingbudget', 'includethoughts',
+                        'include_thoughts', 'thinking budget', 'budget', 'thinking')),
+}
+# a refused native search names itself; Gemini says 'Tool use with function calling is unsupported' (not every
+# model mixes google_search with function declarations), Claude's tool errors are about our own tools
+_NATIVE_WORDS = {'gemini': ('search', 'grounding', 'tool', 'function')}
+_refused = {}                   # (kind, base_url, model) -> {param name}; 'thinkingConfig:off' = Gemini budget 0
+_native_off = set()             # (kind, base_url, model) whose native web search failed: the engine's own is used
+_refused_lock = threading.Lock()
+
+
+def _mkey(p):
+    return str(p.get('kind') or ''), str(p.get('base_url') or '').rstrip('/'), str(p.get('model') or '')
+
+
+def _remember(p, names):
+    with _refused_lock:
+        _refused.setdefault(_mkey(p), set()).update(names)
+
+
+def _get(body, path):
+    for k in path[:-1]:
+        body = body.get(k) if isinstance(body, dict) else None
+    return body.get(path[-1]) if isinstance(body, dict) else None
+
+
+def _param_name(name, body):
+    """The remembered name: Gemini's budget 0 (thinking off) is refused by models that always think, which still
+    take a budget when thinking is on, so the two are remembered apart."""
+    if name == 'thinkingConfig' and (_get(body, ('generationConfig', 'thinkingConfig')) or {}).get('thinkingBudget') == 0:
+        return 'thinkingConfig:off'
+    return name
+
+
+def _present(body):
+    return [n for n, (paths, _) in _PARAMS.items() if any(_get(body, x) is not None for x in paths)]
+
+
+def _drop(body, name):
+    for path in _PARAMS[name][0]:
+        d = body
+        for k in path[:-1]:
+            d = d.get(k) if isinstance(d, dict) else None
+        if isinstance(d, dict):
+            d.pop(path[-1], None)
+
+
+def _drop_refused(p, body):
+    """Leaves out what this model refused before."""
+    gone = _refused.get(_mkey(p)) or ()
+    for n in _present(body):
+        if _param_name(n, body) in gone:
+            _drop(body, n)
+
+
+def _is_native(t):
+    return isinstance(t, dict) and (str(t.get('type') or '').startswith('web_search_') or 'google_search' in t)
+
+
+def _native_in(body):
+    return 'web_search_options' in body or any(_is_native(t) for t in body.get('tools') or [])
+
+
+def _drop_native(body):
+    body.pop('web_search_options', None)
+    if 'tools' in body:
+        body['tools'] = [t for t in body['tools'] if not _is_native(t)]
+        if not body['tools']:
+            del body['tools']
+
+
+def _retry_without(p, r, body, guessed=None):
+    """After a 400 / 422: drops what the provider's error names (the parameter named first) and remembers it.
+    Returns 'native' (native web search dropped), 'param', 'guess' (a compatible server said nothing useful:
+    every optional parameter dropped, collected in `guessed` and remembered only once the retry works) or None
+    (nothing left to drop: the error is real)."""
+    if r.status_code not in (400, 422):
+        return None
+    msg = _err_message(r).lower()
+    if _native_in(body) and (not msg or any(w in msg for w in _NATIVE_WORDS.get(p.get('kind'), ('search',)))):
+        _drop_native(body)
+        with _refused_lock:
+            _native_off.add(_mkey(p))
+        return 'native'
+    present = _present(body)
+    hits = sorted((min(i for w in _PARAMS[n][1] if (i := msg.find(w)) >= 0), k, n)
+                  for k, n in enumerate(present) if any(w in msg for w in _PARAMS[n][1]))
+    if hits:
+        n = hits[0][2]
+        _remember(p, {_param_name(n, body)})
+        _drop(body, n)
+        return 'param'
+    if p.get('kind') == 'openai_compat' and present and guessed is not None and not guessed:
+        guessed.update(_param_name(n, body) for n in present)
+        for n in present:
+            _drop(body, n)
+        return 'guess'
+    return None
+
+
+def native_web_ok(p):
+    """Whether native web search may be asked of this provider: Claude's web_search tool, Gemini's google_search,
+    OpenAI's *search* models. False for compatible servers, and once it failed for this model."""
+    kind = p.get('kind')
+    if _mkey(p) in _native_off:
         return False
-    if 'temperature' in _err_message(r).lower():
-        body.pop('temperature')
+    if kind in ('anthropic', 'gemini'):
         return True
-    return False
+    return kind == 'openai' and 'search' in str(p.get('model') or '').lower()
+
+
+def _send(p, path, body, h):
+    """A non-streamed request, sent again without each parameter the provider refuses."""
+    _drop_refused(p, body)
+    guessed = set()
+    for _ in range(len(_PARAMS) + 2):
+        r = _post(p, path, body, h, 'generate')
+        if r.status_code < 400 or not _retry_without(p, r, body, guessed):
+            break
+    if guessed and r.status_code < 400:
+        _remember(p, guessed)
+    return r
 
 
 def complete(p, system, msgs, json=False, max_tokens=None):
     """(text, usage {'in', 'out'} or None) of one non-streamed answer."""
     path, body, h = _request(p, system, msgs, False, json, max_tokens)
-    r = _post(p, path, body, h, 'generate')
-    if _retry_without(p, r, body):
-        r = _post(p, path, body, h, 'generate')
+    r = _send(p, path, body, h)
     if r.status_code >= 400:
         raise _fail(p, r, f'{p.get("model")}')
     try:
@@ -463,9 +607,7 @@ def complete_tools(p, system, msgs, tools, max_tokens=None):
     """One non-streamed step with native tool calling -> {text, tool_calls: [{id, name, args, sig?}], usage}.
     tools: [{name, description, parameters (JSON schema)}]."""
     path, body, h = _request(p, system, msgs, False, False, max_tokens, tools=tools)
-    r = _post(p, path, body, h, 'generate')
-    if _retry_without(p, r, body):
-        r = _post(p, path, body, h, 'generate')
+    r = _send(p, path, body, h)
     if r.status_code >= 400:
         raise _fail(p, r, f'{p.get("model")}')
     try:
@@ -478,18 +620,419 @@ def complete_tools(p, system, msgs, tools, max_tokens=None):
     return {'text': text or '', 'tool_calls': calls, 'usage': usage or {'in': 0, 'out': 0}}
 
 
-def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_tokens=None):
-    """One tool-calling step as a stream for the agent engine: yields ('thinking', {text, sig?}) / ('text', str) /
-    ('tool_call', {id, name, args, sig?}) / ('search', {query, engine, results}) ... then ('usage', {in, out}).
+# ---------------------------------------------------------------- streamed tool calling (the agent engine)
+THINK_LEVELS = ('off', 'low', 'medium', 'high')
+_BUDGET = {'low': 2048, 'medium': 8192, 'high': 24576}           # thinking tokens (Claude <= 4.5, Gemini)
+_ROOM = 4096                                                      # max_tokens left for the answer above a budget
+_ADAPTIVE_MAX = {'low': 8192, 'medium': 16384, 'high': 32000}     # max_tokens with adaptive thinking (it counts)
+_MAX_PAUSES = 3                                                   # Claude's pause_turn (long server-tool turns)
 
-    This version runs complete_tools() and replays its answer (no live tokens, thinking and native web search
-    ignored); the streamed per-provider version replaces it."""
-    ans = complete_tools(p, system, msgs, tools, max_tokens)
-    if ans.get('text'):
-        yield 'text', ans['text']
-    for c in ans.get('tool_calls') or []:
-        yield 'tool_call', c
-    yield 'usage', ans.get('usage') or {'in': 0, 'out': 0}
+
+def _claude_version(model):
+    """(family, (major, minor)) of a Claude model id: claude-opus-4-6, claude-sonnet-4-5-20250929,
+    claude-3-7-sonnet-20250219, anthropic.claude-haiku-4-5 ... (None, None) when it is not one."""
+    s = str(model or '').lower()
+    m = re.search(r'(opus|sonnet|haiku|fable|mythos)-(\d{1,2})(?!\d)(?:[-.](\d{1,2})(?!\d))?', s)
+    if m:
+        return m.group(1), (int(m.group(2)), int(m.group(3) or 0))
+    m = re.search(r'claude-(\d+)(?:[-.](\d)(?!\d))?-(opus|sonnet|haiku)', s)
+    if m:
+        return m.group(3), (int(m.group(1)), int(m.group(2) or 0))
+    return None, None
+
+
+def _claude_thinking(model):
+    """How a Claude model thinks: ('adaptive', always_on) for Opus / Sonnet 4.6+, Haiku 5+, Fable and Mythos
+    (budget_tokens is a 400 on most of them; effort sets the depth), ('budget', False) for older ones. always_on:
+    thinking cannot be turned off (Opus 5.5, Fable ...) or runs when `thinking` is left out (every 5.x), so 'off'
+    asks for the least of it (effort low) instead of sending a refused {type: disabled}."""
+    fam, v = _claude_version(model)
+    if fam in ('fable', 'mythos'):
+        return 'adaptive', True
+    if (fam in ('opus', 'sonnet') and v >= (4, 6)) or (fam == 'haiku' and v >= (5, 0)):
+        return 'adaptive', v >= (5, 0)
+    return 'budget', False
+
+
+def _claude_web_tool(model):
+    """The newest web search tool the model takes (dynamic filtering needs Opus / Sonnet 4.6+, Fable)."""
+    fam, v = _claude_version(model)
+    new = fam in ('fable', 'mythos') or (fam in ('opus', 'sonnet') and v >= (4, 6))
+    return {'type': 'web_search_20260209' if new else 'web_search_20250305', 'name': 'web_search', 'max_uses': 5}
+
+
+def _openai_reasoning(model):
+    """OpenAI's reasoning models (o1 / o3 / o4-mini ..., gpt-5*): the only ones that take reasoning_effort."""
+    return bool(re.match(r'(?:openai/)?(?:o\d|gpt-5)', str(model or '').lower()))
+
+
+def _stream_extras(p, body, h, level, web, tools):
+    """Thinking and native web search on a streamed request. level: None | off | low | medium | high."""
+    kind = p['kind']
+    on = level in _BUDGET
+    if kind == 'anthropic':
+        mode, always = _claude_thinking(p.get('model'))
+        if on and mode == 'adaptive':
+            body['thinking'] = {'type': 'adaptive', 'display': 'summarized'}   # summarized: else the text is empty
+            body['output_config'] = {'effort': level}
+            body['max_tokens'] = max(body['max_tokens'], _ADAPTIVE_MAX[level])
+        elif on:
+            body['thinking'] = {'type': 'enabled', 'budget_tokens': _BUDGET[level]}
+            body['max_tokens'] = max(body['max_tokens'], _BUDGET[level] + _ROOM)    # must exceed the budget
+            if tools:                                   # thinking between tool calls, not only before the first
+                h['anthropic-beta'] = 'interleaved-thinking-2025-05-14'
+        elif always:
+            body['output_config'] = {'effort': 'low'}
+            body['max_tokens'] = max(body['max_tokens'], _ADAPTIVE_MAX['low'])
+        if on or always:
+            body.pop('temperature', None)               # thinking takes no sampling settings (a 400)
+        if web:
+            body.setdefault('tools', []).append(_claude_web_tool(p.get('model')))
+    elif kind == 'gemini':
+        cfg = body['generationConfig']
+        if on:
+            cfg['thinkingConfig'] = {'thinkingBudget': _BUDGET[level], 'includeThoughts': True}
+            cfg['maxOutputTokens'] = max(cfg['maxOutputTokens'], _BUDGET[level] + _ROOM)
+        else:
+            cfg['thinkingConfig'] = {'thinkingBudget': 0}      # models that always think refuse it: remembered
+        if web:
+            body.setdefault('tools', []).append({'google_search': {}})
+    elif kind == 'openai':
+        if on and _openai_reasoning(p.get('model')):
+            body['reasoning_effort'] = level
+            body.pop('temperature', None)               # reasoning models take only the default
+        if web:
+            body['web_search_options'] = {}
+    else:
+        body['stream_options'] = {'include_usage': True}       # dropped (and remembered) where refused
+        if level is not None:                           # Qwen3 / QwQ / DeepSeek-R1 chat templates
+            body['chat_template_kwargs'] = {'enable_thinking': on}
+
+
+def _stream_error(p, e):
+    """An error event inside a 200 stream (overloaded mid-answer ...)."""
+    if isinstance(e, dict):
+        kind_, msg = str(e.get('type') or e.get('status') or e.get('code') or ''), e.get('message') or e.get('type')
+    else:
+        kind_, msg = '', e
+    msg = re.sub(r'\s+', ' ', str(msg or 'error'))[:200]
+    low = f'{kind_} {msg}'.lower()
+    transient = any(w in low for w in ('overload', 'rate', 'api_error', 'server', 'timeout', 'unavailable',
+                                       'internal', 'exhausted', '429', '500', '503', '529'))
+    return LLMError(_scrub(p, f'{p.get("model")}: provider error: {msg}'), 502, transient=transient)
+
+
+def _broken(p, e, started):
+    if not started:
+        return _unreachable(p, e)
+    return LLMError(_scrub(p, f'{p.get("model")}: the answer stream broke off ({type(e).__name__}: {e})'), 502,
+                    transient=True)
+
+
+def _json_args(raw):
+    """Tool arguments as a dict; None when they are not a JSON object (the engine tells the model)."""
+    if isinstance(raw, dict):
+        return raw
+    if raw is None or not str(raw).strip():
+        return {}
+    try:
+        v = json.loads(raw)
+    except ValueError:
+        return None
+    return v if isinstance(v, dict) else None
+
+
+class _ThinkTags:
+    """`<think>…</think>` at the start of an answer is thinking (Qwen3 / DeepSeek-R1 on a server without a
+    reasoning parser). Tags split over chunks are held back until they are whole."""
+    OPEN, CLOSE = '<think>', '</think>'
+
+    def __init__(self):
+        self.state, self.buf = 'start', ''
+
+    def feed(self, s):
+        if self.state == 'text':
+            yield 'text', s
+            return
+        self.buf += s
+        if self.state == 'start':
+            b = self.buf.lstrip()
+            if not b or (len(b) < len(self.OPEN) and self.OPEN.startswith(b)):
+                return
+            if not b.startswith(self.OPEN):
+                self.state, out, self.buf = 'text', self.buf, ''
+                yield 'text', out
+                return
+            self.state, self.buf = 'think', b[len(self.OPEN):]
+        i = self.buf.find(self.CLOSE)
+        if i >= 0:
+            if i:
+                yield 'thinking', {'text': self.buf[:i]}
+            rest = self.buf[i + len(self.CLOSE):].lstrip()
+            self.state, self.buf = 'text', ''
+            if rest:
+                yield 'text', rest
+            return
+        keep = next((k for k in range(min(len(self.CLOSE) - 1, len(self.buf)), 0, -1)
+                     if self.CLOSE.startswith(self.buf[-k:])), 0)
+        if len(self.buf) > keep:
+            yield 'thinking', {'text': self.buf[:len(self.buf) - keep]}
+            self.buf = self.buf[len(self.buf) - keep:]
+
+    def flush(self):
+        if self.buf:
+            yield ('thinking', {'text': self.buf}) if self.state == 'think' else ('text', self.buf)
+        self.buf = ''
+
+
+def _openai_events(p, r, st):
+    """OpenAI / compatible chunks: content, reasoning_content / reasoning (vLLM, Ollama, DeepSeek, Qwen ...),
+    tool_calls accumulated by index (arguments arrive in pieces), url_citation annotations of search models."""
+    calls, cites = {}, {}
+    tags = _ThinkTags() if p['kind'] == 'openai_compat' else None
+    for ev in _sse_data(r):
+        if ev.get('error'):
+            raise _stream_error(p, ev['error'])
+        if ev.get('usage'):
+            st['usage'] = _usage_openai(ev['usage'])
+        for ch in ev.get('choices') or []:
+            d = ch.get('delta') or ch.get('message') or {}
+            th = d.get('reasoning_content') or d.get('reasoning')
+            if isinstance(th, str) and th:
+                yield 'thinking', {'text': th}
+            c = d.get('content')
+            if isinstance(c, list):
+                c = ''.join(x.get('text', '') for x in c if isinstance(x, dict))
+            if c:
+                if tags:
+                    yield from tags.feed(c)
+                else:
+                    yield 'text', c
+            for a in d.get('annotations') or []:
+                u = a.get('url_citation') if isinstance(a, dict) else None
+                if isinstance(u, dict) and u.get('url'):
+                    cites.setdefault(u['url'], str(u.get('title') or u['url']))
+            for tc in d.get('tool_calls') or []:
+                slot, tid = tc.get('index'), tc.get('id')
+                if not isinstance(slot, int):           # servers that send whole calls without an index
+                    slot = next((k for k, v in calls.items() if tid and v['id'] == tid), None)
+                    if slot is None:
+                        slot = len(calls) if (tid or not calls) else max(calls)
+                c = calls.setdefault(slot, {'id': '', 'name': '', 'args': ''})
+                if tid:
+                    c['id'] = str(tid)
+                fn = tc.get('function') or {}
+                if fn.get('name'):
+                    c['name'] = str(fn['name'])
+                a = fn.get('arguments')
+                if isinstance(a, dict):
+                    c['args'] = a
+                elif isinstance(a, str) and isinstance(c['args'], str):
+                    c['args'] += a
+    if tags:
+        yield from tags.flush()
+    for k in sorted(calls):
+        c = calls[k]
+        yield 'tool_call', {'id': c['id'], 'name': c['name'], 'args': _json_args(c['args'])}
+    if cites:
+        yield 'search', {'query': '', 'engine': 'openai', 'results': [{'title': t, 'url': u} for u, t in cites.items()]}
+
+
+def _anthropic_events(p, r, st):
+    """Claude's content blocks: text, thinking (+ signature), redacted thinking, tool_use (input_json_delta),
+    server_tool_use web_search + web_search_tool_result. st['content'] rebuilds the turn for a pause_turn.
+
+    A thinking block streams as chunks; the first chunk's dict is the block: at content_block_stop it gets the
+    whole text and the signature, so the engine keeps that one dict for the history (it has already shown each
+    chunk) and Claude gets the block back exactly as written."""
+    blocks, queries = {}, {}
+    for ev in _sse_data(r):
+        t = ev.get('type')
+        if t == 'message_start':
+            u = _usage_anthropic((ev.get('message') or {}).get('usage'))
+            if u:
+                st['usage'] = {'in': u['in'], 'out': u['out']}
+        elif t == 'content_block_start':
+            cb = dict(ev.get('content_block') or {})
+            b = blocks[ev.get('index')] = {'type': cb.get('type'), 'raw': cb, 'text': '', 'sig': '', 'json': '',
+                                           'head': None}
+            if b['type'] == 'text' and cb.get('text'):
+                b['text'] = cb['text']
+                yield 'text', cb['text']
+            elif b['type'] == 'thinking':
+                b['text'], b['sig'] = cb.get('thinking') or '', cb.get('signature') or ''
+            elif b['type'] == 'redacted_thinking':
+                st['content'].append(cb)
+                yield 'thinking', {'text': '', 'sig': str(cb.get('data') or ''), 'redacted': cb.get('data'),
+                                   'kind': 'anthropic'}
+            elif b['type'] == 'web_search_tool_result':
+                st['content'].append(cb)
+                res = cb.get('content')
+                yield 'search', {'query': queries.get(cb.get('tool_use_id'), ''), 'engine': 'anthropic',
+                                 'results': [{'title': str(x.get('title') or x.get('url')), 'url': str(x.get('url'))}
+                                             for x in (res if isinstance(res, list) else [])
+                                             if isinstance(x, dict) and x.get('url')]}
+        elif t == 'content_block_delta':
+            b, d = blocks.get(ev.get('index')), ev.get('delta') or {}
+            if b is None:
+                continue
+            dt = d.get('type')
+            if dt == 'text_delta' and d.get('text'):
+                b['text'] += d['text']
+                yield 'text', d['text']
+            elif dt == 'thinking_delta' and d.get('thinking'):
+                b['text'] += d['thinking']
+                chunk = {'text': d['thinking']}
+                if b['head'] is None:
+                    b['head'] = chunk
+                yield 'thinking', chunk
+            elif dt == 'signature_delta':
+                b['sig'] += d.get('signature') or ''
+            elif dt == 'input_json_delta':
+                b['json'] += d.get('partial_json') or ''
+        elif t == 'content_block_stop':
+            b = blocks.get(ev.get('index'))
+            if b is None:
+                continue
+            bt, raw = b['type'], b['raw']
+            if bt == 'text':
+                st['content'].append({'type': 'text', 'text': b['text']})
+            elif bt == 'thinking':
+                st['content'].append({'type': 'thinking', 'thinking': b['text'], 'signature': b['sig']})
+                head = b['head']
+                if head is None:                        # no deltas (display omitted): only the signature
+                    head = {'text': b['text']}
+                head.update(text=b['text'], sig=b['sig'], kind='anthropic')
+                if b['head'] is None:
+                    yield 'thinking', head
+            elif bt in ('tool_use', 'server_tool_use'):
+                args = _json_args(b['json']) if b['json'] else (raw.get('input') if isinstance(raw.get('input'), dict) else {})
+                st['content'].append({'type': bt, 'id': raw.get('id'), 'name': raw.get('name'),
+                                      'input': args if isinstance(args, dict) else {}})
+                if bt == 'tool_use':
+                    yield 'tool_call', {'id': str(raw.get('id') or ''), 'name': str(raw.get('name') or ''),
+                                        'args': args}
+                else:
+                    queries[raw.get('id')] = str((args or {}).get('query') or '')
+        elif t == 'message_delta':
+            st['stop'] = (ev.get('delta') or {}).get('stop_reason') or st.get('stop')
+            u = ev.get('usage') or {}
+            if u.get('output_tokens') is not None:
+                st['usage']['out'] = int(u['output_tokens'] or 0)
+            if u.get('input_tokens'):                   # newer streams repeat the (cumulative) input count
+                st['usage']['in'] = max(st['usage']['in'], _usage_anthropic(u)['in'])
+        elif t == 'error':
+            raise _stream_error(p, ev.get('error') or {})
+
+
+def _gemini_events(p, r, st):
+    """Gemini chunks: thought parts (thinking, signature kept), text, functionCall (its thoughtSignature is the
+    call's sig: thinking models refuse the next turn without it), groundingMetadata of google_search."""
+    queries, results = [], {}
+    for ev in _sse_data(r):
+        if ev.get('error'):
+            raise _stream_error(p, ev['error'])
+        u = ev.get('usageMetadata')
+        if u:                                           # cumulative: the last one counts; thoughts are billed out
+            st['usage'] = {'in': int(u.get('promptTokenCount') or 0),
+                           'out': int(u.get('candidatesTokenCount') or 0) + int(u.get('thoughtsTokenCount') or 0)}
+        cands = ev.get('candidates') or []
+        if not cands:
+            why = (ev.get('promptFeedback') or {}).get('blockReason')
+            if why:
+                raise LLMError(f'Gemini returned no answer (blocked: {why})', 502)
+            continue
+        c = cands[0]
+        for x in (c.get('content') or {}).get('parts') or []:
+            sig = x.get('thoughtSignature')
+            fc = x.get('functionCall')
+            if fc:
+                a = fc.get('args')
+                call = {'id': str(fc.get('id') or ''), 'name': str(fc.get('name') or ''),
+                        'args': a if isinstance(a, dict) else ({} if a is None else None)}
+                if sig:
+                    call['sig'] = sig
+                yield 'tool_call', call
+            elif x.get('thought'):
+                th = {'text': str(x.get('text') or ''), 'kind': 'gemini'}
+                if sig:
+                    th['sig'] = sig
+                if th['text'] or sig:
+                    yield 'thinking', th
+            elif x.get('text'):
+                yield 'text', x['text']
+        gm = c.get('groundingMetadata') or {}
+        for q in gm.get('webSearchQueries') or []:
+            if q not in queries:
+                queries.append(str(q))
+        for g in gm.get('groundingChunks') or []:
+            w = g.get('web') if isinstance(g, dict) else None
+            if isinstance(w, dict) and w.get('uri'):
+                results.setdefault(w['uri'], str(w.get('title') or w['uri']))
+    if queries or results:
+        yield 'search', {'query': '; '.join(queries), 'engine': 'google',
+                         'results': [{'title': t, 'url': u} for u, t in results.items()]}
+
+
+def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_tokens=None):
+    """One tool-calling step streamed for the agent engine. Yields
+        ('thinking', {text, sig?, kind?, redacted?})   reasoning chunks; a signed one goes back in the history
+        ('text', str)                                  answer chunks
+        ('tool_call', {id, name, args, sig?})          once per complete call (args None: not a JSON object)
+        ('search', {query, engine, results: [{title, url}], unavailable?})   provider-native web search
+        ('usage', {in, out})                           last
+    think: None | 'off' | 'low' | 'medium' | 'high'. native_web: ask for the provider's own web search where
+    native_web_ok(p); when the provider refuses it, the step is sent again without it, that is remembered and one
+    ('search', {..., 'unavailable': True}) tells the engine to use its own web_search tool. Refused optional
+    parameters (temperature, stream usage, thinking settings) are dropped and remembered the same way."""
+    kind = p.get('kind')
+    level = think if think in THINK_LEVELS else None
+    if kind != 'openai_compat' and level is None:
+        level = 'off'
+    parse = {'openai': _openai_events, 'openai_compat': _openai_events, 'anthropic': _anthropic_events,
+             'gemini': _gemini_events}.get(kind)
+    if parse is None:
+        raise LLMError(f'unknown provider kind {kind!r}')
+    path, body, h = _request(p, system, msgs, True, False, max_tokens, tools=tools)
+    h = dict(h)
+    _stream_extras(p, body, h, level, bool(native_web) and native_web_ok(p), tools)
+    _drop_refused(p, body)
+    total, told, guessed = {'in': 0, 'out': 0}, False, set()
+    for _pause in range(_MAX_PAUSES + 1):
+        st = {'usage': {'in': 0, 'out': 0}, 'stop': None, 'content': []}
+        for _ in range(len(_PARAMS) + 2):
+            started = False
+            try:
+                with _client(p).stream('POST', path, json=body, headers=h) as r:
+                    if r.status_code >= 400:
+                        r.read()
+                        why = _retry_without(p, r, body, guessed)
+                        if why is None:
+                            raise _fail(p, r, f'{p.get("model")}')
+                        if why == 'native' and not told:
+                            told = True
+                            yield 'search', {'query': '', 'engine': 'native', 'results': [], 'unavailable': True}
+                        continue
+                    for ev in parse(p, r, st):
+                        started = True
+                        yield ev
+                break
+            except httpx.HTTPError as e:
+                raise _broken(p, e, started) from None
+        if guessed:
+            _remember(p, guessed)
+            guessed = set()
+        total = {'in': total['in'] + int(st['usage'].get('in') or 0),
+                 'out': total['out'] + int(st['usage'].get('out') or 0)}
+        if kind != 'anthropic' or st['stop'] != 'pause_turn' or not st['content']:
+            break
+        # a long server-tool turn paused: send it back as it is and Claude carries on where it stopped
+        ms = body['messages']
+        if ms and ms[-1]['role'] == 'assistant':
+            body['messages'] = ms[:-1] + [{'role': 'assistant', 'content': ms[-1]['content'] + st['content']}]
+        else:
+            body['messages'] = ms + [{'role': 'assistant', 'content': st['content']}]
+    yield 'usage', total
 
 
 def _sse_data(r):
@@ -510,13 +1053,14 @@ def chat_stream(p, system, msgs, max_tokens=None):
     """Streamed answer: yields ('delta', text) ... then one ('usage', {'in', 'out'}) at the end."""
     kind = p.get('kind')
     path, body, h = _request(p, system, msgs, True, False, max_tokens)
+    _drop_refused(p, body)
     usage = {'in': 0, 'out': 0}
-    for attempt in (0, 1):
+    for _ in range(len(_PARAMS) + 1):
         try:
             with _client(p).stream('POST', path, json=body, headers=h) as r:
                 if r.status_code >= 400:
                     r.read()
-                    if attempt == 0 and _retry_without(p, r, body):
+                    if _retry_without(p, r, body):
                         continue
                     raise _fail(p, r, f'{p.get("model")}')
                 for ev in _sse_data(r):
