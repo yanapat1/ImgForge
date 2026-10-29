@@ -34,6 +34,7 @@
 /* base.css greys every icon inside a button (button .ico); the tile's icon takes its badge colour instead */
 .ds-icon .ico, button:hover:not(:disabled) .ds-icon .ico { color: inherit; }
 .ds-icon.s3 { background: var(--accent-soft); color: var(--accent); }
+.ds-icon.dcsrc { background: var(--ok-soft); color: var(--ok-text); }
 .ds-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ds-title { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; font-weight: 650; }
 .ds-uri { font: var(--fs-xs) var(--mono); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -80,7 +81,9 @@
 .fld input:hover, input.txt:hover { border-color: var(--border-hover); }
 .fld input:focus, input.txt:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .fld .help { font-size: var(--fs-xs); color: var(--text-faint); }
-.fld.mono input, input.txt.mono { font-family: var(--mono); font-size: var(--fs-xs); }
+/* .fld.mono: only the typed value is monospace, the caption keeps the UI font (the global .mono would turn it mono) */
+.fld.mono { font-family: var(--font); }
+.fld.mono input, .fld.mono textarea, .fld input.mono, input.txt.mono { font-family: var(--mono); font-size: var(--fs-xs); }
 .status-line { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); min-height: 22px; color: var(--text-muted); }
 .status-line.ok { color: var(--ok-text); }
 .status-line.err { color: var(--danger-text); }

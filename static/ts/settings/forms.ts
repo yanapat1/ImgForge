@@ -64,7 +64,7 @@ export function renderDatasetsSec(): string {
     const tile = (act: string, cls: string, ico: string, title: string, text: string): string =>
       `<button class="tile" data-act="${act}"><span class="ds-icon${cls ? ` ${cls}` : ''}">${icon(ico)}</span><b>${title}</b><span>${text}</span></button>`;
     return '<section>' + (add ? '' : `<p class="sec-note">${esc(cannot('add new datasets'))}. You can still combine the ones you can open.</p>`) +
-      '<div class="tiles">' + (add ? tile('new-dc', 'dc', 'db', 'From Data Center',
+      '<div class="tiles">' + (add ? tile('new-dc', 'dcsrc', 'db', 'From Data Center',
         'A bucket (or one of its folders) you keep in Data Center: uploaded, a linked folder or S3. Read in place, nothing is copied.') +
       tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
         'A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.') +
@@ -231,7 +231,7 @@ function renderS3Form(): string {
   const s2 = '<div class="form-grid">' +
     `<label class="fld">Bucket<select data-f="bucket" data-act-change="bucket-pick">${(f.buckets || []).map((x) =>
       `<option ${x === f.bucket ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>` +
-    `<label class="fld mono">Prefix (a folder of images, or a YOLO folder)<input type="text" data-f="prefix" value="${esc(f.prefix || '')}" placeholder="datasets/my-images" data-enter="go-prefix"></label></div>` +
+    `<label class="fld mono">Prefix<input type="text" data-f="prefix" value="${esc(f.prefix || '')}" placeholder="datasets/my-images" data-enter="go-prefix"><span class="help">A folder of images, or a YOLO folder (images/, labels/)</span></label></div>` +
     (f.bucket ? `<div class="browser">${crumbsHTML(f.bucket, parts, 's3-crumb')}${foldersHTML(b && b.folders, 's3-folder', 'no sub-folders here')}</div>` : '') +
     statusHTML(f.locStatus || locationStatus(b));
   const est = b && b.info && b.info.bytes ? ` (~${fmtBytes(b.info.bytes)} on disk)` : '';
