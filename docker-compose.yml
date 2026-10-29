@@ -48,12 +48,25 @@ services:
       DATAVIZ_ADMIN_PASSWORD: ${DATAVIZ_ADMIN_PASSWORD:-}   # empty: a random one is printed once in the log
       DATAVIZ_ADMIN_RESET: ${DATAVIZ_ADMIN_RESET:-false}    # true: every start sets that admin password from .env
       DATAVIZ_COOKIE_SECURE: ${DATAVIZ_COOKIE_SECURE:-auto}
+      SEARXNG_URL: ${SEARXNG_URL-http://searxng:8080}       # the ◆ assistants' free web search (service below)
     volumes:
       - dataviz_cache:/workspace/.dataviz_cache  # crops, features, projections (caches) + uploaded images
       - hf_cache:/workspace/.hf_cache            # downloaded Hugging Face models
       - ${DATASET_DIR:-./folder-server}:/workspace/folder-server   # live bind mount: new files/folders show up instantly
       - dc_data:/workspace/data                  # Data Center buckets, S3 local copies, imports, trash (storage.data_root)
       # - ./runs:/workspace/runs:ro              # uncomment to offer your YOLO runs/**/weights/best.pt as features
+
+  # Free web search for the ◆ assistants (JSON API, used when a user has not set their own engine). Reachable only
+  # from the app (no host port); settings in docker/searxng/settings.yml.
+  searxng:
+    image: searxng/searxng:2024.11.17-10a2a6bd8
+    container_name: image-tools-searxng
+    restart: unless-stopped
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-dataviz-searxng}
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
 volumes:
   dc_data:

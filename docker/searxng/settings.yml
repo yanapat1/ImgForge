@@ -1,0 +1,20 @@
+# The bundled SearXNG (docker-compose.yml service `searxng`): the ◆ assistants' free web search engine when a user
+# has not set their own (Settings › AI › Web search). Only the app talks to it (no host port): JSON API on, the
+# public-instance rate limiter off.
+use_default_settings: true
+
+general:
+  instance_name: "dataviz search"
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+
+server:
+  # overridden by env SEARXNG_SECRET (docker-compose.yml passes it from .env)
+  secret_key: "change-me-dataviz-searxng"
+  limiter: false
+  image_proxy: false
+  method: "GET"
