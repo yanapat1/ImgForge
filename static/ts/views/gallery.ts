@@ -30,6 +30,9 @@ export function setSelection(ids: number[], title: string, { kind = 'samples', p
     ids = ids.filter((id) => !del[id]);
     if (pairs.length) pairs = pairs.filter((p) => !del[p.a] && !del[p.b]);
   }
+  // an Inspect check (a view button) stays on through a lasso drawn over it: the lasso passes its view on, and
+  // clearing the lasso returns to it (backToInspect); only its button or Clear turns it off
+  if (!keepLasso && !keepStack) S.inspect = view ? { ids, title, kind, pairs, view } : null;
   S.activeView = view;
   $qa('.view-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset['view'] === view);
@@ -56,7 +59,8 @@ export function clFixIds(): number[] {
   const P = S.P;
   if (!P?.cl_suggested || !(S.activeView === 'cl-issues' || S.activeView === 'cl-low')) return [];
   const sug = P.cl_suggested, q = P.cl_quality ?? [];
-  return S.sel.filter((id) => q[id] != null && sug[id] !== P.cls[id]);
+  const inView = S.lasso && S.inspect ? new Set(S.inspect.ids) : null;     // a lasso over the issue view: its issues only
+  return S.sel.filter((id) => q[id] != null && sug[id] !== P.cls[id] && (!inView || inView.has(id)));
 }
 
 // "Change N to cleanlab's class" in the gallery head: on cleanlab's issue views, for people who may edit labels
@@ -67,6 +71,13 @@ export function syncClFix(): void {
   b.classList.toggle('hidden', !n);
   const t = $('btn-cl-fix-t');
   if (t) t.textContent = `Change ${n.toLocaleString()} to cleanlab's class`;
+}
+
+/** The lasso was cancelled (click outside it, Esc): back to the Inspect check it was drawn over, else nothing. */
+export function backToInspect(): void {
+  const i = S.inspect;
+  if (i) setSelection(i.ids, i.title, { kind: i.kind, pairs: i.pairs, view: i.view });
+  else setSelection([], 'No selection');
 }
 
 // narrowing the selection (breakdown chips, "in groups / outliers") keeps the previous one: a "back" chip undoes it

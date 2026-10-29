@@ -314,6 +314,7 @@ export interface AppState {
   sel: number[];
   selKind: 'samples' | 'pairs';
   selStack?: SelEntry[];
+  inspect?: SelEntry | null;          // the Inspect check on screen (a view button): a lasso inside it comes back to it
   activeView?: string | null;
   pairs: DuplicatePair[];
   selTitle: string;

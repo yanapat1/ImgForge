@@ -258,7 +258,9 @@ function lassoIds(poly: { x: number[]; y: number[] }): number[] {
 function applyLasso(): void {
   if (!S.lasso) return;
   const ids = lassoIds(S.lasso);
-  setSelection(ids, 'Lasso selection', { highlight: null, keepLasso: true });
+  // inside an Inspect check: its button stays on and its rings stay (highlight: null)
+  const inspect = S.inspect;
+  setSelection(ids, inspect ? `Lasso selection · in ${inspect.title}` : 'Lasso selection', { highlight: null, keepLasso: true, view: inspect?.view ?? null });
   S.dimSet = new Set(ids);
   redrawLasso();
   scheduleRender();                            // one re-render dims the dots outside the lasso

@@ -24,7 +24,7 @@ import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
-import { enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
+import { backToInspect, enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
 import { showMissedObjects } from './views/model.js';
 import { bindBar, bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateBarSummary, updateGroupsBadge } from './views/layout.js';
 import { closeModal, initModal, modalId, openImage, openModal, stepModal, toggleModalPreds } from './views/modal.js';
@@ -339,7 +339,7 @@ function bindEvents(): void {
       // blank space (outside the lasso, if there is one): the picked / hovered target dots go
       const blank = !closestOf(e, '.modebar, .legend, .colorbar, #select-tools') && (!S.lasso || clickOutsideLasso(e));
       if (blank) { clearPicked(); if (hoverDotId !== null) showHoverDot(null); }
-      if (clickOutsideLasso(e)) setSelection([], 'No selection');
+      if (S.lasso && clickOutsideLasso(e)) backToInspect();
       if (!S.groups || !$req<HTMLInputElement>('g-bubbles').checked) return;
       const gid = bubbleAt(e.clientX, e.clientY);
       if (gid !== null) selectGroup(gid);
@@ -547,7 +547,7 @@ function bindEvents(): void {
     if (e.key === 'Escape' && $req('modal').classList.contains('hidden') && $req('settings').classList.contains('hidden') &&
         !t?.closest('.popover')) {
       if (S.picked.length) clearPicked();
-      else if (S.lasso) setSelection([], 'No selection');
+      else if (S.lasso) backToInspect();
     }
   });
   // keyboard focus on a card shows its dot on the plot, like mouse hover
