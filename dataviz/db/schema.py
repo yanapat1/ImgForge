@@ -150,6 +150,76 @@ llm_user_config = Table(
     Column('active_provider_id', String(36), ForeignKey('app.llm_providers.id', ondelete='SET NULL')),
     Column('features', JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     Column('budget', JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column('chat', JSONB, nullable=False, server_default=text("'{}'::jsonb")),    # per assistant: model, mode, effort ...
+    Column('web', JSONB, nullable=False, server_default=text("'{}'::jsonb")),     # web search: level, engine, words
+    Column('web_secrets', LargeBinary),                                           # {api_key} of the user's search engine
+    schema='app')
+
+# a user's own instructions and skills for the ◆ assistants (llm/assets.py): added to the built-in prompt, never
+# replacing it; role data | visual | all
+llm_user_prompts = Table(
+    'llm_user_prompts', metadata,
+    Column('id', String(36), primary_key=True),
+    _user_fk('owner_id'),
+    Column('kind', String(10), nullable=False),                  # prompt | skill
+    Column('role', String(10), nullable=False, server_default='all'),
+    Column('name', String(120), nullable=False),
+    Column('description', Text, nullable=False, server_default=''),
+    Column('body', Text, nullable=False, server_default=''),
+    Column('enabled', Boolean, nullable=False, server_default=text('true')),
+    Column('plugin_id', String(36), ForeignKey('app.llm_plugins.id', ondelete='CASCADE')),   # installed by a plugin
+    _now('created_at'), _now('updated_at'),
+    Index('ix_llm_user_prompts_owner', 'owner_id', 'kind'),
+    schema='app')
+
+# a user's installed plugins: declarative bundles (skills, prompts, HTTP tools); no code runs
+llm_plugins = Table(
+    'llm_plugins', metadata,
+    Column('id', String(36), primary_key=True),
+    _user_fk('owner_id'),
+    Column('name', String(120), nullable=False),
+    Column('version', String(40), nullable=False, server_default=''),
+    Column('manifest', JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column('secrets', LargeBinary),                                  # {header name: value} for its HTTP tools
+    Column('enabled', Boolean, nullable=False, server_default=text('true')),
+    _now('installed_at'),
+    Index('ux_llm_plugins_owner_name', 'owner_id', func.lower(text('name')), unique=True),
+    schema='app')
+
+# ◆ chat sessions (llm/sessions.py): at most N per user and assistant (role); deleting only marks deleted_at, the
+# purge removes rows deleted longer ago than the retention (2 years by default)
+llm_sessions = Table(
+    'llm_sessions', metadata,
+    Column('id', String(36), primary_key=True),
+    _user_fk('owner_id'),
+    Column('role', String(10), nullable=False),                  # data | visual
+    Column('title', String(200), nullable=False, server_default=''),
+    Column('scope', JSONB, nullable=False, server_default=text("'{}'::jsonb")),     # {bucket_id} | {dataset_id, name}
+    Column('provider_id', String(36)),
+    Column('model', String(200)),
+    Column('mode', String(10)),
+    Column('effort', String(10)),
+    Column('pinned', Boolean, nullable=False, server_default=text('false')),
+    Column('n_messages', Integer, nullable=False, server_default='0'),
+    Column('usage', JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    _now('created_at'), _now('updated_at'), _now('last_opened_at'),
+    Column('deleted_at', DateTime(timezone=True)),
+    Column('delete_reason', String(10)),                         # user | limit
+    Index('ix_llm_sessions_owner_role_last_opened_at', 'owner_id', 'role', 'last_opened_at'),
+    Index('ix_llm_sessions_deleted_at', 'deleted_at', postgresql_where=text('deleted_at IS NOT NULL')),
+    schema='app')
+
+llm_messages = Table(
+    'llm_messages', metadata,
+    Column('id', String(36), primary_key=True),
+    Column('session_id', String(36), ForeignKey('app.llm_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('seq', Integer, nullable=False),
+    Column('role', String(10), nullable=False),                  # user | assistant
+    Column('text', Text, nullable=False, server_default=''),
+    Column('trace', JSONB, nullable=False, server_default=text("'[]'::jsonb")),     # the turn's compacted events
+    Column('usage', JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    _now('created_at'),
+    Index('ux_llm_messages_session_id_seq', 'session_id', 'seq', unique=True),
     schema='app')
 
 models = Table(

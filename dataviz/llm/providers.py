@@ -34,9 +34,11 @@ ANTHROPIC_VERSION = '2023-06-01'
 class LLMError(ValueError):
     """A provider problem with a human message. status: the HTTP code a route answers with."""
 
-    def __init__(self, msg, status=400):
+    def __init__(self, msg, status=400, transient=False, retry_after=None):
         super().__init__(msg)
         self.status = status
+        self.transient = transient          # worth retrying: unreachable, timeout, 408 / 425 / 429 / 5xx upstream
+        self.retry_after = retry_after      # seconds the provider asked us to wait (Retry-After), when it said
 
 
 # ---------------------------------------------------------------- clients
@@ -117,11 +119,17 @@ def _err_message(r):
 
 def _fail(p, r, what):
     msg = _scrub(p, f'{what}: the provider answered {r.status_code}' + (f': {m}' if (m := _err_message(r)) else ''))
-    return LLMError(msg, 400 if r.status_code in (400, 401, 403, 404, 422) else 502)
+    code = r.status_code
+    try:
+        after = float((getattr(r, 'headers', None) or {}).get('retry-after'))
+    except (TypeError, ValueError):
+        after = None
+    return LLMError(msg, 400 if code in (400, 401, 403, 404, 422) else 502,
+                    transient=code in (408, 409, 425, 429) or code >= 500, retry_after=after)
 
 
 def _unreachable(p, e):
-    return LLMError(_scrub(p, f'cannot reach {str(p.get("base_url"))}: {type(e).__name__}: {e}'), 502)
+    return LLMError(_scrub(p, f'cannot reach {str(p.get("base_url"))}: {type(e).__name__}: {e}'), 502, transient=True)
 
 
 # ---------------------------------------------------------------- request bodies
@@ -468,6 +476,20 @@ def complete_tools(p, system, msgs, tools, max_tokens=None):
     text, usage = _parse_answer(kind, data)
     calls = _parse_tool_calls(kind, data)
     return {'text': text or '', 'tool_calls': calls, 'usage': usage or {'in': 0, 'out': 0}}
+
+
+def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_tokens=None):
+    """One tool-calling step as a stream for the agent engine: yields ('thinking', {text, sig?}) / ('text', str) /
+    ('tool_call', {id, name, args, sig?}) / ('search', {query, engine, results}) ... then ('usage', {in, out}).
+
+    This version runs complete_tools() and replays its answer (no live tokens, thinking and native web search
+    ignored); the streamed per-provider version replaces it."""
+    ans = complete_tools(p, system, msgs, tools, max_tokens)
+    if ans.get('text'):
+        yield 'text', ans['text']
+    for c in ans.get('tool_calls') or []:
+        yield 'tool_call', c
+    yield 'usage', ans.get('usage') or {'in': 0, 'out': 0}
 
 
 def _sse_data(r):

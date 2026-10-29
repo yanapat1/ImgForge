@@ -47,6 +47,11 @@ tools.py). `?` marks an optional argument.
 | `inspect_dataset_source` | read | source, ref, version?, revision?, patterns?, format? | Preview a dataset on the web before importing it: Kaggle (owner/dataset, competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), a direct link (url), Zenodo (record id / DOI) or OpenML (dataset id): title, size, files, license, versions. |
 | `import_dataset` | change | source, ref, name?, bucket?, path?, version?, revision?, patterns?, format?, extract?, nested? | Download a dataset from the web into a new bucket (or a folder of a writable bucket) as a background job; archives are unpacked and the format is detected. The user needs the source's token in Settings › Connections (Kaggle, Roboflow; Hugging Face / Zenodo only for gated / restricted data). |
 | `write_text_file` | change | bucket, path, text | Write (replace or create) a text file such as data.yaml, classes.txt, a .json or .env. Read it first with read_text and send the whole new content. Undoable. |
+| `all_tags` | read |  | Every tag used in the buckets the user can see, with counts (to reuse existing tag names). |
+| `create_bucket` | change | name, tags? | Create a new empty managed bucket (a folder kept by the Data Center). |
+| `update_bucket` | change | bucket, name?, mode? | Change a bucket's settings: its name, and for an S3 link its load mode (stream | local). |
+| `delete_bucket` | change | bucket, delete_files? | Remove a bucket from the Data Center. delete_files=true also deletes a managed bucket's files PERMANENTLY (no trash); without it the files stay and only the link is forgotten. |
+| `undo` | change | bucket, undo_id | Undo one earlier change (move, copy, rename, delete, write) by the undo_id its result returned. |
 | `ask_user` | control | question, options | Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn. |
 | `cannot_do` | control | reason, alternative? | Say the request cannot be done with these tools, why, and the closest thing you can do. Ends your turn. |
 

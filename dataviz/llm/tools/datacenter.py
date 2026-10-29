@@ -1,102 +1,24 @@
 """
-The Data Center tools: one registry the in-app agent (llm/agent.py), the CLI (`python -m dataviz dc`) and the
-skill (.claude/skills/datacenter/SKILL.md) all use, so the three can never drift apart.
+The Data Center tools (domain 'data'): one registry the Data agent (llm/engine), the old agent (llm/agent.py), the
+CLI (`python -m dataviz dc`) and the skill (.claude/skills/datacenter/SKILL.md) all use, so they never drift apart.
 
-    TOOLS = {name: Tool(name, description, schema, mutating, run(user, args) -> (result, summary))}
-
-Every tool goes through `datacenter.service` only (imported lazily: the service module is optional at import
-time and tests swap it). Read-only tools run at once; mutating ones are only ever run after the user confirmed
-them (agent.confirm / CLI --yes). Results are compact (lists truncated, totals given) because they are fed back
-to the model on every step. Buckets may be named by id or by exact name; an ambiguous name is an error that
-tells the model to ask, never a guess.
+Every tool goes through `datacenter.service` only (via tools._svc: imported lazily, tests swap it). Read-only tools
+run at once; changes run only after the user confirmed them (or at once in mode auto, never a 'danger' one).
+Results are compact (lists truncated, totals given) because they are fed back to the model on every step. Buckets
+may be named by id or by exact name; an ambiguous name is an error that tells the model to ask, never a guess.
 """
 
-import json
-from dataclasses import dataclass, field
+import sys
 
-MAX_LIST = 50                   # entries / files / buckets per result
-MAX_TEXT = 8000                 # characters of a text file per result
+from . import A, B, I, MAX_LIST, MAX_TEXT, S, Tool, ToolError, _obj, register
 
-
-class ToolError(ValueError):
-    """A problem the model can fix (bad args, unknown bucket): its message goes back as the tool result."""
-
-
-@dataclass
-class Tool:
-    name: str
-    description: str
-    schema: dict
-    mutating: bool
-    run: object = None                      # (user, args) -> (result dict, summary str)
-    preview: object = None                  # (bucket dict | None, args) -> one line for a plan
-    control: bool = False                   # ask_user / cannot_do: they end the agent's turn
-    s3_ok: bool = False                     # allowed on a read-only (S3) bucket
-    kind: str = field(init=False, default='read')
-
-    def __post_init__(self):
-        self.kind = 'control' if self.control else 'change' if self.mutating else 'read'
-
-    def spec(self):
-        """What a provider is given: {name, description, parameters}."""
-        return {'name': self.name, 'description': self.description, 'parameters': self.schema}
-
-
-def _svc():
-    from ..datacenter import service
-    return service
-
-
-# ---------------------------------------------------------------- schema helpers
-def _obj(props, required=()):
-    return {'type': 'object', 'properties': props, 'required': list(required), 'additionalProperties': False}
-
-
-S = lambda d: {'type': 'string', 'description': d}                                    # noqa: E731
-I = lambda d, lo=0, hi=None: {'type': 'integer', 'description': d, 'minimum': lo, **({'maximum': hi} if hi else {})}  # noqa: E731,E741
-A = lambda d: {'type': 'array', 'items': {'type': 'string'}, 'description': d}        # noqa: E731
 BUCKET = S('bucket id, or its exact name (look it up with list_buckets first)')
 PATH = S("path inside the bucket, POSIX, no leading slash; '' is the bucket root")
 PATHS = A('paths inside the bucket (files or folders), exactly as list_folder / search returned them')
 
-_TYPES = {'string': str, 'integer': int, 'number': (int, float), 'boolean': bool, 'array': list, 'object': dict}
 
-
-def validate(tool, args):
-    """(clean args, None) or (None, error message). Minimal on purpose: required keys, types, enums, ranges;
-    unknown keys are dropped. A bare string where a list of strings is wanted becomes [string]."""
-    if not isinstance(args, dict):
-        return None, 'arguments must be a JSON object'
-    props = tool.schema.get('properties') or {}
-    out = {}
-    for k, v in args.items():
-        sch = props.get(k)
-        if sch is None or v is None:
-            continue
-        t = sch.get('type')
-        if t == 'array' and isinstance(v, str):
-            v = [v]
-        if t == 'integer' and isinstance(v, float) and v.is_integer():
-            v = int(v)
-        if t == 'integer' and isinstance(v, str) and v.strip().lstrip('-').isdigit():
-            v = int(v)
-        py = _TYPES.get(t)
-        if py and (not isinstance(v, py) or (t in ('integer', 'number') and isinstance(v, bool))):
-            return None, f'{k} must be a{"n" if t[0] in "aeiou" else ""} {t}'
-        if t == 'array' and (sch.get('items') or {}).get('type') == 'string' and not all(isinstance(x, str) for x in v):
-            return None, f'{k} must be a list of strings'
-        if 'enum' in sch and v not in sch['enum']:
-            return None, f'{k} must be one of {", ".join(map(str, sch["enum"]))}'
-        if t == 'integer' and ('minimum' in sch and v < sch['minimum'] or 'maximum' in sch and v > sch['maximum']):
-            return None, f'{k} must be between {sch.get("minimum")} and {sch.get("maximum")}'
-        out[k] = v
-    missing = [k for k in tool.schema.get('required') or [] if k not in out]
-    if missing:
-        return None, f'missing required argument{"s" if len(missing) > 1 else ""}: {", ".join(missing)}'
-    for k in tool.schema.get('required') or []:
-        if props.get(k, {}).get('type') == 'array' and not out[k]:
-            return None, f'{k} must not be empty'
-    return out, None
+def _svc():
+    return sys.modules[__package__]._svc()
 
 
 # ---------------------------------------------------------------- buckets
@@ -377,11 +299,26 @@ def _items(paths):
     return f'{_plural(len(paths), "item")} ({shown})'
 
 
-TOOLS = {}
+def _check(user, clean):
+    """Before a change is proposed or run: the bucket resolved (its id goes into the args) and writable."""
+    b = resolve_bucket(user, clean['bucket']) if clean.get('bucket') else None
+    if b is not None:
+        clean = {**clean, 'bucket': b['id']}
+    return clean, b
 
 
 def _add(t):
-    TOOLS[t.name] = t
+    t.domain = 'data'
+    if t.mutating:
+        tool = t
+
+        def check(user, clean, _t=tool):
+            clean, b = _check(user, clean)
+            if b is not None:
+                _writable(b, _t)
+            return clean, b
+        t.check = check
+    register(t)
 
 
 _add(Tool('list_buckets', 'List the buckets (data roots) the user can see, with format, tags and image counts.',
@@ -418,7 +355,7 @@ _add(Tool('rename', 'Rename one file or folder (a new name, not a path).',
           True, _rename, lambda b, a: f'Rename {a["path"]} → {a["name"]} in {_bname(b, a)}'))
 _add(Tool('delete', 'Delete files / folders (they go to the trash and can be undone).',
           _obj({'bucket': BUCKET, 'paths': PATHS}, ['bucket', 'paths']),
-          True, _delete, lambda b, a: f'Delete {_items(a["paths"])} from {_bname(b, a)} (to trash, undoable)'))
+          True, _delete, lambda b, a: f'Delete {_items(a["paths"])} from {_bname(b, a)} (to trash, undoable)', risk='danger'))
 _add(Tool('add_tags', "Add user tags to a bucket ('' path) or a folder / file. format:* tags are automatic.",
           _obj({'bucket': BUCKET, 'path': PATH, 'tags': A('tags to add')}, ['bucket', 'tags']),
           True, lambda u, a: _set_tags(u, a, True),
@@ -449,7 +386,7 @@ _add(Tool('set_s3_mode', 'Choose how an S3 bucket is read: stream (from S3 on ev
 _add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 '
                           'version, local-only files are kept.',
           _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
-          lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True))
+          lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True, risk='danger'))
 
 _add(Tool('export_to', 'Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user\'s connections '
                       'as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png.',
@@ -459,7 +396,8 @@ _add(Tool('export_to', 'Copy a folder (or file) of a bucket to S3, FTP or SFTP t
                 's3_bucket': S('S3: the target bucket'), 'prefix': S('S3 prefix / FTP or SFTP folder (optional)'),
                 'create_bucket': {'type': 'boolean', 'description': 'S3: create the bucket when missing'},
                 'overwrite': {'type': 'boolean', 'description': 'write into a non-empty target'}},
-               ['bucket', 'to', 'connection']), True, _export_to, _export_preview, s3_ok=True))
+               ['bucket', 'to', 'connection']), True, _export_to, _export_preview, s3_ok=True,
+          danger_if=lambda a: bool(a.get('overwrite'))))
 
 _add(Tool('inspect_dataset_source', 'Preview a dataset on the web before importing it: Kaggle (owner/dataset, '
                                     'competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), '
@@ -486,57 +424,71 @@ _add(Tool('import_dataset', 'Download a dataset from the web into a new bucket (
 _add(Tool('write_text_file', 'Write (replace or create) a text file such as data.yaml, classes.txt, a .json or .env. '
                              'Read it first with read_text and send the whole new content. Undoable.',
           _obj({'bucket': BUCKET, 'path': S('file path'), 'text': S('the complete new content of the file')},
-               ['bucket', 'path', 'text']), True, _write_text, _write_preview))
-
-_add(Tool('ask_user', 'Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn.',
-          _obj({'question': S('one short question'), 'options': A('2-5 concrete answers the user can click')},
-               ['question', 'options']), False, control=True))
-_add(Tool('cannot_do', 'Say the request cannot be done with these tools, why, and the closest thing you can do. '
-                       'Ends your turn.',
-          _obj({'reason': S('why not, one sentence'), 'alternative': S('the closest thing you can do (optional)')},
-               ['reason']), False, control=True))
+               ['bucket', 'path', 'text']), True, _write_text, _write_preview, risk='danger'))
 
 
-def specs():
-    return [t.spec() for t in TOOLS.values()]
+
+# ---------------------------------------------------------------- buckets themselves (settings, create, delete, undo)
+def _create_bucket(user, a):
+    b = _svc().create_bucket(user, a['name'], kind='managed', tags=tuple(a.get('tags') or ()))
+    return _bucket_row(b), f'created bucket {b.get("name")!r}'
 
 
-def catalog():
-    """The tool catalogue as a Markdown table (the agent's system prompt and SKILL.md show the same one)."""
-    rows = ['| tool | kind | arguments | what it does |', '|---|---|---|---|']
-    for t in TOOLS.values():
-        req = set(t.schema.get('required') or [])
-        args = ', '.join(k if k in req else k + '?' for k in (t.schema.get('properties') or {}))
-        rows.append(f'| `{t.name}` | {t.kind} | {args} | {t.description} |')
-    return '\n'.join(rows)
+def _update_bucket(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().update_bucket(user, b['id'], name=a.get('name'), mode=a.get('mode'))
+    return {'bucket': res.get('id'), 'name': res.get('name'), 'mode': res.get('mode'), 'job_id': res.get('job_id')}, \
+        f'{b["name"]}: ' + ', '.join(x for x in (f'renamed to {a["name"]!r}' if a.get('name') else '',
+                                                 f'mode {a["mode"]}' if a.get('mode') else '') if x)
 
 
-def prepare(user, name, args):
-    """A mutating call checked before it goes into a plan -> (clean args with the bucket's id, summary line).
-    ToolError for anything the model must fix first (unknown / read-only bucket, bad args)."""
-    t = TOOLS.get(name)
-    if t is None:
-        raise ToolError(f'unknown tool {name!r}')
-    clean, err = validate(t, args)
-    if err:
-        raise ToolError(err)
-    b = resolve_bucket(user, clean['bucket']) if 'bucket' in clean else None
-    if b is not None:
-        _writable(b, t)
-        clean['bucket'] = b['id']
-    return clean, t.preview(b, clean) if t.preview else f'{name} {json.dumps(clean)}'
+def _update_preview(b, a):
+    what = [f'rename to {a["name"]!r}' if a.get('name') else '',
+            ('load into a local folder (downloads it)' if a.get('mode') == 'local' else 'stream from S3')
+            if a.get('mode') else '']
+    return f'Bucket {_bname(b, a)}: ' + ', '.join(x for x in what if x)
 
 
-def run(user, name, args):
-    """Validate and run one tool -> (result, summary). ToolError for bad args; service errors pass through."""
-    t = TOOLS.get(name)
-    if t is None:
-        raise ToolError(f'unknown tool {name!r}; the tools are: {", ".join(TOOLS)}')
-    if t.control:
-        raise ToolError(f'{name} is answered by the user, not run')
-    clean, err = validate(t, args)
-    if err:
-        raise ToolError(err)
-    if t.mutating and 'bucket' in clean:
-        _writable(resolve_bucket(user, clean['bucket']), t)
-    return t.run(user, clean)
+def _delete_bucket(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().delete_bucket(user, b['id'], delete_files=bool(a.get('delete_files')))
+    return res, f'deleted bucket {b["name"]!r}' + (' and its files' if a.get('delete_files') else ' (files kept)')
+
+
+def _delete_bucket_preview(b, a):
+    if a.get('delete_files'):
+        return f'Delete bucket {_bname(b, a)} AND ALL ITS FILES (permanent: not in the trash, cannot be undone)'
+    return f'Remove bucket {_bname(b, a)} from the Data Center (its files stay on disk / in S3)'
+
+
+def _undo(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().undo(user, b['id'], a['undo_id'])
+    errs = res.get('errors') or []
+    return {'restored': res.get('restored'), 'errors': errs[:20], 'retagged': res.get('retagged')}, \
+        f'undid: {_plural(int(res.get("restored") or 0), "step")} restored' + (f', {_plural(len(errs), "error")}' if errs else '')
+
+
+def _all_tags(user, a):
+    tags = _svc().all_tags(user)
+    rows, total = _cut(tags, 200)
+    return {'total': total, 'tags': rows}, f'→ {_plural(total, "tag")}'
+
+
+_add(Tool('all_tags', 'Every tag used in the buckets the user can see, with counts (to reuse existing tag names).',
+          _obj({}), False, _all_tags))
+_add(Tool('create_bucket', 'Create a new empty managed bucket (a folder kept by the Data Center).',
+          _obj({'name': S('the bucket name'), 'tags': A('user tags (optional)')}, ['name']),
+          True, _create_bucket, lambda b, a: f'Create bucket {a["name"]!r}'
+                                             + (f' tagged {", ".join(a["tags"])}' if a.get('tags') else '')))
+_add(Tool('update_bucket', "Change a bucket's settings: its name, and for an S3 link its load mode (stream | local).",
+          _obj({'bucket': BUCKET, 'name': S('new name (optional)'),
+                'mode': {'type': 'string', 'enum': ['stream', 'local'], 'description': 'S3 links only (optional)'}},
+               ['bucket']), True, _update_bucket, _update_preview, s3_ok=True))
+_add(Tool('delete_bucket', 'Remove a bucket from the Data Center. delete_files=true also deletes a managed bucket\'s '
+                           'files PERMANENTLY (no trash); without it the files stay and only the link is forgotten.',
+          _obj({'bucket': BUCKET, 'delete_files': B('also delete the files of a managed bucket (permanent)')},
+               ['bucket']), True, _delete_bucket, _delete_bucket_preview, s3_ok=True, risk='danger'))
+_add(Tool('undo', 'Undo one earlier change (move, copy, rename, delete, write) by the undo_id its result returned.',
+          _obj({'bucket': BUCKET, 'undo_id': S('the undo_id from the change result')}, ['bucket', 'undo_id']),
+          True, _undo, lambda b, a: f'Undo change {a["undo_id"]} in {_bname(b, a)}'))

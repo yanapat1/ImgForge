@@ -39,7 +39,12 @@ FEATURES = {
 PANEL = ('dataset_qa', 'explain_eval', 'ask_selection', 'label_check', 'report', 'auto_tag')
 MAX_BUDGET = 100_000            # hard cap on estimated input tokens per request (asked for: never more than 100k)
 _FIELDS = ('name', 'kind', 'base_url', 'model', 'vision', 'audio', 'box_format', 'timeout_s', 'max_output_tokens',
-           'temperature')
+           'temperature', 'agent_profile')
+PROFILES = ('auto', 'small', 'large')       # agent profile: small (<= 14B) gets a shorter prompt and fewer tools
+ROLES = ('data', 'visual')                  # the two ◆ agents (llm/engine/roles.py)
+CHAT_KEYS = {'mode': ('ask', 'auto', 'plan'), 'effort': ('low', 'medium', 'high'),
+             'think': ('off', 'low', 'medium', 'high')}
+WEB_ENGINES = ('auto', 'searxng', 'duckduckgo', 'brave', 'tavily', 'serper', 'google_cse')
 _RETEST = ('kind', 'base_url', 'model', 'api_key')      # changing one of these means "not verified" again
 DEFAULT_BOX = {'gemini': 'norm1000_yxyx'}               # everyone else: norm1000_xyxy
 
@@ -56,7 +61,7 @@ def resolve_key(p):
 
 
 ENV_ADMIN_ONLY = 'only admins can use an env: API key (a server environment variable)'
-_J = {k: bindparam(k, type_=JSONB) for k in ('cfg', 'f', 'b')}
+_J = {k: bindparam(k, type_=JSONB) for k in ('cfg', 'f', 'b', 'ch', 'w')}
 
 
 def _user(user):
@@ -94,7 +99,7 @@ class LLMStore:
     def load(self, user=None):
         """{providers, active, features, budget} of one user (no user: nothing saved)."""
         user = _user(user)
-        data = {'providers': [], 'active': None, 'features': {}, 'budget': {}}
+        data = {'providers': [], 'active': None, 'features': {}, 'budget': {}, 'chat': {}, 'web': {}}
         if user and user.get('id'):
             with db.connect() as c:
                 rows = c.execute(text('SELECT * FROM app.llm_providers WHERE owner_id = :o ORDER BY created_at, name'),
@@ -106,7 +111,8 @@ class LLMStore:
                     if _env(p):
                         p['api_key'] = ''
             if cfg is not None:
-                data.update(active=cfg.active_provider_id, features=dict(cfg.features or {}), budget=dict(cfg.budget or {}))
+                data.update(active=cfg.active_provider_id, features=dict(cfg.features or {}), budget=dict(cfg.budget or {}),
+                            chat=dict(getattr(cfg, 'chat', None) or {}), web=dict(getattr(cfg, 'web', None) or {}))
         feats = data['features'] if isinstance(data['features'], dict) else {}
         data['features'] = {k: bool(feats.get(k, False)) for k in FEATURES}
         b = data['budget'] if isinstance(data['budget'], dict) else {}
@@ -116,11 +122,13 @@ class LLMStore:
         return data
 
     def _save_config(self, c, uid, data):
-        c.execute(text("""INSERT INTO app.llm_user_config(user_id, active_provider_id, features, budget)
-                          VALUES (:u, :a, :f, :b) ON CONFLICT (user_id) DO UPDATE
+        c.execute(text("""INSERT INTO app.llm_user_config(user_id, active_provider_id, features, budget, chat, web)
+                          VALUES (:u, :a, :f, :b, :ch, :w) ON CONFLICT (user_id) DO UPDATE
                           SET active_provider_id = EXCLUDED.active_provider_id, features = EXCLUDED.features,
-                              budget = EXCLUDED.budget""").bindparams(_J['f'], _J['b']),
-                  {'u': uid, 'a': data['active'], 'f': data['features'], 'b': data['budget']})
+                              budget = EXCLUDED.budget, chat = EXCLUDED.chat, web = EXCLUDED.web
+                       """).bindparams(_J['f'], _J['b'], _J['ch'], _J['w']),
+                  {'u': uid, 'a': data['active'], 'f': data['features'], 'b': data['budget'],
+                   'ch': data.get('chat') or {}, 'w': data.get('web') or {}})
 
     def _save_provider(self, c, uid, p, new):
         from ..db import crypto
@@ -181,6 +189,8 @@ class LLMStore:
         if not str(out.get('model') or '').strip():
             raise ValueError('pick a model')
         out['name'] = str(out.get('name') or '').strip() or out['model']
+        if out.get('agent_profile') not in PROFILES:
+            out['agent_profile'] = 'auto'
         out['vision'] = bool(out.get('vision'))
         out['audio'] = bool(out.get('audio')) and kind != 'anthropic'       # Claude has no audio input
         if out.get('box_format') not in BOX_FORMATS:
@@ -262,9 +272,54 @@ class LLMStore:
             data['budget']['max_input_tokens'] = self._budget(body['budget']['max_input_tokens'])
         if body.get('active') and self.provider(body['active'], data=data):
             data['active'] = body['active']
+        if isinstance(body.get('chat'), dict):
+            for role, v in body['chat'].items():
+                if role in ROLES and isinstance(v, dict):
+                    data['chat'][role] = self._chat({**(data['chat'].get(role) or {}), **v}, data)
+        if isinstance(body.get('web'), dict):
+            data['web'] = self.clean_web({**data['web'], **body['web']})
         with db.begin() as c:
             self._save_config(c, user['id'], data)
         return data
+
+    def _chat(self, v, data):
+        """One assistant's remembered chat settings: the model picked with /model, mode, effort, think, web level."""
+        out = {k: v[k] for k, allowed in CHAT_KEYS.items() if v.get(k) in allowed}
+        if v.get('provider_id') and self.provider(v['provider_id'], data=data):
+            out['provider_id'] = v['provider_id']
+            m = str(v.get('model') or '').strip()[:200]
+            if m:
+                out['model'] = m
+        try:
+            out['web'] = max(0, min(3, int(v.get('web'))))
+        except (TypeError, ValueError):
+            pass
+        return out
+
+    @staticmethod
+    def clean_web(v):
+        """Web search settings: level 0-3 (off / public / technical / full), ask before each query, the engine and its
+        URL (SearXNG / a custom one), and the personal special words [{text, strength: never | private}]."""
+        out = {}
+        try:
+            out['level'] = max(0, min(3, int(v.get('level', 1))))
+        except (TypeError, ValueError):
+            out['level'] = 1
+        out['ask_before'] = bool(v.get('ask_before'))
+        out['engine'] = v.get('engine') if v.get('engine') in WEB_ENGINES else 'auto'
+        url = str(v.get('url') or '').strip()
+        out['url'] = url if url.startswith(('http://', 'https://')) else ''
+        cx = str(v.get('cx') or '').strip()[:200]
+        if cx:
+            out['cx'] = cx
+        words = []
+        for w in v.get('words') or []:
+            t = str((w or {}).get('text') if isinstance(w, dict) else w or '').strip()[:200]
+            if t and not any(x['text'].lower() == t.lower() for x in words):
+                st = (w or {}).get('strength') if isinstance(w, dict) else None
+                words.append({'text': t, 'strength': st if st in ('never', 'private') else 'private'})
+        out['words'] = words[:2000]
+        return out
 
     # ------------------------------------------------------------ what the page may show
     def state(self, user=None):
@@ -289,5 +344,6 @@ class LLMStore:
     def config(self, user=None):
         data = self.load(user)
         return {'providers': [self.public(p) for p in data['providers']], 'active': data['active'],
-                'features': data['features'], 'budget': data['budget'],
+                'features': data['features'], 'budget': data['budget'], 'chat': data['chat'],
+                'web': self.clean_web(data['web']),
                 'catalog': {k: {'where': w, 'needs': n} for k, (w, n) in FEATURES.items()}}
