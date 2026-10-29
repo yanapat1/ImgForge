@@ -282,6 +282,29 @@ class LLMStore:
             self._save_config(c, user['id'], data)
         return data
 
+    def web_key(self, user=None):
+        """The API key of the user's own web search engine (Brave / Tavily / Serper / Google CSE), server side only."""
+        from ..db import crypto
+        user = _user(user)
+        if not user or not user.get('id'):
+            return ''
+        with db.connect() as c:
+            raw = c.execute(text('SELECT web_secrets FROM app.llm_user_config WHERE user_id = :u'),
+                            {'u': user['id']}).scalar()
+        return str((crypto.decrypt_json(raw) or {}).get('api_key') or '') if raw else ''
+
+    def set_web_key(self, key, user=None):
+        """Save (or with '' remove) the web search engine's API key, encrypted; write-only like provider keys."""
+        from ..db import crypto
+        user = self._need(user)
+        data = self.load(user)
+        key = str(key or '').strip()
+        with db.begin() as c:
+            self._save_config(c, user['id'], data)
+            c.execute(text('UPDATE app.llm_user_config SET web_secrets = :s WHERE user_id = :u'),
+                      {'s': crypto.encrypt_json({'api_key': key}) if key else None, 'u': user['id']})
+        return {'has_key': bool(key)}
+
     def _chat(self, v, data):
         """One assistant's remembered chat settings: the model picked with /model, mode, effort, think, web level."""
         out = {k: v[k] for k, allowed in CHAT_KEYS.items() if v.get(k) in allowed}

@@ -280,3 +280,15 @@ def test_agent_routes(client, monkeypatch, svc):
     # remembered chat settings (what /model and the chips save)
     client.put('/api/llm/config', json={'chat': {'data': {'mode': 'plan', 'effort': 'bad', 'provider_id': p['id']}}})
     assert client.get('/api/llm/agent/data/catalog').json()['chat'] == {'mode': 'plan', 'provider_id': p['id']}
+
+
+def test_web_key_is_stored_encrypted(client):
+    s, u = client.ctx.llm, client.user
+    assert s.web_key(u) == '' and s.set_web_key('brv-123', u) == {'has_key': True} and s.web_key(u) == 'brv-123'
+    from dataviz import db
+    from sqlalchemy import text
+    with db.connect() as c:
+        raw = c.execute(text('SELECT web_secrets FROM app.llm_user_config WHERE user_id = :u'), {'u': u['id']}).scalar()
+    assert b'brv-123' not in bytes(raw)
+    s.set_web_key('', u)
+    assert s.web_key(u) == ''
