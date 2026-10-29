@@ -27,6 +27,7 @@ from .routing import FixedSession, SessionRouting
 from .static import JsonGZip, NoCacheStatic
 from .routes import system, projections, samples, datasets, models, labeling, label_import, curation, llm, compare, live, promote, agent
 from .routes import datacenter
+from .routes import sessions as llm_sessions
 
 _DS_FIELDS = ('path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
 
@@ -334,7 +335,7 @@ def create_app(ctx, auth=True) -> FastAPI:
         return JSONResponse({'detail': 'internal server error'}, status_code=500)
 
     for module in (system, projections, samples, datasets, models, labeling, label_import, curation, llm, compare, live, promote,
-                   datacenter, agent):
+                   datacenter, agent, llm_sessions):
         app.include_router(module.router(state, ctx))
     app.mount('/static', NoCacheStatic(directory=STATIC_DIR), name='static')
     if ctx.fixed is not None:

@@ -2,7 +2,11 @@
 The one NDJSON protocol of every ◆ chat (POST /api/llm/agent/<role>/chat): one JSON object per line, keyed `type`.
 static/ts/core/chat.ts renders it; the session store keeps a compacted copy as the turn's trace.
 
-    meta          {run_id, role, model, provider, kind, mode, effort, think, web, profile, max_steps, in_est, tools}
+    meta          {run_id, role, model, provider, kind, mode, effort, think, web, profile, max_steps, in_est, tools,
+                   session_id?, title?, removed?}           the saved chat's fields: added by the chat route
+    session       {session_id, title, removed}               right after meta (saved chats): removed = the chat the
+                                                             limit soft-deleted for this one {id, title,
+                                                             last_opened_at} or null
     step          {n, max}                                   a provider call starts
     thinking      {text}                                     streamed reasoning (where the provider returns it)
     thinking_end  {ms}
@@ -26,6 +30,6 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
 """
 
 ENDS = ('done', 'error')
-TYPES = ('meta', 'step', 'thinking', 'thinking_end', 'text', 'tool_start', 'tool_end', 'skill', 'search', 'todo',
+TYPES = ('meta', 'session', 'step', 'thinking', 'thinking_end', 'text', 'tool_start', 'tool_end', 'skill', 'search', 'todo',
          'ui_action', 'confirm', 'confirmed', 'ask', 'cannot', 'plan_proposal', 'retry', 'notice', 'ping', 'error',
          'done')

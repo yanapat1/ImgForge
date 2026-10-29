@@ -129,6 +129,8 @@ def main():
     # only after the port is ours: never touch (or migrate) a workspace another running instance is using
     ws_root = vconfig.resolve(cfg['dataset']['workspace_root'])
     admin, admin_pw = start_database(cfg, ws_root)
+    from .llm import sessions as llm_sessions
+    llm_sessions.start_purger(log=vlog.get_logger('llm').info)     # deleted ◆ chats past retention: now + every 24 h
     datasets = connections.Registry(ws_root)
 
     w = cfg['workers']
