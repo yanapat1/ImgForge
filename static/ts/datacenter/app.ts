@@ -16,6 +16,7 @@ import { mountUserMenu } from '../views/usermenu.js';
 import * as api from './api.js';
 import { ACTIVITY_ACTIONS, watchJobs } from './activity.js';
 import { AI_ACTIONS, aiScopeChanged, bindAi, renderAi } from './ai.js';
+import { EDITOR_ACTIONS, fileOpen, leaveFile } from './editor.js';
 import { BROWSER_ACTIONS, bindBrowser, loadListing, renderFolder, renderSearch, selChanged } from './browser.js';
 import { BUCKET_ACTIONS, renderOverview } from './buckets.js';
 import { AUTOLABEL_ACTIONS } from './autolabel.js';
@@ -83,6 +84,7 @@ function readLocation(): void {
 
 /** Open a bucket folder (bid null = All buckets). push: a new history entry (else replace). */
 function navigate(bid: string | null, path = '', push = true): void {
+  if (!leaveFile()) return;                        // an open file with unsaved changes the user keeps
   const same = bid === D.bid && path === D.path;
   D.bid = bid;
   D.path = bid ? path : '';
@@ -181,6 +183,7 @@ function bind(root: HTMLElement): void {
   });
   document.addEventListener('keydown', onKey);
   window.addEventListener('popstate', () => {
+    if (!leaveFile()) { history.pushState({ dc: 1 }, '', dataUrl(D.bid, D.path)); return; }
     readLocation();
     navigate(D.bid, D.path, false);
   });
@@ -208,7 +211,7 @@ const typing = (t: EventTarget | null): boolean =>
 
 function onKey(e: KeyboardEvent): void {
   if (document.querySelector('.ui-dlg-wrap, #settings:not(.hidden), .dc-modal')) return;   // a dialog has the keys
-  if (typing(e.target)) return;
+  if (typing(e.target) || fileOpen()) return;       // the file view handles its own keys (Ctrl+S)
   const mod = e.ctrlKey || e.metaKey;
   if (e.key === '/' && !mod) { e.preventDefault(); $('dc-q')?.focus(); return; }
   if (e.key === 'Escape') {
@@ -250,7 +253,7 @@ export async function start(): Promise<void> {
   if (c === 'grid' || c === 'list') D.cards = c as CardMode;
   if (s === 'name' || s === '-mtime' || s === 'size') D.sort = s as LsSort;
   if (bs === 'recent' || bs === 'name' || bs === 'size' || bs === 'images') D.bucketSort = bs as BucketSort;
-  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS);
+  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS);
   hooks.navigate = navigate;
   hooks.reload = reload;
   hooks.render = render;

@@ -14,11 +14,12 @@ import type { Action } from './app.js';
 import { openTagEditor } from './tags.js';
 import { openDialog } from '../views/dialog.js';
 import { watchJobs } from './activity.js';
+import { peek, peekKey, TEXTY } from './editor.js';
 import {
   bucketOf, curBucket, D, fbadge, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, isYolo, key, selEntries,
   SOURCE, srcIcon, tagChip, timeAgo, writable,
 } from './state.js';
-import type { Bucket, FolderStats, Format, Tag } from '../types-datacenter.js';
+import type { Bucket, Entry, FolderStats, Format, Tag } from '../types-datacenter.js';
 
 const SPLIT_COLORS = ['var(--accent)', 'var(--err-tp)', 'var(--err-cls)', 'var(--err-loc)', 'var(--prog-review)'];
 
@@ -119,6 +120,15 @@ function folderDetails(b: Bucket): string {
     sendFoot(b.id, [D.path], undefined, L?.format, b.writable);
 }
 
+/** One text-like file selected: its first lines (filled in by editor.ts peek) and Open editor. */
+function peekSec(bid: string, e: Entry | undefined): string {
+  if (!e || e.type !== 'file' || !TEXTY.has(e.kind ?? '')) return '';
+  const k = peekKey(bid, e.path, e.mtime);
+  queueMicrotask(() => { void peek(bid, e.path, e.mtime); });
+  return `<section class="d-sec"><h4 class="d-h">Preview</h4><pre id="dc-peek" class="dc-peek" data-k="${esc(k)}">…</pre>` +
+    `<button type="button" class="sm" data-act="open-file" data-bid="${esc(bid)}" data-path="${esc(e.path)}">${icon('edit')}${writable() ? 'Open editor' : 'Open'}</button></section>`;
+}
+
 function selectionDetails(b: Bucket): string {
   const es = selEntries();
   const n = D.sel.size;
@@ -150,7 +160,7 @@ function selectionDetails(b: Bucket): string {
     (yolo && imgs.length ? `<div class="dc-checks">` +
       `<span class="${labeled === imgs.length ? 'ok' : 'wn'}">${icon(labeled === imgs.length ? 'check-c' : 'warn-c')}</span><span class="k">each image has a label file</span><span class="v num">${labeled}/${imgs.length}</span>` +
       `<span class="ok">${icon('check-c')}</span><span class="k">moving keeps label pairs together</span><span class="v">auto</span></div>` : '') +
-    '</section>' +
+    '</section>' + peekSec(b.id, one) +
     `<section class="d-sec"><h4 class="d-h">Actions</h4><div class="act-list">` +
     `<button type="button" data-act="move"${dis}>${icon('move')}Move to…</button><button type="button" data-act="copy"${dis}>${icon('copy')}Copy to…</button>` +
     `<button type="button" data-act="tag-sel">${icon('tag')}Tag…</button><button type="button" data-act="rename"${n === 1 && w ? '' : ' disabled'}>${icon('edit')}Rename</button></div>` +

@@ -41,7 +41,7 @@ export async function undoRetag(bid: string): Promise<void> {
   await undoOp(bid, rt.undo_id);
 }
 
-async function undoOp(bid: string, undoId: string): Promise<void> {
+export async function undoOp(bid: string, undoId: string): Promise<void> {
   try {
     const r = await api.undo(bid, undoId);
     const rt = D.retag.get(bid);

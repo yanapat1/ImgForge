@@ -12,11 +12,11 @@ import { errText } from '../core/api.js';
 import { rememberPref } from '../core/auth.js';
 import { $, esc, icon } from '../core/dom.js';
 import { closeFloat, floatPopover } from '../core/popover.js';
-import { openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } from './ops.js';
 import { downloadZip } from './edit.js';
+import { openFile, TEXTY } from './editor.js';
 import { openSend } from './send.js';
 import {
   baseName, bucketOf, curBucket, D, fbadge, fdot, fmtDate, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, parentOf,
@@ -383,14 +383,9 @@ async function openEntry(e: Entry): Promise<void> {
   if (!bid) return;
   if (e.type === 'dir') { hooks.navigate(bid, e.path); return; }
   if (isImage(e)) { window.open(api.fileUrl(bid, e.path), '_blank', 'noopener'); return; }
-  if (e.kind === 'archive' || e.kind === 'npy' || (e.kind === 'other' && e.size > 65536)) { window.open(api.fileUrl(bid, e.path), '_blank', 'noopener'); return; }
-  let text = '';
-  try {
-    const r = await api.readText(bid, e.path);
-    text = r.text + (r.truncated ? '\n…' : '');
-  } catch (err) { text = `Could not read it: ${errText(err)}`; }
-  await openDialog({ title: e.name, wide: true, ok: 'Close', okClass: 'ghost',
-    body: `<pre class="dc-text">${esc(text)}</pre>`, onOk: () => null });
+  // text-like files (and small unknown ones, often config without an extension) open in the editor
+  if (TEXTY.has(e.kind ?? '') || (e.kind === 'other' && e.size <= 65536) || (!e.kind && e.size <= 65536)) { await openFile(bid, e.path); return; }
+  window.open(api.fileUrl(bid, e.path), '_blank', 'noopener');
 }
 
 function menu(from: HTMLElement, html: string, align: 'left' | 'right' = 'right'): void {

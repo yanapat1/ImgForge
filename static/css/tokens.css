@@ -810,3 +810,27 @@
   --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.2), 0 10px 24px rgba(0, 0, 0, 0.32);
   --shadow-3: 0 4px 10px rgba(0, 0, 0, 0.28), 0 24px 56px rgba(0, 0, 0, 0.5);
 }
+
+/* syntax colours: the Data Center's text editor (CodeMirror, static/vendor-src/editor.ts) and its JSON / YAML tree */
+:root {
+  --syn-key: #8ab4f8;
+  --syn-string: #9ad08f;
+  --syn-number: #f0b46a;
+  --syn-bool: #d7a1f0;
+  --syn-null: #9aa4b2;
+  --syn-comment: #7d8794;
+  --syn-keyword: #f28b9b;
+  --syn-tag: #7fd1d1;
+  --syn-sel: rgba(138, 180, 240, .26);
+}
+:root[data-theme="light"] {
+  --syn-key: #1f5fbf;
+  --syn-string: #2e7d32;
+  --syn-number: #b35c00;
+  --syn-bool: #8a3fb3;
+  --syn-null: #66707c;
+  --syn-comment: #6a737d;
+  --syn-keyword: #c0263e;
+  --syn-tag: #00777a;
+  --syn-sel: rgba(39, 102, 196, .18);
+}

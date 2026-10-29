@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json build.mjs ./
 COPY static/ts static/ts
+COPY static/vendor-src static/vendor-src
 RUN npm run typecheck && npm run build
 
 # BASE_IMAGE (set in .env) can be an earlier build of this image, e.g. image-tools:torch-base made with

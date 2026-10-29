@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "types": ["plotly.js"]
   },
-  "include": ["static/ts"]
+  "include": ["static/ts", "static/vendor-src"]
 }
