@@ -336,6 +336,9 @@ function bindEvents(): void {
     if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
     setTimeout(() => {
       if (Date.now() - lastDotClick < 400 || Date.now() - lassoEndedAt < 400 || touchGestureRecent()) return;
+      // blank space (outside the lasso, if there is one): the picked / hovered target dots go
+      const blank = !closestOf(e, '.modebar, .legend, .colorbar, #select-tools') && (!S.lasso || clickOutsideLasso(e));
+      if (blank) { clearPicked(); if (hoverDotId !== null) showHoverDot(null); }
       if (clickOutsideLasso(e)) setSelection([], 'No selection');
       if (!S.groups || !$req<HTMLInputElement>('g-bubbles').checked) return;
       const gid = bubbleAt(e.clientX, e.clientY);

@@ -180,6 +180,7 @@ export const TIPS_HTML =
   '<li><span><kbd>middle-drag</kbd></span><span>move the lasso (re-selects the dots under it)</span></li>' +
   '<li><span><kbd>Shift</kbd>+<kbd>drag</kbd></span><span>with the circle tool: a round circle instead of an oval</span></li>' +
   '<li><span><kbd>click</kbd></span><span>outside the lasso / box / circle to clear it</span></li>' +
+  '<li><span><kbd>click</kbd></span><span>blank space in the plot to drop the picked (yellow) dots</span></li>' +
   '<li><span><kbd>Esc</kbd></span><span>unpin thumbnails, then clear the lasso</span></li>' +
   '<li><span><kbd>scroll</kbd></span><span>mouse wheel: zoom the plot · trackpad: two-finger scroll pans</span></li>' +
   '<li><span><kbd>pinch</kbd> / <kbd>Ctrl</kbd>+<kbd>scroll</kbd></span><span>zoom the plot (Settings › Appearance: wheel mode)</span></li>' +
