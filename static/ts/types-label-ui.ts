@@ -81,6 +81,7 @@ export interface ImportHandlers {
 export type ExportKind = 'zip' | 'local' | 's3' | 'ftp' | 'sftp' | 'db';
 export interface ExportTarget {
   kind: ExportKind; path?: string; connection_id?: string; bucket?: string; prefix?: string; create_views?: boolean;
+  create_bucket?: boolean;                     // s3: create the bucket first (picked from the Create row)
 }
 /** project.export_default as the server stores it (+ the target fields mirrored at the top level). */
 export interface ExportDefault {

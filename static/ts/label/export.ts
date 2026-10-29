@@ -10,6 +10,7 @@
 
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
+import { bindCombo, comboHTML } from '../core/combobox.js';
 import { esc, icon } from '../core/dom.js';
 import type { Job } from '../types.js';
 import type { LabelProject, LabelTask } from '../types-label.js';
@@ -38,6 +39,7 @@ interface ExportState {
   include_images: boolean; only_done: boolean; overwrite: boolean; create_views: boolean;
   formats: LabelFormat[]; fmts: string[];
   browse: ExportBrowse | null; buckets: string[] | null;
+  create_bucket: boolean;                      // the bucket was picked from the Create row: the export creates it
   job: Partial<Job> | null; result: ExportRun | null; error: string | null; running: boolean;
   closed?: boolean;
 }
@@ -84,7 +86,7 @@ export async function openExportDialog(pid: string, project?: LabelProject | nul
       classes: keptClasses(pid, p, d.classes), counts: (stats && stats.stats) || null, confirmRe: false,
       kind: tg.kind || 'zip', path: tg.path || '', connection_id: tg.connection_id || '', bucket: tg.bucket || '',
       prefix: tg.prefix || '', include_images: d.include_images !== false, only_done: !!d.only_done, overwrite: !!d.overwrite,
-      create_views: tg.create_views !== false, browse: null, buckets: null, job: null, result: null, error: null, running: false,
+      create_views: tg.create_views !== false, browse: null, buckets: null, create_bucket: false, job: null, result: null, error: null, running: false,
       formats: fmts.formats, fmts: d.formats?.length ? d.formats : fmts.default,
     };
     render();
@@ -203,8 +205,8 @@ function targetHTML(): string {
     `<option value="${esc(c.id)}"${c.id === X.connection_id ? ' selected' : ''}>${esc(c.name || c.host || c.endpoint || c.id)}${c.kind && k === 'db' ? ` (${esc(c.kind)})` : ''}</option>`).join('')}</select></label>`;
   const none = cs.length ? '' : `<p class="hint">No saved ${esc(KINDS.find((x) => x[0] === k)?.[1] ?? k)} connection yet. <button class="lbx-link" data-x="conns">Add one in Settings › Connections</button>.</p>`;
   if (k === 's3') {
-    return sel + none + `<label class="lbx-row"><span>Bucket</span><input data-f="bucket" list="lbx-buckets" value="${esc(X.bucket)}" spellcheck="false">
-      <datalist id="lbx-buckets">${(X.buckets || []).map((b) => `<option value="${esc(b)}">`).join('')}</datalist></label>
+    return sel + none + `<label class="lbx-row"><span>Bucket</span>${comboHTML('lbx-bucket', X.bucket, { mono: true, attrs: 'data-f="bucket"' })}</label>
+      <div class="lbx-row lbx-bnew${X.create_bucket ? '' : ' hidden'}"><span></span><span class="hint">New bucket: the export creates it first</span></div>
       <label class="lbx-row"><span>Prefix</span><input data-f="prefix" value="${esc(X.prefix)}" placeholder="exports/my-session/" spellcheck="false"></label>`;
   }
   if (k === 'ftp' || k === 'sftp') {
@@ -395,7 +397,7 @@ async function start(): Promise<void> {
   const target: ExportTarget = { kind: X.kind };
   if (X.kind === 'local' || X.kind === 'ftp' || X.kind === 'sftp') target.path = X.path.trim();
   if (X.kind !== 'zip' && X.kind !== 'local') target.connection_id = X.connection_id;
-  if (X.kind === 's3') { target.bucket = X.bucket.trim(); target.prefix = X.prefix.trim(); }
+  if (X.kind === 's3') { target.bucket = X.bucket.trim(); target.prefix = X.prefix.trim(); if (X.create_bucket) target.create_bucket = true; }
   if (X.kind === 'db') target.create_views = X.create_views;
   X.error = null; X.result = null; X.running = true; X.job = { stage: 'starting' };
   render();
@@ -441,7 +443,7 @@ function applyDefault(): void {
   const tg: Partial<ExportTarget> = d.target || {};
   const live = (X.project.tasks || []).map((t) => t.id);
   const picked = (d.task_ids || []).filter((t) => live.includes(t));
-  Object.assign(X, { kind: tg.kind || 'zip', path: tg.path || '', connection_id: tg.connection_id || '', bucket: tg.bucket || '',
+  Object.assign(X, { kind: tg.kind || 'zip', path: tg.path || '', connection_id: tg.connection_id || '', bucket: tg.bucket || '', create_bucket: false,
     prefix: tg.prefix || '', create_views: tg.create_views !== false, include_images: d.include_images !== false, only_done: !!d.only_done,
     tasks: new Set(picked.length ? picked : live), classes: keptClasses(X.pid, X.project, d.classes), browse: null,
     ...(d.formats?.length ? { fmts: d.formats } : {}) });
@@ -519,6 +521,13 @@ const ACT: Record<string, (b: HTMLElement) => void | Promise<void>> = {
   conns: async () => { closeExport(); const m = await import('../settings/dialog.js'); void m.openSettings('connections'); },
 };
 
+// typing / picking in the target fields: the layout preview and the "will be created" note update in place
+function syncTarget(root: HTMLElement): void {
+  const tree = root.querySelector('.lbx-tree');
+  if (tree) tree.outerHTML = treeHTML();
+  root.querySelector('.lbx-bnew')?.classList.toggle('hidden', !cur().create_bucket);
+}
+
 function bind(): void {
   const root = dlg();
   root.addEventListener('click', (e) => {
@@ -533,8 +542,16 @@ function bind(): void {
     const f = t.dataset['f'];
     if (isTextKey(f)) X[f] = t.value;
     else return;
-    const tree = root.querySelector('.lbx-tree');
-    if (tree) tree.outerHTML = treeHTML();
+    if (f === 'bucket') X.create_bucket = false;           // a pick from the Create row sets it again (onPick runs after)
+    syncTarget(root);
+  });
+  // the Bucket field: a themed list of the connection's buckets (+ a Create row for a new name); a pick also fires the
+  // input event above, so X.bucket and the layout preview follow; the list keeps the focus, so no change / re-render
+  bindCombo(root, 'lbx-bucket', {
+    options: () => X?.buckets || [],
+    empty: () => (X && X.buckets == null ? (X.connection_id ? 'loading buckets…' : 'choose a connection first') : 'no buckets on this connection'),
+    create: (q) => `Create bucket “${q}”`,
+    onPick: (v, created) => { if (!X) return; X.bucket = v; X.create_bucket = created; syncTarget(root); },
   });
   root.addEventListener('change', (e) => {
     if (!X) return;
@@ -556,7 +573,7 @@ function bind(): void {
       if (t instanceof HTMLInputElement && t.type !== 'checkbox') return;
       if (t instanceof HTMLInputElement && t.type === 'checkbox') { if (isFlagKey(f)) X[f] = t.checked; }
       else if (isTextKey(f)) X[f] = t.value;
-      if (f === 'connection_id') { X.browse = null; if (X.kind === 's3' && X.connection_id) void loadBuckets(); }
+      if (f === 'connection_id') { X.browse = null; X.create_bucket = false; if (X.kind === 's3' && X.connection_id) void loadBuckets(); }
     } else return;
     render();
     const again = t.name === 'lbx-kind' ? root.querySelector<HTMLElement>(`input[name="lbx-kind"][value="${X.kind}"]`)

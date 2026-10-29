@@ -6,6 +6,7 @@
 // Every save / test / switch fires the window event `llm-changed`, so the page re-applies live.
 
 import { api, errText, getJSON, postJSON } from '../core/api.js';
+import { bindCombo, comboHTML } from '../core/combobox.js';
 import { $, $req, esc, icon, syncRanges } from '../core/dom.js';
 import type { LlmConfig, LlmDraft, LlmForm, LlmPayload, LlmProvider, LlmTestResult, PresetKey, SetAction, SetChange, StatusLine } from '../types-settings.js';
 import { SET, renderSettings } from './dialog.js';
@@ -276,13 +277,17 @@ function renderForm(f: LlmForm): string {
     fld(`API key${pr.key ? '' : ' (optional)'}`, 'llm.api_key', p.api_key, { mono: true, type: 'password', cls: 'full',
       ph: f.hasKey ? 'unchanged (stored on the server)' : pr.ph, extra: 'autocomplete="new-password" spellcheck="false"', help: keyHelp }) +
     '</div><p class="sec-note">The key is kept on the server in an owner-only file and is never sent back to the page.</p>';
-  const list = f.models || pr.models;
+  // the Model list: the loaded models, else the preset's suggestions; any other name can be typed. A pick fires the
+  // input event the dialog's data-f listener stores (and llmInput re-guesses the capabilities from), so onPick is empty
+  bindCombo($req('settings-body'), 'llm-model', {
+    options: () => { const g = SET.form; return g && g.form === 'llm' ? g.models || PRESETS[g.preset].models : []; },
+    empty: () => 'no suggestions: type the model name, or Load models',
+    onPick: () => undefined,
+  });
   const audioOff = p.kind === 'anthropic';
   const s2 = '<div class="sec-actions llm-model-row">' +
-    `<label class="fld mono" style="flex:1">Model<input type="text" data-f="llm.model" list="llm-models" value="${esc(p.model || '')}" ` +
-    `placeholder="${esc(pr.mph || pr.model || 'model name')}" spellcheck="false" autocomplete="off"></label>` +
+    `<label class="fld mono" style="flex:1">Model${comboHTML('llm-model', p.model || '', { mono: true, placeholder: pr.mph || pr.model || 'model name', attrs: 'data-f="llm.model"' })}</label>` +
     `<button data-act="llm-load-models" ${st.s1 ? '' : 'disabled'} title="Ask the server which models it offers">${icon('search')}Load models</button></div>` +
-    `<datalist id="llm-models">${list.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>` +
     statusHTML(f.modelsStatus) +
     '<div class="llm-caps">' +
     `<label class="llm-cap"><input type="checkbox" class="switch" data-f="llm.vision" data-act-change="llm-cap" ${p.vision ? 'checked' : ''}>` +

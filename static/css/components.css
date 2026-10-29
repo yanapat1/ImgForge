@@ -282,6 +282,29 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .share-results .share-res-note { cursor: default; color: var(--text-faint); }
 .share-results .share-res-note.err { color: var(--danger-text); }
 
+/* ---- combobox (core/combobox.ts): the field keeps the host's input style + a select-like chevron; the list floats
+   above dialogs like the other menus (themed rows in place of the browser's <datalist> popup) */
+.cbx { position: relative; display: block; min-width: 0; width: 100%; }
+.cbx > .cbx-in { width: 100%; padding-right: 30px !important; }    /* the host's input rules (.fld, .lbx) set the padding */
+.cbx-in.mono { font-family: var(--mono); }
+.cbx > .cbx-btn { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 28px; height: auto; padding: 0; border: 0;
+  border-radius: 0 var(--r) var(--r) 0; background: var(--chev) center / 15px no-repeat; }
+.cbx > .cbx-btn:hover:not(:disabled), .cbx > .cbx-btn:active:not(:disabled) { background: var(--chev) center / 15px no-repeat; background-color: var(--surface-3); }
+.cbx-list { position: fixed; z-index: calc(var(--z-modal) + 10); overflow-y: auto; overscroll-behavior: contain; padding: 4px;
+  display: flex; flex-direction: column; gap: 1px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-3); font-size: var(--fs-sm); color: var(--text); }
+.cbx-opt { display: flex; align-items: center; gap: 8px; flex: none; min-height: 30px; padding: 0 8px; border-radius: var(--r-sm);
+  cursor: pointer; font-weight: 500; white-space: nowrap; }
+.cbx-opt > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cbx-list.is-mono .cbx-opt:not(.cbx-new) { font-family: var(--mono); font-size: var(--fs-xs); }
+.cbx-opt:hover, .cbx-opt.on { background: var(--accent-soft); }
+.cbx-opt[aria-selected=true] { color: var(--accent-text); font-weight: 650; }
+.cbx-opt mark { background: none; color: var(--accent-text); font-weight: 700; }
+.cbx-opt.cbx-new { color: var(--accent-text); }
+.cbx-opt.cbx-new .ico { width: 14px; height: 14px; flex: none; color: var(--accent); }
+.cbx-opt.cbx-new:not(:first-child) { margin-top: 3px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-sm) var(--r-sm); }
+.cbx-empty { padding: 6px 8px; color: var(--text-faint); }
+
 /* ---- embeddings rows (views/preview.ts): a card whose row is audio, video, text or only vectors */
 /* the card is its own size container, so small thumbnails drop the columns before the text gets unreadable */
 .card:has(> .rc-body), .card:has(> .rc-video) { container-type: size; }

@@ -9,6 +9,7 @@
 | `avatar.js` | `avatarHTML` (picture or initials on a colour hashed from the id), `avatarStackHTML` (overlapping, `+N`), `ownerChipHTML`. |
 | `state.js` | `S` (the page state), `UI` (defaults from `config.yaml ui`), `featureLabel`. |
 | `theme.js` | `THEME` (CSS tokens read for Plotly), `SCALE` (the current theme's colour scales), `CONTINUOUS` (colour-by fields), `plotBase`, `clsColor` / `clsName` (class colour from the theme's palette), `setTheme` / `themeMode`, `setPalette` / `paletteName` / `PALETTES` (named colour palettes; the colour-blind ones swap in the Okabe-Ito class and error colours). |
+| `combobox.js` | A themed text field + list in place of `<input list>` / `<datalist>` (whose popup the browser draws unthemed): `comboHTML(key, value, {placeholder, mono, disabled, attrs})` (`.cbx` input + chevron), `bindCombo(root, key, {options, onPick, onInput, create, empty})` (listeners delegated once on the document, capture: survives re-renders; filters with `<mark>`, ↑ / ↓ / Home / End / Enter / Tab / Escape, optional Create row; a pick fires the input's `input` event, then `onPick`). The list floats (`.cbx-list`, above dialogs) at the field's width, flips up. Used by the label export Bucket, Settings › AI Model, the tags field. Imports only `dom.js`. |
 | `jobs.js` | `pollJobs` (the bar under the header), `waitJob`, `showWait` / `hideWait` (the plot overlay), `setBar`. |
 
 ## How it is written
