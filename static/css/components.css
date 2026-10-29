@@ -11,7 +11,7 @@
 .row.actions { gap: var(--s2); }
 .row.actions #tag-list { max-width: 170px; }
 
-.gallery { flex: 1; overflow-y: auto; padding: var(--s3) var(--s4); display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
+.gallery { position: relative; flex: 1; overflow-y: auto; padding: var(--s3) var(--s4); display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
 .empty { width: 100%; max-width: 380px; margin: var(--s6) auto; padding: var(--s4); text-align: center; color: var(--text-muted); }
 .empty svg.illus { width: 132px; height: 99px; display: block; margin: 0 auto var(--s4); }
 .empty h3 { color: var(--text); font-size: var(--fs-lg); margin-bottom: var(--s1); }
@@ -42,6 +42,12 @@
 .card.is-outlier { outline: 2px solid var(--danger); outline-offset: -2px; }
 .card.is-outlier .badge { max-width: calc(100% - 78px); }
 .card.is-outlier:hover { outline-color: var(--highlight); }
+/* drag-select box (views/gallery.ts enableGalleryMarquee) and the cards under it */
+.gallery .marquee { position: absolute; z-index: 3; pointer-events: none; border: 1px solid var(--highlight);
+  background: var(--highlight-soft); border-radius: var(--r-sm); }
+.gallery.marqueeing { user-select: none; }
+.gallery.marqueeing .card { cursor: crosshair; }
+.card.marquee-hit { outline: 2px dashed var(--highlight); outline-offset: -2px; }
 /* picked (click / ctrl+click): pinned on the plot as an amber dot */
 .card.picked { outline: 3px solid var(--highlight); outline-offset: -3px; box-shadow: 0 0 0 3px var(--highlight-soft); }
 .card .pick-badge { position: absolute; right: 4px; bottom: 4px; z-index: 1; width: 20px; height: 20px; border-radius: 50%;

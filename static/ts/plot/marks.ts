@@ -92,8 +92,9 @@ interface DistanceMarks { shapes: Array<Partial<P.Shape>>; annotations: Array<Pa
 
 function distanceMarks(picked: number[]): DistanceMarks {
   const out: DistanceMarks = { shapes: [], annotations: [] };
-  if (picked.length < 2 || !$req<HTMLInputElement>('show-dist').checked || !S.scoresFeature) return out;
-  const ids = picked.slice(0, MAX_DIST_PICKS);
+  // a drag-select of many cards: lines among the first few would only be noise
+  if (picked.length < 2 || picked.length > MAX_DIST_PICKS || !$req<HTMLInputElement>('show-dist').checked || !S.scoresFeature) return out;
+  const ids = picked;
   const key = `${S.scoresFeature}|${ids.join(',')}`;
   const dist = S.dist;
   if (!dist || dist.key !== key || !('d' in dist)) {
@@ -120,10 +121,6 @@ function distanceMarks(picked: number[]): DistanceMarks {
   }
   ids.forEach((_id, n) => out.annotations.push({ x: pos[n]?.[0] ?? NaN, y: pos[n]?.[1] ?? NaN, xref: 'x', yref: 'y', showarrow: false, yshift: 20,
     text: `<b>${n + 1}</b>`, font: { family: THEME.mono, size: 12, color: '#2b1f04' }, bgcolor: THEME.highlight, borderpad: 3 }));
-  if (picked.length > MAX_DIST_PICKS) {
-    out.annotations.push({ xref: 'paper', yref: 'paper', x: 0.01, y: 0.01, xanchor: 'left', yanchor: 'bottom', showarrow: false,
-      text: `distances: first ${MAX_DIST_PICKS} of ${picked.length} picks`, font: { size: 11, color: THEME.muted } });
-  }
   return out;
 }
 
@@ -139,6 +136,12 @@ export function pickCard(id: number, add: boolean): void {
   syncPicked();
 }
 
+/** Replace the picks (the gallery's drag-select). */
+export function setPicked(ids: number[]): void {
+  S.picked = [...new Set(ids)];
+  syncPicked();
+}
+
 export function clearPicked(): void {
   if (!S.picked.length) return;
   S.picked = [];
@@ -148,7 +151,7 @@ export function clearPicked(): void {
 // picks are numbered (1, 2, …) like their dots on the plot once there are two or more
 export function pickNumber(id: number): string {
   const n = S.picked.indexOf(id);
-  return S.picked.length > 1 && n >= 0 && n < MAX_DIST_PICKS ? String(n + 1) : '';
+  return S.picked.length > 1 && S.picked.length <= MAX_DIST_PICKS && n >= 0 ? String(n + 1) : '';
 }
 
 function syncPicked(): void {
@@ -161,4 +164,5 @@ function syncPicked(): void {
     if (n) n.textContent = pickNumber(id);
   });
   updateMarks();
+  window.dispatchEvent(new CustomEvent('picks-changed'));      // the gallery's pick bar
 }

@@ -6,7 +6,7 @@ import type { DuplicatePair, SelEntry } from '../types.js';
 import { clsColor, clsName, ERR, errColor } from '../core/theme.js';
 import { isOutlier, showOutlierMarks } from '../plot/groups.js';
 import { clearLasso } from '../plot/interactions.js';
-import { pickNumber, updateMarks } from '../plot/marks.js';
+import { pickNumber, setPicked, updateMarks } from '../plot/marks.js';
 import { updateHighlight } from '../plot/render.js';
 import { renderImageGrid } from './image-grid.js';
 import { allRows, cardMedia, isRows, loadVisibleMedia, rowId, syncPlaying, unit } from './preview.js';
@@ -159,7 +159,7 @@ function cardHTML(id: number): string {
   const desc = `#${id} ${esc(clsName(c))} · ${esc(isRows() ? rowId(id) : P.image[id])}${out ? ' · OUTLIER (no group)' : ''}`;
   const picked = S.picked.includes(id);
   return `<div class="card${out ? ' is-outlier' : ''}${picked ? ' picked' : ''}" data-id="${id}" role="button" tabindex="0" ` +
-    `aria-pressed="${picked}" title="${desc}\nclick: details · ctrl+click: select (pin on map)" aria-label="${desc}">` +
+    `aria-pressed="${picked}" title="${desc}\nclick: details · ctrl+click: select (pin on map) · drag: select many" aria-label="${desc}">` +
     `<span class="pick-badge"><span class="pick-n">${pickNumber(id)}</span>${icon('check')}</span>` +
     (out ? `<span class="out-badge">${icon('x')}outlier</span>` : '') +
     cardMedia(id) +
@@ -173,6 +173,7 @@ export const TIPS_HTML =
   '<li><span><kbd>hover</kbd></span><span>a dot to preview it</span></li>' +
   '<li><span><kbd>click</kbd></span><span>a thumbnail (or a dot) to open the full image</span></li>' +
   '<li><span><kbd>Ctrl</kbd>+<kbd>click</kbd></span><span>thumbnails to select them (their dots are pinned on the map)</span></li>' +
+  '<li><span><kbd>drag</kbd></span><span>over thumbnails to select them all (<kbd>Shift</kbd>: add to the selection)</span></li>' +
   '<li><span><kbd>right-drag</kbd></span><span>pan the plot (or drag with two fingers on a touch screen)</span></li>' +
   '<li><span><kbd>middle-drag</kbd></span><span>move the lasso (re-selects the dots under it)</span></li>' +
   '<li><span><kbd>Shift</kbd>+<kbd>drag</kbd></span><span>with the circle tool: a round circle instead of an oval</span></li>' +
@@ -252,4 +253,78 @@ export function galleryOrder(): number[] {
   if (S.selKind === 'pairs') return S.pairs.flatMap((p) => [p.a, p.b]);
   if (isRows() && !S.sel.length && S.selTitle === 'No selection') return sortedSelection(allRows());
   return sortedSelection();
+}
+
+// ---- drag-select: hold the left button in the gallery and drag a box over the cards; on release they are the picks
+// (Shift / Ctrl / Cmd adds to the picks). Card rects are read once when the drag starts (content coordinates of the
+// scroll box), so a move only compares numbers and toggles a class, at most once per animation frame.
+export let marqueeEndedAt = 0;
+
+export function enableGalleryMarquee(): void {
+  const g = $req('gallery');
+  g.addEventListener('dragstart', (e) => { if (e.target instanceof HTMLImageElement) e.preventDefault(); });
+  g.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !(e.target instanceof Element) || e.target.closest('button, a, input, select, video, audio, .card[data-img]')) return;
+    const r0 = g.getBoundingClientRect();
+    const at = (cx: number, cy: number): [number, number] => [cx - r0.left + g.scrollLeft, cy - r0.top + g.scrollTop];
+    const p0 = at(e.clientX, e.clientY);
+    const add = e.shiftKey || e.ctrlKey || e.metaKey;
+    let box: HTMLDivElement | null = null, frame: number | null = null, scroll: number | null = null;
+    let cards: Array<{ el: HTMLElement; id: number; x0: number; y0: number; x1: number; y1: number }> = [];
+    let last = { x: e.clientX, y: e.clientY }, hits = new Set<number>();
+    const paint = (): void => {
+      frame = null;
+      if (!box) return;
+      const [x, y] = at(last.x, last.y);
+      const x0 = Math.min(x, p0[0]), x1 = Math.max(x, p0[0]), y0 = Math.min(y, p0[1]), y1 = Math.max(y, p0[1]);
+      Object.assign(box.style, { left: `${x0}px`, top: `${y0}px`, width: `${x1 - x0}px`, height: `${y1 - y0}px` });
+      hits = new Set();
+      for (const c of cards) {
+        const on = c.x0 < x1 && c.x1 > x0 && c.y0 < y1 && c.y1 > y0;
+        if (on) hits.add(c.id);
+        c.el.classList.toggle('marquee-hit', on);
+      }
+    };
+    // the pointer near the top / bottom edge scrolls the gallery (and the box grows with it)
+    const autoScroll = (): void => {
+      scroll = null;
+      const d = last.y < r0.top + 40 ? -1 : last.y > r0.bottom - 40 ? 1 : 0;
+      if (!d || !box) return;
+      g.scrollTop += d * 14;
+      if (frame === null) frame = requestAnimationFrame(paint);
+      scroll = requestAnimationFrame(autoScroll);
+    };
+    const move = (ev: MouseEvent): void => {
+      last = { x: ev.clientX, y: ev.clientY };
+      if (!box) {
+        if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 6) return;   // a click, not a drag
+        box = document.createElement('div');
+        box.className = 'marquee';
+        g.appendChild(box);
+        g.classList.add('marqueeing');
+        cards = [...g.querySelectorAll<HTMLElement>('.card[data-id]')].map((el) => {
+          const r = el.getBoundingClientRect(), [x0, y0] = at(r.left, r.top);
+          return { el, id: +(el.dataset.id ?? NaN), x0, y0, x1: x0 + r.width, y1: y0 + r.height };
+        });
+      }
+      ev.preventDefault();                      // no text selection while dragging
+      if (frame === null) frame = requestAnimationFrame(paint);
+      if (scroll === null) scroll = requestAnimationFrame(autoScroll);
+    };
+    const up = (): void => {
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (scroll !== null) cancelAnimationFrame(scroll);
+      if (!box) return;
+      paint();
+      box.remove();
+      g.classList.remove('marqueeing');
+      for (const c of cards) c.el.classList.remove('marquee-hit');
+      marqueeEndedAt = Date.now();              // the click that follows the drag does not open a card
+      setPicked(add ? [...S.picked, ...hits] : [...hits]);
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+  });
 }

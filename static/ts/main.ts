@@ -24,7 +24,7 @@ import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
-import { narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
+import { enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
 import { showMissedObjects } from './views/model.js';
 import { bindBar, bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateBarSummary, updateGroupsBadge } from './views/layout.js';
 import { closeModal, initModal, modalId, openImage, openModal, stepModal, toggleModalPreds } from './views/modal.js';
@@ -465,9 +465,10 @@ function bindEvents(): void {
   });
   $req('gallery').addEventListener('mouseleave', () => { if (hoverDotId !== null) showHoverDot(null); });
   // click = details, ctrl/cmd+click = pick it (add / remove; its dot is pinned on the map)
+  enableGalleryMarquee();
   $req('gallery').onclick = (e) => {
     const card = closestOf(e, '.card');
-    if (!card) return;
+    if (!card || Date.now() - marqueeEndedAt < 300) return;
     if (card.dataset.img !== undefined) { void openImage(card.dataset.img, imageOrder()); return; }   // image browser tile
     if (e.ctrlKey || e.metaKey) pickCard(cardId(card), true);
     else void openModal(cardId(card));
