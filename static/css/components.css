@@ -48,6 +48,7 @@
 .pick-bar { align-items: center; gap: var(--s2); padding: 6px var(--s2); border-radius: var(--r-md);
   background: var(--highlight-soft); border: 1px solid var(--highlight); }
 .pick-bar .pick-count { font-weight: 650; }
+.pick-bar .pick-clear { margin-left: auto; }
 .pick-bar .pick-edit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .pick-bar .pick-edit select { max-width: 11em; }
 .pick-bar button.danger-ghost { color: var(--danger); }

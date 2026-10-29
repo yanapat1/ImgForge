@@ -12,7 +12,7 @@ import { getJSON } from '../core/api.js';
 import { $, esc, rgba } from '../core/dom.js';
 import { pts, S } from '../core/state.js';
 import { clsColor, clsName, THEME } from '../core/theme.js';
-import { xyOf } from './access.js';
+import { plotDiv, xyOf } from './access.js';
 import { updateMarks } from './marks.js';
 import { visibleIndices } from './render.js';
 
@@ -140,7 +140,11 @@ export function explainMarks(ids: number[]): Marks {
   if (!mode || !S.view) return out;
   const P = pts(), centres = classCentres(mode);
   const font: Partial<P.Font> = { family: THEME.mono, size: 11, color: THEME.text };
+  // a label grows away from the nearer side edge, so a dot near the right edge does not push it out of the plot
+  const xa = plotDiv()._fullLayout?.xaxis;
+  const mid = xa ? (xa.p2l(0) + xa.p2l(xa._length)) / 2 : NaN;
   const label = (x: number, y: number, text: string, col: string): Partial<P.Annotations> => ({ x, y, xref: 'x', yref: 'y',
+    xanchor: x > mid ? 'right' : 'left', xshift: x > mid ? 8 : -8,
     showarrow: false, yshift: -22, text, font, bgcolor: rgba(THEME.surface2, 0.94), bordercolor: col, borderwidth: 1, borderpad: 3 });
   for (const id of [...new Set(ids)].slice(0, view === 'suspicious' ? 3 : 8)) {
     const [x, y] = xyOf(id), c = P.cls[id] ?? -1;
