@@ -19,7 +19,7 @@ import { plotDiv } from './plot/access.js';
 import { isOutlier, selectGroup, selectGroupOf } from './plot/groups.js';
 import { clickOutsideLasso, enableLasso, enableMiddleDrag, enableSelectTools, enableRightPan, enableWheelZoom, lassoEndedAt, plotAxes, redrawLasso, touchGestureRecent } from './plot/interactions.js';
 import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks } from './plot/marks.js';
-import { bubbleAt, hoverOf, scheduleRender } from './plot/render.js';
+import { bubbleAt, hoverOf, scheduleRender, updateGrid } from './plot/render.js';
 import { bindSettings, openSettings } from './settings/dialog.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
@@ -404,6 +404,7 @@ function bindEvents(): void {
   $req<HTMLSelectElement>('color-by').onchange = () => { void onGroupControls(); };
   $req<HTMLInputElement>('dot-size').oninput = scheduleRender;
   $req<HTMLInputElement>('show-dist').onchange = () => updateMarks();
+  $req<HTMLInputElement>('show-grid').onchange = updateGrid;
   for (const id of ['g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min']) $req(id).onchange = () => { void onGroupControls(); };
   bindGroupsPopover();
   bindBar();

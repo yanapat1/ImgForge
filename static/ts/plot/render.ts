@@ -299,6 +299,19 @@ function categorical(colorBy: string): Categorical {
   return { key: (id) => at(Pt.cls, id), label: clsName, color: clsColor };
 }
 
+/** Display › Gridlines (off by default): the axes' grid settings. */
+function gridAxis(): Partial<P.LayoutAxis> {
+  return { showgrid: $req<HTMLInputElement>('show-grid').checked, gridcolor: THEME.grid, gridwidth: 1 };
+}
+
+/** The gridlines toggle changed: one relayout, no re-render of the dots. */
+export function updateGrid(): void {
+  if (!S.view || !plotDiv().data) return;
+  const g = gridAxis();
+  const upd: Record<string, unknown> = { 'xaxis.showgrid': g.showgrid, 'xaxis.gridcolor': g.gridcolor, 'yaxis.showgrid': g.showgrid, 'yaxis.gridcolor': g.gridcolor };
+  void Plotly.relayout('plot', upd as Partial<P.Layout>);
+}
+
 type Xy = Array<number | null>;
 type Trace = Partial<P.PlotData>;
 
@@ -454,7 +467,7 @@ export function renderPlot(): void {
   traces.push({ type: 'scattergl', mode: 'markers', name: 'picked', showlegend: false, hoverinfo: 'skip', x: [], y: [] });
   traces.push({ type: 'scattergl', mode: 'markers', name: 'hover-dot', showlegend: false, hoverinfo: 'skip', x: [], y: [] });
 
-  const axis: Partial<P.LayoutAxis> = { showgrid: false, zeroline: false, showticklabels: false, ticks: '' };  // a heatmap trace would add tick marks
+  const axis: Partial<P.LayoutAxis> = { ...gridAxis(), zeroline: false, showticklabels: false, ticks: '' };  // a heatmap trace would add tick marks
   const layout: Partial<P.Layout> = {
     ...plotBase(THEME.plot),
     margin: { l: 0, r: 0, t: 0, b: 0 }, dragmode: false, hovermode: 'closest', hoverdistance: 10,
