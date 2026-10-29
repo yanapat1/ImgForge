@@ -281,7 +281,7 @@ def router(state, ctx):
         if not isinstance(ids, list):
             raise HTTPException(400, 'approve must be a list of action ids')
         try:
-            return confirm.decide(user, body.get('confirm_id'), ids, body.get('reject') or [])
+            return confirm.decide(user, body.get('confirm_id'), ids, body.get('reject') or [], body.get('edits'))
         except confirm.AgentError as e:
             raise HTTPException(e.status, str(e))
 
