@@ -300,6 +300,10 @@ dc_buckets = Table(
     Column('mode', String(8), nullable=False, server_default=text("'stream'")),  # s3: stream | local (0007)
     Column('local_root', Text),                          # s3 + local: the editable copy, under storage.data_root
     _ts('synced_at'),                                     # end of the last finished pull (NULL: still streamed)
+    Column('source_kind', String(16)),                   # imported from the web (0008): kaggle | huggingface | ... | NULL
+    Column('source_ref', Text),                          # its canonical ref (owner/dataset, user/dataset@rev, the link)
+    Column('source_meta', JSONB),                        # the last import's {connection_id, opts, ...}: "Update from source"
+    _ts('imported_at'),                                  # end of the last finished import
     _now('created_at'), _now('updated_at'),
     CheckConstraint("kind IN ('managed', 'local', 's3')", name='kind'),
     CheckConstraint("mode IN ('stream', 'local')", name='mode'),
