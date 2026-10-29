@@ -21,6 +21,7 @@ import { clickOutsideLasso, enableLasso, enableMiddleDrag, enableSelectTools, en
 import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks } from './plot/marks.js';
 import { bubbleAt, hoverOf, requestFit, scheduleRender, updateGrid } from './plot/render.js';
 import { bindSettings, openSettings } from './settings/dialog.js';
+import { far2dIds, setExplainDot } from './plot/explain.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
@@ -338,7 +339,7 @@ function bindEvents(): void {
       if (Date.now() - lastDotClick < 400 || Date.now() - lassoEndedAt < 400 || touchGestureRecent()) return;
       // blank space (outside the lasso, if there is one): the picked / hovered target dots go
       const blank = !closestOf(e, '.modebar, .legend, .colorbar, #select-tools') && (!S.lasso || clickOutsideLasso(e));
-      if (blank) { clearPicked(); if (hoverDotId !== null) showHoverDot(null); }
+      if (blank) { clearPicked(); setExplainDot(null); if (hoverDotId !== null) showHoverDot(null); }
       if (S.lasso && clickOutsideLasso(e)) backToInspect();
       if (!S.groups || !$req<HTMLInputElement>('g-bubbles').checked) return;
       const gid = bubbleAt(e.clientX, e.clientY);
@@ -350,6 +351,7 @@ function bindEvents(): void {
     const p = ev.points && ev.points[0];
     if (!p || OVERLAY.has(p.data.name) || typeof p.customdata !== 'number') return;
     const id = p.customdata;
+    setExplainDot(id);                          // a "far" / "suspicious" check on: lines say why (plot/explain.ts)
     const media = tip.querySelector('.tip-media'), label = tip.querySelector('.tip-label');
     if (media) media.innerHTML = tipMedia(id);
     if (label) label.innerHTML = hoverOf(id);
@@ -431,6 +433,12 @@ function bindEvents(): void {
 
   $req('btn-suspicious').onclick = () => topBy('suspicion', UI.check_list_size, 'Suspicious labels', 'suspicious');
   $req('btn-outliers').onclick = () => topBy('outlier', UI.check_list_size, 'Far from class centre', 'far');
+  $req('btn-outliers-2d').onclick = () => {
+    if (toggleOff('far2d')) return;
+    $req<HTMLSelectElement>('sort').value = 'none';
+    setSelection(far2dIds().slice(0, UI.check_list_size), `Far from class on the map · ${$req<HTMLSelectElement>('method').selectedOptions[0]?.textContent ?? ''}`, { view: 'far2d' });
+  };
+  $req<HTMLInputElement>('show-centres').onchange = scheduleRender;
   $req('btn-dups').onclick = async () => {
     if (toggleOff('dups')) return;
     try {

@@ -5,6 +5,7 @@
 | `render.js` | `renderPlot()` builds every trace (dots by colour, bubbles, outlier ✕, highlight rings, pick / hover overlays) and calls `Plotly.react` once. Also `scheduleRender`, `updateHighlight`, `visibleIndices`, `hoverOf`, `pointInPoly`, `bubbleAt`. |
 | `interactions.js` | All mouse input on the plot: the **lasso** (left-drag), **middle-drag** to move the lasso (or pan when there is none), **right-drag pan**, **wheel zoom** around the cursor. `plotAxes()` gives the geometry. |
 | `marks.js` | Overlays that change often, without a full render: the hovered card's dot (animated), picked cards' dots, crosshairs, and **distance lines** between picks (numbered dots, labels with the feature-space distance). |
+| `explain.js` | Why "Far from class" / "Suspicious labels" flag a dot: class-centre stars, lines from the hovered / picked dot to its centre or to its feature-space neighbours, and the on-the-map "Far from class" score. |
 | `groups.js` | Density groups from `/api/groups`, the outlier test, selecting a group or an outlier set. |
 
 ## How it is written
@@ -30,3 +31,5 @@
 | Hover suppressed during drags | `plotly_hover` handler | Checks the `lassoing`, `panning` and `moving-lasso` classes on the plot element. |
 | Click vs lasso | `lassoEndedAt` | The mouseup that ends a lasso is not treated as a click on a dot. |
 | Distances fetched once per pick set | `distanceMarks` | Results are cached by `feature + ids`. A pending fetch re-renders the marks when it lands, and only if the picks haven't changed. |
+| **Explain feature-space checks on the 2D map** | `explain.ts` | Both checks are scored in the full feature space; UMAP / t-SNE distort distances, so flagged dots often looked close to their class. The centre star is the box with the lowest `outlier` (nearest the real centre); hover lines show the distance or the k nearest neighbours in their class colours. A plot hover only re-draws when the dot changes and unhover is ignored, so the update cannot loop with Plotly's hover. |
+| **Zoom to shown classes + off-screen counters** | `fitToVisible`, `updateOffscreen` | Switching classes kept the old zoom, so a spread class lost its far dots off screen. A class change relayouts once to the bbox of the visible dots; after each draw one pass counts dots past every edge. |

@@ -33,7 +33,7 @@ export function buildParamInputs(): void {
 }
 
 export const SETTING_IDS: string[] = ['feature', 'method', 'mode', 'class-a', 'class-b',
-  'color-by', 'dot-size', 'g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min', 'sort', 'thumb-size', 'show-dist', 'show-grid', 'auto-fit'];
+  'color-by', 'dot-size', 'g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min', 'sort', 'thumb-size', 'show-dist', 'show-grid', 'auto-fit', 'show-centres'];
 
 // these pick WHICH projection is shown: not restored at page load, which always opens the startup view
 // (an uncomputed saved choice used to start a long job on every load); earlier views are in "Saved views"
@@ -243,7 +243,7 @@ export function toggleOff(view: string): boolean {
 }
 
 // a class chip changed: run the active Inspect check again so it follows the visible classes
-const INSPECT_BTN: Record<string, string> = { suspicious: 'btn-suspicious', far: 'btn-outliers', dups: 'btn-dups', 'sel-outliers': 'btn-sel-outliers',
+const INSPECT_BTN: Record<string, string> = { suspicious: 'btn-suspicious', far: 'btn-outliers', far2d: 'btn-outliers-2d', dups: 'btn-dups', 'sel-outliers': 'btn-sel-outliers',
   'cl-issues': 'btn-cl-issues', 'cl-low': 'btn-cl-low', 'cl-ood': 'btn-cl-ood', 'cl-swap': 'btn-cl-swap', 'cl-badloc': 'btn-cl-badloc' };
 export function reapplyInspect(): void {
   const id = INSPECT_BTN[S.activeView ?? ''];

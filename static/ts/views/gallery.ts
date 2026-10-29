@@ -7,7 +7,8 @@ import { clsColor, clsName, ERR, errColor } from '../core/theme.js';
 import { isOutlier, showOutlierMarks } from '../plot/groups.js';
 import { clearLasso } from '../plot/interactions.js';
 import { pickNumber, setPicked, updateMarks } from '../plot/marks.js';
-import { updateHighlight } from '../plot/render.js';
+import { syncCentres, updateHighlight } from '../plot/render.js';
+import { setExplainDot } from '../plot/explain.js';
 import { renderImageGrid } from './image-grid.js';
 import { allRows, cardMedia, isRows, loadVisibleMedia, rowId, syncPlaying, unit } from './preview.js';
 
@@ -49,6 +50,9 @@ export function setSelection(ids: number[], title: string, { kind = 'samples', p
   if (highlight !== null) S.highlight = highlight ? ids.slice(0, 5000) : [];
   renderGallery();
   if (highlight !== null) updateHighlight();
+  syncCentres();
+  syncInspectHint();
+  setExplainDot(null);
   updateMarks();
   window.dispatchEvent(new CustomEvent('selection-changed'));   // the ◆ assistant's "Selection · n" chip
   window.dispatchEvent(new CustomEvent('picks-changed'));       // picks were reset: the pick bar
@@ -71,6 +75,20 @@ export function syncClFix(): void {
   b.classList.toggle('hidden', !n);
   const t = $('btn-cl-fix-t');
   if (t) t.textContent = `Change ${n.toLocaleString()} to cleanlab's class`;
+}
+
+// the feature-space checks: a line saying why a flagged dot may not look far / wrong on the map
+const HINTS: Record<string, string> = {
+  far: 'Scored in the full feature space: the 2D map distorts distances, so a box can look close to its class. Hover a card or a dot: a line goes to its class centre (★). "Far from class (on the map)" ranks what you see.',
+  suspicious: 'Scored by the nearest neighbours in the full feature space, not on the map. Hover a card or a dot: lines go to its nearest neighbours, coloured by their class.',
+  far2d: 'Distance to the class median on this map (★), as a multiple of the class\'s median distance: what the eye sees, not the features.',
+};
+function syncInspectHint(): void {
+  const el = $('inspect-hint');
+  if (!el) return;
+  const t = HINTS[S.activeView ?? ''];
+  el.classList.toggle('hidden', !t);
+  el.textContent = t ?? '';
 }
 
 /** The lasso was cancelled (click outside it, Esc): back to the Inspect check it was drawn over, else nothing. */

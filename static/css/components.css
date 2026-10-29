@@ -42,6 +42,8 @@
 .card.is-outlier { outline: 2px solid var(--danger); outline-offset: -2px; }
 .card.is-outlier .badge { max-width: calc(100% - 78px); }
 .card.is-outlier:hover { outline-color: var(--highlight); }
+/* Inspect › far / suspicious: why a flagged box may not look far on the map (views/gallery.ts) */
+.inspect-hint { margin: 0; font-size: var(--fs-xs); line-height: 1.45; }
 /* picked thumbnails: count + bulk edits (views/pick-bar.ts) */
 .pick-bar { align-items: center; gap: var(--s2); padding: 6px var(--s2); border-radius: var(--r-md);
   background: var(--highlight-soft); border: 1px solid var(--highlight); }

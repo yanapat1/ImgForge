@@ -10,6 +10,7 @@ import { curGroups, groupList, plotDiv, restyle, viewPos, xyOf } from './access.
 import { isOutlier } from './groups.js';
 import { fitToVisible, redrawLasso } from './interactions.js';
 import { pcaLabels, updateMarks } from './marks.js';
+import { centreMode, centreTrace } from './explain.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -195,6 +196,10 @@ export function updateLiveNew(): void {
   const t = liveNewTrace(+$req<HTMLInputElement>('dot-size').value);
   void restyle(gd, { x: [t.x], y: [t.y], text: [t.text], name: [t.name], showlegend: [t.showlegend] } as never, [idx]);
 }
+
+// the class-centre stars (plot/explain.ts) come and go with the Inspect check: a render only when that flips
+let centresDrawn: string | null = null;
+export function syncCentres(): void { if ((centreMode() ?? null) !== centresDrawn) scheduleRender(); }
 
 // the shown classes changed: the next render zooms to their dots (Display › Zoom to shown classes)
 let fitPending = false;
@@ -466,6 +471,9 @@ export function renderPlot(): void {
     x: hl.map((id) => xyOf(id)[0]), y: hl.map((id) => xyOf(id)[1]), customdata: hl,
     marker: { size: dot + 8, color: 'rgba(0,0,0,0)', line: { color: THEME.ring, width: 2 } },
   });
+  const centres = centreTrace(dot);           // why "far" / "suspicious": each class's centre (plot/explain.ts)
+  centresDrawn = centres ? centreMode() : null;
+  if (centres) traces.push(centres);
   traces.push(liveNewTrace(dot));          // provisional dots of the live feed, after the category traces
   // gallery picks + hover: big yellow dots on top (filled by updateMarks)
   traces.push({ type: 'scattergl', mode: 'markers', name: 'picked', showlegend: false, hoverinfo: 'skip', x: [], y: [] });

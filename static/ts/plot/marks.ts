@@ -8,6 +8,7 @@ import { $req, rgba } from '../core/dom.js';
 import { pts, S } from '../core/state.js';
 import { clsColor, THEME } from '../core/theme.js';
 import { plotDiv, restyle, updateTraces, viewPos, xyOf } from './access.js';
+import { explainDot, explainMarks } from './explain.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -17,7 +18,7 @@ export let hoverDotId: number | null = null, hoverAnim: number | null = null;
 
 const MAX_CROSSHAIRS = 8;
 
-export const OVERLAY = new Set(['highlight', 'picked', 'hover-dot', 'bubbles']);   // never part of a selection
+export const OVERLAY = new Set(['highlight', 'picked', 'hover-dot', 'bubbles', 'centres']);   // never part of a selection
 
 interface DotMarker {
   x: number[]; y: number[];
@@ -60,8 +61,11 @@ export function updateMarks(animate = false): void {
   const hover = hoverDotId !== null && pos.has(hoverDotId) && !picked.includes(hoverDotId) ? [hoverDotId] : [];
   const p = dotMarker(picked), h = dotMarker(hover, animate ? 0.3 : 1);
   const dist = distanceMarks(picked);
+  const ed = explainDot();
+  const ex = explainMarks([...(ed !== null && pos.has(ed) ? [ed] : []), ...hover, ...picked]);   // why a flagged dot is flagged
   void updateTraces(gd, { x: [p.x, h.x], y: [p.y, h.y], marker: [p.marker, h.marker] },
-    { shapes: [...dist.shapes, ...crosshairs([...hover, ...picked.slice().reverse()])], annotations: [...pcaLabels(), ...dist.annotations] }, [pi, hi]);
+    { shapes: [...ex.shapes, ...dist.shapes, ...crosshairs([...hover, ...picked.slice().reverse()])],
+      annotations: [...pcaLabels(), ...dist.annotations, ...ex.annotations] }, [pi, hi]);
   const id = hover[0];
   if (!animate || id === undefined) return;
   const t0 = performance.now();

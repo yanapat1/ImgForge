@@ -204,6 +204,7 @@
         <span id="gallery-count" class="count-badge num"></span>
       </div>
       <div id="breakdown" class="chips"></div>
+      <p id="inspect-hint" class="inspect-hint muted hidden" role="note"></p>
       <div id="edit-banner" class="cur-banner edit-banner hidden" role="status"></div>
       <div class="row">
         <label class="field">Sort
@@ -489,6 +490,8 @@
                 <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Suspicious labels</span><span class="mi-d">neighbours mostly another class</span></button>
               <button id="btn-outliers" class="view-btn menu-item" data-view="far" aria-pressed="false" title="Boxes far from their class centre">
                 <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Far from class</span><span class="mi-d">far from the class centre</span></button>
+              <button id="btn-outliers-2d" class="view-btn menu-item" data-view="far2d" aria-pressed="false" title="Boxes far from their class's middle on this 2D map: what you see, not the features">
+                <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Far from class (on the map)</span><span class="mi-d">far from the class middle as drawn</span></button>
               <button id="btn-dups" class="view-btn menu-item" data-view="dups" aria-pressed="false" title="Near-identical boxes in different images">
                 <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg><span class="mi-t">Near-duplicates</span><span class="mi-d">near-identical boxes, other images</span></button>
               <div class="pop-title pop-sep">cleanlab <span class="muted">· k-fold predicted probabilities</span></div>
@@ -530,6 +533,7 @@
               <label class="field" title="Dot size">Size <input id="dot-size" type="range" min="2" max="12" value="5"></label>
               <label class="check dist-toggle" title="Pick 2+ thumbnails (ctrl+click): lines between their dots show the feature-space distance">
                 <input type="checkbox" id="show-dist" checked> Distances between picked boxes</label>
+              <label class="check" title="A star on each shown class's centre (always on with Far from class / Suspicious labels)"><input type="checkbox" id="show-centres"> Class centres</label>
               <label class="check" title="Draw gridlines behind the dots"><input type="checkbox" id="show-grid"> Gridlines</label>
               <label class="check" title="Switching the shown classes zooms so all their dots fit (far dots are never off screen)"><input type="checkbox" id="auto-fit" checked> Zoom to shown classes</label>
               <div class="pop-title pop-sep">Density groups</div>
