@@ -14,5 +14,5 @@ fi
 
 [ -f .env ] || cp .env.example .env    # then set COMPOSE_FILE and POSTGRES_PASSWORD in .env for this server
 # bind-mounted data folders (docker-compose.server.yml); PostgreSQL creates its own files inside
-mkdir -p /home/jovyan/work/image-tools-data/{postgres,dataviz_cache,hf_cache}
+mkdir -p /home/jovyan/work/image-tools-data/{postgres,dataviz_cache,hf_cache,data}
 docker compose up -d

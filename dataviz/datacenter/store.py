@@ -78,7 +78,29 @@ def data_root(cfg):
     raw = ((cfg or {}).get('storage') or {}).get('data_root') or 'data'
     p = Path(os.path.realpath(resolve(str(raw))))
     p.mkdir(parents=True, exist_ok=True)
+    if str(p) not in _warned_roots:
+        _warned_roots.add(str(p))
+        if not on_mount(p):
+            from ..core import logging as vlog
+            vlog.get_logger('datacenter').warning(
+                f'Data Center root {p} is inside the container, not on a volume: buckets, S3 local copies and '
+                'imports are lost when the container is recreated (up --build). Mount it (see docker-compose.yml).')
     return p
+
+
+_warned_roots = set()
+
+
+def on_mount(p):
+    """False only inside Docker when no mount point lies between `p` and the container's / (the writable layer)."""
+    if not os.path.exists('/.dockerenv'):
+        return True
+    q = Path(p)
+    while q != q.parent:
+        if os.path.ismount(q):
+            return True
+        q = q.parent
+    return False
 
 
 def roots(cfg):

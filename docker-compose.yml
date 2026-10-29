@@ -52,9 +52,11 @@ services:
       - dataviz_cache:/workspace/.dataviz_cache  # crops, features, projections (caches) + uploaded images
       - hf_cache:/workspace/.hf_cache            # downloaded Hugging Face models
       - ${DATASET_DIR:-./folder-server}:/workspace/folder-server   # live bind mount: new files/folders show up instantly
+      - dc_data:/workspace/data                  # Data Center buckets, S3 local copies, imports, trash (storage.data_root)
       # - ./runs:/workspace/runs:ro              # uncomment to offer your YOLO runs/**/weights/best.pt as features
 
 volumes:
+  dc_data:
   dataviz_cache:
   hf_cache:
   pg_data:

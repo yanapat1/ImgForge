@@ -8,6 +8,7 @@ __pycache__/
 connections.json
 graphify-out/
 folder-server/
+data/
 tests/
 image.png
 q1.text

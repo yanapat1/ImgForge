@@ -212,13 +212,19 @@ this host only at `127.0.0.1:${PG_PORT:-15432}`, user / database `dataviz`). Bac
 without the key the stored passwords and API keys cannot be read. Other settings in `.env`: `DATASET_DIR`,
 `DATAVIZ_DEVICE`, `HF_TOKEN`; `COMPOSE_FILE` selects the compose files.
 
+**Data Center files live in `/workspace/data`** (`storage.data_root`, `DATAVIZ_DATA_ROOT`): managed buckets, S3 links
+loaded "local", web imports and the trash. The compose files mount it (`dc_data` volume, or
+`/home/jovyan/work/image-tools-data/data/` on the persistent-path server), so `down` / `up --build` keeps it; the log
+warns when the root is on the container's writable layer. An S3 link in local mode whose copy was lost comes back
+with **Sync**.
+
 Without docker: run any PostgreSQL ≥ 14 with the `vector` extension and set `DATABASE_URL` (the schema is created /
 migrated at start-up, `dataviz/db/migrations`).
 
 **The persistent-path server (only `/home/jovyan/work` survives a reset):** `.env` sets
 `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml:docker-compose.server.yml`. `docker-compose.server.yml`
 bind-mounts the caches and the database to `/home/jovyan/work/image-tools-data/` (`postgres/`, `dataviz_cache/`,
-`hf_cache/`). After a reset run `./server-setup.sh`, which restores `/etc/docker/daemon.json` from
+`hf_cache/`, `data/`). After a reset run `./server-setup.sh`, which restores `/etc/docker/daemon.json` from
 `/home/jovyan/work/docker-config/`, creates those folders and starts the containers.
 
 ## TypeScript
