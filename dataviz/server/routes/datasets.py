@@ -238,7 +238,7 @@ def router(state, ctx):
 
     @r.put('/api/datasets/{did}/tags', dependencies=[Depends(OWNER)])
     async def set_dataset_tags(did: str, body: dict, user=Depends(deps.current_user)):
-        """The card's own tags (the session forms never send them)."""
+        """The session's own tags: the edit forms' Tags field sends them after the form saves (only when they changed)."""
         need_registry()
         try:
             ds = await run_io(reg.set_dataset_tags, did, body.get('tags'))

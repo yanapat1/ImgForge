@@ -11,6 +11,8 @@ import { dataUrl, labelUrl } from '../core/nav.js';
 import * as dcApi from '../datacenter/api.js';
 import { $, $req, esc, fmtEta, icon, sleep } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
+import { bindTagFields, commitTagDraft, sameTags, tagFieldHTML, tagState } from '../core/tag-field.js';
+import type { TagState } from '../core/tag-field.js';
 import { attachImport, importHTML, importState, resultText, sourceError, startImport } from '../label/import.js';
 import { TASK_TYPES } from '../label/state.js';
 import { CONN_KINDS, connDefaults, connFormHTML, connKind, connUri, crumbsHTML, statusHTML, tagc } from '../settings/forms.js';
@@ -49,7 +51,7 @@ type WUpload = {
 type WExport = { kind: string; path: string; connId: string; bucket: string; prefix: string };
 type WState = {
   mode: 'new' | 'edit'; pid: string | null; orig: OrigProject | null; steps: StepId[]; step: number; tried: Partial<Record<StepId, boolean>>;
-  name: string; desc: string; review: boolean;
+  name: string; desc: string; review: boolean; tags: TagState; tagSuggest: string[];
   impOn: boolean; imp: ImportState; taskIds: string[] | null; annDone: boolean;
   tab: SrcTab;
   drop: { files: Map<string, File>; bytes: number; ignored: number; scanning: number; sent: Set<string> };
@@ -68,7 +70,7 @@ type WState = {
 };
 /** GET api/label/projects/{pid}: what the edit mode reads. */
 interface OrigProject {
-  id: string; name: string; description?: string; review?: boolean;
+  id: string; name: string; description?: string; review?: boolean; tags?: string[];
   export_default?: { kind?: string; path?: string; connection_id?: string; bucket?: string; prefix?: string } | null;
   tasks?: Array<{ id: string; name: string; task_type: TaskType; config?: TaskConfig; classes?: Array<{ id: string; name: string; color: string }> }>;
 }
@@ -95,7 +97,7 @@ function newTask(type: TaskType = 'object_detection', name = ''): WTask {
 
 function fresh(): WState {
   return {
-    mode: 'new', pid: null, orig: null, steps: ['name', 'images', 'tasks', 'labels', 'export'], step: 0, tried: {}, name: '', desc: '', review: false,
+    mode: 'new', pid: null, orig: null, steps: ['name', 'images', 'tasks', 'labels', 'export'], step: 0, tried: {}, name: '', desc: '', review: false, tags: tagState([]), tagSuggest: [],
     impOn: false, imp: importState(), taskIds: null, annDone: false,
     tab: 'drop',
     drop: { files: new Map(), bytes: 0, ignored: 0, scanning: 0, sent: new Set() },
@@ -259,6 +261,7 @@ function nameHTML(): string {
     `<label class="fld lw-big">Session name<input type="text" data-f="name" data-fk="name" value="${esc(W.name)}" maxlength="120" ` +
     'placeholder="e.g. Street scenes, March batch" autocomplete="off"></label>' +
     `<label class="fld"><span>Description <span class="muted">(optional)</span></span><textarea rows="3" data-f="desc" data-fk="desc">${esc(W.desc)}</textarea></label>` +
+    tagFieldHTML('lw', W.tags, W.tagSuggest) +
     `<label class="check"><input type="checkbox" data-f="review" ${W.review ? 'checked' : ''}> Track review <span class="muted">(optional: a second bar on the card, a Review button, and Review all)</span></label>` +
     '<p class="sec-note">Enter goes to the next step · Esc closes</p></div>';
 }
@@ -882,8 +885,8 @@ async function create(): Promise<void> {
     W.srcKind = source.kind;
     if (!pid) {
       setBusy('Creating the session');
-      const body: { name: string; description: string; source: SourceBody; review: boolean; tasks: unknown[]; export_default?: ExportBody } = {
-        name: W.name.trim(), description: W.desc.trim(), source, review: !!W.review,
+      const body: { name: string; description: string; source: SourceBody; review: boolean; tags: string[]; tasks: unknown[]; export_default?: ExportBody } = {
+        name: W.name.trim(), description: W.desc.trim(), source, review: !!W.review, tags: W.tags.tags,
         tasks: W.tasks.map((t) => ({ name: t.name.trim(), task_type: t.task_type, config: taskConfig(t), classes: t.classes.map((c) => ({ name: c.name, color: c.shown })) })) };
       const exp = exportDefault();
       if (exp) body.export_default = exp;
@@ -943,10 +946,11 @@ async function saveEdit(): Promise<void> {
   assignColors();
   setBusy('Saving');
   try {
-    const patch: { name?: string; description?: string; review?: boolean; export_default?: ExportBody | null } = {};
+    const patch: { name?: string; description?: string; review?: boolean; tags?: string[]; export_default?: ExportBody | null } = {};
     if (W.name.trim() !== P.name) patch.name = W.name.trim();
     if (W.desc.trim() !== (P.description || '')) patch.description = W.desc.trim();
     if (!!W.review !== !!P.review) patch.review = !!W.review;
+    if (!sameTags(W.tags.tags, P.tags)) patch.tags = W.tags.tags;
     const exp = exportDefault();
     if (JSON.stringify(exp) !== JSON.stringify(P.export_default || null)) patch.export_default = exp;
     if (Object.keys(patch).length) await req('', 'PATCH', patch);
@@ -991,6 +995,7 @@ function next(): void {
   if (!id) return;
   W.tried[id] = true;
   W.error = null;
+  if (id === 'name' && !commitTagDraft(W.tags)) { render(); return; }     // a tag still in its box joins first
   if (stepErrors(id).length) { render(); return; }
   if (W.step < W.steps.length - 1) {
     W.step++;
@@ -1261,6 +1266,7 @@ function bind(): void {
     if (chg !== 'files') write(el);
     if (chg) WCHG[chg]?.(el);
   });
+  bindTagFields(box, (key) => (W && key === 'lw' ? { st: W.tags, suggest: W.tagSuggest } : null), () => { if (W) W.dirty = true; });
   box.addEventListener('keydown', onKeydown);
   box.addEventListener('paste', onPaste);
   attachImport(box, {
@@ -1366,6 +1372,7 @@ export async function openWizard(opts: WizardOpts = {}): Promise<void> {
   const w = fresh();
   W = w;
   w.names = (opts.names || []).map((n) => String(n).trim().toLowerCase());
+  w.tagSuggest = opts.tagSuggest || [];
   $req('lw').classList.remove('hidden');
   const need: Array<Promise<void>> = [
     palette ? Promise.resolve() : getJSON<{ colors: string[] }>('api/label/colors?n=64').then((r) => { palette = r.colors; }).catch(() => {}),
@@ -1382,6 +1389,7 @@ export async function openWizard(opts: WizardOpts = {}): Promise<void> {
       W.name = P.name;
       W.desc = P.description || '';
       W.review = !!P.review;
+      W.tags = tagState(P.tags);
       W.tasks = (P.tasks || []).map(taskFromProject);
       const x = P.export_default || {};
       W.exp = { kind: x.kind || '', path: x.path || '', connId: x.connection_id || '', bucket: x.bucket || '', prefix: x.prefix || '' };

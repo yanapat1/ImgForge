@@ -6,7 +6,7 @@
 
 import { rememberPref } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
-import { floatPopover } from '../core/popover.js';
+import { closeFloat, floatPopover } from '../core/popover.js';
 import { jobBadge } from './activity.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
@@ -80,10 +80,11 @@ function warnLine(b: Bucket): string {
 function stats(b: Bucket): string {
   const st = b.stats ?? {};
   const v = (n: number | null | undefined, u: string): string => `<span><b>${n == null ? '–' : fmtN(n)}</b> ${u}</span>`;
+  const size = `<span class="bc-size"><b>${fmtSize(st.size)}</b></span>`;
   if (fmtKey(b.format) === 'embeddings' || (!st.images && st.vectors)) {
-    return `${v(st.vectors, 'vectors')}${st.dims ? v(st.dims, 'dims') : ''}<span><b>${fmtSize(st.size)}</b></span>`;
+    return `<span class="bc-counts">${v(st.vectors, 'vectors')}${st.dims ? v(st.dims, 'dims') : ''}</span>${size}`;
   }
-  return `${v(st.images, 'img')}${v(st.labels, 'labels')}${v(st.classes, 'cls')}<span><b>${fmtSize(st.size)}</b></span>`;
+  return `<span class="bc-counts">${v(st.images, 'img')}${v(st.labels, 'labels')}${v(st.classes, 'cls')}</span>${size}`;
 }
 
 const editBtn = (b: Bucket): string =>
@@ -120,7 +121,7 @@ function renderBar(): void {
   bar.innerHTML = `<span class="dc-here">${icon('grid')}All buckets</span>` +
     `<label class="dc-input dc-bfilter">${icon('search')}<input id="dc-bq" type="search" placeholder="Filter buckets…" aria-label="Filter buckets by name or tag" value="${esc(D.q)}" data-input="bfilter" autocomplete="off"></label>` +
     `<button type="button" class="dc-dd" data-act="tags-menu" aria-haspopup="menu" aria-expanded="false">${icon('tag')}<span>Tags: ${esc(tf)}</span>${icon('chev-d')}</button>` +
-    `<label class="dc-dd dc-sortsel">${icon('sort')}<select data-change="bsort" aria-label="Sort buckets">${SORTS.map(([k, l]) => `<option value="${k}"${D.bucketSort === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>` +
+    `<button type="button" class="dc-dd" data-act="bsort-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Sort buckets" title="Sort buckets">${icon('sort')}<span>${esc(SORTS.find(([k]) => k === D.bucketSort)?.[1] ?? '')}</span>${icon('chev-d')}</button>` +
     `<div class="segmented" role="group" aria-label="Cards or list">` +
     `<button type="button" class="icon-btn view-btn${D.cards === 'grid' ? ' active' : ''}" data-act="cards" data-mode="grid" aria-pressed="${D.cards === 'grid'}" aria-label="Cards" title="Cards">${icon('grid')}</button>` +
     `<button type="button" class="icon-btn view-btn${D.cards === 'list' ? ' active' : ''}" data-act="cards" data-mode="list" aria-pressed="${D.cards === 'list'}" aria-label="List" title="List">${icon('list')}</button></div>` +
@@ -161,7 +162,7 @@ function renderBody(): void {
   } else if (!list.length) {
     content = `<div class="dc-empty">${icon('filter')}<b>No bucket matches</b><button type="button" data-act="clear-bfilters">Clear filters</button></div>`;
   } else if (D.cards === 'list') {
-    content = `<div class="dc-blist" role="list"><div class="dc-brow head"><span>Name</span><span>Format</span><span class="r">Images</span><span class="r">Labels</span><span class="r">Size</span><span>Tags</span><span>Changed</span></div>${list.map(listRow).join('')}</div>`;
+    content = `<div class="dc-blist" role="list"><div class="dc-brow head"><span>Name</span><span>Format</span><span class="r">Images</span><span class="r">Labels</span><span class="r">Size</span><span class="c-t">Tags</span><span>Changed</span></div>${list.map(listRow).join('')}</div>`;
   } else content = `<div class="dc-cards">${list.map(card).join('')}</div>`;
   body.innerHTML = `<div class="dc-pad">${n ? `<div class="dc-sum"><h2>${n} bucket${n === 1 ? '' : 's'}</h2><span class="muted num">${esc(sumLine)}</span></div>` +
     `<div class="dc-fchips" role="group" aria-label="Filter by format">${chips.join('')}</div>` : ''}${content}</div>`;
@@ -185,6 +186,15 @@ function tagsMenu(from: HTMLElement): void {
   floatPopover(m, from, undefined, 'left');
 }
 
+function bsortMenu(from: HTMLElement): void {
+  const m = document.getElementById('dc-menu');
+  if (!m) return;
+  m.innerHTML = `<div class="dc-menu-h">Sort by</div>${SORTS.map(([k, l]) =>
+    `<button type="button" role="menuitemradio" aria-checked="${D.bucketSort === k}" data-act="bsort" data-sort="${k}">${D.bucketSort === k ? icon('check') : '<span class="ico"></span>'}${l}</button>`).join('')}`;
+  floatPopover(m, from, undefined, 'left');
+  m.querySelector<HTMLElement>('button')?.focus();
+}
+
 export const BUCKET_ACTIONS: Record<string, Action> = {
   'focus-bucket': (el, ev) => {
     const bid = el.dataset['bid'] ?? '';
@@ -200,7 +210,14 @@ export const BUCKET_ACTIONS: Record<string, Action> = {
   },
   fmtf: (el) => { D.fmtFilter = el.dataset['fmt'] || null; renderBody(); },
   bfilter: (el) => { D.q = (el as HTMLInputElement).value.trim(); renderBody(); },
-  bsort: (el) => { D.bucketSort = (el as HTMLSelectElement).value as BucketSort; rememberPref(PREF.bucketSort, D.bucketSort); renderBody(); },
+  bsort: (el) => {
+    D.bucketSort = (el.dataset['sort'] as BucketSort | undefined) ?? 'recent';
+    rememberPref(PREF.bucketSort, D.bucketSort);
+    closeFloat();
+    renderBar();
+    renderBody();
+  },
+  'bsort-menu': (el) => bsortMenu(el),
   cards: (el) => { D.cards = el.dataset['mode'] === 'list' ? 'list' : 'grid'; rememberPref(PREF.cards, D.cards); renderOverview(); },
   'tags-menu': (el) => tagsMenu(el),
   tagcheck: (el) => {

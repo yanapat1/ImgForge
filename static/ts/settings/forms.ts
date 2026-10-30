@@ -3,10 +3,11 @@
 import { getJSON } from '../core/api.js';
 import { can, cannot } from '../core/auth.js';
 import { $req, esc, icon } from '../core/dom.js';
+import { tagFieldHTML, tagState } from '../core/tag-field.js';
 import { lookName, PALETTES, paletteName, themeMode, THEME } from '../core/theme.js';
 import type { PaletteSpec } from '../core/theme.js';
 import { MAX_DIST_PICKS } from '../plot/marks.js';
-import type { BrowseResult, ConnDraft, ConnItem, ConnKind, ConnTestResult, DatasetItem, EmbeddingsSummary, FolderEntry, LocalForm, S3Form, SectionId, SetForm, StatusLine, UnionForm,
+import type { BrowseResult, ConnDraft, ConnItem, ConnKind, ConnTestResult, DatasetItem, EmbeddingsSummary, FolderEntry, LocalForm, S3Form, SectionId, SetForm, StatusLine, TagFields, UnionForm,
   UnionPart, YoloInfo } from '../types-settings.js';
 import { SET } from './dialog.js';
 
@@ -22,6 +23,12 @@ export const rowAttr = (el: HTMLElement, selector: string, key: string): string 
 /** Enable / disable a control (a data-act element that is not a button has no `disabled`). */
 export function setDisabled(el: HTMLElement, on: boolean): void {
   if (el instanceof HTMLButtonElement || el instanceof HTMLInputElement) el.disabled = on;
+}
+
+/** A session form's Tags field (saved by dialog.ts saveDataset); suggestions: the tags of the other sessions. */
+export function dsTagsHTML(f: TagFields): string {
+  f.tags ??= tagState(f.origTags);
+  return tagFieldHTML('ds', f.tags, SET.datasets.flatMap((d) => d.tags || []));
 }
 
 /** SET.form as the form of that tag (the caller knows which form is open). */
@@ -241,7 +248,7 @@ function renderS3Form(): string {
     '<p>Always loads from the bucket. Images are downloaded in parallel while indexing, turned into small crops and dropped; the full image is fetched when you open it. No local copy.</p></div></label>' +
     `<label class="radio-card${f.mode === 'cache' ? ' sel' : ''}"><input type="radio" name="s3mode" value="cache" data-f="mode" data-act-change="mode-pick" ${f.mode === 'cache' ? 'checked' : ''}><div><b>${icon('download')}Sync &amp; cache locally</b>` +
     `<p>Mirrors the prefix to disk${esc(est)} with parallel downloads; later syncs only fetch new or changed files. Fastest browsing.</p></div></label></div>` +
-    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? (f.bucket || 'dataset'))}"></label>`;
+    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? (f.bucket || 'dataset'))}"></label>${dsTagsHTML(f)}`;
   return '<section>' +
     step(1, 'Connection', okConn, false, s1) +
     step(2, 'Bucket and prefix', okLoc, !okConn, s2) +
@@ -264,7 +271,7 @@ function renderLocalForm(): string {
     statusHTML(f.status || locationStatus(b)) +
     '<p class="sec-note">Read in place: nothing is copied. Only the small crops, features and projections go to the workspace cache.</p></div>' +
     (ok ? `<div class="form-card"><div class="step-head">${icon('image')}What each point is</div>${unitHTML(f, b)}</div>` : '') +
-    `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label></div>` +
+    `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label>${dsTagsHTML(f)}</div>` +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-local" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-local" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
@@ -289,7 +296,7 @@ function renderDcForm(): string {
   return '<section><div class="form-card done"><div class="step-head">' + icon('db') + 'A folder of a Data Center bucket</div>' + pick +
     (b ? `<div class="browser">${crumbsHTML(b.name, parts, 'dc-crumb')}${foldersHTML((f.dirs ?? []).map((n) => ({ name: n })), 'dc-folder', f.dirs ? 'no sub-folders here' : '…')}</div>` : '') +
     statusHTML(st) + '<p class="sec-note">Read in place from the bucket: nothing is copied.</p></div>' +
-    `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name)}" placeholder="${esc(b ? b.name + (f.path ? ` · ${f.path}` : '') : '')}"></label></div>` +
+    `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name)}" placeholder="${esc(b ? b.name + (f.path ? ` · ${f.path}` : '') : '')}"></label>${dsTagsHTML(f)}</div>` +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button class="primary" data-act="save-dc" ${ok ? '' : 'disabled'}>${icon('play')}Create &amp; open</button></div></section>`;
 }
@@ -332,7 +339,7 @@ function renderEmbeddingsForm(): string {
     '&lt;name&gt;.npy    (rows × dims) float vectors, row i = meta row i; each file is one feature space</pre>' +
     '<p class="sec-note">Columns of numbers colour the plot on a scale; columns with up to 50 values colour it by category. ' +
     'Unit-length vectors are compared by cosine, others by Euclidean distance.</p></details>' +
-    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label></div>` +
+    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(parts[parts.length - 1] ?? '')}"></label>${dsTagsHTML(f)}</div>` +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-embeddings" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-embeddings" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
@@ -376,7 +383,7 @@ function renderLabelingForm(): string {
     '<p class="sec-note">Read live: labels come straight from the labeling database and images from its cache, nothing is exported or copied. ' +
     'Edits made while labeling show up the next time the session is opened (the index is rebuilt for the new version). ' +
     'There are no train / val folders here, so the Model view scores every image as one split.</p>' +
-    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(p && t ? `${p.name} · ${t.name}` : '')}"></label></div>` +
+    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(p && t ? `${p.name} · ${t.name}` : '')}"></label>${dsTagsHTML(f)}</div>` +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button data-act="save-labeling" ${ok ? '' : 'disabled'}>Save</button>` +
     `<button class="primary" data-act="save-labeling" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
@@ -457,7 +464,7 @@ function renderUnionForm(): string {
     '<p class="sec-note">The first session wins where two disagree (its class order, its copy of an image). ' +
     'The alias goes in front of each class name (A:cat), so the members stay apart on the map. ' +
     'Combined datasets and embeddings sessions cannot be members. Nothing is copied: the members’ own crops and features are reused.</p>' +
-    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(unionName(names) || 'combined')}"></label></div>` +
+    `<label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name || '')}" placeholder="${esc(unionName(names) || 'combined')}"></label>${dsTagsHTML(f)}</div>` +
     `<div class="form-foot"><div id="un-problem">${statusHTML(f.saveStatus || (problem && f.parts.length ? { kind: '', text: problem } : null))}</div>` +
     '<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>' +
     `<button data-act="save-union" ${problem ? 'disabled' : ''}>Save</button>` +

@@ -22,7 +22,7 @@ const freeze = (o) => { if (o && typeof o === 'object') { Object.freeze(o); for 
 const run = (evs, t0 = newTurn(0)) => evs.reduce((t, e) => reduce(freeze(t), e), t0);
 
 let t = run([
-  { type: 'meta', run_id: 'r1', model: 'qwen', provider: 'local', mode: 'ask', effort: 'medium', max_steps: 30 },
+  { type: 'meta', run_id: 'r1', model: 'qwen', provider: 'local', mode: 'ask', effort: 'medium', max_steps: 30, in_est: 3200, tools: 14 },
   { type: 'step', n: 1, max: 30 },
   { type: 'thinking', text: 'Let me ', _t: 100 },
   { type: 'thinking', text: 'look.', _t: 150 },
@@ -34,6 +34,8 @@ let t = run([
   { type: 'text', text: 'Hello ' },
 ]);
 assert.equal(t.meta.runId, 'r1');
+assert.equal(t.meta.inEst, 3200, 'the activity dropdown shows the prompt estimate');
+assert.equal(t.meta.tools, 14);
 assert.deepEqual(t.step, { n: 1, max: 30 });
 assert.equal(t.blocks[0].k, 'think');
 assert.equal(t.blocks[0].text, 'Let me look.');

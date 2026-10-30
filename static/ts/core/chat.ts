@@ -120,7 +120,8 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
   switch (ev.type) {
     case 'meta':
       return { ...t, meta: { runId: strOrNull(ev['run_id']), model: strOrNull(ev['model']), provider: strOrNull(ev['provider']),
-        mode: strOrNull(ev['mode']), effort: strOrNull(ev['effort']), maxSteps: numOrNull(ev['max_steps']) } };
+        mode: strOrNull(ev['mode']), effort: strOrNull(ev['effort']), maxSteps: numOrNull(ev['max_steps']),
+        inEst: numOrNull(ev['in_est']), tools: numOrNull(ev['tools']), think: strOrNull(ev['think']), web: strOrNull(ev['web']) } };
     case 'step':
       return { ...t, step: { n: num(ev['n'], 1), max: num(ev['max'], t.meta?.maxSteps ?? 0) } };
     case 'thinking': {
@@ -437,10 +438,10 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     `<div class="chat-hist hidden" id="${uid}-hist" role="dialog" aria-label="Chat history"></div>` +
     '<div class="chat-composer">' +
     '<div class="chat-forced hidden"></div>' +
+    '<div class="chat-hint" aria-live="polite" hidden></div>' +
     `<textarea id="${esc(inputId)}" rows="1" placeholder="${esc(opts.placeholder || 'Ask or tell…  / for commands')}" aria-label="Message the assistant" ` +
     `aria-autocomplete="list" aria-controls="${uid}-slash" autocomplete="off"></textarea>` +
     `<div class="chat-cbar">${opts.composerExtra || ''}<div class="chat-chips" role="group" aria-label="Chat options"></div>` +
-    '<span class="chat-hint" aria-live="polite"></span>' +
     '<button type="button" class="primary icon-btn chat-send" data-ca="send"></button></div></div>';
   const q = <T extends Element = HTMLElement>(sel: string): T => root.querySelector<T>(sel) as T;
   const headEl = q('.chat-head'), logEl = q('.chat-log'), histEl = q('.chat-hist'), chipsEl = q('.chat-chips'),
@@ -499,15 +500,6 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   const fold = (key: string, open: boolean, inner: string, cls = 'ct-fold'): string =>
     `<button type="button" class="${cls}" data-ca="fold" data-key="${key}" aria-expanded="${open}">${inner}${icon(open ? 'chev-u' : 'chev-d')}</button>`;
 
-  function thinkHTML(b: Extract<Block, { k: 'think' }>, key: string, t: AiTurn): string {
-    const live = b.ms === null && t.status === 'streaming';
-    const open = isOpen(key, live);
-    const time = live ? since(b.t0) : `<span class="num">${esc(fmtMs(b.ms))}</span>`;
-    return `<div class="ct-think${open ? ' open' : ''}${live ? ' live' : ''}">` +
-      fold(key, open, `${icon('sparkle')}<span>${live ? 'Thinking…' : 'Thought'}</span><span class="ct-dim">${time}</span><span class="grow"></span>`) +
-      (open ? `<div class="ct-think-body">${esc(b.text)}</div>` : '') + '</div>';
-  }
-
   function itemDetail(it: ToolItem): string {
     const args = Object.keys(it.args).length ? JSON.stringify(it.args, null, 2) : '';
     return '<div class="ct-detail">' + (args ? `<div class="ct-lbl">Arguments</div><pre>${esc(args)}</pre>` : '') +
@@ -531,29 +523,122 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       `${undoBtn(it.undoId, it.undone, it.ok, it.args)}</div>${open ? itemDetail(it) : ''}</div>`;
   }
 
-  function toolsHTML(b: Extract<Block, { k: 'tools' }>, ti: number, bi: number): string {
-    if (!b.read) return `<div class="ct-card r-${esc(b.items[0]?.risk ?? 'change')}">${b.items.map((it) => toolRow(it, keyOf(ti, bi, it.id), true)).join('')}</div>`;
-    const key = keyOf(ti, bi);
-    const running = b.items.some((x) => x.ok === null);
-    const open = isOpen(key, running && b.items.length <= 4);
-    const bad = b.items.filter((x) => x.ok === false).length;
-    const ms = b.items.reduce((s, x) => s + (x.ms ?? 0), 0);
-    const names = [...new Set(b.items.map((x) => x.name))].slice(0, 4).join(', ');
-    const lastSum = b.items[b.items.length - 1]?.summary ?? '';
-    return `<div class="ct-tools${open ? ' open' : ''}">` +
-      fold(key, open, `${running ? '<span class="ct-spin"></span>' : icon('search')}<span class="ct-tools-t">${esc(plural(b.items.length, 'read'))} · <code>${esc(names)}</code></span>` +
-        `<span class="ct-sum">${open ? '' : esc(lastSum)}</span><span class="grow"></span>${bad ? `<span class="ct-badc">${bad} failed</span>` : ''}<span class="ct-ms num">${esc(fmtMs(ms || null))}</span>`) +
-      (open ? `<div class="ct-items">${b.items.map((it) => toolRow(it, keyOf(ti, bi, it.id), false)).join('')}</div>` : '') + '</div>';
+  /** a change / danger tool call: its own card in the answer (read calls are rows of the activity dropdown) */
+  function cardHTML(b: Extract<Block, { k: 'tools' }>, ti: number, bi: number): string {
+    return `<div class="ct-card r-${esc(b.items[0]?.risk ?? 'change')}">${b.items.map((it) => toolRow(it, keyOf(ti, bi, it.id), true)).join('')}</div>`;
   }
 
-  function searchHTML(b: Extract<Block, { k: 'search' }>, key: string): string {
+  // ---- the activity dropdown: one per answer, every step (thinking, reads, searches, skills, retries, the words
+  // said between tool calls) as one row of the same shape; its header says what the model is doing right now.
+  type Step = { b: Block; bi: number };
+  const isStep = (b: Block): boolean => b.k === 'think' || (b.k === 'tools' && b.read) || b.k === 'search' || b.k === 'skill' ||
+    b.k === 'retry' || (b.k === 'notice' && b.level === 'info');
+  const shortModel = (m: string | null | undefined): string => (m ? m.split('/').pop() || m : 'the model');
+  const firstLine = (text: string): string => text.trim().split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? '';
+
+  /** one row: [icon] label · detail ……… time ▾ ; `body` (when given) opens under it */
+  function actRow(key: string | null, ico: string, label: string, detail: string, time: string, body: (() => string) | null, cls = '', dflt = false): string {
+    const inner = `<span class="ct-act-ic">${ico}</span><span class="ct-act-l">${label}</span><span class="ct-act-d">${detail}</span>` +
+      `<span class="ct-act-ms num">${time}</span>`;
+    if (!key || !body) return `<div class="ct-act-row${cls ? ` ${cls}` : ''}"><div class="ct-act-rh">${inner}<span class="ct-act-chev"></span></div></div>`;
+    const open = isOpen(key, dflt);
+    return `<div class="ct-act-row${cls ? ` ${cls}` : ''}${open ? ' open' : ''}"><button type="button" class="ct-act-rh" data-ca="fold" data-key="${key}" aria-expanded="${open}">` +
+      `${inner}${icon(open ? 'chev-u' : 'chev-d')}</button>${open ? `<div class="ct-act-body">${body()}</div>` : ''}</div>`;
+  }
+
+  function stepRows(s: Step, t: AiTurn, ti: number): string {
+    const { b, bi } = s;
+    const key = keyOf(ti, bi);
+    switch (b.k) {
+      case 'think': {
+        const live = b.ms === null && t.status === 'streaming';
+        return actRow(key, live ? '<span class="ct-spin"></span>' : icon('sparkle'), live ? 'Thinking…' : 'Thought', esc(firstLine(b.text)),
+          live ? since(b.t0) : esc(fmtMs(b.ms)), () => `<div class="ct-act-text">${esc(b.text)}</div>`, `k-think${live ? ' live' : ''}`, live);
+      }
+      case 'tools': return b.items.map((it) => actRow(keyOf(ti, bi, it.id), okIcon(it.ok), `<code class="ct-fn">${esc(it.name)}</code>`,
+        esc(it.summary || argsShort(it.args)), esc(fmtMs(it.ms)), () => itemDetail(it), `k-tool${it.ok === false ? ' bad' : ''}${it.ok === null ? ' live' : ''}`)).join('');
+      case 'search': {
+        const info = b.blocked ? 'nothing was sent' : [b.engine, plural(b.results.length, 'result')].filter(Boolean).join(' · ');
+        const body = (): string => (b.blocked ? `<div class="ct-dim">${esc(b.reasons.length ? `It would have sent: ${b.reasons.join(', ')}. Your web search level keeps that private.` : 'Your web search level keeps this query private.')}</div>` : '') +
+          (b.results.length ? `<ul class="ct-src">${b.results.map((r) => { const u = safeUrl(r.url); return `<li>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>` : esc(r.title)}<span class="ct-dim">${esc(hostOf(r.url))}</span></li>`; }).join('')}</ul>` : '') +
+          (!b.blocked && !b.results.length ? '<span class="ct-dim">no results</span>' : '');
+        return actRow(key, icon(b.blocked ? 'shield' : 'globe'), b.blocked ? 'Search blocked' : 'Searched', `<q>${esc(b.query)}</q> · ${esc(info)}`, '', body, `k-search${b.blocked ? ' warn' : ''}`);
+      }
+      case 'skill': return actRow(null, icon('layers'), 'Loaded skill', `<b>${esc(b.name)}</b>`, '', null, 'k-skill');
+      case 'retry': return actRow(key, icon('refresh'), `Retry ${b.attempt}/${b.max}`, esc(firstLine(b.reason)), `${esc(String(b.waitS))} s`,
+        () => `<div class="ct-act-text">${esc(b.reason)}</div>`, 'k-retry warn');
+      case 'notice': return actRow(key, icon('circle'), 'Note', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-note');
+      case 'text': return actRow(key, icon('text'), 'Said', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-said');
+      default: return '';
+    }
+  }
+
+  /** what the model is doing right now (the live header) */
+  function nowDoing(t: AiTurn): string {
+    if (t.blocks.some((x) => x.k === 'confirm' && (x.state === 'pending' || x.state === 'sent'))) return 'Waiting for your OK';
+    const lb = t.blocks[t.blocks.length - 1];
+    if (lb?.k === 'think' && lb.ms === null) return 'Thinking…';
+    for (let i = t.blocks.length - 1; i >= 0; i--) {
+      const x = t.blocks[i];
+      const run = x?.k === 'tools' ? x.items.find((it) => it.ok === null) : undefined;
+      if (run) return `Running <code>${esc(run.name)}</code>…${run.summary ? ` <span class="ct-dim">${esc(run.summary)}</span>` : ''}`;
+    }
+    if (lb?.k === 'retry') return `Retrying ${lb.attempt}/${lb.max}… <span class="ct-dim">${esc(firstLine(lb.reason).slice(0, 80))}</span>`;
+    if (lb?.k === 'text') return 'Writing the answer…';
+    if (!t.meta) return 'Connecting…';
+    return `Waiting for <code>${esc(shortModel(t.meta.model))}</code>…`;
+  }
+
+  /** model · step · tokens in / out · speed (estimated while it streams, the real usage once done) */
+  function statsHTML(t: AiTurn): string {
+    const m = t.meta;
+    const live = t.status === 'streaming';
+    let out: number | null = t.usage?.out ?? null;
+    let est = false;
+    if (live || out == null) {
+      const chars = t.blocks.reduce((n, x) => n + (x.k === 'text' || x.k === 'think' ? x.text.length : 0), 0);
+      out = chars ? Math.round(chars / 4) : null;
+      est = true;
+    }
+    const secs = (t.ms ?? (live && t.t0 ? performance.now() - t.t0 : 0)) / 1000;
+    const inN = t.usage?.in || m?.inEst || null;
+    const parts = [
+      m?.model ? `<code>${esc(shortModel(m.model))}</code>` : '',
+      t.step ? `step ${t.step.n}/${t.step.max || '?'}` : '',
+      inN ? `in ${t.usage?.in ? '' : '~'}${fmtK(inN)}` : '',
+      out ? `out ${est ? '~' : ''}${fmtK(out)}` : '',
+      out && secs > 0.5 ? `${(out / secs).toFixed(out / secs < 10 ? 1 : 0)} tok/s` : '',
+    ].filter(Boolean);
+    return parts.length ? `<div class="ct-stats num">${parts.join('<i aria-hidden="true">·</i>')}</div>` : '';
+  }
+
+  function activityHTML(t: AiTurn, ti: number, steps: Step[]): string {
+    const live = t.status === 'streaming';
+    if (!live && !steps.length) return '';
+    const key = `${ti}.act`;
     const open = isOpen(key, false);
-    const shown = open ? b.results : b.results.slice(0, 3);
-    return `<div class="ct-search${b.blocked ? ' blocked' : ''}"><div class="ct-search-h">${icon(b.blocked ? 'shield' : 'globe')}<span>${b.blocked ? 'Search blocked' : 'Searched the web'}</span><q>${esc(b.query)}</q>` +
-      `<span class="ct-dim">${esc(b.blocked ? 'nothing was sent' : [b.engine, b.level, plural(b.results.length, 'result')].filter(Boolean).join(' · '))}</span></div>` +
-      (b.blocked ? `<div class="ct-dim">${esc(b.reasons.length ? `It would have sent: ${b.reasons.join(', ')}. Your web search level keeps that private.` : 'Your web search level keeps this query private.')}</div>` : '') +
-      (shown.length ? `<ul class="ct-src">${shown.map((r) => { const u = safeUrl(r.url); return `<li>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>` : esc(r.title)}<span class="ct-dim">${esc(hostOf(r.url))}</span></li>`; }).join('')}</ul>` : '') +
-      (b.results.length > 3 ? `<button type="button" class="ghost ct-mini" data-ca="fold" data-key="${key}" aria-expanded="${open}">${open ? 'Fewer' : `All ${b.results.length} sources`}</button>` : '') + '</div>';
+    const thinkMs = steps.reduce((n, s) => n + (s.b.k === 'think' ? s.b.ms ?? 0 : 0), 0);
+    const nTools = steps.reduce((n, s) => n + (s.b.k === 'tools' ? s.b.items.length : 0), 0);
+    const nSearch = steps.filter((s) => s.b.k === 'search').length;
+    const bad = steps.reduce((n, s) => n + (s.b.k === 'tools' ? s.b.items.filter((x) => x.ok === false).length : 0), 0);
+    const counts = [thinkMs ? `thought ${fmtMs(thinkMs)}` : '', nTools ? plural(nTools, 'tool') : '', nSearch ? `${nSearch} search${nSearch === 1 ? '' : 'es'}` : '']
+      .filter(Boolean).join(' · ');
+    const head = live
+      ? `<span class="ct-spin"></span><span class="ct-act-now">${nowDoing(t)}</span><span class="grow"></span>` +
+        `<span class="ct-dim num">${t.step ? `step ${t.step.n}/${t.step.max || '?'} · ` : ''}</span>${since(t.t0)}`
+      : `${icon(t.status === 'error' ? 'alert' : 'sparkle')}<span class="ct-act-now">${t.status === 'stopped' ? 'Stopped' : t.status === 'error' ? 'Failed' : 'Worked'}` +
+        `${t.ms != null ? ` ${esc(fmtMs(t.ms))}` : ''}</span><span class="ct-dim">${esc(counts)}</span>${bad ? `<span class="ct-badc">${bad} failed</span>` : ''}<span class="grow"></span>`;
+    let body = '';
+    if (open) {
+      const m = t.meta;
+      const sent = m ? actRow(null, icon('send'), `Sent to <code>${esc(shortModel(m.model))}</code>`,
+        esc([m.provider, m.inEst ? `~${fmtK(m.inEst)} tokens in` : '', m.tools ? plural(m.tools, 'tool') : '', m.mode, m.effort ? `effort ${m.effort}` : ''].filter(Boolean).join(' · ')), '', null, 'k-sent') : '';
+      const wait = live && !/^(Thinking|Running|Writing)/.test(nowDoing(t))
+        ? actRow(null, '<span class="ct-spin"></span>', nowDoing(t), '', '', null, 'k-wait live') : '';
+      body = `<div class="ct-act-list">${sent}${steps.map((s) => stepRows(s, t, ti)).join('')}${wait}</div>${statsHTML(t)}`;
+    }
+    return `<div class="ct-act${open ? ' open' : ''}${live ? ' live' : ''}">` +
+      `<button type="button" class="ct-act-h" data-ca="fold" data-key="${key}" aria-expanded="${open}">${head}${icon(open ? 'chev-u' : 'chev-d')}</button>${body}</div>`;
   }
 
   function confirmHTML(b: Extract<Block, { k: 'confirm' }>, ti: number, bi: number): string {
@@ -591,11 +676,9 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   function blockHTML(b: Block, t: AiTurn, ti: number, bi: number, lastText: boolean): string {
     switch (b.k) {
-      case 'think': return thinkHTML(b, keyOf(ti, bi), t);
       case 'text': return `<div class="ct-md${lastText && t.status === 'streaming' ? ' streaming' : ''}">${md(b.text)}</div>`;
-      case 'tools': return toolsHTML(b, ti, bi);
-      case 'search': return searchHTML(b, keyOf(ti, bi));
-      case 'skill': return `<div class="ct-skill">${icon('sparkle')}<span>using skill</span><b>${esc(b.name)}</b></div>`;
+      case 'tools': return cardHTML(b, ti, bi);
+      case 'think': case 'search': case 'skill': return '';                    // rows of the activity dropdown
       case 'todo': {
         const done = b.items.filter((x) => /done|complete/.test(x.state)).length;
         return `<div class="ct-todo"><div class="ct-lbl">Checklist · ${done}/${b.items.length}</div><ul>${b.items.map((x) => {
@@ -624,11 +707,15 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   }
 
   function aiHTML(t: AiTurn, ti: number): string {
-    let lastText = -1;
-    t.blocks.forEach((b, i) => { if (b.k === 'text') lastText = i; });
-    const body = t.blocks.map((b, bi) => blockHTML(b, t, ti, bi, bi === lastText && bi === t.blocks.length - 1)).join('');
-    const live = t.status === 'streaming'
-      ? `<div class="ct-live"><span class="ct-spin"></span><span class="num">${t.step ? `step ${t.step.n}/${t.step.max || '?'}` : 'starting…'}</span>${since(t.t0)}</div>` : '';
+    // steps (and the words said before the last of them) go into the activity dropdown; the answer, the cards that
+    // change data and everything that waits for the user stay in the answer, in their order
+    let lastStep = -1;
+    t.blocks.forEach((b, i) => { if (isStep(b)) lastStep = i; });
+    const steps: Step[] = [], rest: Step[] = [];
+    t.blocks.forEach((b, bi) => (isStep(b) || (b.k === 'text' && bi < lastStep) ? steps : rest).push({ b, bi }));
+    const lastText = rest.reduce((n, s) => (s.b.k === 'text' ? s.bi : n), -1);
+    const body = activityHTML(t, ti, steps) +
+      rest.map(({ b, bi }) => blockHTML(b, t, ti, bi, bi === lastText && bi === t.blocks.length - 1)).join('');
     const err = t.err ? `<div class="status-line err">${icon('alert')}<span>${esc(t.err)}</span>` +
       `<button type="button" class="ghost ct-mini" data-ca="retry" data-ti="${ti}">${icon('refresh')}Retry</button></div>` : '';
     const words = turnText(t);
@@ -638,7 +725,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         (words ? `<button type="button" class="ghost ct-mini" data-ca="copy" data-ti="${ti}" title="Copy the answer as Markdown">Copy</button>` : '') +
         (t.kind === 'report' && words && !t.err ? `<button type="button" class="ghost ct-mini" data-ca="dl" data-ti="${ti}">${icon('download')}Download .md</button>` : '') + '</div>' : '';
     return `<div class="chat-turn ai ai-msg bot" data-ti="${ti}"><span class="chat-av" aria-hidden="true">${icon('gem')}</span>` +
-      `<div class="chat-body">${body}${live}${err}${foot}</div></div>`;
+      `<div class="chat-body">${body}${err}${foot}</div></div>`;
   }
 
   function entryHTML(e: Entry, ti: number): string {
@@ -681,7 +768,12 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const el = logEl.querySelector(`.chat-turn[data-ti="${i}"]`);
     if (!e || !el) { renderLog(); return; }
     const stick = nearBottom();
+    // the open activity list scrolls on its own: keep its place, or follow the newest step when it was at the end
+    const list = el.querySelector<HTMLElement>('.ct-act-list');
+    const listTop = list ? list.scrollTop : 0, listEnd = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 24;
     el.outerHTML = entryHTML(e, i);
+    const next = logEl.querySelector<HTMLElement>(`.chat-turn[data-ti="${i}"] .ct-act-list`);
+    if (next) next.scrollTop = listEnd ? next.scrollHeight : listTop;
     if (stick) toBottom();
   }
 
@@ -704,12 +796,15 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       chip('web', `${icon('globe')}${esc(w)}`, WEB_HINT[w] + ' (/web)', w !== 'off' ? 'on' : '') +
       (opts.extraChips ? opts.extraChips() : '');
   }
-  const defaultHint = (): string => (C.busy ? 'Esc or ■ stops' : `Enter sends · / commands · Shift+Tab: ${mode()}`);
+  /** a short note above the box after a chip / command changed something (gone after 3.5 s) */
   function flash(text: string): void {
     hintEl.textContent = text;
+    hintEl.hidden = false;
+    hintEl.classList.remove('flash');
+    void hintEl.offsetWidth;                   // restart the fade-in
     hintEl.classList.add('flash');
     clearTimeout(C.hintTimer);
-    C.hintTimer = window.setTimeout(() => { hintEl.classList.remove('flash'); hintEl.textContent = defaultHint(); }, 3500);
+    C.hintTimer = window.setTimeout(() => { hintEl.hidden = true; hintEl.textContent = ''; hintEl.classList.remove('flash'); }, 3500);
   }
   function renderSend(): void {
     const busy = !!C.busy;
@@ -720,7 +815,6 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     sendEl.title = busy ? 'Stop (Esc)' : 'Send (Enter)';
     root.setAttribute('aria-busy', String(busy));
     logEl.setAttribute('aria-busy', String(busy));
-    if (!hintEl.classList.contains('flash')) hintEl.textContent = defaultHint();
   }
   function renderForced(): void {
     forcedEl.classList.toggle('hidden', !C.forced.length);

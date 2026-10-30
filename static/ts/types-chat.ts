@@ -99,7 +99,11 @@ export type Block =
   | { k: 'retry'; attempt: number; max: number; reason: string; waitS: number; t0: number }
   | { k: 'notice'; level: string; text: string };
 
-export interface TurnMeta { runId: string | null; model: string | null; provider: string | null; mode: string | null; effort: string | null; maxSteps: number | null }
+export interface TurnMeta {
+  runId: string | null; model: string | null; provider: string | null; mode: string | null; effort: string | null; maxSteps: number | null;
+  /** the estimated prompt tokens and the number of tools the model was sent (meta.in_est / meta.tools) */
+  inEst: number | null; tools: number | null; think: string | null; web: string | null;
+}
 /** One answer of the agent. */
 export interface AiTurn {
   role: 'ai';

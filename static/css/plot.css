@@ -23,13 +23,13 @@
 .bar-field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
 .bar-field select { max-width: 210px; }
 .bar-search { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 2px 0 8px;
-  border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface-2); min-width: 0; }
+  border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface-2); min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .bar-search:focus-within { border-color: var(--accent); }
 .bar-search > .ico { color: var(--text-faint); flex: none; }
-.bar-search .text-q { width: 18ch; border: none; background: transparent; height: calc(var(--control-h) - 2px); padding: 0 4px;
+.bar-search .text-q { flex: 1 1 18ch; width: 18ch; min-width: 8ch; border: none; background: transparent; height: calc(var(--control-h) - 2px); padding: 0 4px;
   transition: width var(--t) var(--ease); }
-.bar-search .text-q:focus { outline: none; width: 30ch; }
-.bar-search .icon-btn { width: 26px !important; height: 26px; min-height: 0; border-color: transparent; }
+.bar-search .text-q:focus, .bar-search .text-q:focus-visible { outline: none; box-shadow: none; width: 30ch; }
+.bar-search .icon-btn { flex: none; width: 26px !important; height: 26px; min-height: 0; border-color: transparent; }
 .bar-search.no-text { display: none; }
 
 /* popovers of the bar: anchored left (they open towards the plot), the last ones to the right edge */
@@ -78,7 +78,8 @@
 .feat-import { display: flex; flex-direction: column; gap: 4px; }
 #feat-import-st:empty { display: none; }
 
-/* narrow bar: icons only (each trigger keeps its title / aria-label), then the search shrinks to its icon */
+/* narrow bar: icons only (each trigger keeps its title / aria-label), then the search wraps to its own row (760px).
+   With the text search shown the labels go ~220px sooner, so the search keeps room for its placeholder. */
 @container ctlbar (max-width: 900px) {
   .bar-field .bar-t { display: none; }
   .bar-map { max-width: 240px; }
@@ -90,10 +91,24 @@
 @container ctlbar (max-width: 640px) {
   #issues-btn .bar-t { display: none; }
 }
-@container ctlbar (max-width: 560px) {
-  .ctl-bar { flex-wrap: wrap; }
+@container ctlbar (max-width: 1120px) {
+  html:not(.no-boxes) .ctl-bar:has(.bar-search:not(.no-text)) .bar-field .bar-t { display: none; }
+  html:not(.no-boxes) .ctl-bar:has(.bar-search:not(.no-text)) .bar-map { max-width: 240px; }
+  html:not(.no-boxes) .ctl-bar:has(.bar-search:not(.no-text)) .bar-field select { max-width: 170px; }
+}
+@container ctlbar (max-width: 1000px) {
+  html:not(.no-boxes) .ctl-bar:has(.bar-search:not(.no-text)) :is(#cls-btn, #btn-groups) .bar-t { display: none; }
+}
+@container ctlbar (max-width: 860px) {
+  html:not(.no-boxes) .ctl-bar:has(.bar-search:not(.no-text)) #issues-btn .bar-t { display: none; }
+}
+@container ctlbar (max-width: 760px) {
+  html:not(.no-boxes) .ctl-bar:has(.bar-search:not(.no-text)) { flex-wrap: wrap; }
   .bar-search { order: 10; flex: 1 1 100%; }
   .bar-search .text-q, .bar-search .text-q:focus { width: 100%; flex: 1; }
+}
+@container ctlbar (max-width: 560px) {
+  .ctl-bar { flex-wrap: wrap; }
   .ctl-bar > .grow { display: none; }
   .bar-pop, .ctl-bar > .grow ~ .popover-anchor .bar-pop { position: fixed; left: var(--s3); right: var(--s3); top: auto; width: auto;
     max-height: 70vh; overflow-y: auto; }

@@ -6,8 +6,8 @@
 //   the wizard (views/label-new.js, loaded on demand), export opens label/export.js; its ⋯ menu (#home-cardmenu)
 //   has Visualize a task…, Duplicate…, Manage classes… (label/session-actions.js, loaded on demand) and Re-export.
 // Find: a name search (#home-search) and a tag filter (#home-tagbar, AND) over the current tab; each session has up to
-// 20 tags of its own (under its name, edited in the #home-tagedit popover: PUT api/datasets/{id}/tags or
-// PATCH api/label/projects/{pid}).
+// 20 tags of its own (under its name; the card's Edit opens the full edit form, whose Tags field saves them:
+// core/tag-field.ts, PUT api/datasets/{id}/tags or PATCH api/label/projects/{pid}).
 // Whose: a scope filter (#home-scope: All · Mine · Shared with me · Global · Everyone's for admins, prefs 'homeScope')
 // passed to both lists as ?scope=. Each card shows its owner, the people it is shared with (views/share.ts edits
 // them), a lock (private) or globe (global) badge, and only the actions my role on it allows (viewer < labeler < owner).
@@ -34,21 +34,19 @@ import type { HomeExportTarget, HomeProject, HomeScope, HomeSession, HomeTask, S
 // errs: what failed to load ({ds, lp}); the other list still shows
 // tab: 'viz' | 'label', picked on the first render (the remembered one, else the kind that has sessions)
 type TabId = 'viz' | 'label';
-/** The tag editor popover's state. */
-interface TagEdit { kind: TabId; id: string; from: HTMLElement; tags: string[]; err: string; busy: boolean }
 interface HomeState {
   sessions: HomeSession[]; projects: HomeProject[];
   errs: { ds: string | null; lp: string | null };
   palette: string[] | null; paletteLight: string[] | null;
   opening: boolean; bound: boolean; tab: TabId | null;
-  menuFrom: HTMLElement | null; flash: string | null; q: string; tagSel: Set<string>; raf: number; te: TagEdit | null;
+  menuFrom: HTMLElement | null; flash: string | null; q: string; tagSel: Set<string>; raf: number;
   scope: HomeScope; loadSeq: number;
   sel: string[]; selBusy: '' | 'compare' | 'combine'; selErr: string;
 }
 const H: HomeState = { sessions: [], projects: [], errs: { ds: null, lp: null }, palette: null, paletteLight: null, opening: false, bound: false, tab: null,
-  menuFrom: null, flash: null, q: '', tagSel: new Set(), raf: 0, te: null, scope: 'all', loadSeq: 0,
+  menuFrom: null, flash: null, q: '', tagSel: new Set(), raf: 0, scope: 'all', loadSeq: 0,
   sel: [], selBusy: '', selErr: '' };
-// q: the search text (lower-cased); tagSel: the selected filter tags (lower-cased); te: the open tag editor
+// q: the search text (lower-cased); tagSel: the selected filter tags (lower-cased)
 // sel: the picked Visualize cards, in the order they were picked (= the members' order: A, B, …); selBusy: creating the
 // combined dataset; selErr: why that failed (the server's 400 message)
 const TABS: readonly TabId[] = ['viz', 'label'];
@@ -70,7 +68,6 @@ const roleOf = (x: SharedFields): Role => x.my_role || 'owner';     // no role i
 const can = (x: SharedFields, need: Role): boolean => RANK[roleOf(x)] >= RANK[need];
 const NEW_TEXT: Record<TabId, string> = { viz: 'New visualize session', label: 'New label session' };
 const MAX_CHIPS = 5;
-const MAX_TAGS = 20, TAG_LEN = 32;               // the server's rules (dataviz/core/names.py clean_tags)
 
 // ---- find: name contains the query, and the session has every selected tag
 const fold = (s: unknown): string => String(s).toLowerCase();
@@ -96,11 +93,13 @@ function tagsHTML(tags: string[]): string {
 
 const fmt = (n: unknown): string => Number(n).toLocaleString();
 
-// the people of a session (owner chip, member stack) and when I opened it, at the start of the card's footer
+// the people of a session (owner chip, member stack) and when I opened it, at the start of the card's footer; the
+// time is short ("26 h ago", the full "opened 26 h ago" as its tooltip) and never cut: the owner's name gives way
 function peopleHTML(x: SharedFields, when: string): string {
   const members = (x.members || []).filter((m) => !x.owner || m.id !== x.owner.id);
+  const short = when.replace(/^(opened|created|updated) /, '');
   return `<span class="sc-people">${ownerChipHTML(x.owner)}${avatarStackHTML(members)}` +
-    `${when ? `<span class="sc-when">${esc(when)}</span>` : ''}</span>`;
+    `${when ? `<span class="sc-when" title="${esc(when)}">${esc(short)}</span>` : ''}</span>`;
 }
 
 // private (lock) or global (globe): next to the source badge on the cover
@@ -152,9 +151,10 @@ const modalityHTML = (d: HomeSession): string => (d.kind === 'embeddings' && d.m
   ? `<span class="sc-modality">${d.modality.map((m) => `<span title="rows carry ${esc(m)} previews">${icon(MODALITY_ICON[m] || 'vectors')}${esc(m)}</span>`).join('')}</span>` : '');
 const kindIcon = (d: HomeSession): string => KIND_ICON[d.kind] || 'folder';
 
-function coverHTML(d: HomeSession): string {
+// problem: a broken session's short reason, a badge over the cover
+function coverHTML(d: HomeSession, problem = ''): string {
   const st = d.stats || {};
-  const tag = `<span class="sc-src${d.kind === 'labeling' ? ' lbl' : d.kind === 'union' ? ' uni' : ''}">${icon(kindIcon(d))}${esc(sourceLabel(d))}</span>` +
+  const tag = (problem ? `<span class="sc-problem">${icon('alert')}${esc(problem)}</span>` : '') + `<span class="sc-src${d.kind === 'labeling' ? ' lbl' : d.kind === 'union' ? ' uni' : ''}">${icon(kindIcon(d))}${esc(sourceLabel(d))}</span>` +
     (d.loaded ? `<span class="sc-live" title="Loaded on the server: it opens at once">${icon('check')}Loaded</span>` : '') + visBadge(d);
   if (!d.cover) {
     const emb = d.kind === 'embeddings';
@@ -174,9 +174,9 @@ function coverHTML(d: HomeSession): string {
   return `<div class="sc-cover">${tag}<div class="sc-mosaic">${imgs}</div></div>`;
 }
 
-// the card's Edit button opens the tag editor popover; its "Full edit…" button reaches the settings form / wizard
-const editBtn = (act: string, x: { name: string; tags?: string[] | undefined }, title: string): string => `<button class="icon-btn ghost" data-act="${act}" aria-haspopup="dialog" aria-expanded="false" ` +
-  `aria-label="Edit ${esc(x.name)}" title="${title} (tags ${tagsOf(x).length} / ${MAX_TAGS})">${icon('edit')}</button>`;
+// the card's Edit button opens the full edit (the settings form / the wizard), tags included
+const editBtn = (act: string, x: { name: string }, title: string): string => `<button class="icon-btn ghost" data-act="${act}" aria-haspopup="dialog" ` +
+  `aria-label="Edit ${esc(x.name)}" title="${title}">${icon('edit')}</button>`;
 
 // the pick box of a Visualize card (top-left of its cover); a session that cannot be a member gets a disabled one + why
 function pickHTML(d: HomeSession): string {
@@ -206,16 +206,19 @@ function cardHTML(d: HomeSession): string {
     `<span class="sc-chip"><i style="background:${esc(classColor(i))}"></i>${esc(c)}</span>`).join('') +
     (more > 0 ? `<span class="sc-chip more">+${more}</span>` : '');
   const problem = d.error || (d.exists === false ? 'folder not found' : '');
-  // a broken session says so in the body, full width, with what to do (not squeezed into the footer)
-  const alert = !problem ? '' : `<div class="sc-alert" role="note">${icon('alert')}<div>` + (d.error
-    ? `<b>Cannot open</b><span>${esc(d.error)}</span>`
-    : '<b>Folder not found</b><span>It was moved, renamed or deleted. Edit the session to point it at the new place, or remove it.</span>') + '</div></div>';
+  // a broken session: what is wrong on its (greyed) cover, one line in the body (why + Fix…, the full text as its
+  // tooltip), so it is no taller than a healthy card and does not stretch its grid row
+  const why = d.error || 'Moved, renamed or deleted';
+  const tip = d.error ? `Cannot open: ${d.error}` : 'Folder not found: it was moved, renamed or deleted. Edit the session to point it at the new place, or remove it.';
+  const alert = !problem ? '' : `<div class="sc-alert" role="note" title="${esc(tip)}"><span class="why">${esc(why)}</span>` +
+    (can(d, 'owner') ? `<button class="sc-fix" data-act="edit" title="Edit the session: point it at the new place">Fix…</button>` : '') +
+    `<span class="visually-hidden">${esc(tip)}</span></div>`;
   const when = openedText(d, d.created ? `created ${timeAgo(d.created)}` : '');
   // a labeling-backed session names its labeling session + task (the label:// uri means nothing to people)
   const lb = d.kind === 'labeling' ? d.labeling || {} : null;
   const where = lb ? (lb.project ? `${lb.project} › ${lb.task}${d.only_done ? ' · finished images only' : ''}` : 'labeling session') : d.uri || '';
   return `<article class="session-card${d.loaded ? ' active' : ''}${problem ? ' broken' : ''}${H.sel.includes(d.id) ? ' picked' : ''}" data-id="${esc(d.id)}" data-role="${roleOf(d)}">` +
-    pickHTML(d) + coverHTML(d) +
+    pickHTML(d) + coverHTML(d, problem ? (d.error ? 'Cannot open' : 'Folder not found') : '') +
     '<div class="sc-body">' +
     `<h3 class="sc-title"><button class="sc-open" data-act="open" title="Open ${esc(d.name)}">${esc(d.name)}</button></h3>` +
     tagsHTML(tagsOf(d)) +
@@ -225,10 +228,9 @@ function cardHTML(d: HomeSession): string {
     '</div>' +
     '<footer class="sc-foot">' +
     peopleHTML(d, when) +
-    '<span class="grow"></span>' +
     (lb && lb.project ? `<button class="icon-btn ghost" data-act="tolabel" aria-label="Open the labeling session of ${esc(d.name)}" title="Open the labeling session ${esc(lb.project)}">${icon('tag')}</button>` : '') +
     shareBtn(d, 'viz') +
-    (can(d, 'owner') ? editBtn('tags', d, 'Edit tags or open the full edit') +
+    (can(d, 'owner') ? editBtn('edit', d, 'Edit: name, source and tags') +
       `<button class="icon-btn ghost danger" data-act="remove" aria-label="Remove ${esc(d.name)}" title="Remove the session (no files are deleted)">${icon('trash')}</button>` : '') +
     '</footer><div class="sc-busy" aria-hidden="true"><span class="spin"></span>Opening…</div></article>';
 }
@@ -323,10 +325,10 @@ function labelCardHTML(p: HomeProject): string {
       (more > 0 ? `<span class="lp-more">+${more} more task${more === 1 ? '' : 's'}</span>` : '') + '</div>' : '') +
     checklistHTML(p) +
     '</div><footer class="sc-foot">' +
-    peopleHTML(p, openedText(p, p.updated ? `updated ${timeAgo(p.updated)}` : '')) + '<span class="grow"></span>' +
+    peopleHTML(p, openedText(p, p.updated ? `updated ${timeAgo(p.updated)}` : '')) +
     (can(p, 'labeler') ? `<button class="icon-btn ghost" data-act="lexport" aria-label="Export ${esc(p.name)}" title="Export the labels">${icon('download')}</button>` : '') +
     shareBtn(p, 'label') +
-    (can(p, 'owner') ? editBtn('ltags', p, 'Edit tags, or open the full edit to rename and add tasks or classes') +
+    (can(p, 'owner') ? editBtn('ledit', p, 'Edit: name, tags, tasks, classes and export') +
       `<button class="icon-btn ghost danger" data-act="lremove" aria-label="Remove ${esc(p.name)}" title="Remove the labeling session">${icon('trash')}</button>` : '') +
     `<button class="icon-btn ghost lp-more" data-act="lmore" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${esc(p.name)}" title="More: duplicate, manage classes, re-export"><span aria-hidden="true">⋯</span></button>` +
     '</footer><div class="sc-busy" aria-hidden="true"><span class="spin"></span>Opening…</div></article>';
@@ -439,7 +441,6 @@ function renderTagbar(): void {
 
 // the grids, the tab counts and the tag bar (not the tabs / search box: typing keeps its focus)
 function renderPanels(): void {
-  closeTagEdit(false);
   closeCardMenu(false);
   const on = filtering();
   for (const t of TABS) {
@@ -472,7 +473,6 @@ function setTab(t: TabId, focus: boolean, remember: boolean): void {
   $req('home-new-text').textContent = NEW_TEXT[t];
   if (focus) $req(`home-tab-${t}`).focus();
   closeCardMenu(false);
-  closeTagEdit(false);
   renderTagbar();
   renderSelBar();
 }
@@ -485,7 +485,6 @@ function render(): void {
   $req('home-tabs').classList.toggle('hidden', none);
   $req('home-filter').classList.toggle('hidden', none);
   if (none) {
-    closeTagEdit(false);
     $req('home-panel-viz').classList.remove('hidden');
     $req('home-panel-label').classList.add('hidden');
     $req('home-panel-viz').classList.add('is-empty');
@@ -753,7 +752,7 @@ function openCardMenu(from: HTMLElement): void {
   menuEl.querySelector<HTMLElement>('[role=menuitem]')?.focus();
 }
 
-// ---- popovers (the ⋯ menu, the tag editor): shown under their button, right-aligned, flipped up when no room
+// ---- popovers (the ⋯ menu): shown under their button, right-aligned, flipped up when no room
 function placePopover(m: HTMLElement, from: HTMLElement): void {
   m.classList.remove('hidden');
   const r = from.getBoundingClientRect();
@@ -776,206 +775,6 @@ function closeCardMenu(refocus: boolean): void {
   const from = H.menuFrom;
   H.menuFrom = null;
   hidePopover(m, from, refocus);
-}
-
-// ---- tag editor (#home-tagedit): chips with ×, an input (Enter / comma adds, a pasted list splits on commas and
-// newlines, Backspace on empty removes the last), suggestions from the tags of the same list, Save / Cancel.
-// The client mirrors the server rules (trim, collapse spaces, ≤ 32 chars, ≤ 20, case-insensitive dedupe).
-const cleanTag = (t: unknown): string => String(t).trim().replace(/\s+/g, ' ');
-
-function teItem(te: TagEdit): HomeSession | HomeProject | undefined {
-  return te.kind === 'viz' ? H.sessions.find((x) => x.id === te.id) : H.projects.find((x) => x.id === te.id);
-}
-
-function openTagEdit(from: HTMLElement, kind: TabId): void {
-  const id = kind === 'viz' ? dataOf(from, 'id') : dataOf(from, 'pid');
-  closeCardMenu(false);
-  closeTagEdit(false);
-  const x = kind === 'viz' ? H.sessions.find((d) => d.id === id) : H.projects.find((p) => p.id === id);
-  if (!x) return;
-  let m = $('home-tagedit');
-  if (!m) {
-    m = document.createElement('div');
-    m.id = 'home-tagedit';
-    m.className = 'panel home-tagedit hidden';
-    m.setAttribute('role', 'dialog');
-    document.body.appendChild(m);
-    m.innerHTML = '<div class="te-head"><b id="home-tagedit-title"></b><span class="te-n num"></span></div>' +
-      '<div class="te-box"><span class="te-chips"></span>' +
-      `<input id="home-tagedit-in" type="text" list="home-tagedit-list" autocomplete="off" spellcheck="false" aria-label="New tag"></div>` +
-      '<datalist id="home-tagedit-list"></datalist>' +
-      '<div class="te-note hint"></div><div class="te-err status-line err hidden" role="alert"></div>' +
-      `<div class="te-foot"><button class="ghost" data-te="add">${icon('plus')}Add</button>` +
-      `<button class="ghost" data-te="full">${icon('edit')}Full edit…</button><span class="grow"></span>` +
-      '<button class="ghost" data-te="cancel">Cancel</button><button class="primary" data-te="save">Save</button></div>';
-    m.setAttribute('aria-labelledby', 'home-tagedit-title');
-    bindTagEdit(m);
-  }
-  H.te = { kind, id, from, tags: tagsOf(x).slice(), err: '', busy: false };
-  $req('home-tagedit-title').textContent = `Tags · ${x.name}`;
-  const inp = m.querySelector<HTMLInputElement>('#home-tagedit-in');
-  if (inp) inp.value = '';
-  teRefresh();
-  placePopover(m, from);
-  from.setAttribute('aria-expanded', 'true');
-  inp?.focus();
-}
-
-function closeTagEdit(refocus: boolean): void {
-  const m = $('home-tagedit');
-  if (!m || !H.te) return;
-  const from = H.te.from;
-  H.te = null;
-  hidePopover(m, from, refocus);
-}
-
-// chips, counter, note, suggestions and the buttons' state from H.te
-function teRefresh(): void {
-  const te = H.te, m = $('home-tagedit');
-  if (!te || !m) return;
-  const full = te.tags.length >= MAX_TAGS;
-  const q = <T extends HTMLElement = HTMLElement>(sel: string): T => {
-    const el = m.querySelector<T>(sel);
-    if (!el) throw new Error(`missing ${sel} in the tag editor`);
-    return el;
-  };
-  q('.te-chips').innerHTML = te.tags.map((t, i) => `<span class="te-chip"><span class="nm">${esc(t)}</span>` +
-    `<button data-te="rm" data-i="${i}" aria-label="Remove the tag ${esc(t)}" title="Remove">${icon('x')}</button></span>`).join('');
-  q('.te-n').textContent = `${te.tags.length} / ${MAX_TAGS}`;
-  q('.te-n').classList.toggle('full', full);
-  const inp = q<HTMLInputElement>('#home-tagedit-in');
-  inp.disabled = full || te.busy;
-  inp.placeholder = full ? '' : te.tags.length ? 'Add a tag…' : 'Add a tag: Enter or comma adds it';
-  q('.te-note').textContent = full ? `That is the limit: a session can have at most ${MAX_TAGS} tags. Remove one to add another.`
-    : `Up to ${MAX_TAGS} tags of ${TAG_LEN} characters at most; a click on a tag on a card filters by it.`;
-  q<HTMLButtonElement>('[data-te="add"]').disabled = full || te.busy;
-  q<HTMLButtonElement>('[data-te="save"]').disabled = te.busy;
-  q('[data-te="save"]').textContent = te.busy ? 'Saving…' : 'Save';
-  const err = q('.te-err');
-  err.classList.toggle('hidden', !te.err);
-  err.innerHTML = te.err ? `${icon('alert')}<span>${esc(te.err)}</span>` : '';
-  // suggestions: the tags already used in the same list, minus this session's
-  const have = new Set(te.tags.map(fold)), sug = new Map<string, string>();
-  for (const o of te.kind === 'viz' ? H.sessions : H.projects) {
-    for (const t of tagsOf(o)) if (!have.has(fold(t)) && !sug.has(fold(t))) sug.set(fold(t), t);
-  }
-  q('#home-tagedit-list').innerHTML = [...sug.values()].sort((a, b) => a.localeCompare(b))
-    .map((t) => `<option value="${esc(t)}"></option>`).join('');
-  if (!m.classList.contains('hidden') && document.contains(te.from)) placePopover(m, te.from);   // it grew: keep it on screen
-}
-
-// add raw tags (typed / pasted) -> the refused ones that are worth fixing (too long), plus .over: some did not fit in 20
-interface AddResult { bad: string[]; over: boolean }
-function teAdd(raw: string[]): AddResult {
-  const te = H.te;
-  const res: AddResult = { bad: [], over: false };
-  if (!te) return res;
-  const bad = res.bad;
-  te.err = '';
-  for (const r of raw) {
-    const t = cleanTag(r);
-    if (!t) continue;
-    if (t.length > TAG_LEN) { te.err = `“${t.slice(0, TAG_LEN)}…” is too long: a tag has at most ${TAG_LEN} characters.`; bad.push(t); continue; }
-    if (te.tags.some((x) => fold(x) === fold(t))) continue;
-    if (te.tags.length >= MAX_TAGS) { te.err = `A session can have at most ${MAX_TAGS} tags: the rest were not added.`; res.over = true; break; }
-    te.tags.push(t);
-  }
-  teRefresh();
-  return res;
-}
-
-// add the text of the box (Enter / comma / Add / Save / paste); a too-long tag stays in the box to be fixed.
-// false when something was refused (Save then stops once, so the message is read)
-function teCommit(extra = ''): boolean {
-  const inp = $req<HTMLInputElement>('home-tagedit-in');
-  const text = inp.value + extra;
-  if (!text.trim()) { inp.value = ''; return true; }
-  const { bad, over } = teAdd(text.split(/[,\n\r]+/));
-  inp.value = bad.join(', ');
-  return !bad.length && !over;
-}
-
-async function teSave(): Promise<void> {
-  const te = H.te;
-  if (!te || te.busy || !teCommit()) return;
-  te.busy = true;
-  te.err = '';
-  teRefresh();
-  const enc = encodeURIComponent(te.id);
-  const req = te.kind === 'viz' ? { url: `api/datasets/${enc}/tags`, method: 'PUT' } : { url: `api/label/projects/${enc}`, method: 'PATCH' };
-  try {
-    const r = await api(req.url, { method: req.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: te.tags }) });
-    const out: { tags?: unknown } = await r.json().catch(() => ({}));
-    if (H.te !== te) return;
-    const x = teItem(te);
-    if (x) x.tags = strList(out.tags) ?? te.tags;      // the server's cleaned list
-    const sel = te.kind === 'viz' ? `.session-card[data-id="${CSS.escape(te.id)}"] [data-act="tags"]`
-      : `.session-card[data-pid="${CSS.escape(te.id)}"] [data-act="ltags"]`;
-    closeTagEdit(false);
-    renderPanels();
-    const b = document.querySelector<HTMLElement>(sel);
-    if (b) b.focus();
-  } catch (e) {
-    if (H.te !== te) return;
-    te.busy = false;
-    te.err = errText(e);
-    teRefresh();
-    $req('home-tagedit-in').focus();
-  }
-}
-
-function bindTagEdit(m: HTMLElement): void {
-  const inp = m.querySelector<HTMLInputElement>('#home-tagedit-in');
-  if (!inp) return;
-  m.addEventListener('click', (e) => {
-    const b = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-te]') : null;
-    if (!b || (b instanceof HTMLButtonElement && b.disabled) || !H.te) return;
-    const a = b.dataset['te'];
-    if (a === 'rm') { H.te.tags.splice(+(b.dataset['i'] ?? NaN), 1); H.te.err = ''; teRefresh(); inp.focus(); }
-    else if (a === 'add') { teCommit(); inp.focus(); }
-    else if (a === 'cancel') closeTagEdit(true);
-    else if (a === 'full') {
-      const { kind, id } = H.te;
-      closeTagEdit(false);
-      if (kind === 'viz') editSession(id); else editProject(id);
-    }
-    else if (a === 'save') void teSave();
-  });
-  inp.addEventListener('keydown', (e) => {
-    if (!H.te) return;
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { void teSave(); return; }
-      teCommit();
-    } else if (e.key === 'Backspace' && !inp.value && H.te.tags.length && !H.te.busy) {
-      e.preventDefault();
-      H.te.tags.pop();
-      H.te.err = '';
-      teRefresh();
-    }
-  });
-  // phone keyboards send no keydown for ','; a typed comma still splits
-  inp.addEventListener('input', () => {
-    if (!H.te || !/,/.test(inp.value)) return;
-    const parts = inp.value.split(',');
-    const rest = parts.pop() ?? '';
-    const { bad, over } = teAdd(parts);
-    inp.value = [...bad, over ? '' : rest].filter(Boolean).join(', ');
-  });
-  inp.addEventListener('paste', (e) => {
-    const text = e.clipboardData?.getData('text') ?? '';
-    if (!H.te || !/[,\n\r]/.test(text)) return;          // one tag: the normal paste
-    e.preventDefault();
-    teCommit(text);
-  });
-  m.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeTagEdit(true); return; }
-    if (e.key !== 'Tab') return;                  // keep focus inside
-    const f = [...m.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')].filter((x) => !x.disabled && x.offsetParent);
-    const i = f.findIndex((x) => x === document.activeElement);
-    e.preventDefault();
-    f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length]?.focus();
-  });
 }
 
 function toggleTagFilter(b: HTMLElement): void {
@@ -1044,11 +843,11 @@ const CARD_MENU: Record<string, (pid: string) => unknown> = {
 };
 
 const editSession = (id: string): void => { void openSettings('datasets', { solo: true, edit: id }); };
-const editProject = (pid: string): void => { void wizard({ edit: pid, names: labelNames(pid) }); };
+const editProject = (pid: string): void => { void wizard({ edit: pid, names: labelNames(pid), tagSuggest: H.projects.flatMap(tagsOf) }); };
 
 /** The new-labeling-session wizard, or why the user's tier cannot open it. */
 function newLabel(): void {
-  if (tierCan('label.create')) void wizard({ names: labelNames(null) });
+  if (tierCan('label.create')) void wizard({ names: labelNames(null), tagSuggest: H.projects.flatMap(tagsOf) });
   else toast(cannot('create labeling projects'), 'err');
 }
 
@@ -1059,8 +858,6 @@ const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
   lopen: (b) => openProject(dataOf(b, 'pid')),
   lexport: (b) => exportProject(dataOf(b, 'pid')),
   ledit: (b) => editProject(dataOf(b, 'pid')),
-  tags: (b) => { if (H.te && H.te.from === b) closeTagEdit(true); else openTagEdit(b, 'viz'); },
-  ltags: (b) => { if (H.te && H.te.from === b) closeTagEdit(true); else openTagEdit(b, 'label'); },
   tagfilter: (b) => toggleTagFilter(b),
   tagclear: () => clearFilters(true),
   'clear-filter': () => clearFilters(false),
@@ -1163,10 +960,8 @@ function bind(): void {
     const t = e.target instanceof Element ? e.target : null;
     if (!t) return;
     if (H.menuFrom && !t.closest('#home-cardmenu') && !H.menuFrom.contains(t)) closeCardMenu(false);
-    if (H.te && !t.closest('#home-tagedit') && !H.te.from.contains(t)) closeTagEdit(false);
   });
-  // the tag editor follows its button (a phone keyboard opening resizes the window: it must not close it)
-  const follow = (): void => { closeCardMenu(false); if (H.te && document.contains(H.te.from)) placePopover($req('home-tagedit'), H.te.from); };
+  const follow = (): void => closeCardMenu(false);
   window.addEventListener('resize', follow);
   body.closest('.home-scroll')?.addEventListener('scroll', follow, { passive: true });
   // the name search: one re-render per frame, the box keeps its focus; Esc clears it

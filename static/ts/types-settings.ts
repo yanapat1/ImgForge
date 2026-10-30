@@ -3,6 +3,7 @@
 // view them as plain records. Each form carries a `form` tag, so `SET.form` narrows like a discriminated union.
 
 import type { Bucket, Format } from './types-datacenter.js';
+import type { TagState } from './core/tag-field.js';
 
 // ------------------------------------------------------------------ shared
 export type StatusKind = 'busy' | 'ok' | 'err' | '';
@@ -97,6 +98,7 @@ export interface DatasetItem {
   exists?: boolean;
   mirror?: { path: string; files: number; bytes: number; synced: number };
   labeling?: { project?: string; task?: string; task_type?: string };
+  tags?: string[];
 }
 /** GET api/datasets */
 export interface DatasetsPayload { datasets: DatasetItem[]; active: string | null }
@@ -108,9 +110,11 @@ export interface LabProjectTask { id: string; name: string; task_type: string; d
 export interface LabProject { id: string; name: string; n_media?: number; tasks?: LabProjectTask[] }
 
 // ------------------------------------------------------------------ forms (SET.form)
+/** A session form's Tags field (core/tag-field.ts): the edited list, and the saved one (an edit sends tags only when they changed). */
+export type TagFields = { tags?: TagState | undefined; origTags?: string[] | undefined };
 /** What one point of a local / S3 session is: its labelled boxes, its images, or auto (images when there are no labels). */
 export type MapUnit = 'auto' | 'boxes' | 'images';
-export type S3Form = {
+export type S3Form = TagFields & {
   form: 's3';
   id?: string | undefined; connId: string; conn: ConnDraft;
   bucket?: string | undefined; prefix?: string | undefined; mode?: 'stream' | 'cache' | undefined; name?: string | undefined;
@@ -118,7 +122,7 @@ export type S3Form = {
   buckets?: string[] | null | undefined; browse?: BrowseResult | null | undefined;
   connStatus?: StatusLine | null | undefined; locStatus?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
-export type LocalForm = {
+export type LocalForm = TagFields & {
   form: 'local';
   id?: string | undefined; path?: string | undefined; name?: string | undefined;
   unit?: MapUnit | undefined; cff?: boolean | undefined;
@@ -126,25 +130,25 @@ export type LocalForm = {
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
 /** New visualize › Data Center: a folder of one of the user's Data Center buckets (POST /api/dc/send, target visualize). */
-export type DcForm = {
+export type DcForm = TagFields & {
   form: 'dc';
   buckets: Bucket[] | null; bid: string; path: string; dirs: string[] | null; format: Format | null; name: string;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
-export type EmbeddingsForm = {
+export type EmbeddingsForm = TagFields & {
   form: 'embeddings';
   id?: string | undefined; path?: string | undefined; name?: string | undefined;
   browse?: BrowseResult | null | undefined; summary?: EmbeddingsSummary | null | undefined;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
-export type LabelingForm = {
+export type LabelingForm = TagFields & {
   form: 'labeling';
   id?: string | undefined; project_id: string; task_id: string; only_done: boolean; name: string; direct: boolean;
   projects: LabProject[] | null;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
 /** A combined dataset: 2–8 visualize sessions in priority order, each with an alias (data/union.py ALIAS_RE). */
-export type UnionForm = {
+export type UnionForm = TagFields & {
   form: 'union';
   id?: string | undefined; name?: string | undefined;
   parts: UnionPart[];

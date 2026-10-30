@@ -151,8 +151,7 @@ def test_compare_combine_from_the_home_and_settings(server, tmp_path):  # noqa: 
         shot(page, '60-home-three-member-card-light', '#home-panel-viz')
 
         # editing it: the form starts from its members, in order
-        _card(page, 'Three surveys').locator('[data-act="tags"]').click()
-        page.click('#home-tagedit [data-te="full"]')
+        _card(page, 'Three surveys').locator('[data-act="edit"]').click()
         page.wait_for_selector('#settings-body .un-row')
         assert page.locator('#settings-body .un-alias').evaluate_all('els => els.map(e => e.value)') == ['Cnew', 'A', 'B']
         page.click('#settings-body [data-act="back"]')

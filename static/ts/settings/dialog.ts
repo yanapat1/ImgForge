@@ -10,7 +10,7 @@ import * as dcApi from '../datacenter/api.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
 import { updateMarks } from '../plot/marks.js';
 import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, EmbeddingsSummary, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
-  SectionId, SetAction, SetChange, SetState, UnionForm } from '../types-settings.js';
+  SectionId, SetAction, SetChange, SetState, TagFields, UnionForm } from '../types-settings.js';
 import { connDefaults, connEditable, connKind, connTestText, dd, defaultAlias, fillWorkspaceSec, formOf, renderAppearanceSec, renderConnsSec, renderDatasetsSec, renderPlotSec,
   renderWorkspaceSec, rowAttr, SECTIONS, setDisabled, statusHTML, UNION_MAX, unionInput, VIZ_TASKS } from './forms.js';
 import { LAB_ACTIONS, labCancelRec, labInput, labKeydown, loadLabSettings, renderLabelingSec } from './labeling.js';
@@ -21,6 +21,7 @@ import { ACCOUNT_ACTIONS, accFile, accInput, renderAccountSec } from './account.
 import { admInput, renderUsersSec, USERS_ACTIONS, USERS_CHANGES } from './users.js';
 import { PROMPTS_ACTIONS, PROMPTS_CHANGES, prInput, renderPromptsSec } from './prompts.js';
 import { isAdmin } from '../core/auth.js';
+import { bindTagFields, commitTagDraft, sameTags } from '../core/tag-field.js';
 
 // Datasets: local folders (read in place) and S3 / RustFS prefixes (stream or local cache), connections (S3, FTP,
 // SFTP, PostgreSQL, SQL Server), the labeling page's options + hotkeys, the AI assistant (LLM providers + feature
@@ -132,8 +133,8 @@ function editDataset(id: string): void {
   if (d.kind === 's3') newS3Form(d);
   else if (d.kind === 'labeling') void newLabelingForm(d);
   else if (d.kind === 'union') newUnionForm(d);
-  else if (d.kind === 'embeddings') { SET.view = 'embeddings'; SET.sec = 'datasets'; SET.form = { form: 'embeddings', id: d.id, path: d.path, name: d.name }; renderSettings(); void embBrowse(d.path); }
-  else { SET.view = 'local'; SET.sec = 'datasets'; SET.form = { form: 'local', id: d.id, path: d.path, name: d.name, unit: d.unit, cff: d.class_from_folder }; renderSettings(); void localBrowse(d.path); }
+  else if (d.kind === 'embeddings') { SET.view = 'embeddings'; SET.sec = 'datasets'; SET.form = { form: 'embeddings', id: d.id, path: d.path, name: d.name, origTags: d.tags }; renderSettings(); void embBrowse(d.path); }
+  else { SET.view = 'local'; SET.sec = 'datasets'; SET.form = { form: 'local', id: d.id, path: d.path, name: d.name, unit: d.unit, cff: d.class_from_folder, origTags: d.tags }; renderSettings(); void localBrowse(d.path); }
 }
 
 async function dcLoad(): Promise<void> {
@@ -232,7 +233,7 @@ function newS3Form(d: DatasetItem | null): void {
   SET.sec = 'datasets';
   const f: S3Form = { form: 's3', id: d?.id, connId: d ? (d.connection_id ?? 'new') : (SET.conns[0]?.id ?? 'new'),
     conn: { endpoint: '', region: '', verify_ssl: true }, bucket: d?.bucket, prefix: d ? d.prefix : '',
-    mode: d ? d.mode : 'stream', name: d ? d.name : '', unit: d?.unit, cff: d?.class_from_folder };
+    mode: d ? d.mode : 'stream', name: d ? d.name : '', unit: d?.unit, cff: d?.class_from_folder, origTags: d?.tags };
   SET.form = f;
   renderSettings();
   if (f.connId !== 'new') void testConn();
@@ -243,7 +244,7 @@ async function newLabelingForm(d: DatasetItem | null, pid?: string): Promise<voi
   SET.view = 'labeling';
   SET.sec = 'datasets';
   const f: LabelingForm = { form: 'labeling', id: d?.id, project_id: d ? (d.project_id ?? '') : pid || '', task_id: d ? (d.task_id ?? '') : '',
-    only_done: !!(d && d.only_done), name: d ? d.name : '', direct: !!pid, projects: null };
+    only_done: !!(d && d.only_done), name: d ? d.name : '', direct: !!pid, projects: null, origTags: d?.tags };
   SET.form = f;
   renderSettings();
   try {
@@ -262,7 +263,7 @@ function newUnionForm(d: DatasetItem | null): void {
   SET.view = 'union';
   SET.sec = 'datasets';
   const f: UnionForm = { form: 'union', id: d?.id, name: d ? d.name : '', pick: '',
-    parts: (d?.parts || []).map((p) => ({ ...p })) };
+    parts: (d?.parts || []).map((p) => ({ ...p })), origTags: d?.tags };
   SET.form = f;
   renderSettings();
 }
@@ -304,11 +305,18 @@ function back(): void {
 }
 
 // save-s3 / save-local / save-labeling: post the dataset, then open it or go back to the list
-async function saveDataset(form: { saveStatus?: S3Form['saveStatus'] }, busyText: string, body: () => Promise<{ id: string }>, open: boolean): Promise<void> {
+// the Tags field goes with every save: a tag still typed in its box is added first (a refused one stops the save, the
+// field says why); the tags are sent only when they differ from the saved ones (PUT api/datasets/{id}/tags)
+async function saveDataset(form: TagFields & { saveStatus?: S3Form['saveStatus'] }, busyText: string, body: () => Promise<{ id: string }>, open: boolean): Promise<void> {
+  if (form.tags && !commitTagDraft(form.tags)) { renderSettings(); return; }
   form.saveStatus = { kind: 'busy', text: busyText };
   renderSettings();
   try {
     const d = await body();
+    if (form.tags && !sameTags(form.tags.tags, form.origTags)) {
+      await api(`api/datasets/${encodeURIComponent(d.id)}/tags`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: form.tags.tags }) });
+      form.origTags = [...form.tags.tags];
+    }
     if (open) { form.saveStatus = { kind: 'busy', text: 'opening…' }; renderSettings(); openDataset(d.id); return; }
     await savedDataset();
   } catch (e) { form.saveStatus = { kind: 'err', text: errText(e) }; renderSettings(); }
@@ -503,6 +511,10 @@ const SET_CHANGES: Record<string, SetChange> = {
 
 export function bindSettings(): void {
   const body = $req('settings-body');
+  bindTagFields(body, (key) => {
+    const f = SET.form;
+    return key === 'ds' && f && 'tags' in f && f.tags ? { st: f.tags, suggest: SET.datasets.flatMap((d) => d.tags || []) } : null;
+  });
   // inputs write straight into the form state (no re-render per keystroke, so focus stays put)
   const write = (el: FormControl): void => {
     const path = el.dataset.f;

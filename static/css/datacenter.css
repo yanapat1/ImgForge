@@ -122,9 +122,6 @@ button.dc-tag { height: 24px; padding: 0 9px; font-size: 12px; font-weight: 550;
 .dc-bfilter { width: 220px; }
 .dc-dd { height: var(--control-h); display: inline-flex; align-items: center; gap: 7px; padding: 0 8px 0 10px; font-weight: 500; }
 .dc-dd > .ico:last-of-type { width: 14px; height: 14px; color: var(--text-faint); }
-label.dc-dd { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); font-size: var(--fs-sm); color: var(--text); padding-right: 0; }
-label.dc-dd .ico { color: var(--text-muted); }
-label.dc-dd select { border: 0; background-color: transparent; height: 100%; padding-left: 0; font-weight: 500; }
 .dc-dd .dot-on { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; flex: none; }
 .dc-crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
@@ -219,12 +216,13 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .bc-row .warnline { font-size: 11.5px; color: var(--warn-text); display: inline-flex; gap: 4px; align-items: center; margin-left: auto; white-space: nowrap; }
 .bc-row .warnline .ico { width: 13px; height: 13px; color: var(--warn); }
 .bc-row .when { margin-left: auto; font-size: 11.5px; color: var(--text-faint); white-space: nowrap; }
-.bc-stats { display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 2px; font-size: 12px; color: var(--text-faint); white-space: nowrap; min-width: 0; }
-.bc-stats > span:last-child { margin-left: auto; }
+.bc-stats { display: flex; align-items: baseline; gap: 12px; font-size: 12px; color: var(--text-faint); white-space: nowrap; min-width: 0; }
+.bc-counts { display: flex; gap: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bc-size { margin-left: auto; flex: none; }
 .bc-stats b { font: 600 12px var(--mono); color: var(--text); font-variant-numeric: tabular-nums; }
 .bc-tags { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; min-height: 22px; align-items: center; font-size: 12px; }
 .dc-blist { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
-.dc-brow { display: grid; grid-template-columns: minmax(0, 1.6fr) 150px 80px 80px 84px minmax(0, 1.2fr) 96px; align-items: center; gap: 8px; min-height: 38px; padding: 0 12px;
+.dc-brow { display: grid; grid-template-columns: minmax(0, 1.6fr) 150px 80px 80px 90px minmax(0, 1.2fr) 96px; align-items: center; column-gap: 16px; min-height: 38px; padding: 0 12px;
   border-bottom: 1px solid var(--border); font-size: var(--fs-sm); cursor: pointer; }
 .dc-brow:last-child { border-bottom: 0; }
 .dc-brow:hover { background: var(--surface-2); }
@@ -233,7 +231,7 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .dc-brow .c-n { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dc-brow .c-n .ico { color: var(--text-faint); }
 .dc-brow .r { text-align: right; }
-.dc-brow .c-t { display: flex; gap: 4px; overflow: hidden; }
+.dc-brow .c-t { display: flex; gap: 4px; overflow: hidden; padding-left: 12px; }
 .dc-brow .c-m { color: var(--text-faint); font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 
 /* thumbnails */
@@ -645,9 +643,10 @@ button.icon-btn.sm { width: 26px; padding: 0; }
   border-radius: var(--r-md); font: 11.5px/1.5 var(--mono); white-space: pre; color: var(--text); }
 
 /* import from the web (upload.ts) and the bucket's source line (details.ts) */
-.dc-srcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin-bottom: var(--s3); }
+.dc-srcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-bottom: var(--s3); }
 .dc-src { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md);
   background: var(--surface-2); font-size: var(--fs-sm); justify-content: flex-start; }
+.dc-src b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-src:hover { border-color: var(--border-hover); }
 .dc-src.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); }
 .dc-src.on .ico { color: var(--accent); }

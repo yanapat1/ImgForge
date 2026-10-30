@@ -68,4 +68,6 @@ export interface WizardOpts {
   edit?: string | undefined;
   /** the other label sessions' names (a new name is checked against them) */
   names?: string[] | undefined;
+  /** the tags the other label sessions use: the Tags field suggests them */
+  tagSuggest?: string[] | undefined;
 }
