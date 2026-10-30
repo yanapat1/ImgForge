@@ -39,7 +39,7 @@ __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket'
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
 PERM = 'data.manage'
-S3_TTL = 600                        # an S3 detection is reused this long (no cheap fingerprint for a prefix)
+S3_TTL = 3600                       # an S3 detection is fresh this long (no cheap fingerprint for a prefix)
 SEARCH_SCAN = 300_000               # entries walked by one search
 _JSONB = bindparam('result', type_=JSONB)
 _MANIFEST = bindparam('manifest', type_=JSONB)
@@ -195,13 +195,14 @@ def _abs(r, path, must_exist=True):
 
 
 # ---------------------------------------------------------------------------------------------- detection cache
-def _cached(r, rel, force=False, want_tree=False):
+def _cached(r, rel, force=False, want_tree=False, user=None, wait=True):
     """The cache entry {format, tree} of folder `rel` of bucket row `r`, detected again when its fingerprint
-    changed (or force). tree ({images, labels, size}) is filled for the root, or when want_tree."""
+    changed (or force). tree ({images, labels, size}) is filled for the root, or when want_tree. An S3 link with
+    wait=False never lists inline: a stale entry is returned as is (None when there is none) while a scan job
+    (_scan_soon) refreshes it."""
     rel = store.clean_rel(rel)
-    view = None
     if r.kind == 's3':
-        fp = f's3:{int(time.time() // S3_TTL)}'
+        fp = _s3_fp()
     else:
         absp = _abs(r, rel)
         if not os.path.isdir(absp):
@@ -212,26 +213,70 @@ def _cached(r, rel, force=False, want_tree=False):
                         {'b': r.id, 'p': rel}).first()
     if hit is not None and not force and hit.fingerprint == fp and (hit.result.get('tree') or not (want_tree or not rel)):
         return hit.result
+    if r.kind == 's3' and not wait:
+        jobs = getattr(_conf['ctx'], 'jobs', None) if _conf['ctx'] is not None else None
+        if jobs is None or not jobs.busy(f'dc-scan:{r.id}:'):      # one scan per bucket at a time on the io lane
+            _scan_soon(user, r, rel)
+        return hit.result if hit is not None else None
+    res = _scan(r, rel, want_tree or not rel)
+    _store_cache(r, rel, fp, res)
+    return res
+
+
+def _s3_fp():
+    return f's3:{int(time.time() // S3_TTL)}'
+
+
+def _scan(r, rel, want_tree, progress=None, cancelled=None):
+    """Detect the format of folder `rel` (and its {images, labels, size} when want_tree) -> {format, tree}."""
+    view = None
     try:
         if r.kind == 's3':
             view = _s3(r)
-            keys = view.keys(rel)
+            keys = view.keys(rel, progress=progress, cancelled=cancelled)
+            if progress is not None:
+                progress(stage='detecting the format')
             tree = formats.KeyTree(keys, lambda p, n: view.read(store.join(rel, p), n or None)[0])
         else:
-            tree = formats.LocalTree(absp)
+            tree = formats.LocalTree(_abs(r, rel))
         fmt = formats.detect(tree)
-        ts = formats.tree_stats(tree) if (want_tree or not rel) else None
+        ts = formats.tree_stats(tree) if want_tree else None
     finally:
         if view is not None:
             view.close()
-    res = {'format': fmt, 'tree': ts}
+    return {'format': fmt, 'tree': ts}
+
+
+def _store_cache(r, rel, fp, res):
     with db.begin() as c:
         c.execute(text("""INSERT INTO app.dc_format_cache(bucket_id, path, fingerprint, result, updated_at)
                           VALUES (:b, :p, :fp, :result, now())
                           ON CONFLICT (bucket_id, path) DO UPDATE SET fingerprint = EXCLUDED.fingerprint,
                           result = EXCLUDED.result, updated_at = now()""").bindparams(_JSONB),
                   {'b': r.id, 'p': rel, 'fp': fp, 'result': res})
-    return res
+
+
+def _scan_soon(user, r, rel=''):
+    """List + detect folder `rel` of S3 link `r` in an io-lane job dc-scan:<bid>:<rel> (the running one when it is
+    already queued; inline from the CLI): progress shows the object count, Cancel stores nothing. -> job id."""
+    rel = store.clean_rel(rel)
+
+    def fn(job=None):
+        cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
+        res = _scan(r, rel, True, job.progress if job is not None else None, cancelled)
+        if cancelled is not None and cancelled():
+            return {'cancelled': True}
+        _store_cache(r, rel, _s3_fp(), res)
+        retagged = vtags.apply_format(r.id, res['format']) if not rel else None
+        return {'format': (res['format'] or {}).get('format'), 'stats': res['tree'], 'retagged': retagged}
+
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    if jobs is None:
+        fn()
+        return None
+    return jobs.submit(f'dc-scan:{r.id}:{rel}', f'scan {r.name}{"/" + rel if rel else ""} on S3', fn, lane='io',
+                       public_result=True, owner=(user or {}).get('id') or r.owner_id).id
 
 
 def _revalidate(r):
@@ -432,12 +477,18 @@ def create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_
             shutil.rmtree(made, ignore_errors=True)
         raise
     r = _row(user, bid)
+    if kind == 's3':                     # listing a big bucket takes long: a job (a pull, or a scan) does it
+        if mode == 'local':
+            return update_bucket(user, bid, mode='local')
+        try:
+            scan = _scan_soon(user, r)
+        except Exception:  # noqa: BLE001 - an unreachable S3 bucket is still linked; detect says why later
+            scan = None
+        return {**get_bucket(user, bid), 'scan_job_id': scan}
     try:
         vtags.apply_format(bid, _cached(r, '', force=True)['format'])
-    except Exception:  # noqa: BLE001 - an unreachable S3 bucket is still linked; detect says why later
+    except Exception:  # noqa: BLE001 - a folder that cannot be read is still linked; detect says why later
         pass
-    if kind == 's3' and mode == 'local':
-        return update_bucket(user, bid, mode='local')
     return get_bucket(user, bid)
 
 
@@ -1229,9 +1280,9 @@ def ls(user, bid, path='', offset=0, limit=500, sort='name', q=''):
     else:
         out = store.list_local(r.root, rel, _allowed(), offset, limit, sort, q)
     try:
-        res = _cached(r, rel)
-        out['format'] = res['format']
-        if not rel:
+        res = _cached(r, rel, user=user, wait=False)          # S3: never a full listing inside the request
+        out['format'] = res['format'] if res else None
+        if res and not rel:
             vtags.apply_format(r.id, res['format'])
     except DCError:
         out['format'] = None

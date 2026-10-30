@@ -399,6 +399,7 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
       await hooks.reload();
       hooks.navigate(b.id, '');
       if (b.job_id != null) void trackPull(b.job_id, b.name);
+      if (b.scan_job_id != null) { toast(`Linked ${b.name} · scanning S3…`); watchJobs(); }   // count + Cancel in the strip
       return null;
     },
   });

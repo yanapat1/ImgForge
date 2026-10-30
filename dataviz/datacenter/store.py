@@ -24,11 +24,13 @@ import threading
 import time
 import uuid
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import closing
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from ..data import connections
+from . import s3list
 
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.tif', '.tiff', '.gif')
 KIND_EXTS = {
@@ -53,6 +55,7 @@ TRASH = '.trash'
 ITEMS_CAP = 10000                   # a folder's "items" badge stops counting here
 ZIP_MAX_FILES = 500_000
 CHUNK = 1 << 20
+BIG = 64 << 20                      # an S3 object this big is pulled in parallel ranges
 
 
 class Cancelled(Exception):
@@ -933,20 +936,24 @@ class S3View:
         offset, limit = max(0, int(offset or 0)), max(1, min(int(limit or 500), 5000))
         return {'path': rel, 'total': len(rows), 'entries': rows[offset:offset + limit]}
 
-    def keys(self, rel='', cap=100_000):
-        """{rel path below rel: size} of every object (capped)."""
+    def keys(self, rel='', cap=100_000, progress=None, cancelled=None):
+        """{rel path below rel: size} of every object (capped), listed in parallel (s3list) and sorted (a detection
+        must not depend on the listing order); progress(done, None, 'listing S3', 'n objects') as it goes."""
         rel = clean_rel(rel)
         pre = self.base + (rel + '/' if rel else '')
-        out = {}
-        for page in self.client.get_paginator('list_objects_v2').paginate(Bucket=self.bucket, Prefix=pre):
-            for o in page.get('Contents', []):
+        out, n, last = {}, 0, 0.0
+        with closing(s3list.objects(self.client, self.bucket, pre, cancelled=cancelled)) as objs:
+            for o in objs:
                 k = o['Key'][len(pre):]
-                parts = k.split('/')
-                if k and visible(parts[-1]) and all(visible(p, True) for p in parts[:-1]):
+                n += 1
+                if progress is not None and time.monotonic() - last >= 0.25:
+                    last = time.monotonic()
+                    progress(n, None, 'listing S3', f'{n:,} objects')
+                if _shown(k):
                     out[k] = int(o.get('Size') or 0)
                     if len(out) >= cap:
-                        return out
-        return out
+                        break
+        return dict(sorted(out.items()))
 
     def what(self, rel):
         """'file' when `rel` is an object, 'dir' when objects lie below it (or it is the root), else None."""
@@ -975,8 +982,7 @@ class S3View:
         for page in self.client.get_paginator('list_objects_v2').paginate(Bucket=self.bucket, Prefix=pre):
             for o in page.get('Contents', []):
                 sub = o['Key'][len(pre):]
-                parts = sub.split('/')
-                if not parts[-1] or not visible(parts[-1]) or not all(visible(p, True) for p in parts[:-1]):
+                if not _shown(sub):
                     continue
                 k = join(rel, sub)
                 if secrets or not is_secret(k):
@@ -1004,45 +1010,97 @@ class S3View:
         except Exception:  # noqa: BLE001
             return None
 
-    def pull(self, dest, progress=None, cancelled=None, workers=8):
+    def pull(self, dest, progress=None, cancelled=None, workers=16):
         """Download every object below the prefix into folder `dest` ("load into local"): an object replaces the
-        local file of the same name, local files S3 does not have are kept (nothing is ever deleted).
-        -> {downloaded, bytes, failed}."""
+        local file of the same name unless that file is unchanged (same size, and the mtime every download sets to
+        the object's LastModified), local files S3 does not have are kept (nothing is ever deleted). Downloads start
+        while the (parallel) listing runs; an object of BIG bytes or more is fetched in parallel ranges.
+        -> {downloaded, skipped, bytes, failed, total}."""
         progress = progress or (lambda *a, **k: None)
+        stop = cancelled or (lambda: False)
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        progress(stage='listing bucket')
-        objs = self.keys('', cap=10_000_000)
-        todo = sorted(objs)
-        done, got, failed = 0, 0, []
-        progress(0, len(todo), 'downloading')
+        n = {'found': 0, 'done': 0, 'skipped': 0, 'bytes': 0, 'listing': True, 'last': 0.0}
+        failed, futs = [], {}
 
-        def fetch(k):
+        def fetch(k, size, lm):
             dst = dest / k
             if dst.is_dir():                                            # a local folder named like the object
                 shutil.rmtree(dst)
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(dst.name + '.part')
-            body = self.client.get_object(Bucket=self.bucket, Key=self.base + k)['Body']
-            with open(tmp, 'wb') as f:
-                for chunk in body.iter_chunks(1 << 20):
-                    f.write(chunk)
-            os.replace(tmp, dst)
-            return objs[k]
+            try:
+                if size >= BIG:
+                    from boto3.s3.transfer import TransferConfig
+                    self.client.download_file(self.bucket, self.base + k, str(tmp),
+                                              Config=TransferConfig(multipart_threshold=BIG, max_concurrency=4))
+                else:
+                    body = self.client.get_object(Bucket=self.bucket, Key=self.base + k)['Body']
+                    with open(tmp, 'wb') as f:
+                        for chunk in body.iter_chunks(1 << 20):
+                            f.write(chunk)
+                if lm is not None:
+                    os.utime(tmp, (lm, lm))
+                os.replace(tmp, dst)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            return size
 
+        def report(force=False):
+            if not force and time.monotonic() - n['last'] < 0.25:
+                return
+            n['last'] = time.monotonic()
+            extra = f'{n["bytes"] / 1e6:.1f} MB' + (f' · {n["skipped"]:,} unchanged' if n['skipped'] else '')
+            progress(n['done'], None if n['listing'] else n['found'], 'downloading',
+                     f'listing… {n["found"]:,} found · {extra}' if n['listing'] else extra)
+
+        def settle(block):
+            ready, _ = wait(list(futs), timeout=None if block else 0, return_when=FIRST_COMPLETED)
+            for f in ready:
+                k = futs.pop(f)
+                if f.cancelled():
+                    continue
+                n['done'] += 1
+                e = f.exception()
+                if e is not None:
+                    failed.append({'path': k, 'error': str(e)})
+                else:
+                    n['bytes'] += f.result()
+
+        report(True)
         with ThreadPoolExecutor(max(1, int(workers))) as ex:
-            for i in range(0, len(todo), 256):
-                if cancelled is not None and cancelled():
-                    break
-                part = todo[i:i + 256]
-                for k, res in zip(part, ex.map(lambda k: _try(fetch, k), part)):
-                    if isinstance(res, Exception):
-                        failed.append({'path': k, 'error': str(res)})
+            with closing(s3list.objects(self.client, self.bucket, self.base, cancelled=stop)) as objs:
+                for o in objs:
+                    if stop():
+                        break
+                    k = o['Key'][len(self.base):]
+                    if not _shown(k):
+                        continue
+                    n['found'] += 1
+                    size, lm = int(o.get('Size') or 0), o.get('LastModified')
+                    ts = lm.timestamp() if lm is not None else None
+                    if _unchanged(dest / k, size, ts):
+                        n['skipped'] += 1
+                        n['done'] += 1
                     else:
-                        got += res
-                done += len(part)
-                progress(done, len(todo), 'downloading', extra=f'{got / 1e6:.1f} MB')
-        return {'downloaded': done - len(failed), 'bytes': got, 'failed': failed[:50], 'total': len(todo)}
+                        futs[ex.submit(fetch, k, size, ts)] = k
+                        if len(futs) >= 4 * max(1, int(workers)):
+                            settle(True)
+                    if time.monotonic() - n['last'] >= 0.25:
+                        if futs:
+                            settle(False)
+                        report()
+            n['listing'] = False
+            if stop():
+                for f in futs:
+                    f.cancel()
+            while futs:
+                settle(True)
+                report()
+        report(True)
+        return {'downloaded': n['done'] - n['skipped'] - len(failed), 'skipped': n['skipped'], 'bytes': n['bytes'],
+                'failed': failed[:50], 'total': n['found']}
 
     def close(self):
         try:
@@ -1054,8 +1112,24 @@ class S3View:
 def _try(fn, *a):
     try:
         return fn(*a)
-    except Exception as e:  # noqa: BLE001 - one object that fails must not stop the pull
+    except Exception as e:  # noqa: BLE001 - a close that fails must not hide the real outcome
         return e
+
+
+def _shown(sub):
+    """Whether object `sub` (a key below the listed prefix) is listed: a file name, no hidden part."""
+    parts = sub.split('/')
+    return bool(parts[-1]) and visible(parts[-1]) and all(visible(p, True) for p in parts[:-1])
+
+
+def _unchanged(dst, size, mtime):
+    """A local file a pull wrote from this very object version (same size, mtime = its LastModified to the
+    millisecond: S3 times are whole seconds, so an edit made in that same second still counts as a change)."""
+    try:
+        st = os.stat(dst)
+    except OSError:
+        return False
+    return statmod.S_ISREG(st.st_mode) and st.st_size == size and mtime is not None and abs(st.st_mtime - mtime) < 1e-3
 
 
 def posix_parent(rel):

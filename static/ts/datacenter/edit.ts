@@ -36,8 +36,9 @@ export async function trackPull(jobId: number, name: string): Promise<void> {
   watchJobs();                                     // progress shows in the activity strip
   try {
     const j = await waitJob(jobId);
-    const r = (j as { result?: { downloaded?: number; bytes?: number } }).result;
-    toast(`${name} is loaded locally${r?.downloaded != null ? ` · ${r.downloaded.toLocaleString('en-US')} files, ${fmtSize(r.bytes ?? 0)}` : ''}`, 'ok');
+    const r = (j as { result?: { downloaded?: number; skipped?: number; bytes?: number } }).result;
+    toast(`${name} is loaded locally${r?.downloaded != null ? ` · ${r.downloaded.toLocaleString('en-US')} files, ${fmtSize(r.bytes ?? 0)}` : ''}` +
+      (r?.skipped ? ` · ${r.skipped.toLocaleString('en-US')} unchanged` : ''), 'ok');
   } catch (e) {
     toast(`Loading ${name} failed: ${errText(e)}`, 'err');
   }
@@ -50,7 +51,7 @@ function s3Sec(b: Bucket, mode: S3Mode): string {
     (mode === 'local'
       ? `<div class="dc-edit-row"><span class="muted">${b.local_ready ? `Local copy · ${pulled}` : 'The local copy is filled by a download job.'}</span><span class="grow"></span>` +
         `<button type="button" class="ghost sm" data-ed="sync"${b.mode === 'local' ? '' : ' disabled'}>${icon('refresh')}Re-sync from S3</button></div>` +
-        '<p class="hint">Re-sync replaces files that have the same name in S3; files and folders only the local copy has are kept.</p>'
+        '<p class="hint">Re-sync downloads what changed in S3 (unchanged files are skipped) and replaces those files; files and folders only the local copy has are kept.</p>'
       : `<p class="hint">${b.local_ready || b.synced_at ? 'Switching to stream keeps the downloaded copy on disk; loading again only refreshes it.' : 'Switch to Load into local to change files here.'}</p>`) +
     '</section>';
 }

@@ -46,6 +46,8 @@ export interface Bucket {
   video_auto?: FramesOpts | null;
   /** PATCH / POST answers that queued a pull */
   job_id?: number | null;
+  /** POST of a streamed S3 link: the dc-scan job that lists it and detects its format (null from the CLI) */
+  scan_job_id?: number | null;
 }
 
 /** An S3 link is streamed (read-only) or loaded into an editable local folder (re-synced on demand). */
@@ -108,7 +110,7 @@ export interface CreateBucketBody {
 }
 
 /** POST /api/dc/buckets/{bid}/sync */
-export interface SyncResult { job_id: number | null; result: { downloaded: number; bytes: number; total: number } | null }
+export interface SyncResult { job_id: number | null; result: { downloaded: number; skipped: number; bytes: number; total: number } | null }
 
 /** GET /api/dc/buckets/{bid}/export/check: the zip about to be downloaded (4xx {detail} when it cannot be made) */
 export interface ExportCheck { name: string; kind: string }

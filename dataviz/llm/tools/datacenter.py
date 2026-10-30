@@ -423,7 +423,7 @@ _add(Tool('set_s3_mode', 'Choose how an S3 bucket is read: stream (from S3 on ev
                                        + ('load into a local folder (downloads it)' if a['mode'] == 'local'
                                           else 'stream from S3'), s3_ok=True))
 _add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 '
-                          'version, local-only files are kept.',
+                          'version (unchanged files are skipped), local-only files are kept.',
           _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
           lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True, risk='danger'))
 

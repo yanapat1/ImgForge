@@ -7,9 +7,9 @@ This is the shared contract between `dataviz/datacenter/` (the backend), `datavi
   - `managed`: a folder under `storage.data_root` (config; default `data/` under the project root, always allowed). Imports land here.
   - `local`: a linked folder anywhere inside `storage.allowed_roots`. It is used in place.
   - `s3`: a linked bucket and prefix that goes through one of the owner's S3 connections. It has a load `mode`:
-    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it.
+    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it. Linking returns at once: an io-lane job `dc-scan:<bid>:` lists the objects (in parallel, `s3list.py`) and detects the format, with the object count as progress and Cancel. `ls` never lists the whole prefix inline: a stale detection (older than `S3_TTL`, 1 h) is returned as it is while a scan job refreshes it, and `format` is null until the first scan is done.
     - `local`: a pull job downloads every object into `local_root` (`<data_root>/.s3/<name>-<id>`). Once the first pull has finished (`synced_at`), the bucket reads and writes that copy, so it is editable, undoable and exportable like a local bucket. Its `kind` stays `s3` and `root` is the copy.
-    - Re-sync (`sync`) downloads again. An object replaces the local file with the same name; files only the copy has are kept, and nothing is deleted.
+    - Re-sync (`sync`) downloads again. An object replaces the local file with the same name, unless that file is unchanged (same size, and the mtime the pull set to the object's LastModified), which is skipped; files only the copy has are kept, and nothing is deleted. Downloads start while the listing still runs (`extra` shows `listing… n found`; `total` is set once the listing ends); objects of 64 MB or more are fetched in parallel ranges.
     - Switching back to `stream` keeps the copy on disk.
 - **Path**: relative to the bucket root, POSIX, no leading slash; `''` is the root. Every resolved local path is checked with `connections.check_local`; `..`, absolute paths and symlinks that escape are rejected with 400.
 - **Tags**: each one is on `(bucket, path)`, where `path=''` is the bucket itself. Tags are `{tag, auto}`. **Auto** tags are written only by format detection, as `format:<key>`. Users cannot remove them, and they are swapped when the format changes. User tags are cleaned with `core/names.clean_tags`.
@@ -31,9 +31,10 @@ Every function takes `user` (the acting user dict) first, raises `DCError(messag
 list_buckets(user, q='', tags=(), formats=())                  -> [Bucket]
 get_bucket(user, bid)                                          -> Bucket
 create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_bucket=None, prefix='', tags=(), mode='stream')
-    -> Bucket (+ job_id when an s3 link starts with mode='local')
+    -> Bucket (+ job_id when an s3 link starts with mode='local'; + scan_job_id, the dc-scan job, for a streamed one)
 update_bucket(user, bid, name=None, mode=None)                 -> Bucket (+ job_id when switched to local)
 sync(user, bid)                                                -> {job_id, result}   # s3 + mode local: (re)pull
+    # result {downloaded, skipped (unchanged), bytes, failed: [{path, error}] (first 50), total}
 export(user, bid, path='')                                     -> (zip name, chunk iterator)
     # a folder (or one file) as a stored zip, names relative to that folder (a file: its own name). Local files or a
     # streamed s3 link alike (objects are read one by one while the zip streams). Hidden names and the trash are left

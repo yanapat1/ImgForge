@@ -56,6 +56,10 @@ def test_s3_load_into_local_resync_and_stream(dc, s3_server, s3_bucket):
     b, client, bucket = _s3_link(c, s3_server, s3_bucket)
     bid = b['id']
     assert b['mode'] == 'stream' and not b['writable'] and not b['local_ready']
+    j = wait_job(c, b['scan_job_id'])                    # the listing + detection is a job, not the request
+    assert j['status'] == 'done' and j['result']['format'] == 'yolo-detect' and j['result']['stats']['images'] == 2
+    ls = c.get(f'/api/dc/buckets/{bid}/ls').json()
+    assert ls['format']['format'] == 'yolo-detect' and {e['name'] for e in ls['entries']} == {'images', 'labels', 'data.yaml'}
     r = c.post(f'/api/dc/buckets/{bid}/ops', json={'ops': [{'op': 'mkdir', 'path': 'x'}]})
     assert r.status_code == 400 and 'load into local' in r.json()['detail']
     # export of a streamed bucket: zipped straight from the S3 objects (a folder, one object, a missing path)
@@ -89,7 +93,8 @@ def test_s3_load_into_local_resync_and_stream(dc, s3_server, s3_bucket):
         f.write('names: [changed]\n')
     client.put_object(Bucket=bucket, Key='ds/images/im2.jpg', Body=jpeg_bytes())
     j = wait_job(c, c.post(f'/api/dc/buckets/{bid}/sync').json()['job_id'])
-    assert j['status'] == 'done' and j['result']['downloaded'] == 6
+    assert j['status'] == 'done' and j['result']['total'] == 6, j
+    assert j['result']['downloaded'] == 2 and j['result']['skipped'] == 4      # changed data.yaml + new im2
     assert open(os.path.join(b['root'], 'data.yaml')).read() == 'names: [car]\n'       # replaced from S3
     assert open(os.path.join(b['root'], 'notes.txt')).read() == 'mine'                # kept
     assert os.path.isfile(os.path.join(b['root'], 'images', 'im2.jpg'))               # new in S3
@@ -110,6 +115,22 @@ def test_s3_load_into_local_resync_and_stream(dc, s3_server, s3_bucket):
     # unlink + delete files removes only the local copy
     assert c.delete(f'/api/dc/buckets/{bid}', params={'delete_files': 1}).status_code == 200
     assert not os.path.exists(b['root'])
+
+
+def test_link_a_whole_bucket_scans_in_a_job(dc, s3_server, s3_bucket):
+    """A blank prefix links the whole bucket: the create returns at once, a dc-scan job lists it (in parallel)."""
+    _, c = dc
+    client, bucket = s3_bucket
+    for i in range(30):
+        client.put_object(Bucket=bucket, Key=f'cls{i % 3}/im{i}.jpg', Body=jpeg_bytes())
+    conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'}).json()
+    b = c.post('/api/dc/buckets', json={'name': 'all', 'kind': 's3', 'connection_id': conn['id'], 's3_bucket': bucket,
+                                        'prefix': ''}).json()
+    assert b['format'] is None and b['scan_job_id']
+    j = wait_job(c, b['scan_job_id'])
+    assert j['status'] == 'done' and j['result']['stats']['images'] == 30, j
+    assert c.get(f'/api/dc/buckets/{b["id"]}').json()['stats']['images'] == 30
+    assert c.get(f'/api/dc/buckets/{b["id"]}/ls', params={'path': 'cls1'}).json()['total'] == 10
 
 
 def test_mode_only_for_s3_and_create_local(dc, s3_server, s3_bucket):
