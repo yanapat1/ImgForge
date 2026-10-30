@@ -70,7 +70,39 @@ function settingsHTML(): string {
     '<label class="fld adm-conn">Who can add connections (S3, FTP, databases, model servers)' +
     `<select data-act-change="adm-conns"><option value="everyone"${st.who_can_add_connections === 'everyone' ? ' selected' : ''}>Everyone</option>` +
     `<option value="admins"${st.who_can_add_connections === 'admins' ? ' selected' : ''}>Administrators only</option></select></label>` +
-    statusHTML(US.setStatus) + '</div>';
+    llmSettingsHTML(st) + statusHTML(US.setStatus) + '</div>';
+}
+
+const WEB_LEVELS = ['Off', 'Public only', 'Technical', 'Full'];
+
+/** The ◆ assistants' server rules: the highest web search level, the organisation's special words, chat limits. */
+function llmSettingsHTML(st: AdminSettings): string {
+  const max = st.llm_web_max_level ?? 3;
+  const words = (st.llm_org_words ?? []).map((w) => w.strength === 'private' ? `${w.text} | private` : w.text).join('\n');
+  return '<div class="adm-llm"><div class="step-head">' + icon('gem') + 'AI assistants</div>' +
+    '<label class="fld adm-conn">Maximum web search level<span class="help">Nobody can choose a higher level in their settings or a chat</span>' +
+    '<select data-act-change="adm-web-max">' + WEB_LEVELS.map((n, i) => `<option value="${i}"${i === max ? ' selected' : ''}>${esc(n)}</option>`).join('') +
+    '</select></label>' +
+    '<label class="fld mono">Organisation special words<span class="help">One per line: never sent to a web search, by anyone. ' +
+    'Add <code>| private</code> to block a word only at Public and Technical. Users cannot remove these.</span>' +
+    `<textarea rows="5" data-act-change="adm-org-words" spellcheck="false">${esc(words)}</textarea></label>` +
+    '<div class="adm-nums">' +
+    `<label class="fld">Deleted chats kept (days)<input type="number" min="30" max="3650" step="1" value="${esc(st.llm_chat_retention_days ?? 730)}" ` +
+    'data-act-change="adm-retention"><span class="help">30–3650; then they are purged for good</span></label>' +
+    `<label class="fld">Chats per assistant<input type="number" min="1" max="200" step="1" value="${esc(st.llm_max_sessions ?? 20)}" ` +
+    'data-act-change="adm-max-sessions"><span class="help">1–200 per user; the one not opened longest goes first</span></label>' +
+    '</div></div>';
+}
+
+function numIn(el: HTMLElement, lo: number, hi: number): number | null {
+  if (!(el instanceof HTMLInputElement)) return null;
+  const v = Number(el.value);
+  if (!Number.isInteger(v) || v < lo || v > hi) {
+    US.setStatus = { kind: 'err', text: `Enter a whole number from ${lo} to ${hi}` };
+    renderSettings();
+    return null;
+  }
+  return v;
 }
 
 const defaultTier = (): AdminTier | undefined => (US.tiers ?? []).find((t) => t.is_default);
@@ -319,6 +351,17 @@ export const USERS_CHANGES: Record<string, SetChange> = {
   'adm-conns': (el) => {
     if (el instanceof HTMLSelectElement) void saveSettings({ who_can_add_connections: el.value === 'admins' ? 'admins' : 'everyone' });
   },
+  'adm-web-max': (el) => { if (el instanceof HTMLSelectElement) void saveSettings({ llm_web_max_level: Number(el.value) }); },
+  'adm-org-words': (el) => {
+    if (!(el instanceof HTMLTextAreaElement)) return;
+    const words = el.value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+      const m = l.match(/^(.*?)\s*\|\s*(never|private)$/i);
+      return m && m[1] ? { text: m[1], strength: m[2]?.toLowerCase() === 'private' ? 'private' as const : 'never' as const } : { text: l, strength: 'never' as const };
+    });
+    void saveSettings({ llm_org_words: words });
+  },
+  'adm-retention': (el) => { const v = numIn(el, 30, 3650); if (v !== null) void saveSettings({ llm_chat_retention_days: v }); },
+  'adm-max-sessions': (el) => { const v = numIn(el, 1, 200); if (v !== null) void saveSettings({ llm_max_sessions: v }); },
   'adm-draft-tier': (el) => { if (el instanceof HTMLSelectElement) US.draft.tier_id = el.value; },
   'adm-tier': async (el) => {
     const u = el instanceof HTMLSelectElement ? userOf(el) : undefined;

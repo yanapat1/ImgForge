@@ -38,6 +38,7 @@ export const SECTIONS: Record<SectionId, [string, string]> = {
   labeling: ['Labeling', 'Drawing, name tags, committing and the keyboard shortcuts of the labeling page'],
   models: ['Models', 'YOLO, RF-DETR or custom detectors (files or HTTP APIs), scored in the Model tab — and your own backbones as feature spaces of the plot'],
   llm: ['AI assistant', 'Connect an LLM (OpenAI, Claude, Gemini, vLLM, Ollama…) and choose which AI features to show'],
+  prompts: ['Prompts & Skills', 'Your own instructions and skills for the ◆ assistants, plugins, and what web search may send'],
   appearance: ['Appearance', 'Theme for the page and every plot'],
   plot: ['Plot', 'Drawing and measuring on the embedding plot'],
   account: ['Account', 'Your picture, name, username, email and password, and the devices you are signed in on'],
