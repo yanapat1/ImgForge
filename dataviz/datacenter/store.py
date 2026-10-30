@@ -840,8 +840,7 @@ def thumbnail(data_or_path, key, w, cfg):
     """A JPEG at most w px on its long side, cached on disk under the workspace root (key = path + mtime + size)."""
     from PIL import Image, ImageOps
     w = max(16, min(int(w), 1024))
-    h = hashlib.sha1(f'{key}|{w}'.encode()).hexdigest()
-    p = cache_dir(cfg) / h[:2] / f'{h}.jpg'
+    p = _thumb_path(cfg, key, w)
     try:
         return p.read_bytes()
     except OSError:
@@ -858,7 +857,34 @@ def thumbnail(data_or_path, key, w, cfg):
             im.save(out, 'JPEG', quality=82)
     except Exception as e:  # noqa: BLE001 - any undecodable file is the same answer
         raise DCError(f'cannot make a thumbnail: {e}', 415) from None
-    data = out.getvalue()
+    return _thumb_save(p, out.getvalue())
+
+
+def video_thumbnail(path, key, w, t, cfg):
+    """A JPEG of a video's frame at `t` seconds (None: its poster, 10 % in), at most w px, cached like thumbnail()."""
+    from . import video
+    w = max(16, min(int(w), 1024))
+    t = None if t is None else round(max(0.0, float(t)), 2)
+    p = _thumb_path(cfg, f'{key}|t={t}', w)
+    try:
+        return p.read_bytes()
+    except OSError:
+        pass
+    try:
+        data = video.frame_at(path, t, w)
+    except DCError:
+        raise
+    except Exception as e:  # noqa: BLE001 - any undecodable video is the same answer
+        raise DCError(f'cannot make a poster frame: {e}', 415) from None
+    return _thumb_save(p, data)
+
+
+def _thumb_path(cfg, key, w):
+    h = hashlib.sha1(f'{key}|{w}'.encode()).hexdigest()
+    return cache_dir(cfg) / h[:2] / f'{h}.jpg'
+
+
+def _thumb_save(p, data):
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(f'.{uuid.uuid4().hex[:6]}.tmp')
@@ -963,6 +989,14 @@ class S3View:
         except Exception as e:  # noqa: BLE001 - botocore's NoSuchKey / ClientError
             raise DCError(f'cannot read {rel}: {e}', 404) from None
         return obj['Body'].read(), obj.get('ETag', ''), int(obj.get('ContentLength') or 0)
+
+    def download(self, rel, dest):
+        """Stream object `rel` into local file `dest` (never whole in memory: a video can be gigabytes)."""
+        try:
+            body = self.client.get_object(Bucket=self.bucket, Key=self.key(rel))['Body']
+        except Exception as e:  # noqa: BLE001 - botocore's NoSuchKey / ClientError
+            raise DCError(f'cannot read {rel}: {e}', 404) from None
+        _write_stream(body, dest)
 
     def size(self, rel):
         try:

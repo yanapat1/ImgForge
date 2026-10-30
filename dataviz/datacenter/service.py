@@ -28,12 +28,13 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import db
 from ..auth import tiers as vtiers
-from . import formats, store, tags as vtags
+from . import formats, store, tags as vtags, video
 from .store import DCError
 
 __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
            'summary', 'ls', 'read_file', 'read_text', 'ops', 'undo', 'upload', 'set_tags', 'all_tags', 'detect',
-           'stats', 'search', 'send', 'sync', 'export', 'export_check', 'export_to', 'source', 'autolabel', 'write_text']
+           'stats', 'search', 'send', 'sync', 'export', 'export_check', 'export_to', 'source', 'autolabel', 'write_text',
+           'video_info', 'estimate_frames', 'extract_frames', 'set_video_auto']
 
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
@@ -302,6 +303,7 @@ def _shape(rows, conn):
             'stats': {'images': tree.get('images'), 'labels': tree.get('labels'),
                       'classes': (fmt or {}).get('classes'), 'size': tree.get('size')},
             'sessions': ses.get(r.id, []),
+            'video_auto': getattr(r._r, 'video_auto', None),
             **({'source': {'kind': r.source_kind, 'ref': r.source_ref, 'imported_at': _epoch(r.imported_at),
                            'title': (r.source_meta or {}).get('title'), 'version': (r.source_meta or {}).get('version'),
                            'importing': _importing(r.id)}}
@@ -494,6 +496,8 @@ def sync(user, bid):
     dest = _local_root(r)
 
     def fn(job=None):
+        auto = getattr(r._r, 'video_auto', None)
+        before = _videos_in(dest) if auto else None
         view = _s3(r)
         try:
             res = view.pull(dest, job.progress if job is not None else None,
@@ -505,6 +509,8 @@ def sync(user, bid):
                 c.execute(text('UPDATE app.dc_buckets SET synced_at = now(), updated_at = now() WHERE id = :b'),
                           {'b': r.id})
             _revalidate(_row(user, bid))
+            if auto:
+                res['frames'] = _auto_frames(user, _row(user, bid), sorted(_videos_in(dest) - before))
         return res
 
     ctx = _conf['ctx']
@@ -555,6 +561,315 @@ def convert_vectors(user, bid, path='', to='parquet'):
         return {'job_id': None, 'path': out, 'result': fn()}
     return {'job_id': jobs.submit(f'dc-convert:{r.id}', f'convert {base} to {vector.LAYOUTS[to]["label"]}', fn,
                                   lane='io', public_result=True, owner=user['id']).id, 'path': out, 'result': None}
+
+
+# ---------------------------------------------------------------------------------------------- video -> frames
+FRAMES_MAX_VIDEOS = 500             # videos one extraction takes
+ESTIMATE_PROBES = 100               # videos probed for an estimate (the rest is scaled from them)
+
+
+def _videos_in(absdir, base_rel=''):
+    """The rel paths (below the bucket root, `base_rel` being absdir's) of every video under folder `absdir`."""
+    out = set()
+    if not os.path.isdir(absdir):
+        return out
+    for d, dirs, files in os.walk(absdir):
+        dirs[:] = [x for x in dirs if store.visible(x, True)]
+        sub = os.path.relpath(d, absdir).replace(os.sep, '/')
+        folder = '/'.join(x for x in (base_rel, '' if sub == '.' else sub) if x)
+        for f in files:
+            if store.visible(f) and store.kind_of(f) == 'video':
+                out.add(store.join(folder, f))
+    return out
+
+
+def _videos_below(r, rel):
+    try:
+        return _videos_in(_abs(r, store.clean_rel(rel), must_exist=False), store.clean_rel(rel))
+    except DCError:
+        return set()
+
+
+def _video_rels(r, paths):
+    """The videos `paths` name: a file must be a video; a folder gives the videos directly inside it.
+    -> [rel], in order and without repeats."""
+    if isinstance(paths, str):
+        paths = [paths]
+    out = []
+    view = _s3(r) if r.kind == 's3' else None
+    try:
+        for p in paths or []:
+            rel = store.clean_rel(p)
+            if view is not None:
+                what = view.what(rel)
+                if what is None:
+                    raise DCError(f'no file {rel}', 404)
+                isdir = what == 'dir'
+            else:
+                a = _abs(r, rel)
+                isdir = os.path.isdir(a)
+                if not isdir and not os.path.isfile(a):
+                    raise DCError(f'no file {rel or "/"}', 404)
+            if isdir:
+                if view is not None:
+                    names = [e['name'] for e in view.list(rel, limit=5000)['entries'] if e['type'] == 'file']
+                else:
+                    with os.scandir(_abs(r, rel)) as it:
+                        names = sorted(e.name for e in it if e.is_file() and store.visible(e.name))
+                found = [store.join(rel, n) for n in names if store.kind_of(n) == 'video']
+                if not found:
+                    raise DCError(f'{rel or "/"} holds no video (mp4, mov, avi, mkv, webm, …)')
+                out += found
+            elif store.kind_of(rel.rsplit('/', 1)[-1]) != 'video':
+                raise DCError(f'{rel} is not a video (mp4, mov, avi, mkv, webm, …)')
+            else:
+                out.append(rel)
+    finally:
+        if view is not None:
+            view.close()
+    out = list(dict.fromkeys(out))
+    if not out:
+        raise DCError('pick a video, or a folder that holds videos')
+    if len(out) > FRAMES_MAX_VIDEOS:
+        raise DCError(f'{len(out)} videos: one extraction takes at most {FRAMES_MAX_VIDEOS}')
+    return out
+
+
+def _info(r, rel):
+    i = video.probe(_abs(r, rel))
+    i.pop('time_base', None)
+    return i
+
+
+def video_info(user, bid, path):
+    """A video's {path, w, h, fps, frames, duration, codec, rotation, size, decoder} (w / h as shown, rotation
+    applied); a video streamed from S3 only has {path, size, streamed: true}."""
+    r = _row(user, bid)
+    rel = _file(r, path)
+    if store.kind_of(rel.rsplit('/', 1)[-1]) != 'video':
+        raise DCError(f'{rel} is not a video (mp4, mov, avi, mkv, webm, …)')
+    if r.kind == 's3':
+        view = _s3(r)
+        try:
+            size = view.size(rel)
+        finally:
+            view.close()
+        if size is None:
+            raise DCError(f'no file {rel}', 404)
+        return {'path': rel, 'size': size, 'streamed': True}
+    if not os.path.isfile(_abs(r, rel)):
+        raise DCError(f'no file {rel}', 404)
+    return {'path': rel, **_info(r, rel)}
+
+
+def _estimate(r, rels, o):
+    """{frames, approx, bytes, times, videos}: what options `o` take from the videos `rels` (local: the probes and
+    the same pickers the extraction runs; S3 streamed: unknown until downloaded)."""
+    if r.kind == 's3':
+        return {'frames': None, 'approx': True, 'bytes': None, 'times': [], 'videos': [{'path': x} for x in rels]}
+    vids, frames, size, approx, times = [], 0, 0, False, []
+    for rel in rels[:ESTIMATE_PROBES]:
+        info = _info(r, rel)
+        kf = video.keyframes(_abs(r, rel)) if o['mode'] == 'keyframes' and info['decoder'] == 'pyav' else None
+        e = video.estimate(info, o, kf)
+        vids.append({'path': rel, 'frames': e['frames'], **{k: info[k] for k in ('w', 'h', 'fps', 'duration')}})
+        if not times:
+            times = e['times']
+        if e['frames'] is None:
+            frames = None
+        elif frames is not None:
+            frames += e['frames']
+        size += e['bytes'] or 0
+        approx = approx or e['approx']
+    if len(rels) > ESTIMATE_PROBES and frames is not None:
+        k = len(rels) / ESTIMATE_PROBES
+        frames, size, approx = int(frames * k), int(size * k), True
+    if frames is not None and frames > o['max_frames']:
+        frames = o['max_frames']
+    return {'frames': frames, 'approx': approx, 'bytes': size, 'times': times, 'videos': vids}
+
+
+def estimate_frames(user, bid, paths, opts=None):
+    """How many frames (and roughly how many bytes) extract_frames would write, plus up to 8 of the first video's
+    frame times for a film strip: {frames, approx, bytes, times, videos: [{path, frames, w, h, fps, duration}],
+    describe, limit}."""
+    r = _row(user, bid)
+    o = video.options(opts)
+    rels = _video_rels(r, paths)
+    est = _estimate(r, rels, o)
+    return {**est, 'describe': video.describe(o), 'limit': o['max_frames']}
+
+
+def _frames_name(r, rels, out):
+    if out is not None:
+        name = ' '.join(str(out).split())
+        if not 1 <= len(name) <= 200 or '/' in name or '\\' in name or name.startswith('.'):
+            raise DCError('the output folder name needs 1 to 200 characters, no / or \\, not starting with a dot')
+        return name
+    if len(rels) == 1:
+        return f'{video.stems(rels)[0]}-frames'
+    parent = store.posix_parent(rels[0])
+    return f'{parent.rsplit("/", 1)[-1] if parent else _slug(r.name)}-frames'
+
+
+def extract_frames(user, bid, paths, opts=None, target='inplace', new_name=None, out=None, remember=False):
+    """Cut the videos `paths` (video files, or folders: the videos directly inside) into image frames picked by
+    `opts` (video.options: mode all | every | pattern | count | keyframes | scene | smart, the rate pattern
+    every_s / window_s / take / pick, or fps=…; start / end, dedupe, max_side, format, quality, layout, split,
+    max_frames). The frames go into a new folder `out` (default <video>-frames, or <folder>-frames for several
+    videos) next to the first video ('inplace', the bucket must be writable) or at the root of a new managed bucket
+    `new_name` ('copy'; the only way for a bucket streamed from S3: each video is downloaded first). The folder is
+    written hidden and appears in one rename when complete; layout yolo / yolo-split also writes labels/ and
+    data.yaml, every layout writes frames.csv. remember=True saves `opts` as the bucket's auto-extract settings.
+    One io-lane job -> {job_id, bucket, path, estimate, result}."""
+    r = _row(user, bid)
+    _need(user)
+    o = video.options(opts)
+    if target not in ('inplace', 'copy'):
+        raise DCError('target must be inplace or copy')
+    if target == 'inplace':
+        if r.kind == 's3':
+            raise DCError(f'bucket “{r.name}” is streamed from S3 and read-only: extract into a new bucket '
+                          '(target copy), or switch it to “load into local”')
+        _need_write(r)
+    rels = _video_rels(r, paths)
+    est = _estimate(r, rels, o)
+    if est['frames'] is not None and not est['approx'] and est['frames'] >= o['max_frames'] and \
+            o['max_frames'] == video.MAX_FRAMES:
+        raise DCError(f'these settings take ≈{est["frames"]:,} frames, the limit is {video.MAX_FRAMES:,}: pick a '
+                      'lower rate or a shorter range')
+    name = _frames_name(r, rels, out)
+    if remember:
+        set_video_auto(user, bid, opts)
+    return _frames_job(user, r, rels, o, est, name, target, new_name)
+
+
+def _frames_job(user, r, rels, o, est, name, target='inplace', new_name=None):
+    """Queue (or, without a job runner, run) the extraction; the checks are the caller's."""
+    if target == 'copy':
+        dest = _row(user, create_bucket(user, new_name or f'{r.name}-frames', 'managed')['id'])
+        parent_rel = ''
+    else:
+        dest, parent_rel = r, store.posix_parent(rels[0])
+    parent = _abs(dest, parent_rel)
+    out_rel = store.join(parent_rel, os.path.basename(store._unique(os.path.join(parent, name))))
+    total = est['frames']
+    label = f'cut {", ".join(x.rsplit("/", 1)[-1] for x in rels[:2])}{f" +{len(rels) - 2}" if len(rels) > 2 else ""}' \
+            f' · {video.describe(o)}'
+
+    def fn(job=None):
+        cancelled = (lambda: job.cancelled.is_set()) if job is not None else (lambda: False)
+        tmp = os.path.join(parent, f'.frames-{uuid.uuid4().hex[:10]}')
+        os.makedirs(tmp)
+        done = [0]
+
+        def prog(d=None, t=None, stage=None, extra=''):
+            if job is not None:
+                job.progress(done=done[0] + (d or 0), total=total, stage=stage, extra=extra)
+        try:
+            vids, per, nbytes, capped = [], [], 0, False
+            for i, (rel, stem) in enumerate(zip(rels, video.stems(rels))):
+                if cancelled():
+                    raise store.Cancelled()
+                shown = rel.rsplit('/', 1)[-1] + (f' ({i + 1}/{len(rels)})' if len(rels) > 1 else '')
+                src, dl = None, None
+                if r.kind == 's3':
+                    prog(stage=f'downloading {shown}')
+                    dl = os.path.join(tmp, f'.src-{i}{os.path.splitext(rel)[1]}')
+                    view = _s3(r)
+                    try:
+                        view.download(rel, dl)
+                    finally:
+                        view.close()
+                    src = dl
+                else:
+                    src = _abs(r, rel)
+                try:
+                    info = video.probe(src)
+                    res = video.extract(src, video.image_folder(tmp, o['layout'], stem), stem, o, info, prog,
+                                        cancelled, shown, start_count=done[0])
+                finally:
+                    if dl is not None:
+                        try:
+                            os.remove(dl)
+                        except OSError:
+                            pass
+                done[0] += res['frames']
+                nbytes += res['bytes']
+                per.append({'path': rel, 'frames': res['frames'], 'skipped_dupes': res['skipped_dupes'],
+                            'errors': res['errors'], 'decoder': res['decoder'], 'duration': info['duration']})
+                vids.append((rel, stem, res['rows'], info['duration']))
+                if res['capped']:
+                    capped = True
+                    break
+            if not done[0]:
+                raise DCError('no frame matched these settings: check the range and the mode')
+            prog(stage='laying out the folder')
+            lay = video.finish(tmp, o['layout'], vids, o)
+            final = store._unique(os.path.join(parent, os.path.basename(out_rel)))
+            os.replace(tmp, final)
+        except BaseException as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            if target == 'copy':
+                try:
+                    delete_bucket(user, dest.id, delete_files=True)
+                except Exception:  # noqa: BLE001 - best effort: the error below is what matters
+                    pass
+            if isinstance(e, store.Cancelled):
+                return {'cancelled': True, 'bucket': None if target == 'copy' else dest.id}
+            raise
+        path = store.join(parent_rel, os.path.basename(final))
+        with db.begin() as c:
+            c.execute(text('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': dest.id})
+        return {'bucket': dest.id, 'path': path, 'frames': done[0], 'bytes': nbytes, 'videos': per,
+                'layout': o['layout'], 'format': o['format'], 'describe': video.describe(o),
+                'capped': capped,
+                **lay, 'retagged': _revalidate(_row(user, dest.id))}
+
+    ctx = _conf['ctx']
+    jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
+    base = {'bucket': dest.id, 'path': out_rel, 'estimate': {k: est[k] for k in ('frames', 'approx', 'bytes')}}
+    if jobs is None:
+        return {'job_id': None, **base, 'result': fn()}
+    job = jobs.submit(f'dc-frames:{dest.id}:{out_rel}', label, fn, lane='io', public_result=True, owner=user['id'])
+    return {'job_id': job.id, **base, 'result': None}
+
+
+def set_video_auto(user, bid, opts=None):
+    """Save `opts` (video.options) as the bucket's auto-extract settings: every video that lands in it later (upload,
+    import, S3 load) is cut into <video>-frames by itself. opts None turns it off. -> {video_auto}."""
+    r = _row(user, bid)
+    _need(user)
+    if r.kind == 's3':
+        raise DCError(f'bucket “{r.name}” is streamed from S3 and read-only: nothing new lands in it')
+    o = None
+    if opts is not None:
+        o = video.options(opts)
+        o['split'] = list(o['split'])
+    with db.begin() as c:
+        c.execute(text('UPDATE app.dc_buckets SET video_auto = :v, updated_at = now() WHERE id = :b')
+                  .bindparams(bindparam('v', type_=JSONB)), {'v': o, 'b': r.id})
+    return {'video_auto': o}
+
+
+def _auto_frames(user, r, rels):
+    """Start the auto-extract jobs (one per new video, so each gets its own <video>-frames) -> {jobs, errors} or None."""
+    auto = getattr(r._r, 'video_auto', None)
+    if not auto or not rels or not _writable(r):
+        return None
+    try:
+        o = video.options(auto)
+    except DCError as e:
+        return {'jobs': [], 'errors': [{'path': '', 'error': f'the saved auto-extract settings: {e}'}]}
+    jobs, errors = [], []
+    for rel in rels[:FRAMES_MAX_VIDEOS]:
+        try:
+            est = _estimate(r, [rel], o)
+            res = _frames_job(user, r, [rel], o, est, _frames_name(r, [rel], None))
+            jobs.append({'path': rel, 'job_id': res['job_id'], 'out': res['path']})
+        except DCError as e:
+            errors.append({'path': rel, 'error': e.message})
+    return {'jobs': jobs, 'errors': errors}
 
 
 # ---------------------------------------------------------------------------------------------- web sources
@@ -651,6 +966,8 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
                   {'k': src.key, 'ref': pref['ref'], 'm': meta, 'b': r.id})
 
     def fn(job=None):
+        auto = getattr(_row(user, r.id)._r, 'video_auto', None)
+        before = _videos_below(r, rel) if auto else None
         tmp = os.path.join(r.root, f'.import-{uuid.uuid4().hex[:10]}')
         os.makedirs(tmp)
         cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
@@ -686,6 +1003,8 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
                 c.execute(text("""UPDATE app.dc_buckets SET imported_at = now(), updated_at = now(), source_meta = :m
                                   WHERE id = :b""").bindparams(bindparam('m', type_=JSONB)), {'m': done_meta, 'b': r.id})
             res['retagged'] = _revalidate(_row(user, r.id))
+            if auto:
+                res['frames'] = _auto_frames(user, _row(user, r.id), sorted(_videos_below(r, rel) - before))
             return {**res, 'bucket': r.id, 'source': src.key, 'ref': pref['ref']}
         except BaseException as e:
             if created:
@@ -940,11 +1259,15 @@ def file_path(user, bid, path):
     return p, mimetypes.guess_type(p)[0] or 'application/octet-stream'
 
 
-def read_file(user, bid, path, w=None):
-    """(bytes, media type): the raw file, or with `w` a JPEG thumbnail at most w px (cached on disk)."""
+def read_file(user, bid, path, w=None, t=None):
+    """(bytes, media type): the raw file, or with `w` a JPEG thumbnail at most w px (cached on disk); for a video
+    the thumbnail is its frame at `t` seconds (default: a poster frame 10 % in)."""
     r = _row(user, bid)
     rel = _file(r, path)
     _need_secret(user, rel)
+    is_video = store.kind_of(rel.rsplit('/', 1)[-1]) == 'video'
+    if r.kind == 's3' and w and is_video:
+        raise DCError('a video streamed from S3 has no preview: load the bucket locally or copy it', 415)
     if r.kind == 's3':
         view = _s3(r)
         try:
@@ -957,6 +1280,8 @@ def read_file(user, bid, path, w=None):
     p, mt = file_path(user, bid, rel)
     if w:
         st = os.stat(p)
+        if is_video:
+            return store.video_thumbnail(p, f'{p}|{st.st_mtime_ns}|{st.st_size}', w, t, _cfg()), 'image/jpeg'
         return store.thumbnail(p, f'{p}|{st.st_mtime_ns}|{st.st_size}', w, _cfg()), 'image/jpeg'
     with open(p, 'rb') as f:
         return f.read(), mt
@@ -1203,10 +1528,14 @@ def upload(user, bid, path, files, unzip=True):
     r = _row(user, bid)
     _need(user)
     _need_write(r)
+    auto = getattr(r._r, 'video_auto', None)
+    before = _videos_below(r, path) if auto else None
     out = store.upload_local(r.root, _allowed(), path, files, unzip=unzip)
     with db.begin() as c:
         c.execute(text('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
     out['retagged'] = _revalidate(r) if out['added'] else None
+    if auto and out['added']:
+        out['frames'] = _auto_frames(user, r, sorted(_videos_below(r, path) - before))
     return out
 
 

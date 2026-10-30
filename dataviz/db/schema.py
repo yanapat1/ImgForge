@@ -374,6 +374,7 @@ dc_buckets = Table(
     Column('source_ref', Text),                          # its canonical ref (owner/dataset, user/dataset@rev, the link)
     Column('source_meta', JSONB),                        # the last import's {connection_id, opts, ...}: "Update from source"
     _ts('imported_at'),                                  # end of the last finished import
+    Column('video_auto', JSONB),                         # cut new videos into frames with these options (0010); NULL = off
     _now('created_at'), _now('updated_at'),
     CheckConstraint("kind IN ('managed', 'local', 's3')", name='kind'),
     CheckConstraint("mode IN ('stream', 'local')", name='mode'),

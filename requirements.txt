@@ -14,6 +14,7 @@ pacmap==0.9.1
 opentsne==1.0.4
 plotly==6.7.0
 opencv-python==5.0.0.93
+av==19.0.1           # Data Center video → frames (datacenter/video.py): FFmpeg decoding, threaded, keyframe seeks
 pillow
 tqdm
 rich

@@ -95,12 +95,12 @@ def router(state, ctx):
         return _call(service.ls, user, bid, path, offset=offset, limit=limit, sort=sort, q=q)
 
     @r.get('/buckets/{bid}/file')
-    def read_file(bid: str, path: str, w: int | None = None, user=Depends(deps.current_user)):
+    def read_file(bid: str, path: str, w: int | None = None, t: float | None = None, user=Depends(deps.current_user)):
         if not w:
             local = _call(service.file_path, user, bid, path)
             if local is not None:                       # a local file is streamed, never read into memory
                 return FileResponse(local[0], media_type=local[1], headers=CACHE)
-        data, mt = _call(service.read_file, user, bid, path, w=w)
+        data, mt = _call(service.read_file, user, bid, path, w=w, t=t)
         return Response(data, media_type=mt, headers=CACHE)
 
     @r.get('/buckets/{bid}/text')
@@ -123,6 +123,24 @@ def router(state, ctx):
     @r.post('/buckets/{bid}/convert')
     def convert(bid: str, body: dict, user=Depends(MANAGE)):
         return _call(service.convert_vectors, user, bid, body.get('path') or '', to=body.get('to') or 'parquet')
+
+    @r.get('/buckets/{bid}/video')
+    def video_info(bid: str, path: str, user=Depends(deps.current_user)):
+        return _call(service.video_info, user, bid, path)
+
+    @r.post('/buckets/{bid}/video-auto')
+    def video_auto(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.set_video_auto, user, bid, body.get('opts'))
+
+    @r.post('/frames/estimate')
+    def frames_estimate(body: dict, user=Depends(deps.current_user)):
+        return _call(service.estimate_frames, user, body.get('bucket'), body.get('paths') or [], body.get('opts'))
+
+    @r.post('/frames')
+    def frames(body: dict, user=Depends(MANAGE)):
+        return _call(service.extract_frames, user, body.get('bucket'), body.get('paths') or [], body.get('opts'),
+                     target=body.get('target') or 'inplace', new_name=body.get('new_name'), out=body.get('out'),
+                     remember=bool(body.get('remember')))
 
     @r.post('/buckets/{bid}/upload')
     def upload(bid: str, path: str = '', unzip: int = 1, files: list[UploadFile] = File(...), user=Depends(MANAGE)):
