@@ -346,7 +346,7 @@ def test_bootstrap(pg):
     assert len(users.list_all()) == 1
 
     bootstrap.ensure_defaults()
-    assert settings.all_settings() == {'signup_enabled': True, 'who_can_add_connections': 'everyone'}
+    assert settings.all_settings() == {**settings.DEFAULTS, 'signup_enabled': True, 'who_can_add_connections': 'everyone'}
 
 
 def test_bootstrap_env_and_promote(pg):
