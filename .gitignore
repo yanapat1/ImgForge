@@ -22,3 +22,6 @@ examples/digits-embeddings/
 
 # Data Center managed store (storage.data_root): user data, never committed
 /data/
+
+# UI error screenshots (local debugging), never committed
+/.ui_error_image/

@@ -13,3 +13,7 @@ summary: where tags live, user vs automatic format tags, cleaning rules, reusing
 - A useful taxonomy: a few prefixes, lower-case, `-` inside words: `project:parking`, `split:val`, `status:raw` /
   `status:clean` / `status:labelled`, `source:kaggle`, `cam:north`. Prefixes keep the list short and searchable.
   Never use the `format:` prefix for your own tags.
+- Not the same thing: a **session or labeling project on Home** has up to 20 tags of its own (same cleaning rules),
+  shown under its name on the card. Its owner edits them with the card's Edit button (the full edit form's Tags
+  field, saved with the form; a click on a tag on a card filters Home by it). No tool here changes them: tell the
+  user where to do it.
