@@ -9,3 +9,6 @@ core: true
 - `coco`: a JSON with `images`, `annotations` and `categories`. `voc`: `Annotations/*.xml` next to the images.
 - `classification`: one sub-folder of images per class. `images`: images with no labels. `embeddings`: `.npy`
   vector files. `other`: none of these. `empty`: nothing inside.
+- `detect_format` returns the format, a confidence, the checks that decided it (images/, labels/ mirror, data.yaml,
+  ≤ 50 label files sampled for their column counts) and the class count; results are cached (force re-detects;
+  the page: Re-detect). The bucket root is re-detected after every change and tagged `format:<format>`.
