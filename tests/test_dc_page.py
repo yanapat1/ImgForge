@@ -177,3 +177,43 @@ def test_data_center_assistant_drawer_chat(server):
         assert not errors, '\n'.join(errors)
     finally:
         fake.should_exit = True
+
+
+def test_data_center_extract_frames(server, tmp_path):
+    """A video tile shows its poster; double-click opens Extract frames (player, meta, live estimate + film strip);
+    the "burst" preset runs as a job and the page opens the new frames folder."""
+    from test_dc_video import make_clip
+    clip = Path(make_clip(tmp_path / 'walk.mp4', secs=4))
+    b = _send(f'{server}/api/dc/buckets', {'name': 'video-bucket', 'kind': 'managed'})
+    bid = b['id']
+    _upload(f'{server}/api/dc/buckets/{bid}/upload?path=', [(clip.name, clip.read_bytes())])
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 1000})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?data={bid}')
+        tile = page.locator('#dc-grid .dc-th[data-path="walk.mp4"]')
+        tile.wait_for(timeout=30000)
+        page.wait_for_selector('#dc-grid .dc-th[data-path="walk.mp4"] img[src*="w="]', timeout=15000)
+        assert page.locator('#dc-grid .dc-th[data-path="walk.mp4"] .vb').count() == 1
+        # one click: the details pane plays it and offers Extract frames
+        tile.click()
+        page.wait_for_selector('#dc-details video.dc-d-video')
+        tile.dblclick()
+        page.wait_for_selector('.ui-dlg .dc-fr video.dc-fr-player')
+        page.wait_for_selector('.dc-fr-meta:has-text("160×96")', timeout=15000)
+        page.wait_for_selector('#dc-fr-est .status-line.ok:has-text("4 frames")', timeout=15000)   # 1 per second
+        page.click('.dc-fr [data-preset="burst"]')
+        page.wait_for_selector('#dc-fr-est .status-line.ok:has-text("30 frames")', timeout=15000)  # 15 from 1 s every 2 s
+        page.wait_for_function('[...document.querySelectorAll(".dc-fr-strip img")].filter((i) => i.complete && i.naturalWidth > 0).length === 8',
+                               timeout=20000)
+        page.screenshot(path=str(tmp_path / 'frames-dialog.png'))
+        page.click('.ui-dlg button.primary:has-text("Extract frames")')
+        page.wait_for_function(f'location.search.includes("data={bid}") && location.search.includes("walk-frames")', timeout=30000)
+        page.wait_for_selector('#dc-grid .dc-th[data-path="walk-frames/images"]', timeout=15000)
+        browser.close()
+    ls = _get(f'{server}/api/dc/buckets/{bid}/ls?path=walk-frames/images')
+    assert ls['total'] == 30
+    assert not errors, '\n'.join(errors)

@@ -15,6 +15,7 @@ import { openTagEditor } from './tags.js';
 import { openDialog } from '../views/dialog.js';
 import { watchJobs } from './activity.js';
 import { peek, peekKey, TEXTY } from './editor.js';
+import { describeOpts } from './frames.js';
 import {
   bucketOf, curBucket, D, fbadge, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, isYolo, key, selEntries,
   SOURCE, srcIcon, tagChip, timeAgo, writable,
@@ -104,7 +105,7 @@ function bucketDetails(b: Bucket): string {
     head(srcIcon(b), b.name, `<button type="button" class="icon-btn ghost sm" data-act="edit-bucket" data-bid="${esc(b.id)}" aria-label="Edit bucket" title="Edit: name, tags${b.kind === 's3' ? ', load mode' : ''}, export…">${icon('edit')}</button>` +
       `<button type="button" class="icon-btn ghost sm" data-act="bucket-menu" data-bid="${esc(b.id)}" aria-haspopup="menu" aria-label="Bucket actions" title="Bucket actions">${icon('more')}</button>`) +
     `<div class="d-path">${icon(b.kind === 's3' ? 'cloud' : 'folder')}<span title="${esc(b.root)}">${esc(b.root)}</span></div>` +
-    sourceLine(b) +
+    sourceLine(b) + autoLine(b) +
     `<div class="d-meta">${esc(SOURCE[b.kind]?.[1] ?? b.kind)}${b.kind === 's3' ? ` · ${b.mode === 'local' ? (b.local_ready ? 'loaded locally' : 'loading…') : 'streamed'}` : ''} · ${ro}${b.updated_at ? ` · changed ${esc(timeAgo(b.updated_at))}` : ''}</div></section>` +
     formatSec(b.id, '', f) + tagsSec(b.id, '', tags, true) + contentsSec(s, b) + sessionsSec(b) + '</div>' +
     sendFoot(b.id, [''], undefined, f, b.writable);
@@ -130,6 +131,24 @@ function sourceLine(b: Bucket): string {
   const when = s.importing ? 'importing…' : s.imported_at ? `imported ${timeAgo(s.imported_at)}` : 'not finished';
   return `<div class="d-src">${icon('globe')}<span>From ${esc(SRC_LABEL[s.kind] ?? s.kind)} · <code>${esc(s.ref)}</code>${s.version != null ? ` · v${esc(String(s.version))}` : ''} · ${esc(when)}</span>` +
     (b.writable && !s.importing ? `<button type="button" class="ghost sm" data-act="reimport" data-bid="${esc(b.id)}" title="Download it again: newer files replace the old ones">${icon('refresh')}Update</button>` : '') + '</div>';
+}
+
+/** The bucket cuts every new video into frames by itself (video_auto): what with, and Turn off. */
+function autoLine(b: Bucket): string {
+  if (!b.video_auto) return '';
+  return `<div class="d-src">${icon('film')}<span>Auto-extract new videos · ${esc(describeOpts(b.video_auto))}</span>` +
+    (b.writable ? `<button type="button" class="ghost sm" data-act="video-auto-off" data-bid="${esc(b.id)}" title="Stop cutting new videos into frames">Turn off</button>` : '') + '</div>';
+}
+
+/** Only videos selected: one plays here; Extract frames… cuts them (frames.ts). */
+function videoSec(b: Bucket, es: Entry[]): string {
+  if (!es.length || es.some((e) => e.kind !== 'video')) return '';
+  const one = es.length === 1 ? es[0] : undefined;
+  const play = one && (b.kind !== 's3' || b.local_ready)
+    ? `<video class="dc-d-video" controls preload="metadata" playsinline src="${esc(api.fileUrl(b.id, one.path))}"></video>` : '';
+  return `<section class="d-sec"><h4 class="d-h">Video</h4>${play}` +
+    `<button type="button" class="primary sm" data-act="extract-frames" data-bid="${esc(b.id)}" data-paths="${esc(es.map((e) => e.path).join('\n'))}">${icon('film')}Extract frames${es.length > 1 ? ` from ${fmtN(es.length)} videos` : ''}…</button>` +
+    `<p class="hint">Cut into images to label or visualize: per second, bursts, scene changes, smart picks…</p></section>`;
 }
 
 /** One text-like file selected: its first lines (filled in by editor.ts peek) and Open editor. */
@@ -159,7 +178,7 @@ function selectionDetails(b: Bucket): string {
   const w = writable();
   const dis = w ? '' : ' disabled';
   return `<div class="d-scroll"><section class="d-sec">` +
-    `<div class="d-title">${icon(imgs.length ? 'file-img' : 'folder')}<h3>${one ? esc(one.name) : `${what} selected`}</h3><span class="grow"></span>` +
+    `<div class="d-title">${icon(imgs.length ? 'file-img' : es.length && es.every((e) => e.kind === 'video') ? 'film' : 'folder')}<h3>${one ? esc(one.name) : `${what} selected`}</h3><span class="grow"></span>` +
     `<button type="button" class="ghost sm" data-act="clear-sel">Clear</button>` +
     `<button type="button" class="icon-btn ghost sm dc-only-overlay" data-act="close-overlays" aria-label="Close details">${icon('x')}</button></div>` +
     (stack ? `<div class="stack">${stack}</div>` : '') +
@@ -172,7 +191,7 @@ function selectionDetails(b: Bucket): string {
     (yolo && imgs.length ? `<div class="dc-checks">` +
       `<span class="${labeled === imgs.length ? 'ok' : 'wn'}">${icon(labeled === imgs.length ? 'check-c' : 'warn-c')}</span><span class="k">each image has a label file</span><span class="v num">${labeled}/${imgs.length}</span>` +
       `<span class="ok">${icon('check-c')}</span><span class="k">moving keeps label pairs together</span><span class="v">auto</span></div>` : '') +
-    '</section>' + peekSec(b.id, one) +
+    '</section>' + peekSec(b.id, one) + videoSec(b, es) +
     `<section class="d-sec"><h4 class="d-h">Actions</h4><div class="act-list">` +
     `<button type="button" data-act="move"${dis}>${icon('move')}Move to…</button><button type="button" data-act="copy"${dis}>${icon('copy')}Copy to…</button>` +
     `<button type="button" data-act="tag-sel">${icon('tag')}Tag…</button><button type="button" data-act="rename"${n === 1 && w ? '' : ' disabled'}>${icon('edit')}Rename</button></div>` +

@@ -42,6 +42,8 @@ export interface Bucket {
    *  once; root is then that folder), the last finished pull, and the s3:// root */
   connection_id?: string | null; s3_bucket?: string | null; prefix?: string;
   mode?: S3Mode; local_ready?: boolean; synced_at?: number | null; s3_root?: string;
+  /** cut every video that lands in the bucket into frames with these options (POST …/video-auto); null = off */
+  video_auto?: FramesOpts | null;
   /** PATCH / POST answers that queued a pull */
   job_id?: number | null;
 }
@@ -122,6 +124,33 @@ export interface DcSource {
   source: { kind: 'local'; path: string } | { kind: 's3'; connection_id: string; bucket: string; prefix: string };
   format: Format | null; classes: string[]; bucket: string; path: string; name: string;
 }
+
+// ---------------------------------------------------------------- video → frames (datacenter/video.py)
+/** GET /api/dc/buckets/{bid}/video: w / h as shown (rotation applied); a streamed S3 video only has size */
+export interface VideoInfo {
+  path: string; size: number; streamed?: boolean;
+  w?: number; h?: number; fps?: number; frames?: number; duration?: number; codec?: string; rotation?: number; decoder?: 'pyav' | 'opencv';
+}
+export type FramesMode = 'all' | 'every' | 'pattern' | 'count' | 'keyframes' | 'scene' | 'smart';
+export type FramesLayout = 'yolo' | 'yolo-split' | 'per-video' | 'flat';
+export type FramesFormat = 'jpg' | 'png' | 'webp';
+/** video.options: which frames (mode + its numbers, or the fps shorthand), the range and the output */
+export interface FramesOpts {
+  mode?: FramesMode; fps?: number; n?: number; every_s?: number; window_s?: number; take?: number; pick?: 'spread' | 'consecutive';
+  threshold?: number; dedupe?: number; start?: number; end?: number | null; max_side?: number | null;
+  format?: FramesFormat; quality?: number; layout?: FramesLayout; split?: [number, number, number]; block_s?: number | null; max_frames?: number;
+}
+export interface FramesEstimate {
+  frames: number | null; approx: boolean; bytes: number | null; times: number[]; describe: string; limit: number;
+  videos: Array<{ path: string; frames?: number | null; w?: number; h?: number; fps?: number; duration?: number }>;
+}
+export interface FramesBody { bucket: string; paths: string[]; opts: FramesOpts; target: 'inplace' | 'copy'; new_name?: string; out?: string; remember?: boolean }
+export interface FramesDone {
+  bucket: string; path: string; frames: number; bytes: number; layout: FramesLayout; describe: string; capped: boolean;
+  splits?: Record<'train' | 'val' | 'test', number>; cancelled?: boolean;
+  videos: Array<{ path: string; frames: number; skipped_dupes: number; errors: number; decoder: string; duration: number }>;
+}
+export interface FramesResult { job_id: number | null; bucket: string; path: string; estimate: { frames: number | null; approx: boolean; bytes: number | null }; result: FramesDone | null }
 
 /** POST /api/dc/autolabel */
 export interface AutolabelBody {

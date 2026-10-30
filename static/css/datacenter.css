@@ -674,3 +674,31 @@ button.icon-btn.sm { width: 26px; padding: 0; }
   font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; color: var(--text); }
 .dc-exp-dest .hint, .dc-exp > .hint { margin: 0; }
 .dc-exp > .hint .ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; }
+
+/* ---------------------------------------------------------------- extract frames (frames.ts; video tiles, details) */
+.dc-th .vb { position: absolute; left: 6px; bottom: 6px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--overlay); color: var(--text); pointer-events: none; }
+.dc-th .vb .ico { width: 12px; height: 12px; }
+.dc-d-video { display: block; width: 100%; max-height: 220px; border-radius: var(--r-md); background: var(--media-fill); margin-bottom: var(--s2); }
+.ui-dlg.wide:has(.dc-fr) { width: min(760px, 100%); }
+.dc-fr { gap: 12px; }
+.dc-fr-player { display: block; width: 100%; max-height: 300px; border-radius: var(--r-md); background: var(--media-fill); }
+.dc-fr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: var(--fs-sm); color: var(--text-muted); }
+.dc-fr-meta .ico { width: 14px; height: 14px; }
+.dc-fr-form { display: flex; flex-direction: column; gap: 10px; }
+.dc-fr-form .hint { margin: 0; }
+.dc-fr-range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.dc-fr-range .grow { flex: 1; }
+.dc-fr-num { display: flex; align-items: center; gap: 6px; }
+.dc-fr-num input { width: 100%; min-width: 0; }
+.dc-fr-burst { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
+@media (max-width: 560px) { .dc-fr-burst { grid-template-columns: 1fr 1fr; } }
+.dc-fr-out { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: end; }
+@media (max-width: 560px) { .dc-fr-out { grid-template-columns: 1fr; } }
+.dc-fr-lay .dest-o .dt span { font-size: var(--fs-sm); }
+.dc-fr input[type=range] { width: 100%; }
+.dc-fr-strip { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; margin-top: var(--s2); }
+@media (max-width: 560px) { .dc-fr-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.dc-fr-strip figure { margin: 0; min-width: 0; }
+.dc-fr-strip img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-sm); background: var(--media-fill); }
+.dc-fr-strip figcaption { font-size: 11px; color: var(--text-faint); text-align: center; }

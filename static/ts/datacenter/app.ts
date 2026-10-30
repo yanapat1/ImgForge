@@ -20,6 +20,7 @@ import { EDITOR_ACTIONS, fileOpen, leaveFile } from './editor.js';
 import { BROWSER_ACTIONS, bindBrowser, loadListing, renderFolder, renderSearch, selChanged } from './browser.js';
 import { BUCKET_ACTIONS, renderOverview } from './buckets.js';
 import { AUTOLABEL_ACTIONS } from './autolabel.js';
+import { FRAMES_ACTIONS } from './frames.js';
 import { DETAIL_ACTIONS, renderDetails } from './details.js';
 import { EDIT_ACTIONS } from './edit.js';
 import { deleteSel, OPS_ACTIONS, renameSel } from './ops.js';
@@ -253,7 +254,7 @@ export async function start(): Promise<void> {
   if (c === 'grid' || c === 'list') D.cards = c as CardMode;
   if (s === 'name' || s === '-mtime' || s === 'size') D.sort = s as LsSort;
   if (bs === 'recent' || bs === 'name' || bs === 'size' || bs === 'images') D.bucketSort = bs as BucketSort;
-  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS);
+  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS);
   hooks.navigate = navigate;
   hooks.reload = reload;
   hooks.render = render;

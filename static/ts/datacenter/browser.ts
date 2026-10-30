@@ -17,10 +17,11 @@ import type { Action } from './app.js';
 import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } from './ops.js';
 import { downloadZip, openExportDialog } from './export.js';
 import { openFile, TEXTY } from './editor.js';
+import { openFrames } from './frames.js';
 import { openSend } from './send.js';
 import {
   baseName, bucketOf, curBucket, D, fbadge, fdot, fmtDate, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, parentOf,
-  PREF, tagChip, writable,
+  PREF, selEntries, tagChip, writable,
 } from './state.js';
 import { openTagEditor } from './tags.js';
 import { uploadFiles } from './upload.js';
@@ -126,8 +127,12 @@ function labelBadge(e: Entry): string {
 function fileIcon(e: Entry): string {
   if (e.type === 'dir') return icon('folder');
   if (isImage(e)) return icon('file-img');
+  if (e.kind === 'video') return icon('film');
   return icon('file');
 }
+
+/** A video's poster frame can be made (a local file; a bucket streamed from S3 has none). */
+const posterOk = (bid: string): boolean => { const b = bucketOf(bid); return !!b && (b.kind !== 's3' || !!b.local_ready); };
 
 function tile(e: Entry): string {
   const bid = D.bid ?? '';
@@ -137,9 +142,10 @@ function tile(e: Entry): string {
     ? `<span class="meta">${e.items != null ? `${fmtN(e.items)} items` : 'folder'}</span>`
     : `<span class="meta">${fmtSize(e.size)}${e.w && e.h ? ` · ${e.w}×${e.h}` : ''}</span>`;
   let media: string;
-  if (isImage(e)) {
+  if (isImage(e) || (e.kind === 'video' && posterOk(bid))) {
     const u = thumbUrl(bid, e.path);
-    media = seen.has(u) ? `<img src="${esc(u)}" alt="" decoding="async">` : `<img data-src="${esc(u)}" alt="" decoding="async">`;
+    media = (seen.has(u) ? `<img src="${esc(u)}" alt="" decoding="async">` : `<img data-src="${esc(u)}" alt="" decoding="async">`) +
+      (e.kind === 'video' ? `<span class="vb" aria-hidden="true">${icon('play')}</span>` : '');
   } else media = `<span class="ph${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}</span>`;
   return `<div class="dc-th${sel ? ' sel' : ''}${e.type === 'dir' ? ' dir' : ''}" role="option" aria-selected="${sel}" tabindex="-1" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag} title="${esc(e.name)}">` +
     `<div class="im">${media}${labelBadge(e)}<i class="ck" data-ck="1" aria-hidden="true"></i></div>` +
@@ -383,6 +389,7 @@ async function openEntry(e: Entry): Promise<void> {
   if (!bid) return;
   if (e.type === 'dir') { hooks.navigate(bid, e.path); return; }
   if (isImage(e)) { window.open(api.fileUrl(bid, e.path), '_blank', 'noopener'); return; }
+  if (e.kind === 'video') { await openFrames(bid, [e.path]); return; }
   // text-like files (and small unknown ones, often config without an extension) open in the editor
   if (TEXTY.has(e.kind ?? '') || (e.kind === 'other' && e.size <= 65536) || (!e.kind && e.size <= 65536)) { await openFile(bid, e.path); return; }
   window.open(api.fileUrl(bid, e.path), '_blank', 'noopener');
@@ -397,6 +404,8 @@ function menu(from: HTMLElement, html: string, align: 'left' | 'right' = 'right'
 }
 
 const sendPaths = (): string[] => (D.sel.size ? [...D.sel] : [D.path]);
+/** The Send menu offers Extract frames: the selection holds a video, or (nothing selected) the folder does. */
+const videosHere = (): boolean => (D.sel.size ? selEntries() : D.listing?.entries ?? []).some((e) => e.kind === 'video');
 
 export const BROWSER_ACTIONS: Record<string, Action> = {
   pick: (el, ev) => {
@@ -462,6 +471,7 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
   'send-menu': (el) => menu(el, `<div class="dc-menu-h">Send ${D.sel.size ? `${fmtN(D.sel.size)} selected` : 'this folder'} to</div>` +
     `<button type="button" role="menuitem" data-act="send" data-target="visualize">${icon('scatter')}Visualize<span class="faint">explore embeddings</span></button>` +
     `<button type="button" role="menuitem" data-act="send" data-target="label">${icon('edit')}Label<span class="faint">a labeling project</span></button>` +
+    (videosHere() ? `<button type="button" role="menuitem" data-act="extract-frames">${icon('film')}Extract frames…<span class="faint">${D.sel.size ? 'from the selected videos' : 'from this folder’s videos'}</span></button>` : '') +
     (D.sel.size ? '' : `<div class="dc-menu-h">This folder</div>` +
       `<button type="button" role="menuitem" data-act="autolabel" data-path="${esc(D.path)}">${icon('robot')}Label with model…<span class="faint">auto-label every image</span></button>` +
       `<button type="button" role="menuitem" data-act="export-zip">${icon('download')}Export (zip)<span class="faint">download this folder</span></button>` +

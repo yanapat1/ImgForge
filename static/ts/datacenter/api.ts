@@ -4,8 +4,9 @@
 
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
-  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats, ImportBody, Listing, LsSort, Op, OpsResult,
-  S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult,
+  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
+  FramesBody, FramesEstimate, FramesOpts, FramesResult, ImportBody, Listing, LsSort, Op, OpsResult,
+  S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult, VideoInfo,
 } from '../types-datacenter.js';
 
 const B = (bid: string): string => `api/dc/buckets/${encodeURIComponent(bid)}`;
@@ -57,8 +58,15 @@ export const PAGE = 500;
 export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = ''): Promise<Listing> =>
   getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q })}`);
 
-/** URL of a file (raw), or of its scaled JPEG thumbnail when `w` is given. */
-export const fileUrl = (bid: string, path: string, w?: number): string => `${B(bid)}/file${qs({ path, w: w ?? null })}`;
+/** URL of a file (raw), or of its scaled JPEG thumbnail when `w` is given (a video: its frame at `t` seconds, else a poster). */
+export const fileUrl = (bid: string, path: string, w?: number, t?: number): string => `${B(bid)}/file${qs({ path, w: w ?? null, t: t ?? null })}`;
+export const videoInfo = (bid: string, path: string): Promise<VideoInfo> => getJSON<VideoInfo>(`${B(bid)}/video${qs({ path })}`);
+export const framesEstimate = (bucket: string, paths: string[], opts: FramesOpts): Promise<FramesEstimate> =>
+  postJSON<FramesEstimate>('api/dc/frames/estimate', { bucket, paths, opts });
+/** Cut videos into frames: one io-lane job (dc-frames:<bucket>:<out path>). */
+export const frames = (body: FramesBody): Promise<FramesResult> => postJSON<FramesResult>('api/dc/frames', body);
+export const setVideoAuto = (bid: string, opts: FramesOpts | null): Promise<{ video_auto: FramesOpts | null }> =>
+  postJSON<{ video_auto: FramesOpts | null }>(`${B(bid)}/video-auto`, { opts });
 export const readText = (bid: string, path: string, limit?: number): Promise<TextFile> =>
   getJSON<TextFile>(`${B(bid)}/text${qs({ path, limit: limit ?? null })}`);
 /** Save (or with create, make) a text file; 409 when it changed since `expectMtime` (null overwrites). */

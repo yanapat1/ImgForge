@@ -1,5 +1,5 @@
 // The Data Center's activity strip (under the header): the page's running jobs (label with model, load from S3,
-// import from the web, export to S3 / FTP, label import / label all) with stage, a progress bar, rate / ETA and Cancel, polled from
+// import from the web, export to S3 / FTP, video → frames, label import / label all) with stage, a progress bar, rate / ETA and Cancel, polled from
 // GET api/jobs (every second while one runs, every 5 s otherwise, never while the page is hidden). Bucket cards
 // show a "Labeling… 42%" badge for the job that writes into them (jobBadge). When a job ends the page reloads once.
 
@@ -10,8 +10,8 @@ import type { Job, JobsPayload } from '../types.js';
 import type { Action } from './app.js';
 import { hooks } from './state.js';
 
-const MINE = /^(dc-(autolabel|sync|import|reimport|convert|export)|label-(import|predict)):/;
-const VERB: Record<string, string> = { autolabel: 'Labeling', sync: 'Loading', import: 'Importing', reimport: 'Updating', convert: 'Converting', export: 'Exporting' };
+const MINE = /^(dc-(autolabel|sync|import|reimport|convert|export|frames)|label-(import|predict)):/;
+const VERB: Record<string, string> = { autolabel: 'Labeling', sync: 'Loading', import: 'Importing', reimport: 'Updating', convert: 'Converting', export: 'Exporting', frames: 'Cutting' };
 
 let active: Job[] = [];
 let timer = 0;
