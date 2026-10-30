@@ -15,6 +15,13 @@ hover, text or image thumbnails, and any metadata column colours the plot. Forma
 [`dataviz/data/README.md`](dataviz/data/README.md#embeddings-folders-any-modality); try it with
 `python examples/make_embeddings_demo.py` and *New visualize session › Embeddings folder*.
 
+**Videos → frames.** Put a video (mp4, mov, mkv, webm, …) in a Data Center bucket and double-click it: *Extract frames*
+cuts it into images, N per second, the first N of each second, bursts (15 frames from 1 s every 2 s), every Nth, all,
+a total count, keyframes only, scene changes or the N most varied (smart), for a time range, skipping near-duplicates,
+into a YOLO-ready folder (optionally split train / val / test by time block) with a `frames.csv` back to the video.
+A bucket can also cut every new video by itself (auto-extract). Then Send to Label or Visualize as usual
+([`dataviz/datacenter/README.md`](dataviz/datacenter/README.md)).
+
 ```bash
 npm install && npm run build                                    # compile static/ts -> static/js (once, and after TS edits; `npm run watch` while developing)
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -149,6 +156,7 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | use a Settings › Models model on the label page / gate it | `dataviz/models/hub.py` (adapters), `dataviz/server/routes/labeling.py` (`adapter_for`, `activate_model`), `static/ts/label/model.ts` |
 | change the ◆ AI assistant (providers, features, prompts, token budget) | backend `dataviz/llm/` (`store.py` switches + `FEATURES`, `providers.py` OpenAI / compatible / Claude / Gemini, `budget.py`, `context.py`, `tasks.py`) → `dataviz/llm/README.md`, routes `dataviz/server/routes/llm.py`; page `static/ts/core/llm.ts` (visibility), `settings/llm.ts`, `views/assistant.ts`, `label/assist.ts` |
 | change the optional review (card bar + checklist, Review button, Review all) | `dataviz/labeling/store.py` `set_review` / `stats`, route `/api/label/projects/{pid}/review`; card `static/ts/views/home.ts` (`taskHTML`, `checklistHTML`, `reviewAll`); label page `static/ts/label/app.ts` (`setReview`, `reviewAll`), `panels.ts` (`renderReview`); colours `--prog-review` / `--prog-bulk` in `css/tokens.css` |
+| change video → frames (pick modes, speed, layouts, auto-extract) | `dataviz/datacenter/video.py` (pure), `service.py` `extract_frames` / `set_video_auto`; dialog `static/ts/datacenter/frames.ts`; ◆ tools `extract_frames` / `set_video_auto` in `dataviz/llm/tools/datacenter.py` |
 | change terminal logging | `dataviz/core/logging.py` (tags, colours), HTTP lines in `dataviz/server/app.py` |
 
 ## Conventions (whole project)

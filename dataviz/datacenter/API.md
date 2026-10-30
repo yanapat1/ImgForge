@@ -78,6 +78,31 @@ autolabel(user, bid, path='', model={registry_id | connection_id + model_id, ver
 convert_vectors(user, bid, path='', to='parquet'|'csv'|'npy') -> {job_id, path, result}
     # an embeddings folder (meta.csv + .npy, embeddings.parquet or embeddings.csv) into another layout, in a new
     # sibling folder <name>-<to> (labeling/writers/vector.py); an io-lane job, key dc-convert:<bid>
+video_info(user, bid, path) -> {path, w, h, fps, frames, duration, codec, rotation, size, decoder}
+    # w / h as shown (rotation applied); a video streamed from S3 only {path, size, streamed: true}. PyAV probe
+    # (datacenter/video.py), OpenCV fallback (decoder 'opencv'), cached per path + mtime + size
+estimate_frames(user, bid, paths, opts) -> {frames, approx, bytes, times: [≤ 8 s], videos: [...], describe, limit}
+    # what extract_frames would write: the same pickers walk the nominal frame grid (keyframes: the packet index),
+    # scene / smart are guesses (approx); S3 streamed: unknown (frames null)
+extract_frames(user, bid, paths, opts=None, target='inplace'|'copy', new_name=None, out=None, remember=False)
+                                                               -> {job_id, bucket, path, estimate, result}
+    # videos (files, or folders: the videos directly inside) cut into image frames. opts = video.options:
+    #   which:  fps (shorthand) | mode all | every (n) | pattern (every_s, window_s, take, pick spread|consecutive)
+    #           | count (n) | keyframes | scene (threshold) | smart (n: farthest-point picks, 2 passes)
+    #   range:  start, end (s)      skip: dedupe 0..0.5 (mean abs diff of a 64×36 gray vs the last written)
+    #   output: format jpg|png|webp, quality, max_side, layout yolo|yolo-split|per-video|flat, split, block_s,
+    #           max_frames (≤ 200 000; a non-approx estimate over the hard limit is refused up front)
+    # into a new folder `out` (default <video>-frames; several videos <folder>-frames; a free name) next to the
+    # first video, or at the root of a new managed bucket new_name (target copy: the only way for a streamed S3
+    # bucket, each video downloaded first). Written as .frames-<hex>/ and renamed when complete (removed on error or
+    # cancel, the copy bucket too). yolo*: images/ (+ train|val|test by time block), empty labels/, data.yaml with
+    # nc: 0; every layout: frames.csv (file, video, frame, time_s, split). An io-lane job dc-frames:<bid>:<path>.
+    # result {bucket, path, frames, bytes, videos: [{path, frames, skipped_dupes, errors, decoder, duration}],
+    #   layout, format, describe, capped, splits?, retagged}. remember=True also runs set_video_auto(opts)
+set_video_auto(user, bid, opts|None) -> {video_auto}
+    # the bucket's auto-extract (dc_buckets.video_auto, migration 0010): upload(), import_source and sync() start one
+    # extract_frames job per new video with these options; their result carries frames: {jobs, errors}. None = off
+read_file(user, bid, path, w=None, t=None)                     # a video with w: its frame at t s (a poster when None)
 list_sources(user)                                             -> {sources: [{key, label, needs, token, fields, examples, help, connections}]}
 inspect_source(user, source, ref, connection_id=None, opts={}) -> {title, size, files, license, versions, name, ref, ...}
 import_source(user, source, ref, name=None, connection_id=None, opts={}, bucket=None, path='') -> {job_id, bucket, result}
@@ -132,7 +157,7 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | POST | `/api/dc/buckets` | create_bucket |
 | GET / PATCH / DELETE | `/api/dc/buckets/{bid}` | get / update / delete (`?delete_files=1`) |
 | GET | `/api/dc/buckets/{bid}/ls?path=&offset=&limit=&sort=&q=` | ls |
-| GET | `/api/dc/buckets/{bid}/file?path=&w=` | read_file (Cache-Control private, max-age=300) |
+| GET | `/api/dc/buckets/{bid}/file?path=&w=&t=` | read_file (Cache-Control private, max-age=300; a video with w: its frame at t s) |
 | GET | `/api/dc/buckets/{bid}/text?path=&limit=` | read_text |
 | PUT | `/api/dc/buckets/{bid}/text` `{path, text, expect_mtime_ns, create}` | write_text |
 | POST | `/api/dc/buckets/{bid}/ops` `{ops}` | ops |
@@ -152,6 +177,10 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | GET | `/api/dc/buckets/{bid}/source?path=` | source |
 | POST | `/api/dc/autolabel` `{bucket, path, model, target, new_name, conf, formats, write_yolo, name}` | autolabel |
 | POST | `/api/dc/buckets/{bid}/convert` `{path, to}` | convert_vectors |
+| GET | `/api/dc/buckets/{bid}/video?path=` | video_info |
+| POST | `/api/dc/frames/estimate` `{bucket, paths, opts}` | estimate_frames |
+| POST | `/api/dc/frames` `{bucket, paths, opts, target, new_name, out, remember}` | extract_frames (data.manage) |
+| POST | `/api/dc/buckets/{bid}/video-auto` `{opts \| null}` | set_video_auto (data.manage) |
 | GET | `/api/dc/sources` | list_sources |
 | POST | `/api/dc/sources/inspect` `{source, ref, connection_id, opts}` | inspect_source |
 | POST | `/api/dc/import` `{source, ref, name, connection_id, opts, bucket, path}` | import_source |

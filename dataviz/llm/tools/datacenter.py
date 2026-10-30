@@ -10,7 +10,7 @@ may be named by id or by exact name; an ambiguous name is an error that tells th
 
 import sys
 
-from . import A, B, I, MAX_LIST, MAX_TEXT, S, Tool, ToolError, _obj, register
+from . import A, B, I, MAX_LIST, MAX_TEXT, N, S, Tool, ToolError, _obj, register
 
 BUCKET = S('bucket id, or its exact name (look it up with list_buckets first)')
 PATH = S("path inside the bucket, POSIX, no leading slash; '' is the bucket root")
@@ -299,6 +299,45 @@ def _items(paths):
     return f'{_plural(len(paths), "item")} ({shown})'
 
 
+# ---------------------------------------------------------------- video -> frames
+_FRAME_MODES = ('all', 'every', 'pattern', 'count', 'keyframes', 'scene', 'smart')
+_FRAME_OPTS = ('fps', 'mode', 'n', 'take', 'window_s', 'every_s', 'pick', 'start', 'end', 'dedupe', 'format',
+               'max_side', 'layout')
+
+
+def _frame_opts(a):
+    return {k: a[k] for k in _FRAME_OPTS if a.get(k) is not None}
+
+
+def _frames_how(a):
+    from ...datacenter import video
+    try:
+        return video.describe(video.options(_frame_opts(a)))
+    except Exception as e:  # noqa: BLE001 - shown in the preview; the run reports the real error
+        return f'invalid settings: {e}'
+
+
+def _frames(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().extract_frames(user, b['id'], a['paths'], _frame_opts(a), target=a.get('target') or 'inplace',
+                                new_name=a.get('new_name'), out=a.get('out'))
+    est = res.get('estimate') or {}
+    n = est.get('frames')
+    return res, (f'{b["name"]}: cutting {"≈" if est.get("approx") else ""}{n if n is not None else "?"} frames into '
+                 f'{res.get("path")}' + (' (a job)' if res.get('job_id') else ''))
+
+
+def _frames_preview(b, a):
+    where = 'a new bucket' + (f' {a["new_name"]!r}' if a.get('new_name') else '') if a.get('target') == 'copy' \
+        else _bname(b, a)
+    return f'Cut {_items(a["paths"])} into frames ({_frames_how(a)}) → {a.get("out") or "<video>-frames"} in {where}'
+
+
+def _video_auto(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().set_video_auto(user, b['id'], None if a.get('off') else _frame_opts(a))
+    return res, f'{b["name"]}: auto-extract ' + ('off' if a.get('off') else 'on')
+
 def _check(user, clean):
     """Before a change is proposed or run: the bucket resolved (its id goes into the args) and writable."""
     b = resolve_bucket(user, clean['bucket']) if clean.get('bucket') else None
@@ -398,6 +437,32 @@ _add(Tool('export_to', 'Copy a folder (or file) of a bucket to S3, FTP or SFTP t
                 'overwrite': {'type': 'boolean', 'description': 'write into a non-empty target'}},
                ['bucket', 'to', 'connection']), True, _export_to, _export_preview, s3_ok=True,
           danger_if=lambda a: bool(a.get('overwrite'))))
+
+_add(Tool('extract_frames', 'Cut videos (a video file, or a folder: its videos) into image frames to label or visualize: '
+                           'a background job writing a new folder <video>-frames (YOLO-ready by default). Pick frames '
+                           'with fps, or mode + its numbers; bursts = take frames from window_s every every_s.',
+          _obj({'bucket': BUCKET, 'paths': PATHS,
+                'fps': N('frames per second, e.g. 15 (0.5 = one every 2 s)'),
+                'mode': {'type': 'string', 'enum': list(_FRAME_MODES), 'description': 'instead of fps'},
+                'n': I('every: the step; count / smart: how many frames', 1),
+                'take': I('pattern: frames per window', 1), 'window_s': N('pattern: window length (s)'),
+                'every_s': N('pattern: a window every this many s'),
+                'pick': {'type': 'string', 'enum': ['spread', 'consecutive'], 'description': 'pattern: spread or in a row'},
+                'start': N('from this second'), 'end': N('to this second'),
+                'dedupe': N('skip near-identical frames: 0 off, 0.01 light, 0.03 strong'),
+                'format': {'type': 'string', 'enum': ['jpg', 'png', 'webp']}, 'max_side': I('shrink to this long side (px)', 16),
+                'layout': {'type': 'string', 'enum': ['yolo', 'yolo-split', 'per-video', 'flat']},
+                'target': {'type': 'string', 'enum': ['inplace', 'copy'], 'description': 'copy = into a new bucket '
+                           '(the only way for a streamed S3 bucket)'},
+                'new_name': S('copy: the new bucket name'), 'out': S('output folder name (optional)')},
+               ['bucket', 'paths']), True, _frames, _frames_preview, s3_ok=True))
+_add(Tool('set_video_auto', 'Make a bucket cut every new video (upload, import, S3 load) into frames by itself, with '
+                           'extract_frames-style settings; off=true turns it off.',
+          _obj({'bucket': BUCKET, 'fps': N('frames per second'), 'mode': {'type': 'string', 'enum': list(_FRAME_MODES)},
+                'n': I('every / count / smart number', 1), 'layout': {'type': 'string', 'enum': ['yolo', 'yolo-split', 'per-video', 'flat']},
+                'off': B('turn auto-extract off')}, ['bucket']), True, _video_auto,
+          lambda b, a: f'{_bname(b, a)}: ' + ('stop cutting new videos into frames' if a.get('off')
+                                             else f'cut every new video into frames ({_frames_how(a)})')))
 
 _add(Tool('inspect_dataset_source', 'Preview a dataset on the web before importing it: Kaggle (owner/dataset, '
                                     'competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), '

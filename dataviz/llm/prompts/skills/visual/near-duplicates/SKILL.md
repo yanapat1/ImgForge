@@ -11,5 +11,6 @@ when: the user asks about duplicates, copies, leakage between splits, or a suspi
 4. Leakage: `split_leak` lists val / test images copied from train. Those inflate validation scores: the fix is to
    move or delete one side in the Data Center (the Data Center assistant does that), then re-index.
 5. Duplicates inside one split are mostly harmless for training but waste labelling time; burst frames from video
-   are a judgement call: keep a few per scene.
+   are a judgement call: keep a few per scene (cutting the video again with Skip near-duplicates or Smart in the
+   Data Center's Extract frames gives fewer, more varied frames).
 6. The user removes boxes with the pick bar (Delete, undoable) or Curation fixes; files are the Data Center's.

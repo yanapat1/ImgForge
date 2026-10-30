@@ -23,6 +23,7 @@ Data flows **Data Center → sessions**. Everything you import lands in a Data C
 | I want to change… | Backend (`dataviz/`) | Frontend (`static/`) |
 |---|---|---|
 | **Data Center**: buckets, file ops, tags, format detection, Send to | `datacenter/` (`service.py` is the only entry point; contract in `datacenter/API.md`), `server/routes/datacenter.py` | `ts/datacenter/`, `css/datacenter.css` |
+| Video → frames (Extract frames, auto-extract) | `datacenter/video.py`, `service.extract_frames` | `ts/datacenter/frames.ts` |
 | AI assistant: tools the LLM can call, confirm-a-plan loop | `llm/tools.py`, `llm/agent.py`, `llm/prompts/`, `llm/providers.py` | `ts/datacenter/ai.ts`, `ts/views/assistant.ts` |
 | AI skill (how an agent drives the Data Center) | `.claude/skills/datacenter/SKILL.md` | |
 | Sessions home (cards, tags, sharing) | `data/sessions.py`, `server/routes/datasets.py` | `ts/views/home.ts`, `ts/views/share.ts`, `css/home.css` |

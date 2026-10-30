@@ -88,6 +88,7 @@ S = lambda d: {'type': 'string', 'description': d}                              
 I = lambda d, lo=0, hi=None: {'type': 'integer', 'description': d, 'minimum': lo, **({'maximum': hi} if hi else {})}  # noqa: E731,E741
 A = lambda d: {'type': 'array', 'items': {'type': 'string'}, 'description': d}        # noqa: E731
 B = lambda d: {'type': 'boolean', 'description': d}                                   # noqa: E731
+N = lambda d: {'type': 'number', 'description': d}                                    # noqa: E731
 E = lambda d, values: {'type': 'string', 'enum': list(values), 'description': d}      # noqa: E731
 
 _TYPES = {'string': str, 'integer': int, 'number': (int, float), 'boolean': bool, 'array': list, 'object': dict}
@@ -111,6 +112,11 @@ def validate(tool, args):
             v = int(v)
         if t == 'integer' and isinstance(v, str) and v.strip().lstrip('-').isdigit():
             v = int(v)
+        if t == 'number' and isinstance(v, str):
+            try:
+                v = float(v)
+            except ValueError:
+                pass
         if t == 'boolean' and isinstance(v, str) and v.lower() in ('true', 'false'):
             v = v.lower() == 'true'
         py = _TYPES.get(t)

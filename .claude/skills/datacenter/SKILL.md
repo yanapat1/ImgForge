@@ -44,6 +44,8 @@ tools.py). `?` marks an optional argument.
 | `set_s3_mode` | change | bucket, mode | Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local (downloaded into an editable local folder that can be re-synced and exported). |
 | `sync_from_s3` | change | bucket | Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 version, local-only files are kept. |
 | `export_to` | change | bucket, path?, to, connection, s3_bucket?, prefix?, create_bucket?, overwrite? | Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user's connections as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png. |
+| `extract_frames` | change | bucket, paths, fps?, mode?, n?, take?, window_s?, every_s?, pick?, start?, end?, dedupe?, format?, max_side?, layout?, target?, new_name?, out? | Cut videos (a video file, or a folder: its videos) into image frames to label or visualize: a background job writing a new folder <video>-frames (YOLO-ready by default). Pick frames with fps, or mode + its numbers; bursts = take frames from window_s every every_s. |
+| `set_video_auto` | change | bucket, fps?, mode?, n?, layout?, off? | Make a bucket cut every new video (upload, import, S3 load) into frames by itself, with extract_frames-style settings; off=true turns it off. |
 | `inspect_dataset_source` | read | source, ref, version?, revision?, patterns?, format? | Preview a dataset on the web before importing it: Kaggle (owner/dataset, competitions/<name>), Hugging Face (user/dataset), Roboflow (workspace/project/version), a direct link (url), Zenodo (record id / DOI) or OpenML (dataset id): title, size, files, license, versions. |
 | `import_dataset` | change | source, ref, name?, bucket?, path?, version?, revision?, patterns?, format?, extract?, nested? | Download a dataset from the web into a new bucket (or a folder of a writable bucket) as a background job; archives are unpacked and the format is detected. The user needs the source's token in Settings › Connections (Kaggle, Roboflow; Hugging Face / Zenodo only for gated / restricted data). |
 | `write_text_file` | change | bucket, path, text | Write (replace or create) a text file such as data.yaml, classes.txt, a .json or .env. Read it first with read_text and send the whole new content. Undoable. |
@@ -101,7 +103,7 @@ As Claude Code: show the user the `confirm` line and only re-run with `--yes` af
    then `ask_user` with 2-5 concrete options built from what you found (real names, real counts). Do not ask when
    the request is clear.
 3. **Impossible → refuse** with `cannot_do`, the reason and the closest alternative. Out of reach: converting
-   formats or images to video, editing pixels or labels, training, anything outside the user's buckets, and changing
+   formats, making a video from images (cutting a video into frames is `extract_frames`), editing pixels or labels, training, anything outside the user's buckets, and changing
    an S3 bucket (offer copying into a managed bucket).
 4. **Changes are proposals.** Put every change of the request into one plan, after the lookups. Never claim a
    change is done before it was confirmed.
@@ -123,6 +125,13 @@ As Claude Code: show the user the `confirm` line and only re-run with `--yes` af
 
 **Impossible.** "Turn the cars bucket into an mp4."
 - `cannot_do {reason: "The Data Center cannot render images into a video.", alternative: "I can open the cars bucket in the visualizer to page through it."}`
+
+**Video → frames.** "Cut drive.mp4 into 15 frames every 2 seconds and get it ready to label."
+1. `search {glob: "drive.mp4"}` → bucket `b4`, path `raw/drive.mp4`.
+2. One plan: `extract_frames {bucket: "b4", paths: ["raw/drive.mp4"], mode: "pattern", take: 15, window_s: 1, every_s: 2}`
+   (layout yolo by default: `raw/drive-frames/images/` + empty `labels/` + `data.yaml` + `frames.csv`).
+3. After the job: `send_to_session {bucket: "b4", paths: ["raw/drive-frames"], target: "label"}`. "Every new video like
+   this" → `set_video_auto` with the same settings.
 
 **Read-only bucket.** "Delete the blurry images in the cloud bucket" (an `s3` bucket) → `cannot_do` (S3 links are
 read-only), alternative: copy them into a managed bucket, or tag them `blurry`.

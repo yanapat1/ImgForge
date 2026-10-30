@@ -223,6 +223,15 @@ class FakeService:
         self.calls.append(('import_source', source, ref, name, opts, bucket, path))
         return {'job_id': 7, 'bucket': bucket or 'b9', 'result': None}
 
+    def extract_frames(self, user, bid, paths, opts=None, target='inplace', new_name=None, out=None, remember=False):
+        self.calls.append(('extract_frames', bid, tuple(paths), opts, target, new_name, out))
+        return {'job_id': 8, 'bucket': bid, 'path': 'raw/drive-frames', 'estimate': {'frames': 30, 'approx': False},
+                'result': None}
+
+    def set_video_auto(self, user, bid, opts=None):
+        self.calls.append(('set_video_auto', bid, opts))
+        return {'video_auto': opts}
+
 
 @pytest.fixture
 def svc(monkeypatch):
@@ -485,3 +494,31 @@ def test_web_import_and_write_text_tools(svc):
     tools.run(ALICE, 'write_text_file', {'bucket': 'cars', 'path': 'new.txt', 'text': 'y'})
     assert svc.calls[-1] == ('write_text', 'b1', 'new.txt', 'y', None, True)
     assert tools.TOOLS['write_text_file'].kind == 'change' and tools.TOOLS['inspect_dataset_source'].kind == 'read'
+
+
+def test_video_frame_tools(svc):
+    """extract_frames: a readable plan line (the pattern in words, where it goes), the settings passed through as
+    video.options, a streamed S3 bucket only through a copy; set_video_auto on and off."""
+    args = {'bucket': 'cars', 'paths': ['raw/drive.mp4'], 'mode': 'pattern', 'take': 15, 'window_s': 1, 'every_s': '2'}
+    clean, line = tools.prepare(ALICE, 'extract_frames', args)
+    assert clean['bucket'] == 'b1' and clean['every_s'] == 2.0
+    assert line == "Cut 1 item (raw/drive.mp4) into frames (15 from 1 s every 2 s) → <video>-frames in 'cars'"
+    res, summary = tools.run(ALICE, 'extract_frames', clean)
+    assert svc.calls[-1] == ('extract_frames', 'b1', ('raw/drive.mp4',),
+                             {'mode': 'pattern', 'take': 15, 'window_s': 1, 'every_s': 2.0}, 'inplace', None, None)
+    assert summary == 'cars: cutting 30 frames into raw/drive-frames (a job)' and res['job_id'] == 8
+    _, line = tools.prepare(ALICE, 'extract_frames', {'bucket': 'cars', 'paths': ['a.mp4'], 'fps': 0.5})
+    assert '(1 frame every 2 s)' in line
+    with pytest.raises(tools.ToolError, match='mode must be one of'):
+        tools.prepare(ALICE, 'extract_frames', {'bucket': 'cars', 'paths': ['a.mp4'], 'mode': 'warp'})
+    # a streamed S3 bucket passes the check (the service refuses inplace, a copy works)
+    _, line = tools.prepare(ALICE, 'extract_frames', {'bucket': 'cloud', 'paths': ['v.mp4'], 'target': 'copy',
+                                                       'new_name': 'cut'})
+    assert line.endswith("in a new bucket 'cut'")
+    assert tools.TOOLS['extract_frames'].kind == 'change'
+    _, line = tools.prepare(ALICE, 'set_video_auto', {'bucket': 'cars', 'mode': 'smart', 'n': 200})
+    assert line == "'cars': cut every new video into frames (the 200 most varied frames)"
+    tools.run(ALICE, 'set_video_auto', {'bucket': 'cars', 'fps': 2, 'layout': 'flat'})
+    assert svc.calls[-1] == ('set_video_auto', 'b1', {'fps': 2, 'layout': 'flat'})
+    tools.run(ALICE, 'set_video_auto', {'bucket': 'cars', 'off': True})
+    assert svc.calls[-1] == ('set_video_auto', 'b1', None)
