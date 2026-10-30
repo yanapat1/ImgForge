@@ -133,3 +133,47 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
         page.wait_for_selector(f'#dc-body .dc-bcard[data-bid="{bid}"]')
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_data_center_assistant_drawer_chat(server):
+    """The ◆ drawer (datacenter/ai.ts on core/chat.ts): the collapsed bar sends and opens the drawer, the answer of a
+    fake OpenAI-compatible model streams in, the side column lists the catalogue's tools, Shift+Tab in #dc-ai-q
+    switches the mode chip (and the mode sent), and the chat is saved (History)."""
+    from test_llm import REPLY, fake_app
+    from test_models import _serve
+    REPLY['text'] = 'Hello there, this is the fake model.'
+    fake, url = _serve(fake_app())
+    try:
+        p = _send(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
+                                                  'model': 'gpt-x', 'vision': True})['provider']
+        assert _send(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _send(f'{server}/api/llm/config', {'features': {'data_center': True}}, 'PUT')
+        errors = []
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1600, 'height': 1000})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+            page.goto(f'{server}/?data')
+            page.wait_for_selector('#dc-ai:not(.hidden) #dc-ai-q', timeout=30000)
+            page.fill('#dc-ai-q', 'Which buckets are there?')
+            page.press('#dc-ai-q', 'Enter')
+            page.wait_for_selector('#dc-ai.open .chat .ai-msg.bot:has-text("fake model")', timeout=20000)
+            page.wait_for_selector('#dc-ai .dr-side .tchip', timeout=10000)
+            assert page.inner_text('#dc-ai .chat-chip.mode').strip() == 'ask'
+            page.focus('#dc-ai-q')
+            page.keyboard.press('Shift+Tab')
+            assert page.inner_text('#dc-ai .chat-chip.mode').strip() == 'auto'
+            page.fill('#dc-ai-q', 'And now?')
+            with page.expect_request(lambda r: '/api/llm/agent/data/chat' in r.url) as req:
+                page.press('#dc-ai-q', 'Enter')
+            sent = json.loads(req.value.post_data)
+            assert sent['mode'] == 'auto' and sent['session_id'] and 'selection' in sent['scope'], sent
+            page.wait_for_function("document.querySelectorAll('#dc-ai .chat-turn.ai').length >= 2 && "
+                                   "document.querySelector('#dc-ai .chat').getAttribute('aria-busy') === 'false'", timeout=20000)
+            page.click('#dc-ai [data-ca="history"]')
+            page.wait_for_selector('#dc-ai .chat-hrow.cur', timeout=5000)      # the title may be improved by a title call
+            browser.close()
+        assert not errors, '\n'.join(errors)
+    finally:
+        fake.should_exit = True

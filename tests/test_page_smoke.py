@@ -330,6 +330,27 @@ def test_ai_assistant_appears_only_when_connected_and_streams(server):
             page.fill('#ai-q', 'Summarize this dataset')
             page.press('#ai-q', 'Enter')
             page.wait_for_selector('.ai-msg.bot:has-text("fake model")', timeout=15000)
+            # the shared chat (core/chat.ts): Shift+Tab cycles the mode chip and the mode sent; '/' lists commands;
+            # the saved chat shows in History
+            assert page.inner_text('#ai-side .chat-chip.mode').strip() == 'ask'
+            page.focus('#ai-q')
+            page.keyboard.press('Shift+Tab')
+            assert page.inner_text('#ai-side .chat-chip.mode').strip() == 'auto'
+            assert page.evaluate("document.activeElement.id") == 'ai-q', 'Shift+Tab stays in the composer'
+            page.fill('#ai-q', '/')
+            page.wait_for_selector('.chat-slash-pop:not(.hidden) [data-cmd="model"]', timeout=5000)
+            page.keyboard.press('Escape')
+            page.fill('#ai-q', 'And now?')
+            with page.expect_request(lambda r: '/api/llm/agent/visual/chat' in r.url) as req:
+                page.press('#ai-q', 'Enter')
+            sent = json.loads(req.value.post_data)
+            assert sent['mode'] == 'auto' and sent['session_id'] and sent['scope']['view']['feature'], sent
+            page.wait_for_function("document.querySelectorAll('#ai-side .chat-turn.ai').length >= 2 && "
+                                   "!document.querySelector('#ai-side .chat').getAttribute('aria-busy').includes('true')",
+                                   timeout=15000)
+            page.click('#ai-side [data-ca="history"]')
+            page.wait_for_selector('#ai-side .chat-hrow', timeout=5000)
+            page.keyboard.press('Escape')
             page.click('#btn-settings')
             page.click('.snav[data-sec="llm"]')
             page.wait_for_selector('.llm-card:has-text("Connected")')
