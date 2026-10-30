@@ -9,7 +9,8 @@ export type StatusKind = 'busy' | 'ok' | 'err' | '';
 /** One status line (statusHTML). */
 export interface StatusLine { kind: StatusKind; text: string }
 
-export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace' | 'account' | 'users';
+export type SectionId = 'datasets' | 'connections' | 'labeling' | 'models' | 'llm' | 'appearance' | 'plot' | 'workspace' | 'account' | 'users'
+  | 'prompts';
 export type SettingsView = 'list' | 'add' | 's3' | 'local' | 'dc' | 'labeling' | 'embeddings' | 'union' | 'conn' | 'model' | 'llm-form' | 'llm-add';
 
 /** openSettings options (the Sessions home opens the dialog in solo mode). */
@@ -302,7 +303,8 @@ export interface AdminTier {
 /** The permission catalog (GET api/admin/tiers → permissions[]). */
 export interface TierPerm { key: string; label: string }
 /** GET / PUT api/admin/settings */
-export interface AdminSettings { signup_enabled: boolean; who_can_add_connections: 'everyone' | 'admins' }
+export interface AdminSettings { signup_enabled: boolean; who_can_add_connections: 'everyone' | 'admins';
+  llm_web_max_level?: number; llm_org_words?: WebWord[]; llm_chat_retention_days?: number; llm_max_sessions?: number }
 /** One row of GET api/admin/audit */
 export interface AuditEvent {
   at: number | string; user: { id: string; username: string } | null; action: string; target?: string | null;
@@ -318,3 +320,24 @@ export type LabSettings = {
   dim_other_tasks: boolean; bbox_mode: string;
   hotkeys: Record<string, string[]>;
 };
+
+// ------------------------------------------------------------------ prompts & skills (settings/prompts.ts)
+export type AssetRole = 'data' | 'visual' | 'all';
+/** One of the user's own instructions / skills (GET api/llm/prompts → items[]). */
+export interface LlmItem {
+  id: string; kind: 'prompt' | 'skill'; role: AssetRole; name: string; description: string; when: string; body: string;
+  enabled: boolean; created_at?: number; updated_at?: number;
+}
+export interface LlmPluginTool { name: string; description: string; risk: 'read' | 'change' | 'danger'; roles: string[]; method: string; url: string }
+/** An installed plugin (GET api/llm/plugins → plugins[]); secret values never come back, only `set`. */
+export interface LlmPlugin {
+  id: string; name: string; version: string; description: string; enabled: boolean; installed_at?: number;
+  tools: LlmPluginTool[];
+  skills: Array<{ id: string; name: string; role: AssetRole; description: string; enabled: boolean }>;
+  prompts: Array<{ id: string; name: string; role: AssetRole; enabled: boolean }>;
+  secrets: Array<{ name: string; set: boolean }>;
+}
+export interface WebWord { text: string; strength: 'never' | 'private' }
+export interface WebSettings { level: number; ask_before: boolean; engine: string; url: string; cx?: string; words: WebWord[] }
+/** GET / PUT api/llm/web. */
+export interface WebView { web: WebSettings; has_key: boolean; max_level: number; org_words: number }

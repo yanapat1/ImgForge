@@ -19,6 +19,7 @@ import { loadModelsData, MODEL_ACTIONS, MODEL_CHANGES, renderModelsSec } from '.
 import { LLM_ACTIONS, LLM_CHANGES, llmInput, loadLlmData, renderLlmSec } from './llm.js';
 import { ACCOUNT_ACTIONS, accFile, accInput, renderAccountSec } from './account.js';
 import { admInput, renderUsersSec, USERS_ACTIONS, USERS_CHANGES } from './users.js';
+import { PROMPTS_ACTIONS, PROMPTS_CHANGES, prInput, renderPromptsSec } from './prompts.js';
 import { isAdmin } from '../core/auth.js';
 
 // Datasets: local folders (read in place) and S3 / RustFS prefixes (stream or local cache), connections (S3, FTP,
@@ -85,6 +86,7 @@ const RENDERERS: Record<SectionId, () => string> = {
   datasets: renderDatasetsSec, connections: renderConnsSec, labeling: renderLabelingSec, models: renderModelsSec, llm: renderLlmSec,
   appearance: () => renderAppearanceSec() + wheelModeHTML(), plot: renderPlotSec, workspace: renderWorkspaceSec,
   account: renderAccountSec, users: renderUsersSec,
+  prompts: renderPromptsSec,
 };
 
 export function renderSettings(): void {
@@ -465,6 +467,7 @@ const SET_ACTIONS: Record<string, SetAction> = {
   ...LLM_ACTIONS,
   ...ACCOUNT_ACTIONS,
   ...USERS_ACTIONS,
+  ...PROMPTS_ACTIONS,
 };
 
 const SET_CHANGES: Record<string, SetChange> = {
@@ -495,6 +498,7 @@ const SET_CHANGES: Record<string, SetChange> = {
   ...MODEL_CHANGES,
   ...LLM_CHANGES,
   ...USERS_CHANGES,
+  ...PROMPTS_CHANGES,
 };
 
 export function bindSettings(): void {
@@ -529,6 +533,7 @@ export function bindSettings(): void {
     if (t instanceof HTMLInputElement && t.dataset.acc) { accInput(t); return; }
     if (t instanceof HTMLInputElement && t.dataset.adm) { admInput(t); return; }
     if (isControl(t)) write(t);
+    if (SET.sec === 'prompts') prInput(t);       // live counters and the web level caption
     if (SET.sec === 'llm') llmInput(t);       // live step locks, capability guess, token budget
     else if (t.classList.contains('un-alias')) unionInput();      // alias checks in place
   });

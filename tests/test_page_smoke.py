@@ -688,3 +688,43 @@ def test_embeddings_session_rows_audio_and_columns(server, tmp_path):
         page.keyboard.press('Escape')
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_settings_prompts_and_skills_section(server):
+    """Settings › Prompts & Skills: add an instruction, install a pasted plugin and see its tools, removing it asks
+    inline (no browser dialog), and the web search level caption follows the slider."""
+    pytest.importorskip('playwright')
+    from playwright.sync_api import sync_playwright
+    plugin = {'name': 'tracker', 'version': '1.2', 'secrets': ['TOKEN'],
+              'tools': [{'name': 'find', 'description': 'Find issues', 'risk': 'read',
+                         'parameters': {'type': 'object', 'properties': {'q': {'type': 'string'}}},
+                         'http': {'method': 'GET', 'url': 'https://tracker.test/find', 'query': {'q': '{{q}}'},
+                                  'headers': {'Authorization': 'Bearer ${secret:TOKEN}'}}}]}
+    with sync_playwright() as pw:
+        browser = _browser(pw)
+        page = browser.new_page(viewport={'width': 1300, 'height': 900})
+        errors = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.on('dialog', lambda d: errors.append(f'browser dialog: {d.message}'))
+        page.goto(f'{server}/')
+        page.click('#home-settings')                  # the Sessions home's gear
+        page.click('.snav[data-sec="prompts"]')
+        page.click('[data-act="pr-new"]')
+        page.fill('.pr-form [data-pr-f="name"]', 'Short answers')
+        page.fill('.pr-form [data-pr-f="body"]', 'Answer in two sentences.')
+        page.click('[data-act="pr-save"]')
+        page.wait_for_selector('.pr-item:has-text("Short answers")')
+        page.click('[data-act="pr-tab"][data-v="plugins"]')
+        page.click('[data-act="pr-paste"]')
+        page.fill('[data-pr-f="manifest"]', json.dumps(plugin))
+        page.click('[data-act="pr-plug-paste"]')
+        page.wait_for_selector('.pr-plugin code:has-text("tracker__find")')
+        page.click('[data-act="pr-plug-del"]')
+        page.wait_for_selector('.pr-confirm')
+        page.click('[data-act="pr-plug-del-yes"]')
+        page.wait_for_selector('.pr-plugin', state='detached')
+        page.click('[data-act="pr-tab"][data-v="web"]')
+        page.fill('[data-pr-f="level"]', '3')
+        page.wait_for_selector('#pr-level-cap:has-text("Full")')
+        browser.close()
+    assert not errors, '\n'.join(errors)
