@@ -1,7 +1,11 @@
 # The bundled SearXNG (docker-compose.yml service `searxng`): the ◆ assistants' free web search engine when a user
 # has not set their own (Settings › AI › Web search). Only the app talks to it (no host port): JSON API on, the
 # public-instance rate limiter off.
-use_default_settings: true
+use_default_settings:
+  engines:
+    remove:          # Tor (.onion) engines: they cannot load without a Tor proxy and only log errors
+      - ahmia
+      - torch
 
 general:
   instance_name: "dataviz search"
