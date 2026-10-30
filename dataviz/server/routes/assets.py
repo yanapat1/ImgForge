@@ -17,11 +17,13 @@ user (llm/assets.py, llm/store.py); signing in and the tier permission llm.use a
     GET    /api/llm/web                     {web, has_key, max_level, org_words: n}
     PUT    /api/llm/web                     {level, ask_before, engine, url, cx, words} -> the same as GET
     PUT    /api/llm/web/key                 {api_key} ('' removes it) -> {has_key}
-    POST   /api/llm/web/test                {query?} -> one search through llm/tools/web.py `test(user, query)`
-                                            (501 while that module is not installed)
+    POST   /api/llm/web/test                one generic search through llm/tools/web.py (the user's engine, then the
+                                            fallbacks) -> {ok, engine, ms, results: [{title, url}], skipped} / {ok: false, error}
 """
 
 import json
+import time
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -171,24 +173,30 @@ def router(state, ctx):
         return store().set_web_key(key or '', user)
 
     @r.post('/api/llm/web/test')
-    def test_web(body: dict | None = None):
+    def test_web():
         user = me()
         store()
         try:
             from ...llm.tools import web
         except ImportError:
             raise HTTPException(501, 'web search is not available on this server yet') from None
-        fn = getattr(web, 'test', None)
-        if fn is None:
-            raise HTTPException(501, 'web search is not available on this server yet')
         if _max_web() <= 0:
             raise HTTPException(403, 'web search is turned off by the administrators')
-        q = str((body or {}).get('query') or 'open source object detection datasets').strip()[:200]
-        try:
-            return fn(user, q)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001 - the engine's message is the answer
-            return {'ok': False, 'error': f'{type(e).__name__}: {e}'[:300]}
+        # a fixed, generic query (nothing internal to guard): the user's engine first, then the fallbacks, as a run would
+        q = 'open source object detection datasets'
+        cfg = store().clean_web(store().load(user).get('web') or {})
+        wctx = SimpleNamespace(user=user, app=ctx, web_cfg=cfg, web_level=cfg['level'], events=[], seen=set(), web_blocked=0)
+        errors = []
+        for name, fn in web.chain(cfg):
+            t0 = time.perf_counter()
+            try:
+                rows = fn(q, 5, wctx, cfg)
+            except Exception as e:  # noqa: BLE001 - the next engine is tried, like in a chat
+                errors.append(f'{name}: {str(e)[:160]}')
+                continue
+            return {'ok': True, 'engine': name, 'query': q, 'ms': round((time.perf_counter() - t0) * 1000),
+                    'results': [{'title': r.get('title', ''), 'url': r.get('url', '')} for r in rows][:5],
+                    'skipped': errors}
+        return {'ok': False, 'error': 'every engine failed: ' + '; '.join(errors)[:600], 'skipped': errors}
 
     return r

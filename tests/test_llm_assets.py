@@ -389,7 +389,25 @@ def test_web_settings_capped_by_admin(client_as, users):
     assert c.get('/api/llm/web').json()['has_key'] and 'brave-key-1' not in c.get('/api/llm/web').text
     assert client_as.ctx.llm.web_key(alice) == 'brave-key-1'
     assert c.put('/api/llm/web/key', json={'api_key': ''}).json() == {'has_key': False}
-    try:
-        import dataviz.llm.tools.web  # noqa: F401
-    except ImportError:
-        assert c.post('/api/llm/web/test', json={}).status_code == 501
+
+
+def test_web_test_tries_the_engines_in_order(client_as, users, monkeypatch):
+    from dataviz.llm.tools import web
+    c = client_as(users[0])
+    c.put('/api/llm/web', json={'engine': 'brave'})
+    seen = []
+
+    def broken(q, n, ctx, cfg):
+        seen.append(('brave', cfg['engine'], ctx.user['id']))
+        raise ToolError('no API key saved for this web search engine')
+
+    def ok(q, n, ctx, cfg):
+        seen.append(('ddg', q))
+        return [{'title': 'Open Images', 'url': 'https://example.org/oi', 'snippet': 's'}]
+    monkeypatch.setattr(web, 'chain', lambda cfg: [('brave', broken), ('duckduckgo', ok)])
+    r = c.post('/api/llm/web/test').json()
+    assert r['ok'] and r['engine'] == 'duckduckgo' and r['results'] == [{'title': 'Open Images', 'url': 'https://example.org/oi'}]
+    assert 'no API key' in r['skipped'][0] and seen[0] == ('brave', 'brave', users[0]['id'])
+    monkeypatch.setattr(web, 'chain', lambda cfg: [('brave', broken)])
+    r = c.post('/api/llm/web/test').json()
+    assert not r['ok'] and 'every engine failed' in r['error']
