@@ -454,10 +454,11 @@ def events(run):
                 _, err = tools.validate(t, args)
                 results.append({**res, 'content': err or 'invalid', 'is_error': True})
                 continue
-            if t.risk == 'ui':
-                clean, err = tools.validate(t, args)
-                if err:
-                    results.append({**res, 'content': err, 'is_error': True})
+            if t.risk == 'ui':             # checked against the session (feature ids, the method's params, a filter)
+                try:
+                    clean, _ = tools.prepare(run.ctx, name, args, run.tools)
+                except Exception as e:  # noqa: BLE001 - the model fixes it on the next step
+                    results.append({**res, 'content': _error_text(e), 'is_error': True})
                     continue
                 applied = run.mode == 'auto'
                 label = t.preview(None, clean) if t.preview else name
