@@ -12,6 +12,7 @@ import { clsName, DIFF_STYLE, diffColor, diffKey, originColor } from '../core/th
 import type { CmpImage, CmpImgBox, CmpImgSide } from '../types.js';
 import { closestOf } from './ev-util.js';
 import { svgEl, tagIn } from './viewer.js';
+import { trapTab } from './dialog.js';
 
 type Side = 'a' | 'b';
 type Mode = 'side' | 'flicker' | 'swipe';
@@ -315,7 +316,7 @@ function bind(el: HTMLElement): void {
     else if (k === '1' || k === '2' || k === '3') setMode(k === '1' ? 'side' : k === '2' ? 'flicker' : 'swipe');
     else if (k === '0') { CV.T = { s: 1, x: 0, y: 0 }; apply(); }
     else if (k === ' ' && CV.mode === 'flicker') { if (CV.flick) { clearInterval(CV.flick); CV.flick = undefined; } else startFlicker(); }
-    else if (k === 'Tab') { e.preventDefault(); }
+    else if (k === 'Tab') { if (root) trapTab(root, e); return; }      // its buttons are reachable, focus stays inside
     else return;
     e.preventDefault();
     e.stopPropagation();

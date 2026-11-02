@@ -13,6 +13,8 @@ import { prettyCombo, combosFor } from './hotkeys.js';
 import * as P from './panels.js';
 import { L, TASK_TYPES } from './state.js';
 import type { TaskTypeInfo } from './state.js';
+import { confirmDialog, trapTab } from '../views/dialog.js';
+import { pollPause } from '../core/jobs.js';
 
 // ---------------------------------------------------------------- types
 /** What the page gives the model module (initModel). */
@@ -284,24 +286,25 @@ async function toggleAuto(): Promise<void> {
 }
 
 // ---------------------------------------------------------------- small modal shell (Esc / backdrop close, focus trap)
+let modalSeq = 0;
+
 function modal(cls: string, title: string, onClose?: () => void): Modal {
+  const tid = `lbm-title-${++modalSeq}`;              // unique: a dialog may stack on another
   const back = document.createElement('div');
   back.className = 'modal lb-dlg-back';
-  back.innerHTML = `<div class="panel lb-dlg ${cls}" role="dialog" aria-modal="true" aria-labelledby="lbm-title" tabindex="-1">` +
-    `<div class="lbm-head"><h2 id="lbm-title">${icon('robot')}<span>${esc(title)}</span></h2>` +
+  back.innerHTML = `<div class="panel lb-dlg ${cls}" role="dialog" aria-modal="true" aria-labelledby="${tid}" tabindex="-1">` +
+    `<div class="lbm-head"><h2 id="${tid}">${icon('robot')}<span>${esc(title)}</span></h2>` +
     `<button class="icon-btn ghost" data-a="close" aria-label="Close">${icon('x')}</button></div><div class="lbm-body"></div><div class="lb-dlg-actions lbm-foot"></div></div>`;
   document.body.appendChild(back);
   const prev = document.activeElement;
   const close = (): void => { back.remove(); if (onClose) onClose(); if (prev instanceof HTMLElement && document.contains(prev)) prev.focus(); };
-  back.addEventListener('pointerdown', (e) => { if (e.target === back) close(); });
+  // a click beside the dialog closes it only while nothing was typed or picked (a filled form is not lost by a stray click)
+  let touched = false;
+  back.addEventListener('input', () => { touched = true; });
+  back.addEventListener('pointerdown', (e) => { if (e.target === back && !touched) close(); });
   back.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); close(); return; }
-    if (e.key !== 'Tab') return;
-    const f = [...back.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)')].filter((x) => x.offsetParent);
-    if (!f.length) return;
-    const i = f.findIndex((x) => x === document.activeElement);
-    if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1]?.focus(); }
-    else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0]?.focus(); }
+    trapTab(back, e);
   });
   return { back, el: must<HTMLElement>(back, '.lb-dlg'), body: must<HTMLElement>(back, '.lbm-body'), foot: must<HTMLElement>(back, '.lbm-foot'), close };
 }
@@ -518,7 +521,7 @@ function bindLink(dl: LinkDialog): void {
       render(dl);
     } else if (a === 'save') void saveLink(dl);
     else if (a === 'unlink') {
-      if (!confirm(`Unlink the model from “${D.t.name}”? The labels it made stay.`)) return;
+      if (!(await confirmDialog({ title: `Unlink the model from “${D.t.name}”?`, text: 'The labels it made stay.', ok: 'Unlink', danger: true }))) return;
       try { await putLink(D.t.id, null); dl.close(); P.toast('Model unlinked'); } catch (err) { D.status = { kind: 'err', text: errText(err) }; render(dl); }
     }
   });
@@ -620,7 +623,7 @@ async function trackJob(jid: number, key: string, resumed = false): Promise<void
     let j: Job;
     try { j = await getJSON<Job>(`api/jobs/${encodeURIComponent(jid)}`); } catch (e) {
       if (/: 404 /.test(errMessage(e))) { endJob(); if (!resumed) P.toast('The labeling job is gone (server restarted?)', 'err'); return; }
-      await new Promise((r) => setTimeout(r, 2000));
+      await pollPause(2000);
       continue;
     }
     if (!M.job || M.job.id !== jid) return;
@@ -641,7 +644,7 @@ async function trackJob(jid: number, key: string, resumed = false): Promise<void
       H.afterBulk();
       return;
     }
-    await new Promise((r) => setTimeout(r, 700));
+    await pollPause(700);
   }
 }
 

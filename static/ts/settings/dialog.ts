@@ -22,6 +22,8 @@ import { admInput, renderUsersSec, USERS_ACTIONS, USERS_CHANGES } from './users.
 import { PROMPTS_ACTIONS, PROMPTS_CHANGES, prInput, renderPromptsSec } from './prompts.js';
 import { isAdmin } from '../core/auth.js';
 import { bindTagFields, commitTagDraft, sameTags } from '../core/tag-field.js';
+import { confirmDialog, trapTab } from '../views/dialog.js';
+import { toast } from '../core/toast.js';
 
 // Datasets: local folders (read in place) and S3 / RustFS prefixes (stream or local cache), connections (S3, FTP,
 // SFTP, PostgreSQL, SQL Server), the labeling page's options + hotkeys, the AI assistant (LLM providers + feature
@@ -421,7 +423,7 @@ const SET_ACTIONS: Record<string, SetAction> = {
   'remove-ds': async (b) => {
     const d = SET.datasets.find((x) => x.id === rowAttr(b, '[data-id]', 'id'));
     if (!d) return;
-    if (!confirm(`Remove the session "${d.name}"?\n\nNo dataset files are deleted.`)) return;
+    if (!(await confirmDialog({ title: `Remove the session “${d.name}”?`, text: 'No dataset files are deleted.', ok: 'Remove', danger: true }))) return;
     let err: string | null = null;              // e.g. a member of a combined dataset: shown above the list
     try { await api(`api/datasets/${encodeURIComponent(d.id)}`, { method: 'DELETE' }); } catch (e) { err = errText(e); }
     await loadSettingsData();
@@ -461,8 +463,8 @@ const SET_ACTIONS: Record<string, SetAction> = {
   'remove-conn': async (b) => {
     const c = SET.conns.find((x) => x.id === rowAttr(b, '[data-cid]', 'cid'));
     if (!c) return;
-    if (!confirm(`Delete the connection "${c.name}"? Its stored keys are removed from the server.`)) return;
-    try { await api(`api/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' }); } catch (e) { alert(errText(e)); }
+    if (!(await confirmDialog({ title: `Delete the connection “${c.name}”?`, text: 'Its stored keys are removed from the server.', ok: 'Delete', danger: true }))) return;
+    try { await api(`api/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' }); } catch (e) { toast(`Could not delete “${c.name}”: ${errText(e)}`, 'err'); }
     await loadSettingsData();
     renderSettings();
   },
@@ -588,12 +590,7 @@ export function bindSettings(): void {
   $req('settings').addEventListener('mousedown', (e) => { if (e.target === $req('settings')) closeSettings(); });
   $req('settings').addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); closeSettings(); return; }
-    if (e.key !== 'Tab') return;                  // keep focus inside the dialog
-    const f = [...$req('settings').querySelectorAll<HTMLElement>('button:not(:disabled), input, select, textarea')].filter((x) => x.offsetParent);
-    const first = f[0], last = f[f.length - 1];
-    if (!first || !last) return;
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    trapTab($req('settings'), e);                 // keep focus inside the dialog
   });
   $req('btn-settings').onclick = () => openSettings('datasets');
   const homeBtn = $('home-settings');

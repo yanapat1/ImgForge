@@ -76,3 +76,32 @@ export async function waitForServer(onWait?: () => void, timeout = 120000): Prom
     wait = Math.min(wait * 1.5, 3000);
   }
 }
+
+/** The answer of postXHR: any HTTP status (the caller decides), the body as text and parsed JSON (null if not JSON). */
+export interface XhrAnswer { status: number; text: string; json: unknown }
+
+/** POST with upload progress (fetch has none): the app header and cookie, a Blob sent as octet-stream, a 401 starts
+ *  the sign-in redirect. Rejects with Error('network') when the connection fails and Error('abort') when `track`'s
+ *  xhr was aborted. `track(xhr, true|false)` lets the caller keep the request to cancel it. Both uploaders use it. */
+export function postXHR(url: string, body: FormData | Blob, o: { onProgress?: (loaded: number) => void; track?: (x: XMLHttpRequest, live: boolean) => void } = {}): Promise<XhrAnswer> {
+  return new Promise((ok, fail) => {
+    const x = new XMLHttpRequest();
+    const end = (): void => o.track?.(x, false);
+    x.open('POST', url);
+    x.setRequestHeader('X-Requested-With', XRW);
+    if (body instanceof Blob) x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.withCredentials = true;
+    if (o.onProgress) { const f = o.onProgress; x.upload.onprogress = (e) => f(e.loaded); }
+    x.onload = () => {
+      end();
+      if (x.status === 401) onUnauthorized();
+      let json: unknown = null;
+      try { json = JSON.parse(x.responseText); } catch (e) { /* not JSON */ }
+      ok({ status: x.status, text: x.responseText, json });
+    };
+    x.onerror = () => { end(); fail(new Error('network')); };
+    x.onabort = () => { end(); fail(new Error('abort')); };
+    o.track?.(x, true);
+    x.send(body);
+  });
+}

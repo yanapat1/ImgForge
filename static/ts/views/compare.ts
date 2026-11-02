@@ -28,6 +28,7 @@ import { setSelection } from './gallery.js';
 import { setImageSubset } from './image-grid.js';
 import { switchTab } from './layout.js';
 import { isImageUnit } from './preview.js';
+import { fmtCount } from '../core/format.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -63,7 +64,7 @@ const unitWord = (count: number, cap = false): string => {
   return cap ? w.charAt(0).toUpperCase() + w.slice(1) : w;
 };
 const alias = (k: number): string => U.members[k]?.alias ?? `#${k}`;
-const n = (v: number | undefined): string => (v ?? 0).toLocaleString();
+const n = fmtCount;
 
 // ---------------------------------------------------------------- setup
 

@@ -18,6 +18,7 @@ import { closestOf } from './ev-util.js';
 import { renderGallery, setSelection } from './gallery.js';
 import { curTab, switchTab } from './layout.js';
 import { openCard } from './modal.js';
+import { pct1 } from '../core/format.js';
 
 // Plotly is loaded as a classic script by main.ts (window.Plotly)
 declare const Plotly: typeof import('plotly.js');
@@ -209,7 +210,7 @@ function renderEmpty(err?: string): void {
   }
 }
 
-const pct = (v: number | null | undefined): string => (v == null ? '–' : (v * 100).toFixed(1));
+const pct = pct1;
 
 function renderLeft(ev: ModelEvalFull): void {
   const t = ev.totals, ap = ev.ap;

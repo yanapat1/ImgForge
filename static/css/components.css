@@ -179,7 +179,7 @@
 .vw-editbar select { max-width: 200px; }
 .vw-flash { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 12px; line-height: 1.4;
   font-size: var(--fs-sm); white-space: nowrap; box-shadow: var(--shadow-2); }
-.vw-menu { position: fixed; z-index: calc(var(--z-modal) + 1); min-width: 230px; padding: 4px; display: flex; flex-direction: column; box-shadow: var(--shadow-3); }
+.vw-menu { position: fixed; z-index: var(--z-menu); min-width: 230px; padding: 4px; display: flex; flex-direction: column; box-shadow: var(--shadow-3); }
 .vw-menu.hidden { display: none; }
 .vw-menu button { justify-content: flex-start; border: none; background: none; width: 100%; text-align: left; }
 .vw-menu button:hover:not(:disabled), .vw-menu button:focus-visible { background: var(--surface-2); }
@@ -247,7 +247,7 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .um-sep { height: 1px; margin: 4px 0; background: var(--border); }
 
 /* ---------------------------------------------------------------- small dialog (views/dialog.ts) */
-.ui-dlg-wrap { z-index: calc(var(--z-modal) + 10); }
+.ui-dlg-wrap { z-index: var(--z-dialog); }
 .ui-dlg { width: min(460px, 100%); max-height: 100%; overflow-y: auto; padding: var(--s4) var(--s5) var(--s5); display: flex; flex-direction: column;
   gap: var(--s3); box-shadow: var(--shadow-3); outline: none; }
 .ui-dlg.wide { width: min(560px, 100%); }
@@ -255,6 +255,7 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .ui-dlg-head h3 { flex: 1; min-width: 0; font-size: var(--fs-lg); overflow-wrap: anywhere; }
 .ui-dlg-body { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
 .ui-dlg-body p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; }
+.ui-dlg-text { display: flex; flex-direction: column; gap: var(--s2); }
 .ui-dlg-body .check { white-space: normal; align-items: flex-start; }
 
 /* ---------------------------------------------------------------- share dialog (views/share.ts) */
@@ -290,7 +291,7 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .cbx > .cbx-btn { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 28px; height: auto; padding: 0; border: 0;
   border-radius: 0 var(--r) var(--r) 0; background: var(--chev) center / 15px no-repeat; }
 .cbx > .cbx-btn:hover:not(:disabled), .cbx > .cbx-btn:active:not(:disabled) { background: var(--chev) center / 15px no-repeat; background-color: var(--surface-3); }
-.cbx-list { position: fixed; z-index: calc(var(--z-modal) + 10); overflow-y: auto; overscroll-behavior: contain; padding: 4px;
+.cbx-list { position: fixed; z-index: var(--z-dialog-pop); overflow-y: auto; overscroll-behavior: contain; padding: 4px;
   display: flex; flex-direction: column; gap: 1px; background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg); box-shadow: var(--shadow-3); font-size: var(--fs-sm); color: var(--text); }
 .cbx-opt { display: flex; align-items: center; gap: 8px; flex: none; min-height: 30px; padding: 0 8px; border-radius: var(--r-sm);

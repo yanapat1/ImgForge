@@ -19,6 +19,7 @@ import { setSelection } from './gallery.js';
 import { curTab, switchTab } from './layout.js';
 import { openModal, openPredModal } from './modal.js';
 import { modelsChanged, openModelClass, useModel } from './model.js';
+import { saveFile } from '../core/format.js';
 
 // Plotly is loaded as a classic script by main.ts (window.Plotly)
 declare const Plotly: typeof import('plotly.js');
@@ -521,14 +522,7 @@ function bindEval(): void {
 // ---------------------------------------------------------------- export
 const stamp = (): string => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 
-function download(name: string, text: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: name });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
+const download = (name: string, text: string, type: string): void => saveFile(text, name, type);
 
 function csvCell(v: unknown): string { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 

@@ -5,6 +5,7 @@
 
 import { errMessage, errText, getJSON, postJSON } from '../core/api.js';
 import { $req, esc, icon } from '../core/dom.js';
+import { actionToast, toast as appToast } from '../core/toast.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { pts, S } from '../core/state.js';
 import { clsColor, clsName } from '../core/theme.js';
@@ -15,6 +16,7 @@ import { closestOf } from './ev-util.js';
 import { onDataPatched, setIssueFilter, setIssueTypes } from './filter-bar.js';
 import { clFixIds, renderGallery, setSelection, syncClFix } from './gallery.js';
 import { switchTab } from './layout.js';
+import { confirmDialog, dialogOpen, openDialog } from './dialog.js';
 
 const ROW = 132;            // px per issue row (fixed: the list is virtualised)
 const PAGE = 200;           // issues fetched per request
@@ -287,7 +289,7 @@ async function scan(): Promise<void> {
         if (label) label.textContent = j.total ? `${j.stage} · ${j.done.toLocaleString()} / ${j.total.toLocaleString()}` : j.stage;
       });
     }
-  } catch (e) { toast(`Scan failed: ${errText(e)}`); }
+  } catch (e) { toast(`Scan failed: ${errText(e)}`, null, 'err'); }
   prog.classList.add('hidden');
   await loadSummary();
   await resetList();
@@ -303,17 +305,17 @@ async function applyFix(it: CurItem, ops: CurOp[], text: string): Promise<void> 
   try {
     const r = await postJSON<CurResult>('api/curation/fix', { items: fixItems(it, ops), summary: text });
     afterFix(r, text);
-  } catch (e) { toast(`Fix failed: ${errText(e)}`); }
+  } catch (e) { toast(`Fix failed: ${errText(e)}`, null, 'err'); }
 }
 
 function afterFix(r: CurResult, text: string): void {
   applyPatch(r.patch);
   if (r.undo_id) { C.lastUndo = r.undo_id; toast(`${text} · ${r.applied} change${r.applied === 1 ? '' : 's'}`, r.undo_id); }
   if (r.conflicts && r.conflicts.length) {
-    toast(`${r.conflicts.length} file${r.conflicts.length === 1 ? '' : 's'} changed on disk since the scan (${r.conflicts.slice(0, 3).join(', ')}): scan again`);
+    toast(`${r.conflicts.length} file${r.conflicts.length === 1 ? '' : 's'} changed on disk since the scan (${r.conflicts.slice(0, 3).join(', ')}): scan again`, null, 'warn');
   }
   // files that failed (bad op, write error): the rest of the batch went through and stays undoable
-  if (r.errors && r.errors.length) toast(`${r.errors.length} file${r.errors.length === 1 ? '' : 's'} not fixed: ${errList(r.errors)}`, r.undo_id || undefined);
+  if (r.errors && r.errors.length) toast(`${r.errors.length} file${r.errors.length === 1 ? '' : 's'} not fixed: ${errList(r.errors)}`, r.undo_id || undefined, 'warn');
   const keep = C.active;
   void loadSummary().then(() => resetList()).then(() => setActive(keep, false));
 }
@@ -331,13 +333,13 @@ export const showToast = (text: string): void => toast(text);
 export async function fixToSuggested(): Promise<void> {
   const ids = clFixIds();
   if (!ids.length || !S.lq) return;
-  if (!confirm(`Change ${ids.length} label${ids.length === 1 ? '' : 's'} to the class cleanlab suggests?\n\n` +
-    'The label files are edited (a backup is kept): undo from the message that follows or in Curation › History.')) return;
+  if (!(await confirmDialog({ title: `Change ${ids.length} label${ids.length === 1 ? '' : 's'} to the class cleanlab suggests?`, ok: 'Change',
+    text: 'The label files are edited (a backup is kept): undo from the message that follows or in Curation › History.' }))) return;
   try {
     const r = await postJSON<CurResult>('api/curation/fix-boxes', { ids, op: 'suggested', feature: S.lq.feature });
     afterFix(r, `Changed to cleanlab's class`);
     if (C.info) void loadSummary();
-  } catch (e) { toast(`Fix failed: ${errText(e)}`); }
+  } catch (e) { toast(`Fix failed: ${errText(e)}`, null, 'err'); }
 }
 
 /** Explore's pick bar: delete the boxes or change them all to one class, in one fix batch (backup + undo). */
@@ -347,7 +349,7 @@ export async function fixBoxes(ids: number[], op: 'delete' | 'set_class', cls?: 
     const r = await postJSON<CurResult>('api/curation/fix-boxes', op === 'delete' ? { ids, op } : { ids, op, cls });
     afterFix(r, op === 'delete' ? `Deleted ${ids.length} box${ids.length === 1 ? '' : 'es'}` : `Changed to ${clsName(cls ?? -1)}`);
     return true;
-  } catch (e) { toast(`Fix failed: ${errText(e)}`); return false; }
+  } catch (e) { toast(`Fix failed: ${errText(e)}`, null, 'err'); return false; }
 }
 
 // called after every undo (the viewer reloads the boxes of the image it shows)
@@ -363,7 +365,7 @@ async function undo(id: string | undefined): Promise<void> {
     const nc = (r.conflicts || []).length, errs = r.errors || [], ne = errs.length;
     toast(nc || ne ? `Undone, except ${nc ? `${nc} file(s) changed since the fix` : ''}${nc && ne ? ' and ' : ''}${ne ? `${ne} file(s) that failed: ${errList(errs)} (undo again to retry)` : ''}`
       : r.stale ? 'Undone: the label files are back as they were. Re-index to see those boxes in the plot' : 'Undone: the label files are back as they were');
-  } catch (e) { toast(`Undo failed: ${errText(e)}`); }
+  } catch (e) { toast(`Undo failed: ${errText(e)}`, null, 'err'); }
   const keep = C.active;
   await loadSummary();
   await resetList();
@@ -374,23 +376,20 @@ async function ignore(it: CurItem): Promise<void> {
   try {
     const r = await postJSON<{ ignored: string[] }>('api/curation/ignore', { ids: [it.id], ignore: !C.showIgnored });
     C.ignored = r.ignored;
-  } catch (e) { toast(errText(e)); return; }
+  } catch (e) { toast(errText(e), null, 'err'); return; }
   const keep = C.active;
   await loadSummary();
   await resetList();
   setActive(keep, false);
 }
 
-let toastTimer: ReturnType<typeof setTimeout> | undefined;
-
-function toast(text: string, undoId: string | null | undefined = null): void {
-  const el = $req('cur-toast');
-  $req('cur-toast-text').textContent = text;
-  $req('cur-toast-undo').classList.toggle('hidden', !undoId);
-  $req('cur-toast-undo').dataset.undo = undoId || '';
-  el.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add('hidden'), undoId ? 12000 : 7000);
+// messages go through the app's toasts (core/toast.ts); a fix with an undo id gets an action toast with Undo
+function toast(text: string, undoId: string | null | undefined = null, kind: 'err' | 'warn' | '' = ''): void {
+  if (undoId && document.documentElement.dataset['role'] !== 'viewer') {
+    actionToast({ title: text, kind: kind || 'ok', timeout: 12000, actions: [{ label: 'Undo', icon: 'undo', run: () => undo(undoId) }] });
+    return;
+  }
+  appToast(text, kind === 'warn' ? 'err' : kind);
 }
 
 async function selectType(t: string): Promise<void> {
@@ -408,7 +407,7 @@ async function selectType(t: string): Promise<void> {
     switchTab('explore');
     setSelection(sel, `Issue: ${label}`);
     if (!sel.length) toast('No indexed boxes for these issues (e.g. images without boxes)');
-  } catch (e) { toast(errText(e)); }
+  } catch (e) { toast(errText(e), null, 'err'); }
 }
 
 async function confirmFixAll(t: string): Promise<void> {
@@ -417,35 +416,19 @@ async function confirmFixAll(t: string): Promise<void> {
   let preview: CurItem[] = [];
   try { preview = (await getJSON<CurIssuesPage>(`api/curation/issues?type=${encodeURIComponent(t)}&limit=5`)).items; } catch (e) { /* the count is enough */ }
   const first: CurFix | undefined = preview[0]?.fixes[0];
-  $req('cur-dlg-title').textContent = `Fix all: ${v.label}`;
-  $req('cur-dlg-text').textContent = `${first ? `“${first.label}”` : 'The first fix'} on ${v.n.toLocaleString()} issue${v.n === 1 ? '' : 's'}. ` +
-    'Every changed label file is backed up first; one Undo restores them all.';
-  $req('cur-dlg-list').innerHTML = preview.map((it) => `<li><b>${esc(it.image || it.label)}</b> <span class="muted">${esc(it.detail)}</span></li>`).join('') +
+  const list = preview.map((it) => `<li><b>${esc(it.image || it.label)}</b> <span class="muted">${esc(it.detail)}</span></li>`).join('') +
     (v.n > preview.length ? `<li class="muted">… and ${(v.n - preview.length).toLocaleString()} more</li>` : '');
-  $req('cur-dlg-ok').textContent = `Fix ${v.n.toLocaleString()}`;
-  const dlg = $req('cur-dlg');
-  const prevFocus = document.activeElement;
-  dlg.classList.remove('hidden');
-  $req('cur-dlg-ok').focus();
-  const ok = await new Promise<boolean>((resolve) => {
-    const done = (v2: boolean): void => { dlg.classList.add('hidden'); dlg.onkeydown = null; resolve(v2); };
-    $req('cur-dlg-ok').onclick = () => done(true);
-    $req('cur-dlg-cancel').onclick = () => done(false);
-    dlg.onclick = (e) => { if (e.target === dlg) done(false); };
-    dlg.onkeydown = (e) => {
-      if (e.key === 'Escape') { e.stopPropagation(); done(false); }
-      if (e.key === 'Tab') {                    // keep focus in the dialog
-        const cancel = $req('cur-dlg-cancel'), okBtn = $req('cur-dlg-ok');
-        if (document.activeElement === okBtn && !e.shiftKey) { e.preventDefault(); cancel.focus(); } else if (document.activeElement === cancel && e.shiftKey) { e.preventDefault(); okBtn.focus(); }
-      }
-    };
+  const ok = await openDialog({
+    title: `Fix all: ${v.label}`, ok: `Fix ${v.n.toLocaleString()}`, focus: '[data-dlg="ok"]',
+    body: `<p>${esc(`${first ? `“${first.label}”` : 'The first fix'} on ${v.n.toLocaleString()} issue${v.n === 1 ? '' : 's'}. ` +
+      'Every changed label file is backed up first; one Undo restores them all.')}</p><ul class="cur-dlg-list">${list}</ul>`,
+    onOk: () => null,
   });
-  if (prevFocus instanceof HTMLElement) prevFocus.focus();
   if (!ok) return;
   try {
     const r = await postJSON<CurResult>('api/curation/fix', { type: t });
     afterFix(r, `Fix all · ${v.label}`);
-  } catch (e) { toast(`Fix failed: ${errText(e)}`); }
+  } catch (e) { toast(`Fix failed: ${errText(e)}`, null, 'err'); }
 }
 
 async function reindex(): Promise<void> {
@@ -454,7 +437,7 @@ async function reindex(): Promise<void> {
   try {
     await postJSON(`api/datasets/${encodeURIComponent(ds.id)}/open`, {});
     location.reload();
-  } catch (e) { toast(`Re-index failed: ${errText(e)}`); }
+  } catch (e) { toast(`Re-index failed: ${errText(e)}`, null, 'err'); }
 }
 
 /** The fix button's op: the fix without its label. */
@@ -494,7 +477,7 @@ function onListChange(e: Event): void {
 }
 
 function onKey(e: KeyboardEvent): void {
-  if ($req('tab-curation').classList.contains('hidden') || !$req('cur-dlg').classList.contains('hidden')) return;
+  if ($req('tab-curation').classList.contains('hidden') || dialogOpen()) return;
   const t = e.target instanceof Element ? e.target : null;
   if (t && (t.closest('input, select, textarea, [contenteditable]') || t.closest('.modal:not(.hidden)'))) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -564,7 +547,5 @@ export async function initCuration(): Promise<void> {
   list.addEventListener('change', onListChange);
   new ResizeObserver(scheduleRows).observe(list);
   document.addEventListener('keydown', onKey);
-  $req('cur-toast-undo').onclick = () => { $req('cur-toast').classList.add('hidden'); void undo($req('cur-toast-undo').dataset.undo); };
-  $req('cur-toast-x').onclick = () => $req('cur-toast').classList.add('hidden');
   void loadSummary();
 }

@@ -11,7 +11,7 @@
 import { errText, isStatus } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
 import { actionToast, toast } from '../core/toast.js';
-import { openDialog } from '../views/dialog.js';
+import { confirmDialog, openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { showRetag, undoOp } from './ops.js';
@@ -53,21 +53,33 @@ const $f = (): HTMLElement | null => document.getElementById('dc-fview');
 export const fileOpen = (): boolean => !!F;
 
 /** Close the file view; false (and it stays open) when it has unsaved changes the user wants to keep. */
-export function leaveFile(): boolean {
+export async function leaveFile(): Promise<boolean> {
   if (!F) return true;
-  if (dirty() && !window.confirm(`${F.name} has unsaved changes. Leave without saving?`)) return false;
+  if (dirty()) {
+    const name = F.name;
+    if (!(await confirmDialog({ title: `Leave ${name} without saving?`, text: 'Its unsaved changes are lost.', ok: 'Leave', danger: true }))) return false;
+    if (!F) return true;                               // closed meanwhile
+  }
+  closeFile();
+  return true;
+}
+
+/** Close the file view now, unsaved changes or not (callers ask first through leaveFile / fileDirty). */
+export function closeFile(): void {
+  if (!F) return;
   F.handle?.destroy();
   F = null;
   $f()?.remove();
   window.removeEventListener('beforeunload', onUnload);
-  return true;
 }
 
-function onUnload(e: BeforeUnloadEvent): void { if (dirty()) e.preventDefault(); }
+export const fileDirty = (): boolean => dirty();
+
+function onUnload(e: BeforeUnloadEvent): void { if (dirty()) { e.preventDefault(); e.returnValue = ''; } }
 
 // ---------------------------------------------------------------- open
 export async function openFile(bid: string, path: string): Promise<void> {
-  if (!leaveFile()) return;
+  if (!(await leaveFile())) return;
   const main = document.getElementById('dc-main');
   if (!main) return;
   const host = document.createElement('section');
@@ -447,9 +459,9 @@ function onClick(e: MouseEvent): void {
   const f = F;
   if (!el) return;
   const fx = el.dataset['fx'] ?? '';
-  if (fx === 'close') { if (leaveFile()) hooks.render(); return; }
+  if (fx === 'close') { void leaveFile().then((ok) => { if (ok) hooks.render(); }); return; }
   if (!f) return;
-  if (fx === 'crumb') { const p = el.dataset['path'] ?? ''; if (leaveFile()) hooks.navigate(f.bid, p); return; }
+  if (fx === 'crumb') { const p = el.dataset['path'] ?? ''; void leaveFile().then((ok) => { if (ok) hooks.navigate(f.bid, p); }); return; }
   if (fx === 'mode') {
     const m: Mode = el.dataset['m'] === 'text' ? 'text' : 'struct';
     if (m === f.mode) return;

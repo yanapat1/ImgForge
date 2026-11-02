@@ -9,21 +9,21 @@
      (data-screen = login on /login, viz on /s/<id>/, label with ?label=, data with ?data, else home; on viz it also starts the Plotly download) -->
 <script src="static/js/theme-boot.js?v=17"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='9' fill='%23458'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12.5' cy='13.5' r='2.4'/%3E%3Ccircle cx='18.5' cy='11.8' r='2.4'/%3E%3Ccircle cx='17' cy='17.6' r='2.4'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="stylesheet" href="static/css/tokens.css?v=20">
+<link rel="stylesheet" href="static/css/tokens.css?v=21">
 <link rel="stylesheet" href="static/css/base.css?v=16">
 <link rel="stylesheet" href="static/css/layout.css?v=14">
-<link rel="stylesheet" href="static/css/components.css?v=17">
+<link rel="stylesheet" href="static/css/components.css?v=18">
 <link rel="stylesheet" href="static/css/plot.css?v=14">
 <link rel="stylesheet" href="static/css/settings.css?v=23">
-<link rel="stylesheet" href="static/css/home.css?v=18">
-<link rel="stylesheet" href="static/css/datacenter.css?v=8">
-<link rel="stylesheet" href="static/css/label.css?v=15">
-<link rel="stylesheet" href="static/css/curation.css?v=14">
+<link rel="stylesheet" href="static/css/home.css?v=19">
+<link rel="stylesheet" href="static/css/datacenter.css?v=9">
+<link rel="stylesheet" href="static/css/label.css?v=16">
+<link rel="stylesheet" href="static/css/curation.css?v=15">
 <link rel="stylesheet" href="static/css/assistant.css?v=16">
 <link rel="stylesheet" href="static/css/chat.css?v=2">
 <link rel="stylesheet" href="static/css/compare.css?v=1">
 <link rel="stylesheet" href="static/css/compare-shift.css?v=1">
-<link rel="stylesheet" href="static/css/states.css?v=16">
+<link rel="stylesheet" href="static/css/states.css?v=17">
 <link rel="stylesheet" href="static/css/responsive.css?v=15">
 <link rel="stylesheet" href="static/css/editorial.css?v=3">
 <link rel="stylesheet" href="static/css/blueprint.css?v=2">
@@ -94,15 +94,6 @@
       </header>
       <div id="lw-body" class="lw-body"></div>
       <footer id="lw-foot" class="lw-foot"></footer>
-    </div>
-  </div>
-  <!-- small confirm dialog of the home (remove a labeling session) -->
-  <div id="home-dlg" class="modal hidden">
-    <div class="home-dlg panel" role="alertdialog" aria-modal="true" aria-labelledby="home-dlg-title" aria-describedby="home-dlg-text" tabindex="-1">
-      <h3 id="home-dlg-title"></h3>
-      <p id="home-dlg-text" class="muted"></p>
-      <label id="home-dlg-check" class="check hidden"><input type="checkbox" id="home-dlg-cb"> <span id="home-dlg-cb-text"></span></label>
-      <div class="form-foot"><button id="home-dlg-cancel" class="ghost">Cancel</button><button id="home-dlg-ok" class="danger-btn"></button></div>
     </div>
   </div>
 </div>
@@ -817,19 +808,6 @@
 </main>
 
 <!-- curation: undo toast + fix-all confirm -->
-<div id="cur-toast" class="cur-toast panel hidden" role="status" aria-live="polite">
-  <span id="cur-toast-text"></span>
-  <button id="cur-toast-undo" class="ghost"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-undo"/></svg>Undo</button>
-  <button id="cur-toast-x" class="icon-btn ghost" aria-label="Dismiss"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-x"/></svg></button>
-</div>
-<div id="cur-dlg" class="modal hidden">
-  <div class="cur-dlg panel" role="alertdialog" aria-modal="true" aria-labelledby="cur-dlg-title" aria-describedby="cur-dlg-text" tabindex="-1">
-    <h3 id="cur-dlg-title"></h3>
-    <p id="cur-dlg-text" class="muted"></p>
-    <ul id="cur-dlg-list" class="cur-dlg-list"></ul>
-    <div class="form-foot"><button id="cur-dlg-cancel" class="ghost">Cancel</button><button id="cur-dlg-ok" class="primary"></button></div>
-  </div>
-</div>
 
 <div id="hover-tip" class="hover-tip panel hidden"><div class="tip-media"></div><div class="tip-label"></div></div>
 

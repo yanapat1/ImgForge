@@ -30,6 +30,8 @@ import { MODALITY_ICON, UNION_MAX, unionBlock, VIZ_TASKS } from '../settings/for
 import { openSettings } from '../settings/dialog.js';
 import type { Role, Status } from '../types.js';
 import type { HomeExportTarget, HomeProject, HomeScope, HomeSession, HomeTask, SharedFields, WizardOpts } from '../types-home.js';
+import { openDialog, paras } from './dialog.js';
+import { timeAgo } from '../core/format.js';
 
 // errs: what failed to load ({ds, lp}); the other list still shows
 // tab: 'viz' | 'label', picked on the first render (the remembered one, else the kind that has sessions)
@@ -118,14 +120,6 @@ function openedText(x: SharedFields, fallback: string): string {
   return x.opened_at ? `opened ${timeAgo(x.opened_at)}` : fallback;
 }
 
-// workspace.json times are "YYYY-MM-DD HH:MM:SS" (server local time); `created` is epoch seconds
-function timeAgo(t: string | number): string {
-  const ms = typeof t === 'number' ? t * 1000 : Date.parse(String(t).replace(' ', 'T'));
-  if (!Number.isFinite(ms)) return '';
-  const s = (Date.now() - ms) / 1000;
-  return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago`
-    : s < 86400 * 60 ? `${Math.round(s / 86400)} days ago` : new Date(ms).toLocaleDateString();
-}
 
 function classColor(i: number): string {
   const p = (THEME.name === 'light' ? H.paletteLight : H.palette) || H.palette || [];
@@ -625,44 +619,22 @@ async function combine(mode: 'compare' | 'combine'): Promise<void> {
 
 async function remove(id: string): Promise<void> {
   const d = H.sessions.find((x) => x.id === id);
-  if (!d || !confirm(`Remove the session "${d.name}"?\n\nNo dataset files are deleted; its cached crops and features stay on disk.`)) return;
+  if (!d || !(await confirmDlg({ title: `Remove the session “${d.name}”?`, ok: 'Remove', text: 'No dataset files are deleted; its cached crops and features stay on disk.' }))) return;
   try { await api(`api/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch (e) { failLine(`remove “${d.name}”`, e, 'Could not'); return; }
   await load();
 }
 
-// ---- small confirm dialog (#home-dlg): resolves {checked} on OK, null on cancel / Esc / backdrop
+// ---- a removal question on the shared dialog (views/dialog.ts): resolves {checked} on OK, null when dismissed
 interface ConfirmOpts { title: string; text: string; check?: string; ok: string }
-function confirmDlg({ title, text, check, ok }: ConfirmOpts): Promise<{ checked: boolean } | null> {
-  const dlg = $req('home-dlg');
-  const back = document.activeElement;
-  const okBtn = $req('home-dlg-ok'), cancelBtn = $req('home-dlg-cancel'), cb = $req<HTMLInputElement>('home-dlg-cb');
-  $req('home-dlg-title').textContent = title;
-  $req('home-dlg-text').textContent = text;
-  $req('home-dlg-check').classList.toggle('hidden', !check);
-  cb.checked = false;
-  $req('home-dlg-cb-text').textContent = check || '';
-  okBtn.textContent = ok;
-  dlg.classList.remove('hidden');
-  cancelBtn.focus();
-  return new Promise((resolve) => {
-    const done = (v: { checked: boolean } | null): void => {
-      dlg.classList.add('hidden');
-      dlg.onkeydown = dlg.onmousedown = okBtn.onclick = cancelBtn.onclick = null;
-      if (back instanceof HTMLElement && document.contains(back)) back.focus();
-      resolve(v);
-    };
-    okBtn.onclick = () => done({ checked: cb.checked });
-    cancelBtn.onclick = () => done(null);
-    dlg.onmousedown = (e) => { if (e.target === dlg) done(null); };
-    dlg.onkeydown = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); return; }
-      if (e.key !== 'Tab') return;                // keep focus inside
-      const f = [...dlg.querySelectorAll<HTMLElement>('button, input')].filter((x) => x.offsetParent);
-      const i = f.findIndex((x) => x === document.activeElement);
-      e.preventDefault();
-      f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length]?.focus();
-    };
+async function confirmDlg({ title, text, check, ok }: ConfirmOpts): Promise<{ checked: boolean } | null> {
+  let checked = false;
+  const done = await openDialog({
+    title, ok, okClass: 'danger-btn', focus: '.form-foot [data-dlg="cancel"]',
+    body: `<div class="ui-dlg-text">${paras(text)}</div>` +
+      (check ? `<label class="check"><input type="checkbox" id="home-dlg-cb"> <span>${esc(check)}</span></label>` : ''),
+    onOk: (r) => { checked = !!r.querySelector<HTMLInputElement>('#home-dlg-cb')?.checked; return null; },
   });
+  return done ? { checked } : null;
 }
 
 async function removeProject(pid: string): Promise<void> {
@@ -672,7 +644,7 @@ async function removeProject(pid: string): Promise<void> {
     text: 'The labeling session leaves this list. Without the box below, its uploaded images and annotations stay on disk (the workspace labeling/ folder); source folders and buckets are never touched.',
     check: 'Also delete the uploaded images and every annotation (cannot be undone)' });
   if (!r) return;
-  try { await api(`api/label/projects/${encodeURIComponent(pid)}?delete_files=${r.checked ? 1 : 0}`, { method: 'DELETE' }); } catch (e) { alert(errText(e)); }
+  try { await api(`api/label/projects/${encodeURIComponent(pid)}?delete_files=${r.checked ? 1 : 0}`, { method: 'DELETE' }); } catch (e) { failLine(`remove “${p.name}”`, e, 'Could not'); return; }
   await load();
 }
 

@@ -145,17 +145,9 @@
 .cur-fixes button, .cur-fixes select { height: 26px; font-size: var(--fs-xs); }
 .cur-keys { flex: none; margin: 0; padding: 6px var(--s4); border-top: 1px solid var(--border); background: var(--surface); }
 
-/* ---------------------------------------------------------------- toast + confirm */
-.cur-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: var(--z-tip); display: flex; align-items: center;
-  gap: var(--s2); padding: 8px 8px 8px var(--s4); max-width: min(640px, calc(100vw - 32px)); font-size: var(--fs-sm); box-shadow: var(--shadow-3); }
-.cur-toast > span { min-width: 0; overflow-wrap: anywhere; }
-.cur-dlg { width: min(520px, 100%); padding: var(--s5); display: flex; flex-direction: column; gap: var(--s3); box-shadow: var(--shadow-3); outline: none; }
-.cur-dlg h3 { font-size: var(--fs-lg); }
-.cur-dlg p { margin: 0; font-size: var(--fs-sm); }
+/* ---------------------------------------------------------------- "Fix all" dialog: preview list */
 .cur-dlg-list { margin: 0; padding-left: 18px; font-size: var(--fs-sm); max-height: 200px; overflow-y: auto; }
 .cur-dlg-list li { overflow-wrap: anywhere; }
-#cur-dlg { display: flex; align-items: center; justify-content: center; padding: var(--s4); }
-#cur-dlg.hidden { display: none; }
 
 @media (max-width: 900px) {
   .cur-thumb { width: 110px; }

@@ -14,6 +14,8 @@ import { openImportDialog } from './import.js';
 import { openDuplicate, openManageClasses } from './session-actions.js';
 import { HOLD_ACTIONS, L, TASK_TYPES } from './state.js';
 import { asEl, closestEl } from './ui-util.js';
+import { toast as appToast } from '../core/toast.js';
+import { trapTab } from '../views/dialog.js';
 
 /** What app.ts gives the panels. */
 export interface PanelHandlers {
@@ -854,12 +856,14 @@ export function revealCurrent(): void {
 }
 
 // ---------------------------------------------------------------- dialog + toast
+let dlgSeq = 0;
 export function ask({ title, html, buttons }: AskOptions): Promise<AskResult | null> {
   return new Promise((resolve) => {
+    const tid = `lb-dlg-t${++dlgSeq}`;                  // unique: a dialog may open over another
     const back = document.createElement('div');
     back.className = 'modal lb-dlg-back';
-    back.innerHTML = `<div class="panel lb-dlg" role="dialog" aria-modal="true" aria-labelledby="lb-dlg-title" tabindex="-1">
-      <h2 id="lb-dlg-title">${esc(title)}</h2><div class="lb-dlg-body">${html || ''}</div>
+    back.innerHTML = `<div class="panel lb-dlg" role="dialog" aria-modal="true" aria-labelledby="${tid}" tabindex="-1">
+      <h2 id="${tid}">${esc(title)}</h2><div class="lb-dlg-body">${html || ''}</div>
       <div class="lb-dlg-actions">${buttons.map((b) => `<button data-b="${esc(b.id)}" class="${b.primary ? 'primary' : b.danger ? 'danger' : ''}">${esc(b.label)}</button>`).join('')}</div></div>`;
     document.body.appendChild(back);
     const prev = document.activeElement;
@@ -872,19 +876,22 @@ export function ask({ title, html, buttons }: AskOptions): Promise<AskResult | n
         done({ id: b.dataset['b'] ?? '', values });
       } else if (e.target === back) done(null);
     });
-    back.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } });
+    const box = back.querySelector<HTMLElement>('.lb-dlg');
+    back.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(null); return; }
+      if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {         // Enter in a field = the primary button
+        e.preventDefault();
+        back.querySelector<HTMLElement>('.lb-dlg-actions .primary')?.click();
+        return;
+      }
+      if (box) trapTab(box, e);
+    });
     (back.querySelector<HTMLElement>('select, .primary, button') || back.querySelector<HTMLElement>('.lb-dlg'))?.focus();
   });
 }
 
-let toastTimer = 0;
-export function toast(msg: string, kind: ToastKind = ''): void {
-  const el = $req('lb-toast');
-  el.className = `lb-toast show ${kind}`;
-  el.textContent = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = 'lb-toast'; }, 3500);
-}
+/** The label page's messages use the app toast (core/toast.ts). */
+export function toast(msg: string, kind: ToastKind = ''): void { appToast(msg, kind); }
 
 // ---------------------------------------------------------------- panel sizes / collapse
 const WKEY = 'label-panels';

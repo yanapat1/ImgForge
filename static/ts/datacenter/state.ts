@@ -4,6 +4,7 @@
 
 import { esc, icon } from '../core/dom.js';
 import type { Bucket, Entry, FolderStats, Format, Listing, LsSort, Retag, SearchResult, Summary, TagCount } from '../types-datacenter.js';
+import { toMs } from '../core/format.js';
 
 export type ViewMode = 'thumbs' | 'names';
 export type CardMode = 'grid' | 'list';
@@ -157,21 +158,7 @@ export function fmtSize(b: number | null | undefined): string {
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
   return `${i === 0 ? v : v >= 100 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
 }
-const toMs = (t: number | string | null | undefined): number => {
-  if (t == null || t === '') return NaN;
-  if (typeof t === 'number') return t < 1e12 ? t * 1000 : t;
-  return Date.parse(String(t).replace(' ', 'T'));
-};
-export function timeAgo(t: number | string | null | undefined): string {
-  const ms = toMs(t);
-  if (!Number.isFinite(ms)) return '';
-  const s = (Date.now() - ms) / 1000;
-  if (s < 90) return 'just now';
-  if (s < 5400) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  if (s < 172800) return 'yesterday';
-  return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
-}
+export { timeAgo, toMs } from '../core/format.js';
 export function fmtDate(t: number | string | null | undefined): string {
   const ms = toMs(t);
   if (!Number.isFinite(ms)) return '';

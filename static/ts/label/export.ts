@@ -17,6 +17,8 @@ import type { LabelProject, LabelTask } from '../types-label.js';
 import type { ClassStat, ClassStatsPayload, ExportBody, ExportBrowse, ExportDefault, ExportKind, ExportRun, ExportTarget, ImportConn, JobStarted, LabelFormat } from '../types-label-ui.js';
 import type { ConnectionsPayload, ConnTestResult } from '../types-settings.js';
 import { closestEl } from './ui-util.js';
+import { trapTab } from '../views/dialog.js';
+import { pollPause } from '../core/jobs.js';
 
 const KINDS: ReadonlyArray<readonly [ExportKind, string, string]> = [
   ['zip', 'Download zip', 'download'], ['local', 'Local folder', 'folder'], ['s3', 'S3', 'cloud'],
@@ -415,7 +417,7 @@ async function start(): Promise<void> {
       if (j.status === 'error') throw new Error(j.error || 'export failed');
       if (j.status === 'done') break;
       render();
-      await new Promise((ok) => setTimeout(ok, 500));
+      await pollPause(500);
     }
     const run = await getJSON<ExportRun>(`api/label/exports/${encodeURIComponent(r.run_id)}`);
     run.run_id = run.run_id || r.run_id;
@@ -582,11 +584,6 @@ function bind(): void {
   });
   root.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); closeExport(); return; }
-    if (e.key !== 'Tab') return;
-    const f = [...root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]')].filter((x) => x.offsetParent);
-    const first = f[0], last = f[f.length - 1];
-    if (!first || !last) return;
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    trapTab(root, e);
   });
 }

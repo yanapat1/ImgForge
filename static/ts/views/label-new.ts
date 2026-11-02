@@ -6,7 +6,7 @@
 // Same patterns as the Settings dialog: all state in W, one innerHTML render per change (focus is restored by
 // data-fk), inputs write into W without a render, one delegated listener per event type on #lw.
 
-import { api, errText, getJSON, onUnauthorized, postJSON, XRW } from '../core/api.js';
+import { api, errText, getJSON, postJSON, postXHR } from '../core/api.js';
 import { dataUrl, labelUrl } from '../core/nav.js';
 import * as dcApi from '../datacenter/api.js';
 import { $, $req, esc, fmtEta, icon, sleep } from '../core/dom.js';
@@ -22,6 +22,7 @@ import type { TaskConfig, TaskType } from '../types-label.js';
 import type { Job } from '../types.js';
 import type { Bucket, DcSource } from '../types-datacenter.js';
 import type { WizardOpts } from '../types-home.js';
+import { confirmDialog, trapTab } from './dialog.js';
 
 const IMAGE_RE = /\.(jpe?g|png|bmp|webp|tiff?)$/i;
 const ACCEPT = '.jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff';
@@ -768,29 +769,19 @@ function setBusy(title: string, opts: Partial<WBusy> = {}): void {
 // one multipart request; resolves {saved, skipped}; rejects (with .cancelled when aborted)
 class CancelledError extends Error { readonly cancelled = true; }
 type Batch = Array<[string, File]>;
-function sendBatch(pid: string, batch: Batch, onProgress: (loaded: number) => void): Promise<{ saved?: number; skipped?: number }> {
-  const W = wz();
-  return new Promise((resolve, reject) => {
-    const fd = new FormData();
-    for (const [rel, f] of batch) { fd.append('files', f, f.name); fd.append('rel_paths', rel); }
-    const xhr = new XMLHttpRequest();
-    const up = W.up;
-    up?.xhrs.add(xhr);
-    const done = (): void => { up?.xhrs.delete(xhr); };
-    xhr.open('POST', `api/label/projects/${encodeURIComponent(pid)}/upload`);
-    xhr.setRequestHeader('X-Requested-With', XRW);
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
-    xhr.onload = () => {
-      done();
-      if (xhr.status === 401) onUnauthorized();
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve({ saved: batch.length, skipped: 0 }); }
-      } else reject(new Error(`upload: ${xhr.status} ${xhr.responseText}`));
-    };
-    xhr.onerror = () => { done(); reject(new Error('upload: network error')); };
-    xhr.onabort = () => { done(); reject(new CancelledError('cancelled')); };
-    xhr.send(fd);
-  });
+async function sendBatch(pid: string, batch: Batch, onProgress: (loaded: number) => void): Promise<{ saved?: number; skipped?: number }> {
+  const up = wz().up;
+  const fd = new FormData();
+  for (const [rel, f] of batch) { fd.append('files', f, f.name); fd.append('rel_paths', rel); }
+  let r;
+  try {
+    r = await postXHR(`api/label/projects/${encodeURIComponent(pid)}/upload`, fd,
+      { onProgress, track: (x, live) => { if (live) up?.xhrs.add(x); else up?.xhrs.delete(x); } });
+  } catch (e) {
+    throw e instanceof Error && e.message === 'abort' ? new CancelledError('cancelled') : new Error('upload: network error');
+  }
+  if (r.status < 200 || r.status >= 300) throw new Error(`upload: ${r.status} ${r.text}`);
+  return (r.json ?? { saved: batch.length, skipped: 0 }) as { saved?: number; skipped?: number };
 }
 
 // 3 requests in flight, each <= 8 files or 16 MB; a failed request is retried twice; what was sent is remembered
@@ -1069,11 +1060,13 @@ const WACT: Record<string, Act> = {
     W.focus = `tn-${t.key}`;
     render();
   },
-  't-rm': (b) => {
+  't-rm': async (b) => {
     const W = wz();
     const t = findTask(dataTk(b));
-    if (t.classes.length && !confirm(`Remove the task “${t.name}” and its ${t.classes.length} classes?`)) return;
-    W.tasks.splice(W.tasks.indexOf(t), 1);
+    if (t.classes.length && !(await confirmDialog({ title: `Remove the task “${t.name}” and its ${t.classes.length} classes?`, ok: 'Remove', danger: true }))) return;
+    const i = W.tasks.indexOf(t);
+    if (i < 0) return;
+    W.tasks.splice(i, 1);
     render();
   },
   't-up': (b) => { const W = wz(); const k = dataTk(b); moveTask(k, W.tasks.findIndex((t) => t.key === k) - 1); render(); },
@@ -1172,16 +1165,7 @@ function onKeydown(e: KeyboardEvent): void {
     if (!W.busy || W.busy.closable) closeWizard(false);
     return;
   }
-  if (e.key === 'Tab') {                                // keep focus inside the dialog
-    const box = $req('lw-box');
-    const f = [...box.querySelectorAll<HTMLElement>('button:not(:disabled), input:not([type=file]):not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
-      .filter((x) => x.offsetParent);
-    const first = f[0], last = f[f.length - 1];
-    if (!first || !last) return;
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    return;
-  }
+  if (trapTab($req('lw-box'), e)) return;            // keep focus inside the dialog
   // tabs: arrows move between them
   if (tg.getAttribute('role') === 'tab' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     e.preventDefault();
@@ -1344,7 +1328,11 @@ function bind(): void {
 // ---------------------------------------------------------------- open / close
 function closeWizard(force: boolean): void {
   if (!W) return;
-  if (!force && W.dirty && !W.created && !confirm(W.mode === 'edit' ? 'Discard your changes?' : 'Discard this new labeling session?')) return;
+  if (!force && W.dirty && !W.created) {
+    void confirmDialog({ title: W.mode === 'edit' ? 'Discard your changes?' : 'Discard this new labeling session?', ok: 'Discard', danger: true })
+      .then((ok) => { if (ok) closeWizard(true); });
+    return;
+  }
   if (W.up) { W.up.stop = true; for (const x of [...W.up.xhrs]) x.abort(); }
   const created = W.created;
   $req('lw').classList.add('hidden');

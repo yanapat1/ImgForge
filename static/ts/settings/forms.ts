@@ -10,6 +10,7 @@ import { MAX_DIST_PICKS } from '../plot/marks.js';
 import type { BrowseResult, ConnDraft, ConnItem, ConnKind, ConnTestResult, DatasetItem, EmbeddingsSummary, FolderEntry, LocalForm, S3Form, SectionId, SetForm, StatusLine, TagFields, UnionForm,
   UnionPart, YoloInfo } from '../types-settings.js';
 import { SET } from './dialog.js';
+import { timeAgo } from '../core/format.js';
 
 /** `el.dataset[k]` as a string ('' when the attribute is missing). */
 export const dd = (el: HTMLElement, k: string): string => el.dataset[k] ?? '';
@@ -58,10 +59,6 @@ export function fmtBytes(bytes: number | undefined): string {
   return b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1e3)} kB`;
 }
 
-function timeAgo(t: number): string {
-  const s = Date.now() / 1000 - t;
-  return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
-}
 
 export const tagc = (text: string, cls = '', ico = ''): string => `<span class="tagc ${cls}">${ico ? icon(ico) : ''}${esc(text)}</span>`;
 

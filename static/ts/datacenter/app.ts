@@ -17,7 +17,7 @@ import { mountUserMenu } from '../views/usermenu.js';
 import * as api from './api.js';
 import { ACTIVITY_ACTIONS, watchJobs } from './activity.js';
 import { AI_ACTIONS, aiScopeChanged, bindAi, renderAi } from './ai.js';
-import { EDITOR_ACTIONS, fileOpen, leaveFile } from './editor.js';
+import { closeFile, EDITOR_ACTIONS, fileDirty, fileOpen, leaveFile } from './editor.js';
 import { BROWSER_ACTIONS, bindBrowser, loadListing, renderFolder, renderSearch, selChanged } from './browser.js';
 import { BUCKET_ACTIONS, renderOverview } from './buckets.js';
 import { AUTOLABEL_ACTIONS } from './autolabel.js';
@@ -95,7 +95,11 @@ function readLocation(): void {
 
 /** Open a bucket folder (bid null = All buckets). push: a new history entry (else replace). */
 function navigate(bid: string | null, path = '', push = true): void {
-  if (!leaveFile()) return;                        // an open file with unsaved changes the user keeps
+  if (fileDirty()) {                                // an open file with unsaved changes may be kept: ask first
+    void leaveFile().then((ok) => { if (ok) navigate(bid, path, push); });
+    return;
+  }
+  closeFile();
   const same = bid === D.bid && path === D.path;
   D.bid = bid;
   D.path = bid ? path : '';
@@ -207,9 +211,13 @@ function bind(root: HTMLElement): void {
   });
   document.addEventListener('keydown', onKey);
   window.addEventListener('popstate', () => {
-    if (!leaveFile()) { history.pushState({ dc: 1 }, '', dataUrl(D.bid, D.path)); return; }
-    readLocation();
-    navigate(D.bid, D.path, false);
+    if (!fileDirty()) { readLocation(); navigate(D.bid, D.path, false); return; }
+    const back = dataUrl(D.bid, D.path);
+    void leaveFile().then((ok) => {
+      if (!ok) { history.pushState({ dc: 1 }, '', back); return; }
+      readLocation();
+      navigate(D.bid, D.path, false);
+    });
   });
   document.addEventListener('me-changed', () => render());
 }

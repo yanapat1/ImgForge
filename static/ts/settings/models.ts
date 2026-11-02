@@ -13,6 +13,8 @@ import { refreshStatus } from '../views/controls.js';
 import { modelsChanged } from '../views/model.js';
 import { SET, renderSettings } from './dialog.js';
 import { dd, fmtBytes, formOf, rowAttr, setDisabled, statusHTML, tagc } from './forms.js';
+import { confirmDialog } from '../views/dialog.js';
+import { toast } from '../core/toast.js';
 
 const FAMILIES: Record<ModelFamily, [string, string]> = {
   yolo: ['YOLO', 'ultralytics detect models (YOLOv5u / v8 / 11 / 26 …). Class names come from the weights.'],
@@ -499,8 +501,8 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
   'remove-model': async (b) => {
     const m = SET.models.find((x) => x.id === rowAttr(b, '[data-mid]', 'mid'));
     if (!m) return;
-    if (!confirm(`Remove the model "${m.name}"?\n\nUploaded files are deleted; files elsewhere on the server are not touched.`)) return;
-    try { await api(`api/models/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); } catch (e) { alert(errText(e)); }
+    if (!(await confirmDialog({ title: `Remove the model “${m.name}”?`, text: 'Uploaded files are deleted; files elsewhere on the server are not touched.', ok: 'Remove', danger: true }))) return;
+    try { await api(`api/models/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); } catch (e) { toast(`Could not remove “${m.name}”: ${errText(e)}`, 'err'); }
     await loadModelsData();
     void modelsChanged();
     if (onDataset()) void refreshStatus();

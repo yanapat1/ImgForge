@@ -13,6 +13,7 @@ import type { ImagesPayload } from '../types.js';
 import { FB, filterAgg } from './filter-bar.js';
 import { TIPS_HTML } from './gallery.js';
 import { isImageUnit } from './preview.js';
+import { toast } from '../core/toast.js';
 
 /** GET api/edits/status: what a re-index would place in the plot. */
 export interface EditStatus { pending_new: number; moved: number; images?: unknown }
@@ -211,7 +212,7 @@ async function reindex(): Promise<void> {
   try {
     await postJSON(`api/datasets/${encodeURIComponent(ds.id)}/open`, {});
     location.reload();
-  } catch (e) { $req<HTMLButtonElement>('edit-reindex').disabled = false; alert(`Re-index failed: ${errMessage(e)}`); }
+  } catch (e) { $req<HTMLButtonElement>('edit-reindex').disabled = false; toast(`Re-index failed: ${errMessage(e)}`, 'err'); }
 }
 
 export const bannerStatus = (): EditStatus => IG.status;

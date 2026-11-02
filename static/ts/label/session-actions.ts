@@ -12,9 +12,12 @@ import type { ClassStat, ClassStatsPayload, DeleteClassesPayload, DuplicateJob, 
 import type { LabelProject, LabelTask, TaskClass, TaskType } from '../types-label.js';
 import { TASK_TYPES } from './state.js';
 import { asEl, closestEl } from './ui-util.js';
+import { trapTab } from '../views/dialog.js';
+import { pollPause } from '../core/jobs.js';
+import { fmtCount } from '../core/format.js';
 
 const okColor = (c: string | null | undefined): string => (c && /^#[0-9a-f]{6}$/i.test(c) ? c : '#888888');
-const fmt = (n: number | null | undefined): string => Number(n || 0).toLocaleString();
+const fmt = fmtCount;
 const plural = (n: number, w: string): string => `${fmt(n)} ${w}${n === 1 ? '' : /(s|sh|ch|x)$/.test(w) ? 'es' : 's'}`;
 
 /** A modal shell: the backdrop element, the dialog box, and close(). */
@@ -43,13 +46,7 @@ function shell(cls: string, label: string): Shell {
   el.addEventListener('keydown', (e) => {
     e.stopPropagation();                         // the label page's hotkeys never see keys typed here
     if (e.key === 'Escape') { e.preventDefault(); if (!S.busy) S.close(); return; }
-    if (e.key !== 'Tab') return;
-    const f = [...box.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]')].filter((x) => x.offsetParent);
-    const first = f[0], last = f[f.length - 1];
-    if (!first || !last) return;
-    const i = f.indexOf(document.activeElement as HTMLElement);
-    if (e.shiftKey && i <= 0) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); first.focus(); }
+    trapTab(box, e);
   });
   box.focus();
   return S;
@@ -263,7 +260,7 @@ export function openDuplicate({ pid, project = null, onDone = null }: DuplicateO
         if (j.status === 'done') break;
         D.job = j;
         render();
-        await new Promise((ok) => setTimeout(ok, 400));
+        await pollPause(400);
       }
       D.busy = false; S.busy = false;
       S.close();

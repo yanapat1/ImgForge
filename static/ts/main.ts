@@ -25,7 +25,7 @@ import { far2dIds, setExplainDot } from './plot/explain.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
-import { openDialog } from './views/dialog.js';
+import { dialogOpen, openDialog, trapTab } from './views/dialog.js';
 import { backToInspect, enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
 import { showMissedObjects } from './views/model.js';
 import { bindBar, bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateBarSummary, updateGroupsBadge } from './views/layout.js';
@@ -531,7 +531,7 @@ function bindEvents(): void {
     const card = closestOf(e, '.card[data-id]');
     if (card) void openModal(cardId(card));
   });
-  $req('m-close').onclick = closeModal;
+  $req('m-close').onclick = () => closeModal();
   $req('m-preds').onclick = toggleModalPreds;
   $req('m-group').onclick = () => { const id = modalId; closeModal(); if (id !== null) selectGroupOf(id); };
   $req('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
@@ -582,13 +582,8 @@ function bindEvents(): void {
   });
   document.addEventListener('keydown', (e) => {
     if ($req('modal').classList.contains('hidden')) return;
-    if (e.key === 'Tab') {                          // keep focus inside the dialog
-      const f = [...$req('modal').querySelectorAll<HTMLElement>('button:not(.hidden):not(:disabled)')];
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && (document.activeElement === first || !$req('modal').contains(document.activeElement))) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-      return;
-    }
+    if (dialogOpen()) return;                       // a question on top of the modal has the keys
+    if (trapTab($req('modal'), e)) return;          // keep focus inside the dialog (fields of the edit mode too)
     if (!$req('vw-menu').classList.contains('hidden')) return;      // the right-click menu has the keys
     if (viewerKey(e)) return;                                      // toggles, Edit mode (box keys, Ctrl+S / Z)
     if (e.key === 'Escape') closeModal();

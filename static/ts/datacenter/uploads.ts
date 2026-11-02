@@ -8,7 +8,8 @@
 // finish clock, Cancel; an error keeps the row with Retry. Rows are updated in place (one frame per change), never
 // the whole page, so nothing else repaints while bytes go up. Leaving the page asks first (the tab sends the bytes).
 
-import { errText, XRW } from '../core/api.js';
+import { errText, postXHR, XRW } from '../core/api.js';
+import type { XhrAnswer } from '../core/api.js';
 import { can, cannot } from '../core/auth.js';
 import { esc, fmtEta, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
@@ -72,29 +73,21 @@ export const uploadRows = (): number => tasks.length;
 const sent = (t: Task): number => t.done + [...t.inflight.values()].reduce((a, n) => a + n, 0);
 
 /** POST `body` (a multipart batch or a raw chunk) for task `t` -> the parsed JSON answer. */
-function send(t: Task, url: string, body: FormData | Blob): Promise<unknown> {
-  return new Promise((ok, fail) => {
-    const x = new XMLHttpRequest();
-    const end = (): void => { t.xhrs.delete(x); t.inflight.delete(x); schedule(); };
-    x.open('POST', url);
-    x.setRequestHeader('X-Requested-With', XRW);
-    if (body instanceof Blob) x.setRequestHeader('Content-Type', 'application/octet-stream');
-    x.withCredentials = true;
-    x.upload.onprogress = (e) => { t.inflight.set(x, e.loaded); schedule(); };
-    x.onload = () => {
-      end();
-      const j = ((): { detail?: unknown } | null => {
-        try { return JSON.parse(x.responseText) as { detail?: unknown } | null; } catch (e) { return null; }   // not JSON
-      })();
-      if (x.status >= 200 && x.status < 300) { ok(j); return; }
-      fail(new UpErr(j?.detail ? String(j.detail) : x.status === 413 ? 'the request was too large for a proxy in front of the app' : `${x.status}`, x.status));
-    };
-    x.onerror = () => { end(); fail(new UpErr(CUT, 0)); };
-    x.onabort = () => { end(); fail(new UpErr('cancelled', -1)); };
-    t.xhrs.add(x);
-    t.inflight.set(x, 0);
-    x.send(body);
-  });
+async function send(t: Task, url: string, body: FormData | Blob): Promise<unknown> {
+  let r: XhrAnswer, mine: XMLHttpRequest | null = null;      // this request: its bytes sent count in t.inflight
+  try {
+    r = await postXHR(url, body, {
+      onProgress: (n) => { if (mine && t.inflight.has(mine)) t.inflight.set(mine, n); schedule(); },
+      track: (x, live) => {
+        if (live) { mine = x; t.xhrs.add(x); t.inflight.set(x, 0); } else { t.xhrs.delete(x); t.inflight.delete(x); schedule(); }
+      },
+    });
+  } catch (e) {
+    throw e instanceof Error && e.message === 'abort' ? new UpErr('cancelled', -1) : new UpErr(CUT, 0);
+  }
+  const j = r.json as { detail?: unknown } | null;
+  if (r.status >= 200 && r.status < 300) return j;
+  throw new UpErr(j?.detail ? String(j.detail) : r.status === 413 ? 'the request was too large for a proxy in front of the app' : `${r.status}`, r.status);
 }
 
 async function status(bid: string, path: string, name: string, id: string, total: number): Promise<{ ranges?: number[][]; done?: boolean } | null> {

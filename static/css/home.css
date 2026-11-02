@@ -287,10 +287,6 @@ body.home-opening .session-card:not(.opening) { opacity: .6; }
 .lp-more { font-size: var(--fs-xs); color: var(--text-faint); }
 
 /* ---------------------------------------------------------------- small confirm dialog */
-.home-dlg { width: min(460px, 100%); padding: var(--s5); display: flex; flex-direction: column; gap: var(--s3); box-shadow: var(--shadow-3); outline: none; }
-.home-dlg h3 { font-size: var(--fs-lg); overflow-wrap: anywhere; }
-.home-dlg p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; }
-.home-dlg .check { align-items: flex-start; font-size: var(--fs-sm); white-space: normal; }
 button.danger-btn { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 650; }
 button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); filter: brightness(1.08); }
 

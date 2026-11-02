@@ -2,7 +2,7 @@
 
 import type { Job, JobsPayload } from '../types.js';
 import { getJSON, isStatus } from './api.js';
-import { $req, fmtEta, sleep } from './dom.js';
+import { $req, fmtEta } from './dom.js';
 import { refreshStatus } from '../views/controls.js';
 
 /** Progress bar fill: determinate when the job knows its total, else an indeterminate stripe. */
@@ -33,7 +33,8 @@ export async function pollJobs(): Promise<void> {
     if (isStatus(e, 401)) return;                // signed out: api() is taking the page to the sign-in page
     /* server restarting */
   }
-  setTimeout(pollJobs, delay);
+  await pollPause(delay, undefined, 15000);
+  void pollJobs();
 }
 
 function renderJobsBar(jobs: Job[], active: Job[]): void {
@@ -71,14 +72,44 @@ function renderJobsBar(jobs: Job[], active: Job[]): void {
   }
 }
 
-/** Poll job `jid` every 500 ms until done (resolves to the job) or error (throws; a 401 too, so it never loops). */
-export async function waitJob(jid: number | string, onProgress?: (j: Job) => void): Promise<Job> {
+/** Wait `ms` between two polls. In a hidden tab the wait grows to `hiddenMs` (no polling a page nobody sees), and
+ *  it ends early when the tab is shown again or `signal` aborts. Every job poller of the app waits through this. */
+export function pollPause(ms: number, signal?: AbortSignal, hiddenMs = Math.max(ms * 6, 5000)): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(); return; }
+    const end = (): void => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVis);
+      signal?.removeEventListener('abort', end);
+      resolve();
+    };
+    const onVis = (): void => { if (!document.hidden) end(); };
+    const t = setTimeout(end, document.hidden ? hiddenMs : ms);
+    document.addEventListener('visibilitychange', onVis);
+    signal?.addEventListener('abort', end);
+  });
+}
+
+export interface WaitOpts<T> {
+  onProgress?: (j: T) => void;
+  /** ms between polls while the tab is visible (default 500) */
+  every?: number;
+  /** stops the wait: it rejects with an AbortError */
+  signal?: AbortSignal;
+}
+
+/** Poll job `jid` until done (resolves to the job) or error (throws; a 401 too, so it never loops). The old form
+ *  waitJob(jid, onProgress) still works. */
+export async function waitJob<T extends Job = Job>(jid: number | string, opts: WaitOpts<T> | ((j: T) => void) = {}): Promise<T> {
+  const o: WaitOpts<T> = typeof opts === 'function' ? { onProgress: opts } : opts;
   for (;;) {
-    const j = await getJSON<Job>(`api/jobs/${jid}`);
-    if (onProgress) onProgress(j);
+    if (o.signal?.aborted) throw new DOMException('stopped', 'AbortError');
+    const j = await getJSON<T>(`api/jobs/${encodeURIComponent(String(jid))}`);
+    if (o.signal?.aborted) throw new DOMException('stopped', 'AbortError');
+    o.onProgress?.(j);
     if (j.status === 'done') return j;
     if (j.status === 'error') throw new Error(`${j.label}: ${j.error}`);
-    await sleep(500);
+    await pollPause(o.every ?? 500, o.signal);
   }
 }
 

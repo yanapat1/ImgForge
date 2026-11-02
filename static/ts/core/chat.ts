@@ -23,6 +23,7 @@ import { md } from './md.js';
 import { arrowNav, floatPopover } from './popover.js';
 import { isAbort, streamNDJSON } from './stream.js';
 import { actionToast, toast } from './toast.js';
+import { saveFile } from './format.js';
 
 // ================================================================ pure part (no DOM): reducer + helpers
 
@@ -1225,14 +1226,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   function download(text: string, suffix: string): void {
     const stem = (opts.exportName?.() || C.title || `${role}-chat`).replace(/[^\w.-]+/g, '_').slice(0, 80) || 'chat';
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${stem}${suffix}.md`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveFile(text, `${stem}${suffix}.md`, 'text/markdown');
   }
 
   function costText(): string {

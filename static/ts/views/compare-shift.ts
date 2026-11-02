@@ -20,6 +20,7 @@ import { closestOf } from './ev-util.js';
 import { setSelection } from './gallery.js';
 import { setImageSubset } from './image-grid.js';
 import { switchTab } from './layout.js';
+import { fmtCount, saveFile } from '../core/format.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -62,7 +63,7 @@ const EXPOSURE_LABEL: Record<string, string> = { dark: 'dark < 60', dim: 'dim 60
 const A = (): number => H.host?.pair().a ?? 0;
 const B = (): number => H.host?.pair().b ?? 1;
 const nm = (k: number): string => H.host?.alias(k) ?? `#${k}`;
-const n = (v: number | undefined | null): string => (v ?? 0).toLocaleString();
+const n = fmtCount;
 
 /** A number as people read it: 3 significant digits, thousands grouped. */
 export function fmt(v: number | null | undefined): string {
@@ -583,14 +584,7 @@ async function openList(which: string, side: 'a' | 'b' = 'b'): Promise<void> {
   }
 }
 
-function download(name: string, text: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+const download = (name: string, text: string, type: string): void => saveFile(text, name, type);
 
 /** The metric table as CSV (one row per metric). */
 export function reportCsv(r: ShiftReport): string {

@@ -15,6 +15,7 @@ import { originColor, plotBase, THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import { cfg } from './chart-util.js';
 import { closestOf } from './ev-util.js';
+import { saveFile } from '../core/format.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -270,11 +271,6 @@ function onClick(e: Event): void {
   if (!t) return;
   if (t.dataset['strStrip']) { S.strip = t.dataset['strStrip']; renderStrip(S.strip); return; }
   if (t.dataset['strExport'] !== undefined && S.run) {
-    const url = URL.createObjectURL(new Blob([stressCsv(S.run, S.sum)], { type: 'text/csv' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `stress-${S.run.model.name}-${S.run.member}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveFile(stressCsv(S.run, S.sum), `stress-${S.run.model.name}-${S.run.member}.csv`, 'text/csv');
   }
 }

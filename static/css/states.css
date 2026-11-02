@@ -12,7 +12,7 @@
 .startup-box .bar { margin-top: var(--s3); }
 
 /* ---------------------------------------------------------------- error page */
-.errpage { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--bg);
+.errpage { position: fixed; inset: 0; z-index: var(--z-error); background: var(--bg);
   display: flex; align-items: center; justify-content: center; padding: var(--s4); }
 .errpage-box { width: min(560px, 100%); padding: var(--s6); }
 .errpage-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%;
@@ -33,12 +33,13 @@
 .errpage-note { margin-top: var(--s3); font-size: var(--fs-sm); }
 
 /* ---------------------------------------------------------------- toast (visualizer + home) */
-.app-toast { position: fixed; left: 50%; bottom: var(--s5); transform: translate(-50%, 12px); z-index: var(--z-modal);
+.app-toast { position: fixed; left: 50%; bottom: var(--s5); transform: translate(-50%, 12px); z-index: var(--z-toast);
   max-width: min(520px, calc(100vw - 2 * var(--s4))); padding: var(--s2) var(--s4); border-radius: var(--r-md);
   background: var(--surface-2); border: 1px solid var(--border-strong); box-shadow: var(--shadow-2, 0 6px 20px rgba(0, 0, 0, .3));
   font-size: var(--fs-sm); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
 .app-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .app-toast.err { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-text); }
+.app-toast.warn { border-color: var(--highlight-line); }
 
 @media (prefers-reduced-motion: reduce) {
   .startup.delayed { animation-duration: .01s; }
@@ -49,7 +50,7 @@
 /* ---------------------------------------------------------------- visualizer for a viewer (main.ts html[data-role]) */
 /* no box editor, no curation fixes / undo / ignore, no tag writes: the server refuses them anyway (403) */
 html[data-role="viewer"] #btn-tag, html[data-role="viewer"] #vw-edit, html[data-role="viewer"] #vw-editbar,
-html[data-role="viewer"] #cur-fixall, html[data-role="viewer"] #pick-edit, html[data-role="viewer"] .cur-fixes, html[data-role="viewer"] #cur-toast-undo { display: none !important; }
+html[data-role="viewer"] #cur-fixall, html[data-role="viewer"] #pick-edit, html[data-role="viewer"] .cur-fixes { display: none !important; }
 
 /* ---------------------------------------------------------------- an embeddings session (main.ts html.no-boxes) */
 /* rows with metadata instead of boxes in images: no curation, models, box filters or image viewer (the server answers

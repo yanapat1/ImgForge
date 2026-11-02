@@ -7,11 +7,13 @@
 import { apiFetch, errMessage, getJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
 import { $, $req, textOn, isTypingTarget } from '../core/dom.js';
+import { confirmDialog } from './dialog.js';
 import { S } from '../core/state.js';
 import { clsColor, THEME } from '../core/theme.js';
 import type { EditResult, ImagePred, ImgBox, ImgBoxes, ViewerState } from '../types-views.js';
 import * as ED from './box-editor.js';
 import { closestOf } from './ev-util.js';
+import { saveFile } from '../core/format.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const PREF_KEY = 'viewer-show';
@@ -369,7 +371,11 @@ export function tagIn(H: number, x: number, y: number, text: string, col: string
 // ---------------------------------------------------------------- edit mode
 export function setEdit(on: boolean): void {
   if (on && (!V.writable || V.fixed)) return;
-  if (!on && ED.dirty() && !confirm('Discard the unsaved box changes?')) return;
+  if (!on && ED.dirty()) {
+    void confirmDialog({ title: 'Discard the unsaved box changes?', ok: 'Discard', danger: true })
+      .then((ok) => { if (ok && ED.active()) { ED.setActive(false); syncButtons(); draw(); } });
+    return;
+  }
   ED.setActive(on);
   syncButtons();
   draw();
@@ -448,15 +454,7 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-function download(blob: Blob): void {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${(V.name || 'image').replace(/\.[^.]+$/, '')}.png`;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-}
+const download = (blob: Blob): void => saveFile(blob, `${(V.name || 'image').replace(/\.[^.]+$/, '')}.png`);
 
 let flashTimer: ReturnType<typeof setTimeout> | undefined;
 function flash(text: string): void {

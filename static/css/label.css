@@ -188,12 +188,6 @@
   background: var(--surface); border-color: var(--border-strong); }
 .lb-show-l { left: 0; border-radius: 0 var(--r) var(--r) 0; border-left: 0; }
 .lb-show-r { right: 0; border-radius: var(--r) 0 0 var(--r); border-right: 0; }
-.lb-toast { position: absolute; left: 50%; bottom: var(--s4); transform: translate(-50%, 8px); z-index: 5; max-width: calc(100% - 32px);
-  padding: 8px 14px; border-radius: var(--r-md); background: var(--surface-3); border: 1px solid var(--border-strong); box-shadow: var(--shadow-2);
-  font-size: var(--fs-sm); opacity: 0; pointer-events: none; transition: opacity var(--t) var(--ease), transform var(--t) var(--ease); }
-.lb-toast.show { opacity: 1; transform: translate(-50%, 0); }
-.lb-toast.err { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
-.lb-toast.warn { border-color: var(--highlight-line); }
 
 /* ---------------------------------------------------------------- status bar */
 .lb-status { grid-area: st; display: flex; align-items: center; gap: var(--s4); padding: 0 var(--s3); min-width: 0; overflow: hidden;
@@ -289,7 +283,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .lb-save.s-saving .ico, .lbx-t.run .ico { animation: none; }
-  .lb-toast { transition: none; }
 }
 
 /* ================================================================ v2 (agent 3): area select, model rows, export

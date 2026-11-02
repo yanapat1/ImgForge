@@ -11,6 +11,7 @@ import { BROWSER_RESERVED, DEFAULT_HOTKEYS, HOLD_ACTIONS, HOTKEY_LABELS, SETTING
 import type { LabSettings, SetAction, StatusLine } from '../types-settings.js';
 import { renderSettings } from './dialog.js';
 import { dd, statusHTML } from './forms.js';
+import { confirmDialog } from '../views/dialog.js';
 
 const lsKey = (): string => userKey('label-settings');
 const PREF = 'label_settings';
@@ -292,8 +293,8 @@ export const LAB_ACTIONS: Record<string, SetAction> = {
   'hk-fold': () => { LAB.classOpen = !LAB.classOpen; renderSettings(); },
   'hk-cancel': () => { const c = LAB.conflict; LAB.conflict = null; renderSettings(); if (c) focusCell(c.a, c.i); },
   'hk-reset': (b) => { delete lab().hotkeys[dd(b, 'a')]; LAB.conflict = null; save(); renderSettings(); },
-  'hk-reset-all': () => {
-    if (!confirm('Reset every labeling hotkey to its default?')) return;
+  'hk-reset-all': async () => {
+    if (!(await confirmDialog({ title: 'Reset every labeling hotkey to its default?', ok: 'Reset all' }))) return;
     lab().hotkeys = {};
     LAB.conflict = LAB.rec = null;
     save();

@@ -35,6 +35,7 @@ import type { SyncEntry } from './sync.js';
 import { asEl, closestEl } from './ui-util.js';
 import type * as AssistModule from './assist.js';
 import type { AssistHooks } from './assist.js';
+import { confirmDialog } from '../views/dialog.js';
 
 /** A geometry tool as the page drives it (the optional members exist on some tools only). */
 type AppTool = Tool & { reset?(): void; visibility?(): boolean };
@@ -124,7 +125,6 @@ function markup(): string {
     <div id="lb-ro" class="lb-ro hidden" role="status">${icon('eye')}<span><b>View only</b> — ask the owner for Labeler access</span></div>
     <button id="lb-show-l" class="lb-show lb-show-l hidden" aria-label="Show the classes panel" title="Show classes">${icon('chev-r')}</button>
     <button id="lb-show-r" class="lb-show lb-show-r hidden" aria-label="Show the objects panel" title="Show objects">${icon('chev-l')}</button>
-    <div id="lb-toast" class="lb-toast" role="status" aria-live="polite"></div>
     <aside id="lb-assist" class="lb-assist hidden" data-overlay aria-label="Label assistant"></aside>
   </main>
   <div id="lb-split-r" class="lb-split" role="separator" aria-orientation="vertical" aria-label="Resize the objects panel" tabindex="0"></div>
@@ -416,7 +416,9 @@ let reviewingAll = false;
 async function reviewAll(): Promise<void> {
   if (!L.project || !L.project.review || reviewingAll || viewOnly()) return;
   const tids = L.project.tasks.map((t) => t.id);
-  if (!window.confirm('Review all: mark every done image that is not reviewed yet as reviewed?\n\nThey are shown apart from the ones you review by hand, and any later edit puts an image back to not reviewed.')) return;
+  if (!(await confirmDialog({ title: 'Mark every done image that is not reviewed yet as reviewed?', ok: 'Review all',
+    text: 'They are shown apart from the ones you review by hand, and any later edit puts an image back to not reviewed.' }))) return;
+  if (reviewingAll) return;
   reviewingAll = true;
   $req<HTMLButtonElement>('lb-review-all').disabled = true;
   try {

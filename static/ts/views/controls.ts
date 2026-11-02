@@ -14,6 +14,8 @@ import { at } from './chart-util.js';
 import { galleryOrder, renderGallery, setSelection, sortedSelection } from './gallery.js';
 import { setCollapsed, setLeftWidth, setMapDirty, syncClassFilter, syncIssuesBtn, updateBarSummary, updateGroupsBadge } from './layout.js';
 import { invalidateStats, renderClassTable, renderStats, showConfusion } from './stats.js';
+import { promptDialog } from './dialog.js';
+import { saveFile } from '../core/format.js';
 
 /** [label, hint, step] of a method parameter's number input. */
 const PARAM_INFO: Record<string, [string, string, number]> = {
@@ -196,7 +198,7 @@ export async function loadView(): Promise<void> {
   } catch (e) {
     if (seq !== viewSeq) return;
     hideWait();
-    alert(errMessage(e));
+    toast(errMessage(e), 'err');
   }
 }
 
@@ -274,7 +276,7 @@ export function bindFeatureImport(): void {
     const f = file.files?.[0];
     file.value = '';
     if (!f) return;
-    const name = prompt('Name of this feature space', f.name.replace(/\.[^.]+$/, ''));
+    const name = await promptDialog({ title: 'Import a feature space', label: 'Name of this feature space', value: f.name.replace(/\.[^.]+$/, ''), ok: 'Import' });
     if (name === null) return;
     const body = new FormData();
     body.append('file', f);
@@ -394,7 +396,7 @@ export async function runLabelQuality(): Promise<boolean> {
     return r.ready && !!S.lq;
   } catch (e) {
     hideWait();
-    alert(errMessage(e));
+    toast(errMessage(e), 'err');
     return false;
   } finally { btn.disabled = false; lqRunning = null; }
 }
@@ -467,19 +469,14 @@ export async function exportCSV(): Promise<void> {
   if (!ids.length) return;
   const r = await api('api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids, feature: S.scoresFeature }) });
-  const blob = await r.blob();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `selection_${ids.length}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  saveFile(await r.blob(), `selection_${ids.length}.csv`);
 }
 
 export async function onGroupControls(): Promise<void> {
   updateGroupsBadge();
   try {
     await refreshGroups();
-  } catch (e) { alert(errMessage(e)); return; }
+  } catch (e) { toast(errMessage(e), 'err'); return; }
   renderPlot();
   renderGallery();     // outlier frames/badges follow the "mark outliers" toggle
 }

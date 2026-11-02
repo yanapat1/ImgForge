@@ -11,6 +11,8 @@ import { $, $req, esc, icon, syncRanges } from '../core/dom.js';
 import type { LlmConfig, LlmDraft, LlmForm, LlmPayload, LlmProvider, LlmTestResult, PresetKey, SetAction, SetChange, StatusLine } from '../types-settings.js';
 import { SET, renderSettings } from './dialog.js';
 import { dd, formOf, rowAttr, statusHTML, tagc } from './forms.js';
+import { confirmDialog } from '../views/dialog.js';
+import { toast } from '../core/toast.js';
 
 // presets: what a tile fills in. keyUrl = where to get a key; key = a key is needed; ph = key placeholder
 interface Preset {
@@ -376,7 +378,7 @@ async function testSaved(id: string): Promise<void> {
 }
 
 async function setFeatures(features: Record<string, boolean>, focusKey?: string): Promise<void> {
-  try { SET.llm = await put({ features }); } catch (e) { SET.llmError = errText(e); alert(errText(e)); await loadLlmData(); }
+  try { SET.llm = await put({ features }); } catch (e) { SET.llmError = errText(e); toast(errText(e), 'err'); await loadLlmData(); }
   changed();
   renderSettings();
   if (focusKey) { const el = $req('settings-body').querySelector<HTMLElement>(`[data-llm-feat="${focusKey}"]`); if (el) el.focus(); }
@@ -432,8 +434,8 @@ export const LLM_ACTIONS: Record<string, SetAction> = {
   'llm-test-saved': (b) => testSaved(dd(b, 'id') || rowAttr(b, '[data-lid]', 'lid')),
   'llm-remove': async (b) => {
     const p = cfg().providers.find((x) => x.id === rowAttr(b, '[data-lid]', 'lid'));
-    if (!p || !confirm(`Remove the provider "${p.name}"?\n\nIts API key is deleted from the server.`)) return;
-    try { SET.llm = await (await api(`api/llm/providers/${encodeURIComponent(p.id)}`, { method: 'DELETE' })).json(); } catch (e) { alert(errText(e)); await loadLlmData(); }
+    if (!p || !(await confirmDialog({ title: `Remove the provider “${p.name}”?`, text: 'Its API key is deleted from the server.', ok: 'Remove', danger: true }))) return;
+    try { SET.llm = await (await api(`api/llm/providers/${encodeURIComponent(p.id)}`, { method: 'DELETE' })).json(); } catch (e) { toast(errText(e), 'err'); await loadLlmData(); }
     changed();
     renderSettings();
   },
@@ -452,7 +454,7 @@ export const LLM_CHANGES: Record<string, SetChange> = {
   },
   'llm-feat': (el) => setFeatures({ [dd(el, 'llmFeat')]: el instanceof HTMLInputElement && el.checked }, dd(el, 'llmFeat')),
   'llm-active': async (el) => {
-    try { SET.llm = await put({ active: el instanceof HTMLInputElement ? el.value : '' }); } catch (e) { alert(errText(e)); await loadLlmData(); }
+    try { SET.llm = await put({ active: el instanceof HTMLInputElement ? el.value : '' }); } catch (e) { toast(errText(e), 'err'); await loadLlmData(); }
     changed();
     renderSettings();
   },

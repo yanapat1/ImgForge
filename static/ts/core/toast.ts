@@ -1,4 +1,4 @@
-// A small message at the bottom of the page for non-fatal problems (the label page has its own, in label/panels.js),
+// A small message at the bottom of the page for non-fatal problems (every screen, the label page and Curation too),
 // and actionToast: a toast with buttons (Undo) used by the Data Center (datacenter/ops.ts).
 
 import { $, esc, ICONS } from './dom.js';

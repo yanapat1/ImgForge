@@ -525,7 +525,7 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .ai-pend .faint { font-weight: 400; font-size: 11.5px; }
 
 /* ---------------------------------------------------------------- action toast (core/toast.ts actionToast) */
-.act-toast { position: fixed; left: var(--s4); bottom: var(--s4); z-index: calc(var(--z-modal) + 20); width: min(600px, calc(100vw - 2 * var(--s4)));
+.act-toast { position: fixed; left: var(--s4); bottom: var(--s4); z-index: var(--z-toast); width: min(600px, calc(100vw - 2 * var(--s4)));
   background: var(--surface-3); border: 1px solid var(--accent-line); border-radius: var(--r-md); box-shadow: var(--shadow-3);
   padding: 11px 12px 11px 14px; display: none; gap: 11px; align-items: flex-start; }
 .act-toast.show { display: flex; animation: dc-toast-in var(--t) var(--ease); }

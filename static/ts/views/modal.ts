@@ -13,6 +13,7 @@ import { imageOrder, onImageEdited } from './image-grid.js';
 import { markEdited, modelEval } from './model.js';
 import { closeViewer, dirty, initViewer, refreshPreds, setBoxes, showImage, V } from './viewer.js';
 import { cardMedia, detailMedia, isImageUnit, isRows, loadVisibleMedia, metaCols, metaText, rowId, stopAudio } from './preview.js';
+import { confirmDialog } from './dialog.js';
 
 export let modalId: number | null = null;
 let predMode: { pid: number; list: number[] } | null = null;       // a model prediction with no label box (false positive) is shown
@@ -28,11 +29,11 @@ const num = (v: unknown, d = 2): string => (typeof v === 'number' ? String(+v.to
 export function initModal(): void {
   initViewer({ onSaved });
   // a combined dataset with a compare run: this image as A and as B, side by side (views/compare-viewer.ts)
-  $req('m-cmp').onclick = () => {
+  $req('m-cmp').onclick = async () => {
     const name = sampleImage;
-    if (!name || !mayLeave()) return;
+    if (!name || !(await mayLeave())) return;
     const list = imageMode?.list ?? [name];
-    closeModal();
+    closeModal(true);
     void import('./compare-viewer.js').then((m) => m.openCompareViewer(name, list));
   };
 }
@@ -75,11 +76,11 @@ function openDialog(): void {
 }
 
 // unsaved editor changes: ask before they are dropped (next / previous / close)
-const mayLeave = (): boolean => !dirty() || confirm('Discard the unsaved box changes?');
+const mayLeave = async (): Promise<boolean> => !dirty() || confirmDialog({ title: 'Discard the unsaved box changes?', ok: 'Discard', danger: true });
 
 export async function openModal(id: number, nav: { list: CardRef[] } | null = null): Promise<void> {
   if (isRows()) { void openRow(id, nav); return; }
-  if (!mayLeave()) return;
+  if (!(await mayLeave())) return;
   openDialog();
   cardNav = nav;
   modalId = id;
@@ -206,7 +207,7 @@ function modelRow(id: number): string {
 
 // one whole image (the image browser): all its boxes, nothing ringed; list = the order prev / next walk
 export async function openImage(name: string, list: string[] | null = null): Promise<void> {
-  if (!mayLeave()) return;
+  if (!(await mayLeave())) return;
   openDialog();
   cardNav = null;
   modalId = null;
@@ -257,7 +258,7 @@ function renderImageMeta(b: BoxesInfo): void {
 
 // a prediction that matches no label (no box id): the editable image with labels solid + predictions dashed, this one ringed
 export async function openPredModal(pid: number, list: number[] = [pid], nav: { list: CardRef[] } | null = null): Promise<void> {
-  if (!mayLeave()) return;
+  if (!(await mayLeave())) return;
   openDialog();
   cardNav = nav;
   const M = S.model;
@@ -318,8 +319,9 @@ function onSaved(r: EditResult): void {
 
 let modalReturnFocus: Element | null = null;
 
-export function closeModal(): void {
-  if (!mayLeave()) return;
+/** Close the image modal; unsaved box edits ask first (force: the user already chose to discard them). */
+export function closeModal(force = false): void {
+  if (!force && dirty()) { void mayLeave().then((ok) => { if (ok) closeModal(true); }); return; }
   closeViewer();
   $req('modal').classList.add('hidden');
   $req('modal').classList.remove('rows');
