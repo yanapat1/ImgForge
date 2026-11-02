@@ -15,7 +15,7 @@ const TAGS_SHOWN = 7;
 
 const row = (o: { depth: number; act: string; bid: string; path: string; sel: boolean; twist: 'open' | 'shut' | 'none';
   body: string; n?: string; drop?: boolean; title?: string }): string =>
-  `<div class="t-row${o.sel ? ' sel' : ''}" style="--d:${o.depth}" role="treeitem" tabindex="0" data-act="${o.act}" data-bid="${esc(o.bid)}" data-path="${esc(o.path)}"` +
+  `<div class="t-row${o.sel ? ' sel' : ''}" style="--d:${o.depth}" role="treeitem" tabindex="${o.sel ? 0 : -1}" data-act="${o.act}" data-bid="${esc(o.bid)}" data-path="${esc(o.path)}"` +
   `${o.twist !== 'none' ? ` aria-expanded="${o.twist === 'open'}"` : ''}${o.sel ? ' aria-selected="true"' : ''}${o.drop ? ' data-drop="1"' : ''}${o.title ? ` title="${esc(o.title)}"` : ''}>` +
   (o.twist === 'none' ? '<span class="tw none"></span>'
     : `<button type="button" class="tw" data-act="twist" data-bid="${esc(o.bid)}" data-path="${esc(o.path)}" tabindex="-1" aria-label="${o.twist === 'open' ? 'Collapse' : 'Expand'}">${icon(o.twist === 'open' ? 'chev-d' : 'chev-r')}</button>`) +
@@ -98,6 +98,8 @@ export function renderTree(): void {
     `<div class="src-line">${icon('cloud')}S3 links<span class="num">${s ? s.links.s3 : '—'}</span></div>` +
     `<div class="btns"><button type="button" class="primary" data-act="import">${icon('upload')}Import</button>` +
     `<button type="button" data-act="link">${icon('link')}Link source</button></div></div>`;
+  // one Tab stop in the tree (the open folder's row, else the first): the arrow keys move inside it (app.ts treeKey)
+  if (!el.querySelector('.t-row[tabindex="0"]')) el.querySelector('.t-row[role="treeitem"]')?.setAttribute('tabindex', '0');
 }
 
 export const TREE_ACTIONS: Record<string, Action> = {

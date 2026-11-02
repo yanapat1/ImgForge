@@ -20,7 +20,7 @@
 :root[data-look="terminal"] .radio-card,
 :root[data-look="terminal"] .theme-choice { box-shadow: none; background: var(--surface); }
 :root[data-look="terminal"] .theme-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-:root[data-look="terminal"] :focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+:root[data-look="terminal"] { --focus-w: 1px; }
 :root[data-look="terminal"] .sec-sub { color: var(--text); font-weight: 700; }
 :root[data-look="terminal"] .sec-sub::before { content: "$ "; color: var(--accent-text); }
 :root[data-look="terminal"] .sec-sub2 { text-transform: none; letter-spacing: 0; }

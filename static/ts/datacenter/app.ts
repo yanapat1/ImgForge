@@ -66,7 +66,7 @@ const SKELETON = (): string => `
 <div id="dc-activity" class="dc-activity hidden" role="status" aria-live="polite" aria-label="Running jobs"></div>
 <div id="dc-app" class="dc-app">
   <aside id="dc-tree" class="dc-tree" aria-label="Buckets and folders"></aside>
-  <section id="dc-main" class="dc-main" aria-label="Files">
+  <section id="dc-main" class="dc-main" role="main" tabindex="-1" aria-label="Files">
     <div class="dc-head">
       <div id="dc-bar" class="dc-bar"></div>
       <div id="dc-selbar" class="dc-selbar hidden" role="toolbar" aria-label="Selection"></div>
@@ -183,11 +183,13 @@ function bind(root: HTMLElement): void {
     const a = ACTIONS[el.dataset['act'] ?? ''];
     if (a) a(el, e);
   });
-  // Enter / Space on a role=button element acts like a click
+  // Enter / Space on a role=button / treeitem / row element acts like a click; the tree moves with the arrows
   root.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
     const t = e.target;
-    if (!(t instanceof HTMLElement) || t.getAttribute('role') !== 'button' || !t.dataset['act']) return;
+    if (!(t instanceof HTMLElement)) return;
+    if (t.matches('.t-row[role="treeitem"]') && treeKey(e, t)) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (!/^(button|treeitem|row)$/.test(t.getAttribute('role') ?? '') || !t.dataset['act']) return;
     e.preventDefault();
     t.click();
   });
@@ -246,6 +248,47 @@ async function runSearch(text: string): Promise<void> {
 
 const typing = (t: EventTarget | null): boolean =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
+
+// The bucket tree (WAI-ARIA tree pattern): Up / Down move between visible rows, Right opens a folder (or moves into
+// it when open), Left closes it (or moves to its parent), Home / End jump. A toggle re-renders the tree, so the focus is
+// put back on the row with the same bucket + path after the paint.
+function treeKey(e: KeyboardEvent, row: HTMLElement): boolean {
+  const tree = $('dc-tree');
+  if (!tree || e.ctrlKey || e.metaKey || e.altKey) return false;
+  const rows = [...tree.querySelectorAll<HTMLElement>('.t-row[role="treeitem"]')];
+  const i = rows.indexOf(row);
+  const depth = (r: HTMLElement): number => Number(r.style.getPropertyValue('--d')) || 0;
+  const go = (r: HTMLElement | undefined): void => {
+    if (!r) return;
+    for (const x of rows) if (x.tabIndex === 0) x.tabIndex = -1;
+    r.tabIndex = 0;
+    r.focus();
+    r.scrollIntoView({ block: 'nearest' });
+  };
+  const refocus = (): void => {
+    const sel = `.t-row[role="treeitem"][data-bid="${CSS.escape(row.dataset['bid'] ?? '')}"][data-path="${CSS.escape(row.dataset['path'] ?? '')}"]`;
+    requestAnimationFrame(() => tree.querySelector<HTMLElement>(sel)?.focus());
+  };
+  const exp = row.getAttribute('aria-expanded');
+  switch (e.key) {
+    case 'ArrowDown': go(rows[i + 1]); break;
+    case 'ArrowUp': go(rows[i - 1]); break;
+    case 'Home': go(rows[0]); break;
+    case 'End': go(rows[rows.length - 1]); break;
+    case 'ArrowRight':
+      if (exp === 'false') { row.querySelector<HTMLElement>('.tw')?.click(); refocus(); } else if (exp === 'true') go(rows[i + 1]);
+      break;
+    case 'ArrowLeft':
+      if (exp === 'true') { row.querySelector<HTMLElement>('.tw')?.click(); refocus(); } else {
+        const d = depth(row);
+        go(rows.slice(0, i).reverse().find((r) => depth(r) < d));
+      }
+      break;
+    default: return false;
+  }
+  e.preventDefault();
+  return true;
+}
 
 function onKey(e: KeyboardEvent): void {
   if (document.querySelector('.ui-dlg-wrap, #settings:not(.hidden), .dc-modal')) return;   // a dialog has the keys

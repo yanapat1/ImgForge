@@ -165,6 +165,8 @@ export function postStatus(mid: string, kind: string, taskIds: string[]): Promis
 
 // conflicts: the server copy (reload) or overwrite it with ours (keep mine)
 export const conflictsOf = (mid: string): SyncConflict[] => [...conflicts.values()].filter((c) => c.mid === mid);
+/** The images with an open conflict, in the order they came up (the save chip lists them and jumps to the next). */
+export const conflictMids = (): string[] => [...new Set([...conflicts.values()].map((c) => c.mid))];
 
 export function resolveConflict(mid: string, keepMine: boolean): SyncConflict[] {
   const out: SyncConflict[] = [];

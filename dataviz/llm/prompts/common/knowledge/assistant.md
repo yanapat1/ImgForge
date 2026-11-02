@@ -1,6 +1,6 @@
 ---
 title: The ◆ assistant itself
-summary: chat commands (/model, /mode, /effort, /web ...), modes, sessions, limits, the user's own prompts and skills
+summary: chat commands (/model, /mode, /effort, /web ...), modes, sessions, limits, the user's own prompts and skills; app-wide ? shortcut sheet, Undo after removing a session / model / connection
 ---
 - **Slash commands** in the chat box: `/model` (pick a provider and model), `/mode ask|auto|plan` (or Shift+Tab),
   `/effort low|medium|high`, `/think off|low|medium|high`, `/web off|public|technical|full`, `/skills`,
@@ -16,3 +16,6 @@ summary: chat commands (/model, /mode, /effort, /web ...), modes, sessions, limi
   built-in rules). **Plugins** add skills, prompts and web (HTTP) tools.
 - **Web search** levels: off, public only, technical, full; organisation "special words" are never sent.
 - Providers and models: Settings › AI assistant.
+- **App-wide**: press **?** (not while typing) for the keyboard shortcuts of the page on screen (the labeling page
+  lists the user's own hotkeys). Removing a session, a labeling session, a model or a connection is undone with the
+  **Undo** button on the message that follows (about 8 s); after that it is gone.

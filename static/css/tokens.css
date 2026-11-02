@@ -13,6 +13,10 @@
   font-weight: 200 900; font-style: normal; font-display: swap; }
 @font-face { font-family: "Archivo"; src: url("../assets/fonts/archivo.woff2") format("woff2");
   font-weight: 100 900; font-style: normal; font-display: swap; }
+/* Thai (the Latin faces have no Thai glyphs): Noto Sans Thai, variable weight, Thai subset, SIL OFL. The unicode-range
+   means it is only downloaded when Thai text is on the page; every font stack lists it right after its Latin face */
+@font-face { font-family: "DV Thai"; src: url("../assets/fonts/noto-sans-thai.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap; unicode-range: U+0E01-0E5B, U+200C-200D, U+25CC; }
 
 :root {
   /* surfaces: desaturated slate, each step ~+4% lightness */
@@ -68,8 +72,8 @@
      crop_outside_transparent); fine diagonal hatching marks it as "no photo here" instead of a black bar */
   --media-fill: repeating-linear-gradient(135deg, var(--media-hatch) 0 1.5px, transparent 1.5px 7px), var(--media-bg);
   /* type */
-  --font: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Atkinson Hyperlegible Next", "DV Thai", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", "DV Thai", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-display: var(--font);  /* headings; the editorial and brutalist looks swap it */
   --fs-xs: 12px;
   --fs-sm: 13px;
@@ -268,7 +272,7 @@
    A printed reference work: warm paper and ink, serif headings over the legible sans, 1px rules instead of boxes,
    small radii, deep teal ink as the accent. Light first; the dark block is the same page read at night. */
 :root[data-look="editorial"] {
-  --font-display: "Source Serif 4", "Iowan Old Style", Charter, Georgia, serif;
+  --font-display: "Source Serif 4", "DV Thai", "Iowan Old Style", Charter, Georgia, serif;
   --r-sm: 2px; --r: 3px; --r-md: 4px; --r-lg: 6px;
   --shadow-2: 0 1px 2px rgba(40, 30, 15, .06), 0 8px 24px rgba(40, 30, 15, .08);
   --shadow-3: 0 2px 6px rgba(40, 30, 15, .08), 0 28px 64px rgba(40, 30, 15, .2);
@@ -490,8 +494,8 @@
    Flat, loud and square: Archivo, 0 radius, 2px ink borders, hard offset shadows (--bd-shadow), signal-orange accent,
    yellow press state. Bone paper in light, near-black with bone linework in dark. */
 :root[data-look="brutalist"] {
-  --font: "Archivo", "Helvetica Neue", Arial, system-ui, sans-serif;
-  --font-display: "Archivo", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font: "Archivo", "DV Thai", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-display: "Archivo", "DV Thai", "Helvetica Neue", Arial, system-ui, sans-serif;
   --r-sm: 0; --r: 0; --r-md: 0; --r-lg: 0;
 }
 :root[data-look="brutalist"][data-theme="light"] {
@@ -601,7 +605,7 @@
    Everything in Atkinson Hyperlegible Mono, hairlines, almost square, no shadows. Soft phosphor green on near-black;
    the light block is a green-bar printout. */
 :root[data-look="terminal"] {
-  --font: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Atkinson Hyperlegible Mono", "DV Thai", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --fs-xs: 11.5px; --fs-sm: 12.5px; --fs: 13px; --fs-lg: 15px; --fs-xl: 18px;
   --r-sm: 0; --r: 2px; --r-md: 2px; --r-lg: 3px;
   --shadow-2: none;

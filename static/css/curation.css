@@ -24,7 +24,7 @@
 .fb-pop.fb-chips-pop { width: 300px; left: auto; right: 0; }
 .fb-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 300px; max-width: 520px;
   height: var(--control-h); padding: 0 4px 0 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); }
-.fb-name:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.fb-name:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .fb-name > .ico { color: var(--text-muted); }
 .fb-name input[type=search] { flex: 1; min-width: 60px; height: 100%; border: none; background: transparent; outline: none; padding: 0;
   font-size: var(--fs-sm); }

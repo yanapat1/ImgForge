@@ -23,19 +23,21 @@ import * as P from './panels.js';
 import * as M from './model.js';
 import type { PredictResult } from './model.js';
 import { initSettings, setSettings } from './settings.js';
-import { CLASS_KEYS, L, N_TASK_KEYS, TASK_TYPES } from './state.js';
+import { CLASS_KEYS, HOTKEY_LABELS, L, N_TASK_KEYS, settingsHotkeys, TASK_TYPES } from './state.js';
 import { bboxTool } from './tools/bbox.js';
 import { classifyTool, toggleTag } from './tools/classify.js';
 import { keypointsTool } from './tools/keypoints.js';
 import { polygonTool } from './tools/polygon.js';
 import { cancelMove, clearSelection, cycleOverlap, deleteSelected, duplicateSelected, initSelect, newId, nudge, reassignSelected, setSelection } from './tools/select.js';
 import { areaTool, copySelection, pasteClipboard } from './selection.js';
-import { busy, conflictsOf, flush, flushMid, initSync, postStatus, resolveConflict, touch } from './sync.js';
+import { busy, conflictMids, conflictsOf, flush, flushMid, initSync, postStatus, resolveConflict, touch } from './sync.js';
 import type { SyncEntry } from './sync.js';
 import { asEl, closestEl } from './ui-util.js';
 import type * as AssistModule from './assist.js';
 import type { AssistHooks } from './assist.js';
 import { confirmDialog } from '../views/dialog.js';
+import { registerKeys } from '../core/keys.js';
+import type { KeyRow } from '../core/keys.js';
 
 /** A geometry tool as the page drives it (the optional members exist on some tools only). */
 type AppTool = Tool & { reset?(): void; visibility?(): boolean };
@@ -921,6 +923,19 @@ const assistHooks: AssistHooks = {
 
 function bindAssist(): void {
   $req('lb-ai').addEventListener('click', () => { void toggleAssist(); });
+  // the "?" sheet lists this page's hotkeys as the user mapped them (Settings › Labeling)
+  registerKeys('Labeling', () => document.documentElement.dataset['screen'] === 'label', () =>
+    Object.entries(settingsHotkeys(L.settings)).flatMap(([id, combos]): KeyRow[] => {
+      const keys = (combos || []).filter(Boolean).map(prettyCombo);
+      return keys.length ? [[keys.join(' / '), HOTKEY_LABELS[id] ?? id]] : [];
+    }));
+  $req('lb-save').addEventListener('click', (e) => {     // "Conflict on N images: show" → the next one after this image
+    if (!closestEl(e.target, '[data-a="next-conflict"]')) return;
+    const ms = conflictMids();
+    const at = L.media ? ms.indexOf(L.media.id) : -1;
+    const next = ms[(at + 1) % ms.length];
+    if (next) goToId(next);
+  });
   applyLLM($req('lb-app'));                        // the state may have loaded before this markup existed
   window.addEventListener('llm-state', () => { applyLLM($req('lb-app')); if (AI) AI.stateChanged(); });
 }

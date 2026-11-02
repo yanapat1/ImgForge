@@ -41,6 +41,7 @@ import { initCompare } from './views/compare.js';
 import { startLive } from './core/live.js';
 import { initFilterBar } from './views/filter-bar.js';
 import { initPickBar } from './views/pick-bar.js';
+import { bindKeyHelp } from './core/keys.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -79,7 +80,7 @@ async function boot(): Promise<void> {
   const up = await waitForServer(() => {
     $req('startup-title').textContent = 'Waiting for the server…';
     $req('startup-stage').textContent = 'it may be starting or restarting; this page continues on its own';
-  });
+  }, 120000, SCREEN === 'login' ? 'api/auth/config' : 'api/status');
   if (!up) { hints.stop(); showError({ kind: 'network' }); return; }
   if (SCREEN === 'login') {                    // signed out: only the sign-in card (no user, no settings)
     hints.stop();
@@ -608,4 +609,14 @@ function bindEvents(): void {
 window.dataviz = { S, UI, plotAxes, get THEME() { return THEME; } };
 
 installCrashHandlers();
+bindKeyHelp();                                     // "?" opens the shortcut sheet on every screen
+// "Skip to the main content" (the first Tab stop on every screen): focus the visible main region
+document.addEventListener('click', (e) => {
+  if (!(e.target instanceof Element) || !e.target.closest('[data-skip]')) return;
+  e.preventDefault();
+  const main = [...document.querySelectorAll<HTMLElement>('main, [role="main"]')].find((m) => m.getClientRects().length > 0);
+  if (!main) return;
+  if (!main.hasAttribute('tabindex')) main.tabIndex = -1;
+  main.focus();
+});
 boot().catch((e: unknown) => showError({ kind: 'crash', message: errText(e), detail: e instanceof Error && e.stack ? e.stack : String(e) }));

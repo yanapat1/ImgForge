@@ -161,6 +161,7 @@
 /* ---------------------------------------------------------------- stage + canvases */
 .lb-stage { grid-area: stage; position: relative; overflow: hidden; min-width: 0; min-height: 0; background: var(--lb-stage-bg); }
 .lb-canvas { position: absolute; inset: 0; touch-action: none; outline: none; user-select: none; -webkit-user-select: none; }
+.lb-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }   /* reached by Tab: an inset ring */
 .lb-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .lb-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .lb-canvas .lb-c2 { pointer-events: none; }
@@ -498,7 +499,7 @@
   border-color: var(--border); color: var(--text-muted); text-align: left; white-space: normal; }
 .lba-chip:hover:not(:disabled) { color: var(--text); border-color: var(--gem-2, var(--accent)); }
 .lba-input { display: flex; align-items: flex-end; gap: 4px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
-.lba-input:focus-within { border-color: var(--gem-2, var(--accent)); }
+.lba-input:focus-within { border-color: var(--gem-2); box-shadow: 0 0 0 3px var(--gem-glow); }
 .lba-input textarea { flex: 1; min-width: 0; resize: vertical; min-height: 40px; max-height: 200px; border: 0; background: transparent; padding: 4px 6px;
   font: inherit; font-size: var(--fs-sm); color: var(--text); outline: none; box-shadow: none; }
 .lba-input-btns { display: flex; flex-direction: column; gap: 2px; }

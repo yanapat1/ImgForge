@@ -193,7 +193,7 @@ function labelsCell(e: Entry): string {
 function lrow(e: Entry): string {
   const sel = D.sel.has(e.path);
   const drag = writable() ? ' draggable="true"' : '';
-  return `<div class="dc-lrow${sel ? ' sel' : ''}" role="row" aria-selected="${sel}" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag}>` +
+  return `<div class="dc-lrow${sel ? ' sel' : ''}" role="row" tabindex="-1" aria-selected="${sel}" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag}>` +
     `<span class="c-ck"><i class="cb${sel ? ' on' : ''}" data-ck="1" aria-hidden="true"></i></span>` +
     `<span class="c-n${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}<span>${esc(e.name)}${e.type === 'dir' ? '/' : ''}</span>${localBadge(e)}</span>` +
     `<span class="r num">${e.type === 'dir' ? '' : fmtSize(e.size)}</span>` +
@@ -318,14 +318,15 @@ function renderBody(): void {
     `<button type="button" class="hcol${cls}${D.sort === k ? ' sorted' : ''}" data-act="sort" data-sort="${k}">${label}${D.sort === k ? icon('chev-d') : ''}</button>`;
   const allSel = D.sel.size > 0 && D.sel.size >= L.entries.length;
   body.innerHTML = `<div class="dc-pad" data-act="desel">` + (D.view === 'thumbs'
-    ? `<div id="dc-grid" class="dc-grid" role="listbox" aria-multiselectable="true" aria-label="Files">${items}</div>`
+    ? `<div id="dc-grid" class="dc-grid" role="listbox" aria-multiselectable="true" aria-label="Files: arrow keys move, Space selects, Enter opens">${items}</div>`
     : `<div class="dc-list" role="grid" aria-multiselectable="true" aria-label="Files"><div class="dc-lrow head" role="row">` +
       `<span class="c-ck"><button type="button" class="dc-cbbtn" data-act="selall" aria-label="Select all"><i class="cb${allSel ? ' on' : D.sel.size ? ' part' : ''}" aria-hidden="true"></i></button></span>` +
       `${sortCol('name', 'Name')}${sortCol('size', 'Size', ' r')}<span class="r">Dims</span><span>Labels</span>${sortCol('-mtime', 'Modified')}</div>` +
-      `<div id="dc-grid" class="dc-rows">${items}</div></div>`) +
+      `<div id="dc-grid" class="dc-rows" aria-label="Files: arrow keys move, Space selects, Enter opens">${items}</div></div>`) +
     `<div id="dc-more" class="dc-more"></div></div>`;
   setMore();
   observeThumbs();
+  rove();
 }
 
 function observeThumbs(): void {
@@ -395,6 +396,7 @@ export function selChanged(): void {
     }
     paintedGrid = grid;
     painted = new Set(D.sel);
+    rove();
   }
   const L = D.listing;
   const head = document.querySelector('#dc-body .dc-lrow.head .cb');
@@ -582,8 +584,58 @@ let dropOn: Element | null = null;
 const clearDrop = (): void => { dropOn?.classList.remove('drop-on'); dropOn = null; };
 const markDrop = (el: Element): void => { if (dropOn !== el) { clearDrop(); el.classList.add('drop-on'); dropOn = el; } };
 
+// ---------------------------------------------------------------- keyboard in the file grid / list
+/** Roving tab stop: exactly one item of the grid is in the Tab order (`to`, else the one already there, else the
+ *  selection anchor, else the first), so Tab enters the grid once and Shift+Tab leaves it. */
+function rove(to?: HTMLElement | null): void {
+  const grid = $('dc-grid');
+  if (!grid) return;
+  const now = grid.querySelector<HTMLElement>(':scope > [tabindex="0"]');
+  const want = to || now || (D.anchor && grid.querySelector<HTMLElement>(`:scope > [data-path="${CSS.escape(D.anchor)}"]`)) || grid.querySelector<HTMLElement>(':scope > [data-path]');
+  if (!want || want === now) return;
+  now?.setAttribute('tabindex', '-1');
+  want.setAttribute('tabindex', '0');
+}
+
+// The grid is one Tab stop; inside it the arrow keys move the focus (Up / Down by a row of tiles), Shift+arrow
+// extends the selection, Space toggles the focused item, Enter opens it, the ContextMenu key opens its menu. The
+// actions go through the same click handler as the mouse (synthetic clicks), so both behave the same.
+function gridKey(e: KeyboardEvent): void {
+  const grid = $('dc-grid');
+  if (!grid || !(e.target instanceof HTMLElement) || !grid.contains(e.target)) return;
+  const items = [...grid.querySelectorAll<HTMLElement>(':scope > [data-path]')];
+  if (!items.length) return;
+  const cur = e.target === grid ? -1 : items.indexOf(e.target.closest<HTMLElement>('[data-path]') ?? e.target);
+  const click = (el: HTMLElement, o: MouseEventInit): void => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...o })); };
+  let cols = 1;
+  if (D.view === 'thumbs') { const top = items[0]?.offsetTop; cols = Math.max(1, items.findIndex((x) => x.offsetTop !== top)); if (cols <= 0) cols = items.length; }
+  const step: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols, Home: -1e9, End: 1e9 };
+  const k = e.key;
+  if (k in step && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    const to = items[Math.max(0, Math.min(items.length - 1, (cur < 0 ? 0 : cur) + (cur < 0 ? 0 : step[k] ?? 0)))];
+    if (!to) return;
+    rove(to);
+    to.focus();
+    to.scrollIntoView({ block: 'nearest' });
+    if (e.shiftKey) click(to, { shiftKey: true });
+    return;
+  }
+  const at = cur >= 0 ? items[cur] : null;
+  if (!at) return;
+  if (k === ' ') { e.preventDefault(); click(at, { ctrlKey: true }); return; }
+  if (k === 'Enter') { e.preventDefault(); click(at, { detail: 2 }); return; }
+  if (k === 'ContextMenu' || (k === 'F10' && e.shiftKey)) {
+    e.preventDefault();
+    if (!D.sel.has(at.dataset['path'] ?? '')) click(at, {});
+    const r = at.getBoundingClientRect();
+    at.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 12, clientY: r.top + 12 }));
+  }
+}
+
 export function bindBrowser(): void {
   const app = $('dc-app'), body = $('dc-body'), main = $('dc-main');
+  body?.addEventListener('keydown', gridKey);
   if (!app || !body || !main) return;
   body.addEventListener('scroll', () => {
     if (D.listing && !D.search && body.scrollTop + body.clientHeight > body.scrollHeight - 900) void loadMore();

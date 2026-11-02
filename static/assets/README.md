@@ -6,6 +6,7 @@
 | `fonts/atkinson-next.woff2` | Atkinson Hyperlegible Next, a variable font (weights 200–800) used for all UI text. It is preloaded in `index.html`. |
 | `fonts/atkinson-mono.woff2` | Atkinson Hyperlegible Mono, used for numbers, paths and keys (tabular figures), and for all text in the Terminal look. |
 | `fonts/source-serif-4.woff2` | Source Serif 4 (variable weight, Latin subset, SIL OFL, from `@fontsource-variable/source-serif-4`): headings in the Editorial look. Only downloaded when that look is on. |
+| `fonts/noto-sans-thai.woff2` | Noto Sans Thai (variable weight, Thai subset only, SIL OFL, from `@fontsource-variable/noto-sans-thai`): the Thai fallback right after the Latin face in every font stack (`"DV Thai"` in `css/tokens.css`). Its `unicode-range` means it is only downloaded when Thai text is shown. |
 | `fonts/archivo.woff2` | Archivo (variable weight, Latin subset, SIL OFL, from `@fontsource-variable/archivo`): all text in the Brutalist look. Only downloaded when that look is on. |
 
 ## Icon conventions

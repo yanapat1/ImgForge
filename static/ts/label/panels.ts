@@ -16,6 +16,7 @@ import { HOLD_ACTIONS, L, TASK_TYPES } from './state.js';
 import { asEl, closestEl } from './ui-util.js';
 import { toast as appToast } from '../core/toast.js';
 import { trapTab } from '../views/dialog.js';
+import { conflictMids } from './sync.js';
 
 /** What app.ts gives the panels. */
 export interface PanelHandlers {
@@ -129,12 +130,13 @@ function renderClasses(): void {
     const alias = c.hotkey ? '' : combosFor(`class_${i + 1}`).slice(1).map(prettyCombo).join(', ');
     const n = cnt.get(c.id) || 0;
     const on = c.id === L.classId;
-    return `<div class="lb-cls${on ? ' active' : ''}${tagged && n ? ' tagged' : ''}" role="option" aria-selected="${on}" tabindex="-1" data-cls="${esc(c.id)}"
+    return `<div class="lb-cls${on ? ' active' : ''}${tagged && n ? ' tagged' : ''}" role="option" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-cls="${esc(c.id)}"
       title="${esc(c.name)}${k ? ` · ${esc(prettyCombo(k))}${alias ? ` (also ${esc(alias)})` : ''}` : ''} · double-click to rename, right-click for more">
       <span class="sw" style="--c:${okColor(c.color)}"></span><span class="nm">${esc(c.name)}</span>` +
       `${tagged ? `<span class="lb-check">${n ? icon('check') : ''}</span>` : ''}` +
       `${k ? `<kbd>${esc(prettyCombo(k))}</kbd>` : ''}<span class="n num${n ? '' : ' zero'}">${n}</span></div>`;
   }).join('') || `<div class="lb-empty">${t.classes.length ? 'No class matches' : 'No classes yet: type a name above and press Enter'}</div>`;
+  if (!el.querySelector('[data-cls][tabindex="0"]')) el.querySelector('[data-cls]')?.setAttribute('tabindex', '0');   // one Tab stop
 }
 
 async function addClass(name: string): Promise<void> {
@@ -316,9 +318,43 @@ export function menuKey(combo: string, e: KeyboardEvent): boolean {
   }
   if (P.menu) {
     if (combo === 'escape') { closeMenu(); return true; }
-    if (e.target instanceof Node && P.menu.el.contains(e.target)) return combo !== 'tab' && combo !== 'shift+tab' && combo !== 'enter' && combo !== 'space' ? true : false;
+    if (e.target instanceof Node && P.menu.el.contains(e.target)) {
+      if (combo === 'arrowdown' || combo === 'arrowup' || combo === 'home' || combo === 'end') { moveFocus(menuItems(P.menu.el), combo); return true; }
+      return combo !== 'tab' && combo !== 'shift+tab' && combo !== 'enter' && combo !== 'space';
+    }
+  }
+  // the class list (a listbox): Up / Down / Home / End move, Enter picks the class, Shift+F10 opens its menu
+  const row = e.target instanceof Element ? e.target.closest<HTMLElement>('#lb-classes [data-cls]') : null;
+  if (row) {
+    const rows = [...$req('lb-classes').querySelectorAll<HTMLElement>('[data-cls]')];
+    if (combo === 'arrowdown' || combo === 'arrowup' || combo === 'home' || combo === 'end') { moveFocus(rows, combo, true); return true; }
+    if (combo === 'enter') { row.click(); return true; }
+    if (combo === 'shift+f10') { classMenuAt(row); return true; }
   }
   return false;
+}
+
+const menuItems = (m: HTMLElement): HTMLElement[] =>
+  [...m.querySelectorAll<HTMLElement>('button[role="menuitem"], input[data-m="color"]')].filter((x) => x.offsetParent !== null);
+
+/** Arrow-key focus move in a list; rove: the item becomes the list's one Tab stop. */
+function moveFocus(items: HTMLElement[], combo: string, rove = false): void {
+  if (!items.length) return;
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  const next = combo === 'home' ? 0 : combo === 'end' ? items.length - 1 : (i + (combo === 'arrowdown' ? 1 : -1) + items.length) % items.length;
+  const to = items[next];
+  if (!to) return;
+  if (rove) for (const x of items) x.tabIndex = x === to ? 0 : -1;
+  to.focus();
+  to.scrollIntoView({ block: 'nearest' });
+}
+
+/** The class menu opened from the keyboard, at the row. */
+function classMenuAt(row: HTMLElement): void {
+  const c = activeTask()?.classes.find((x) => x.id === row.dataset['cls']);
+  if (!c) return;
+  const r = row.getBoundingClientRect();
+  openMenu(c, r.left + 24, r.bottom);
 }
 
 function startRename(cid: string): void {
@@ -553,7 +589,12 @@ function renderStatus(): void {
   const [ic, tx] = SAVE_TEXT[L.saveState] || ['check', 'Saved'];
   const sv = $req('lb-save');
   sv.className = `lb-save s-${L.saveState}`;
-  sv.innerHTML = `${icon(ic)}${tx}`;
+  // a conflict on another image would be invisible from here: the chip names how many and jumps to the next one
+  const cm = L.saveState === 'conflict' ? conflictMids() : [];
+  const elsewhere = cm.filter((m) => m !== L.media?.id);
+  sv.innerHTML = elsewhere.length
+    ? `<button type="button" class="linkish" data-a="next-conflict" title="Show the next image with a conflict">${icon(ic)}Conflict on ${cm.length} image${cm.length === 1 ? '' : 's'}: show</button>`
+    : `${icon(ic)}${tx}`;
 }
 
 function renderBanner() {
@@ -1004,6 +1045,13 @@ function bind(): void {
   const cl = $req('lb-classes');
   cl.addEventListener('click', (e) => { const r = closestEl(e.target, '[data-cls]'); if (r?.dataset['cls'] && !closestEl(e.target, 'input')) H.selectClass(r.dataset['cls'], true); });
   cl.addEventListener('dblclick', (e) => { const r = closestEl(e.target, '[data-cls]'); if (r?.dataset['cls'] && !closestEl(e.target, 'input')) startRename(r.dataset['cls']); });
+  cl.addEventListener('keydown', (e) => {          // the ContextMenu key (the hotkeys do not name it)
+    if (e.key !== 'ContextMenu') return;
+    const r = closestEl(e.target, '[data-cls]');
+    if (!r) return;
+    e.preventDefault();
+    classMenuAt(r);
+  });
   cl.addEventListener('contextmenu', (e) => {
     const r = closestEl(e.target, '[data-cls]');
     if (!r) return;

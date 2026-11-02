@@ -458,6 +458,7 @@ export function updateOffscreen(): void {
     if (c && e) {
       b.textContent = `${ARROW[e]} ${c.toLocaleString()}`;
       b.title = `${c.toLocaleString()} shown dot${c === 1 ? '' : 's'} past the ${e} edge: click to fit every dot in`;
+      b.setAttribute('aria-label', b.title);
     }
   }
 }

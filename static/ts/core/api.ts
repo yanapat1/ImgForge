@@ -62,13 +62,14 @@ export function errText(e: unknown): string {
 
 // Resolves once the server answers api/status: a refused connection or a 502/503/504 means it is starting or
 // restarting, so poll with backoff (500 ms rising to 3 s). Any other status counts as up (the caller reports it).
-// Gives up after `timeout` ms by resolving false; onWait() is called before each retry.
-export async function waitForServer(onWait?: () => void, timeout = 120000): Promise<boolean> {
+// Gives up after `timeout` ms by resolving false; onWait() is called before each retry. `probe`: the sign-in page asks
+// the public api/auth/config (api/status needs a sign-in: a 401 there is only console noise).
+export async function waitForServer(onWait?: () => void, timeout = 120000, probe = 'api/status'): Promise<boolean> {
   const t0 = Date.now();
   let wait = 500;
   for (;;) {
     try {
-      const r = await apiFetch('api/status', { cache: 'no-store' });
+      const r = await apiFetch(probe, { cache: 'no-store' });
       if (![502, 503, 504].includes(r.status)) return true;
     } catch (e) { /* not reachable yet */ }
     if (Date.now() - t0 > timeout) return false;

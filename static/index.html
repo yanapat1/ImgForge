@@ -9,27 +9,27 @@
      (data-screen = login on /login, viz on /s/<id>/, label with ?label=, data with ?data, else home; on viz it also starts the Plotly download) -->
 <script src="static/js/theme-boot.js?v=17"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='9' fill='%23458'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12.5' cy='13.5' r='2.4'/%3E%3Ccircle cx='18.5' cy='11.8' r='2.4'/%3E%3Ccircle cx='17' cy='17.6' r='2.4'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="stylesheet" href="static/css/tokens.css?v=21">
-<link rel="stylesheet" href="static/css/base.css?v=16">
+<link rel="stylesheet" href="static/css/tokens.css?v=22">
+<link rel="stylesheet" href="static/css/base.css?v=17">
 <link rel="stylesheet" href="static/css/layout.css?v=14">
-<link rel="stylesheet" href="static/css/components.css?v=18">
-<link rel="stylesheet" href="static/css/plot.css?v=14">
+<link rel="stylesheet" href="static/css/components.css?v=19">
+<link rel="stylesheet" href="static/css/plot.css?v=15">
 <link rel="stylesheet" href="static/css/settings.css?v=23">
-<link rel="stylesheet" href="static/css/home.css?v=19">
-<link rel="stylesheet" href="static/css/datacenter.css?v=10">
-<link rel="stylesheet" href="static/css/label.css?v=16">
-<link rel="stylesheet" href="static/css/curation.css?v=15">
+<link rel="stylesheet" href="static/css/home.css?v=20">
+<link rel="stylesheet" href="static/css/datacenter.css?v=11">
+<link rel="stylesheet" href="static/css/label.css?v=17">
+<link rel="stylesheet" href="static/css/curation.css?v=16">
 <link rel="stylesheet" href="static/css/assistant.css?v=16">
-<link rel="stylesheet" href="static/css/chat.css?v=2">
+<link rel="stylesheet" href="static/css/chat.css?v=3">
 <link rel="stylesheet" href="static/css/compare.css?v=1">
 <link rel="stylesheet" href="static/css/compare-shift.css?v=1">
 <link rel="stylesheet" href="static/css/states.css?v=17">
 <link rel="stylesheet" href="static/css/responsive.css?v=15">
-<link rel="stylesheet" href="static/css/editorial.css?v=3">
-<link rel="stylesheet" href="static/css/blueprint.css?v=2">
-<link rel="stylesheet" href="static/css/brutalist.css?v=5">
-<link rel="stylesheet" href="static/css/terminal.css?v=4">
-<link rel="stylesheet" href="static/css/soft.css?v=5">
+<link rel="stylesheet" href="static/css/editorial.css?v=4">
+<link rel="stylesheet" href="static/css/blueprint.css?v=3">
+<link rel="stylesheet" href="static/css/brutalist.css?v=6">
+<link rel="stylesheet" href="static/css/terminal.css?v=5">
+<link rel="stylesheet" href="static/css/soft.css?v=6">
 <link rel="stylesheet" href="static/css/palettes.css?v=3">
 <!-- ?v= on the entry files: bump it after a big change. Every static file is served with Cache-Control: no-cache
      (cheap 304 revalidation), so the ES modules imported by main.js are never stale either. -->
@@ -38,6 +38,7 @@
 <!-- plotly (~1.5 MB) is loaded only on the visualizer screen: theme-boot.js preloads it, main.js runs it -->
 </head>
 <body>
+<a class="skip-link" href="#" data-skip>Skip to the main content</a>
 <!-- SESSIONS HOME (first page, no ?session=): one card per session, each one dataset -->
 <div id="home" class="home">
   <header class="app-header">
@@ -57,7 +58,7 @@
         <svg class="ico only-dark" aria-hidden="true"><use href="static/assets/icons.svg#i-sun"/></svg><svg class="ico only-light" aria-hidden="true"><use href="static/assets/icons.svg#i-moon"/></svg></button>
     </div>
   </header>
-  <div class="home-scroll">
+  <div class="home-scroll" role="main" tabindex="-1">
     <div class="home-wrap">
       <div id="home-head" class="home-head hidden">
         <div class="home-title">
@@ -613,7 +614,7 @@
         <div id="fb-chips-line" class="fb-chips-line hidden">
           <div id="fb-chips" class="chips fb-chips" role="group" aria-label="Active filters"></div>
           <div class="popover-anchor">
-            <button id="fb-chips-more" type="button" class="ghost fb-clear hidden" aria-haspopup="true" aria-expanded="false" aria-controls="fb-chips-pop"></button>
+            <button id="fb-chips-more" type="button" class="ghost fb-clear hidden" aria-label="More active filters" aria-haspopup="true" aria-expanded="false" aria-controls="fb-chips-pop"></button>
             <div id="fb-chips-pop" class="popover panel hidden fb-pop fb-chips-pop" role="group" aria-label="More active filters"></div>
           </div>
           <button id="fb-chips-clear" type="button" class="ghost fb-clear hidden" data-clear="all">Clear all</button>
@@ -625,8 +626,8 @@
         <svg id="lasso-layer" class="lasso-layer" aria-hidden="true"><path id="lasso-path" d=""/></svg>
         <!-- dots outside the shown range, per edge (plot/interactions.ts updateOffscreen): a click fits them all in -->
         <div id="offscreen" class="offscreen" aria-live="polite">
-          <button class="off-chip hidden" data-edge="left"></button><button class="off-chip hidden" data-edge="right"></button>
-          <button class="off-chip hidden" data-edge="top"></button><button class="off-chip hidden" data-edge="bottom"></button>
+          <button class="off-chip hidden" data-edge="left" aria-label="Dots past the left edge: fit the view"></button><button class="off-chip hidden" data-edge="right" aria-label="Dots past the right edge: fit the view"></button>
+          <button class="off-chip hidden" data-edge="top" aria-label="Dots past the top edge: fit the view"></button><button class="off-chip hidden" data-edge="bottom" aria-label="Dots past the bottom edge: fit the view"></button>
         </div>
         <button id="btn-fit" class="icon-btn plot-fit" aria-label="Fit to the shown dots" title="Fit to the shown dots — zoom so every visible dot is in view"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-fit"/></svg></button>
         <div id="select-tools" class="segmented select-tools" role="group" aria-label="Selection shape">

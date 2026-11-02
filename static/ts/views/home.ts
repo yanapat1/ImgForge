@@ -17,7 +17,7 @@
 // (s/<id>/#compare). Combined and embeddings sessions cannot be picked; a combined card lists its members (alias + name).
 // One innerHTML render per change, one delegated click listener on #home-body; no Plotly and no job polling here.
 
-import { api, errText, getJSON, postJSON } from '../core/api.js';
+import { errText, getJSON, postJSON } from '../core/api.js';
 import { toast } from '../core/toast.js';
 import { $, $req, esc, icon, ICONS } from '../core/dom.js';
 import { can as tierCan, cannot, isAdmin, pref, rememberPref } from '../core/auth.js';
@@ -32,6 +32,7 @@ import type { Role, Status } from '../types.js';
 import type { HomeExportTarget, HomeProject, HomeScope, HomeSession, HomeTask, SharedFields, WizardOpts } from '../types-home.js';
 import { openDialog, paras } from './dialog.js';
 import { timeAgo } from '../core/format.js';
+import { deferDelete } from '../core/defer-delete.js';
 
 // errs: what failed to load ({ds, lp}); the other list still shows
 // tab: 'viz' | 'label', picked on the first render (the remembered one, else the kind that has sessions)
@@ -191,9 +192,10 @@ function partsHTML(d: HomeSession): string {
 
 function cardHTML(d: HomeSession): string {
   const st = d.stats || {};
-  const stat = (v: number | null | undefined, label: string): string => (v == null ? '' : `<span><b class="num">${fmt(v)}</b>${label}</span>`);
-  const stats = d.kind === 'embeddings' ? stat(st.n_boxes, 'rows') + stat(st.n_classes, 'classes')
-    : stat(st.n_images, 'images') + stat(st.n_boxes, 'boxes') + stat(st.n_classes, 'classes');
+  // label: [one, many] ("1 class", "16 classes")
+  const stat = (v: number | null | undefined, [one, many]: [string, string]): string => (v == null ? '' : `<span><b class="num">${fmt(v)}</b>${v === 1 ? one : many}</span>`);
+  const stats = d.kind === 'embeddings' ? stat(st.n_boxes, ['row', 'rows']) + stat(st.n_classes, ['class', 'classes'])
+    : stat(st.n_images, ['image', 'images']) + stat(st.n_boxes, ['box', 'boxes']) + stat(st.n_classes, ['class', 'classes']);
   const classes = st.classes || [];
   const more = (st.n_classes || classes.length) - Math.min(MAX_CHIPS, classes.length);
   const chips = classes.slice(0, MAX_CHIPS).map((c, i) =>
@@ -632,11 +634,15 @@ async function combine(mode: 'compare' | 'combine'): Promise<void> {
   }
 }
 
-async function remove(id: string): Promise<void> {
+// no dataset file is touched by a removal, so no question first: it goes at once with Undo (core/defer-delete.ts)
+function remove(id: string): void {
   const d = H.sessions.find((x) => x.id === id);
-  if (!d || !(await confirmDlg({ title: `Remove the session “${d.name}”?`, ok: 'Remove', text: 'No dataset files are deleted; its cached crops and features stay on disk.' }))) return;
-  try { await api(`api/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch (e) { failLine(`remove “${d.name}”`, e, 'Could not'); return; }
-  await load();
+  if (!d) return;
+  deferDelete({
+    title: `Removed the session “${d.name}”`, url: `api/datasets/${encodeURIComponent(id)}`,
+    hide: () => { H.sessions = H.sessions.filter((x) => x.id !== id); render(); },
+    restore: load, after: load,
+  });
 }
 
 // ---- a removal question on the shared dialog (views/dialog.ts): resolves {checked} on OK, null when dismissed
@@ -659,8 +665,11 @@ async function removeProject(pid: string): Promise<void> {
     text: 'The labeling session leaves this list. Without the box below, its uploaded images and annotations stay on disk (the workspace labeling/ folder); source folders and buckets are never touched.',
     check: 'Also delete the uploaded images and every annotation (cannot be undone)' });
   if (!r) return;
-  try { await api(`api/label/projects/${encodeURIComponent(pid)}?delete_files=${r.checked ? 1 : 0}`, { method: 'DELETE' }); } catch (e) { failLine(`remove “${p.name}”`, e, 'Could not'); return; }
-  await load();
+  deferDelete({
+    title: `Removed “${p.name}”${r.checked ? ' and its files' : ''}`, url: `api/label/projects/${encodeURIComponent(pid)}?delete_files=${r.checked ? 1 : 0}`,
+    hide: () => { H.projects = H.projects.filter((x) => x.id !== pid); render(); },
+    restore: load, after: load,
+  });
 }
 
 // the label session names the wizard checks a new name against (minus the one being edited)

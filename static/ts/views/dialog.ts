@@ -19,6 +19,8 @@ export interface DialogOpts {
   onOk: (root: HTMLElement) => Promise<string | null> | string | null;
   /** the element to focus first (a selector inside the body), else the first field */
   focus?: string;
+  /** an information dialog: no Cancel button, only the action (e.g. Close) */
+  noCancel?: boolean;
   /** true while the form holds input worth keeping: a click on the backdrop then does not close the dialog */
   dirty?: (root: HTMLElement) => boolean;
 }
@@ -60,7 +62,7 @@ export function openDialog(o: DialogOpts): Promise<boolean> {
     `<button type="button" class="icon-btn ghost" data-dlg="cancel" aria-label="Close" title="Close (Esc)">${icon('x')}</button></header>` +
     `<div class="ui-dlg-body">${o.body}</div>` +
     '<div class="ui-dlg-err status-line err hidden" role="alert"></div>' +
-    `<div class="form-foot"><button type="button" class="ghost" data-dlg="cancel">Cancel</button>` +
+    `<div class="form-foot">${o.noCancel ? '' : '<button type="button" class="ghost" data-dlg="cancel">Cancel</button>'}` +
     `<button type="button" class="${o.okClass || 'primary'}" data-dlg="ok">${esc(o.ok)}</button></div></div>`;
   document.body.appendChild(wrap);
   const box = wrap.querySelector<HTMLElement>('.ui-dlg');

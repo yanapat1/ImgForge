@@ -23,7 +23,7 @@ import { PROMPTS_ACTIONS, PROMPTS_CHANGES, prInput, renderPromptsSec } from './p
 import { isAdmin } from '../core/auth.js';
 import { bindTagFields, commitTagDraft, sameTags } from '../core/tag-field.js';
 import { confirmDialog, trapTab } from '../views/dialog.js';
-import { toast } from '../core/toast.js';
+import { deferDelete } from '../core/defer-delete.js';
 
 // Datasets: local folders (read in place) and S3 / RustFS prefixes (stream or local cache), connections (S3, FTP,
 // SFTP, PostgreSQL, SQL Server), the labeling page's options + hotkeys, the AI assistant (LLM providers + feature
@@ -423,12 +423,13 @@ const SET_ACTIONS: Record<string, SetAction> = {
   'remove-ds': async (b) => {
     const d = SET.datasets.find((x) => x.id === rowAttr(b, '[data-id]', 'id'));
     if (!d) return;
-    if (!(await confirmDialog({ title: `Remove the session “${d.name}”?`, text: 'No dataset files are deleted.', ok: 'Remove', danger: true }))) return;
-    let err: string | null = null;              // e.g. a member of a combined dataset: shown above the list
-    try { await api(`api/datasets/${encodeURIComponent(d.id)}`, { method: 'DELETE' }); } catch (e) { err = errText(e); }
-    await loadSettingsData();
-    if (err) SET.error = `Could not remove “${d.name}”: ${err}`;
-    renderSettings();
+    // no dataset file is deleted: it goes at once, with Undo (a refusal, e.g. a member of a combined dataset, brings it back)
+    const reload = async (): Promise<void> => { await loadSettingsData(); renderSettings(); };
+    deferDelete({
+      title: `Removed the session “${d.name}”`, url: `api/datasets/${encodeURIComponent(d.id)}`,
+      hide: () => { SET.datasets = SET.datasets.filter((x) => x.id !== d.id); renderSettings(); },
+      restore: reload, after: async () => { await reload(); document.dispatchEvent(new Event('sessions-changed')); },
+    });
   },
   'new-conn': () => { SET.view = 'conn'; SET.form = { form: 'conn', conn: connDefaults('s3') }; renderSettings(); },
   'conn-kind': (b) => {
@@ -464,9 +465,12 @@ const SET_ACTIONS: Record<string, SetAction> = {
     const c = SET.conns.find((x) => x.id === rowAttr(b, '[data-cid]', 'cid'));
     if (!c) return;
     if (!(await confirmDialog({ title: `Delete the connection “${c.name}”?`, text: 'Its stored keys are removed from the server.', ok: 'Delete', danger: true }))) return;
-    try { await api(`api/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' }); } catch (e) { toast(`Could not delete “${c.name}”: ${errText(e)}`, 'err'); }
-    await loadSettingsData();
-    renderSettings();
+    const reload = async (): Promise<void> => { await loadSettingsData(); renderSettings(); };
+    deferDelete({
+      title: `Deleted the connection “${c.name}”`, url: `api/connections/${encodeURIComponent(c.id)}`,
+      hide: () => { SET.conns = SET.conns.filter((x) => x.id !== c.id); renderSettings(); },
+      restore: reload, after: reload,
+    });
   },
   look: (b) => { setLook(dd(b, 'look')); renderSettings(); },
   palette: (b) => { setPalette(dd(b, 'palette')); renderSettings(); },

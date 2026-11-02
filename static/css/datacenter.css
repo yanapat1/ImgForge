@@ -22,9 +22,8 @@ html[data-screen="data"] .viz-only, html[data-screen="data"] #home, html:not([da
 .dc-hsearch:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dc-hsearch .ico { color: var(--text-faint); }
 .dc-hsearch input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none; font-size: var(--fs-sm); padding: 0; }
-/* the wrapper's :focus-within ring is the indicator: the looks' `:root[data-look] :focus-visible` must not ring the bare input */
-:root .dc-hsearch input:focus-visible, :root .dc-input input:focus-visible,
-:root[data-look] .dc-hsearch input:focus-visible, :root[data-look] .dc-input input:focus-visible { outline: none; }
+/* the wrapper's :focus-within ring is the indicator: the bare input gets none */
+.dc-hsearch input:focus-visible, .dc-input input:focus-visible { outline: none; }
 .dc-hsearch input::-webkit-search-cancel-button, .dc-input input::-webkit-search-cancel-button { margin: 0 2px 0 4px; cursor: pointer; }
 .dc-only-narrow, .dc-only-overlay { display: none !important; }
 
@@ -423,7 +422,8 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .te { width: 360px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .te-head { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-sm); }
 .te-head b { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.te-box { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 5px; border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); border-radius: var(--r); background: var(--surface); }
+.te-box { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 5px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); }
+.te-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .te-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 3px 0 9px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-text); }
 .te-x { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; justify-content: center; }
 .te-x .ico { width: 11px; height: 11px; color: var(--accent-text); }
@@ -500,6 +500,7 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .dr-bar .model { font: 11.5px var(--mono); color: var(--text-faint); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; display: inline-flex; align-items: center; }
 .ok-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 6px; }
 .dr-bar .ask { flex: 1; height: 28px; max-width: 760px; min-width: 120px; padding: 0 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); font-size: var(--fs-sm); outline: none; }
+.dr-bar .ask:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dr-bar .ask:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .hintline { font-size: 11.5px; color: var(--text-faint); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
 .hintline .ico { width: 13px; height: 13px; }

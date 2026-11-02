@@ -29,7 +29,6 @@
 :root[data-look="soft"] .radio-card,
 :root[data-look="soft"] .theme-choice { border-color: transparent; background: var(--surface); box-shadow: var(--shadow-2); }
 :root[data-look="soft"] .theme-choice[aria-pressed="true"] { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); }
-:root[data-look="soft"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-look="soft"] .sec-sub { color: var(--text); }
 :root[data-look="soft"] dialog,
 :root[data-look="soft"] .modal-box { border-color: transparent; box-shadow: var(--shadow-3); }

@@ -18,7 +18,6 @@
 :root[data-look="editorial"] .radio-card,
 :root[data-look="editorial"] .theme-choice { box-shadow: none; background: var(--surface); }
 :root[data-look="editorial"] .theme-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-:root[data-look="editorial"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-look="editorial"] a { text-underline-offset: 3px; text-decoration-thickness: 1px; }
 
 /* accounts: a ruled sign-in card and dialogs that sit on the page like a plate */

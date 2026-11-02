@@ -14,7 +14,7 @@ import { modelsChanged } from '../views/model.js';
 import { SET, renderSettings } from './dialog.js';
 import { dd, fmtBytes, formOf, rowAttr, setDisabled, statusHTML, tagc } from './forms.js';
 import { confirmDialog } from '../views/dialog.js';
-import { toast } from '../core/toast.js';
+import { deferDelete } from '../core/defer-delete.js';
 
 const FAMILIES: Record<ModelFamily, [string, string]> = {
   yolo: ['YOLO', 'ultralytics detect models (YOLOv5u / v8 / 11 / 26 …). Class names come from the weights.'],
@@ -502,11 +502,13 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
     const m = SET.models.find((x) => x.id === rowAttr(b, '[data-mid]', 'mid'));
     if (!m) return;
     if (!(await confirmDialog({ title: `Remove the model “${m.name}”?`, text: 'Uploaded files are deleted; files elsewhere on the server are not touched.', ok: 'Remove', danger: true }))) return;
-    try { await api(`api/models/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); } catch (e) { toast(`Could not remove “${m.name}”: ${errText(e)}`, 'err'); }
-    await loadModelsData();
-    void modelsChanged();
-    if (onDataset()) void refreshStatus();
-    renderSettings();
+    const reload = async (): Promise<void> => { await loadModelsData(); renderSettings(); };
+    deferDelete({
+      title: `Removed the model “${m.name}”`, url: `api/models/${encodeURIComponent(m.id)}`,
+      hide: () => { SET.models = SET.models.filter((x) => x.id !== m.id); renderSettings(); },
+      restore: reload,
+      after: async () => { await reload(); void modelsChanged(); if (onDataset()) void refreshStatus(); },
+    });
   },
 };
 

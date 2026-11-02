@@ -149,7 +149,9 @@ button.big { height: 40px; padding: 0 var(--s5); font-size: var(--fs); border-ra
 .sc-stats b { color: var(--text); font-weight: 650; font-size: var(--fs-sm); margin-right: 4px; }
 /* the session's own tags, right under its name (buttons: a click filters, it does not open the card) */
 .sc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: -2px 0 2px; }
-.sc-tag { height: 20px; max-width: 100%; padding: 0 8px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 18px; }
+.sc-tag { height: 20px; max-width: 100%; padding: 0 8px; font-size: 11.5px; overflow: clip; overflow-clip-margin: 4px; text-overflow: ellipsis; display: inline-block; line-height: 18px; }
+/* user text (tags, names) in a fixed-height chip: overflow: clip with a margin lets Thai vowel / tone marks above and
+   below the line draw outside the box instead of being cut, the ellipsis still works */
 .sc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .sc-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 132px; padding: 1px 8px 1px 6px; border-radius: 999px;
   font-size: 11.5px; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border);
@@ -193,7 +195,7 @@ body.home-opening .session-card:not(.opening) { opacity: .6; }
 .tagf-n.full { color: var(--accent-text); font-weight: 650; }
 .tagf-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 36px; max-height: 140px; overflow: auto; padding: 4px;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r); cursor: text; }
-.tagf-box:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line); }
+.tagf-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tagf-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 24px; padding: 0 2px 0 9px; border-radius: 999px;
   font-size: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-text); }
 .tagf-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -210,7 +212,7 @@ body.home-opening .session-card:not(.opening) { opacity: .6; }
 .te-n.full { color: var(--accent-text); font-weight: 650; }
 .te-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 38px; max-height: 180px; overflow: auto; padding: 4px;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r); cursor: text; }
-.te-box:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line); }
+.te-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .te-chips { display: contents; }
 .te-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 24px; padding: 0 2px 0 9px; border-radius: 999px;
   font-size: 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent-text); }

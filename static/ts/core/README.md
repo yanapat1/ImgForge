@@ -3,6 +3,8 @@
 | File | Main exports |
 |---|---|
 | `dom.js` | `$` (getElementById), `esc` (HTML escape), `icon(name)` + `ICONS` (sprite URL), `rgba`, `mixHex` (blend two colours), `fmtEta`, `sleep`, `syncRanges` (slider fill), `isTypingTarget` (global keys skip inputs). No app state. |
+| `keys.js` | The **?** shortcut sheet: one list of each screen's keys (`registerKeys` adds the label page's mapped hotkeys), `bindKeyHelp` (main.ts). |
+| `defer-delete.js` | `deferDelete({title, url, hide, restore, after})`: remove with Undo: the item goes at once, the DELETE is sent after 8 s (or with keepalive when the page closes). Sessions, labeling sessions, models, connections. |
 | `format.js` | The one copy of the small formatters: `timeAgo` / `toMs` (Data Center re-exports them), `fmtCount`, `pct1`, and `saveFile(blob or text, name)` (every download). |
 | `api.js` | `apiFetch` (every request: `X-Requested-With` header, cookie, 401 → sign-in page once), `api`, `getJSON`, `postJSON`, `sendJSON` (non-2xx → `Error("path: status body")`), `isStatus`, `errText` (the server's `detail` message from such an error), `postXHR` (a POST with upload progress: both uploaders use it). |
 | `nav.js` | The page's URLs: `appRoot`, `homeUrl`, `vizUrl(id)` (`s/<id>/`), `labelUrl(pid)`, `dataUrl(bucket?, path?)` (`?data…`), `loginUrl(next)`, `sessionIdFromPath`, `safeNext`. No imports. |
