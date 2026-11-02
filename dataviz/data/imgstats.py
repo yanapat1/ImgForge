@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-VERSION = 1
+VERSION = 3            # 3: sharpness net of noise (floored), edges on a sigma-1 blur
 FILE = 'imgstats.npz'
 WORK = 512           # the light / sharpness / colour metrics: long side cut by an integer factor to <= this
 DRAFT = 1024         # JPEG draft decode keeps the long side at least this
@@ -42,8 +42,8 @@ METRICS = [
     ('bright_clip', 'light', 'blown highlights (% luma >= 247)', False, '%'),
     ('dyn_range', 'light', 'dynamic range (p99 - p1)', False, '0-255'),
     ('entropy', 'light', 'tonal entropy', False, 'bits'),
-    ('sharpness', 'sharpness', 'sharpness (Laplacian variance)', True, ''),
-    ('tenengrad', 'sharpness', 'edge strength (Sobel)', True, ''),
+    ('sharpness', 'sharpness', 'sharpness (Laplacian var, noise removed)', True, ''),
+    ('tenengrad', 'sharpness', 'edge strength (Tenengrad, noise removed)', True, ''),
     ('edge_density', 'sharpness', 'edge density (% Canny)', False, '%'),
     ('noise', 'noise', 'noise sigma (Immerkaer)', True, '0-255'),
     ('r_mean', 'colour', 'red mean', False, '0-255'),
@@ -124,6 +124,21 @@ def _exif(im):
     return cam, _ratio(iso) if iso is not None else math.nan, _ratio(sub.get(0x829A)), _ratio(sub.get(0x829D))
 
 
+_SOBEL_GAIN = []
+
+
+def _sobel_noise_gain():
+    """Sum of squares of the sigma-1 Gaussian + 3x3 Sobel kernel: the variance one gradient component gets from unit
+    white noise (computed once from an impulse)."""
+    if not _SOBEL_GAIN:
+        import cv2
+        d = np.zeros((31, 31), np.float32)
+        d[15, 15] = 1.0
+        k = cv2.Sobel(cv2.GaussianBlur(d, (0, 0), 1.0), cv2.CV_32F, 1, 0, ksize=3)
+        _SOBEL_GAIN.append(float((k * k).sum()))
+    return _SOBEL_GAIN[0]
+
+
 def noise_sigma(gray):
     """Immerkaer (1996) fast noise sigma of a grayscale float32 image, in 0..255 units."""
     import cv2
@@ -164,13 +179,20 @@ def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=(''
     p64 = h256.reshape(64, 4).sum(1) / n
     nz = p64[p64 > 0]
     vec[COL['entropy']] = float(-(nz * np.log2(nz)).sum())
-    vec[COL['sharpness']] = float(cv2.Laplacian(y, cv2.CV_32F).var())
-    gx = cv2.Sobel(y, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(y, cv2.CV_32F, 0, 1, ksize=3)
-    vec[COL['tenengrad']] = float(cv2.magnitude(gx, gy).mean())
+    # sharpness without the noise: a noisy soft image must not read as sharp. Laplacian variance minus the part
+    # white noise of the work image's own sigma adds (sum of the 3x3 kernel's squares = 20); edges on a sigma-1 blur
+    yf = y.astype(np.float32)
+    sw = noise_sigma(yf)
+    lap = float(cv2.Laplacian(yf, cv2.CV_32F).var())
+    vec[COL['sharpness']] = max(0.02 * lap, lap - 20.0 * sw * sw, 0.01)   # floored: a log scale, never 0
+    ys = cv2.GaussianBlur(y, (0, 0), 1.0)
+    gx = cv2.Sobel(ys, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(ys, cv2.CV_32F, 0, 1, ksize=3)
+    g2 = float(cv2.mean(gx * gx + gy * gy)[0])
+    vec[COL['tenengrad']] = math.sqrt(max(0.0, g2 - 2.0 * sw * sw * _sobel_noise_gain()))
     med = _pct(cum, n, 0.5)
     lo, hi = max(5.0, 0.66 * med), min(255.0, max(20.0, 1.33 * med))
-    vec[COL['edge_density']] = 100.0 * float(np.count_nonzero(cv2.Canny(y, lo, hi)) / n)
+    vec[COL['edge_density']] = 100.0 * float(np.count_nonzero(cv2.Canny(ys, lo, hi)) / n)
     f = small.reshape(-1, 3)
     mR, mG, mB = (float(v) for v in f.mean(0, dtype=np.float64))
     vec[COL['r_mean']], vec[COL['g_mean']], vec[COL['b_mean']] = mR, mG, mB

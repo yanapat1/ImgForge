@@ -94,7 +94,15 @@ def _q(v):
     return {'med': float(p50), 'p5': float(p5), 'p95': float(p95), 'mean': float(v.mean())}
 
 
-def compare_metric(a, b, log=False):
+# the smallest change worth a whole "effect" unit, per metric (in its own units; log metrics in log10): below it a
+# tight dataset's tiny spread would call a 2 % change major
+MIN_SCALE = {'brightness': 4.0, 'contrast': 3.0, 'dark_clip': 0.5, 'bright_clip': 0.5, 'dyn_range': 6.0, 'entropy': 0.1,
+             'edge_density': 0.3, 'r_mean': 4.0, 'g_mean': 4.0, 'b_mean': 4.0, 'saturation': 6.0, 'colorfulness': 4.0,
+             'cast_a': 1.5, 'cast_b': 1.5, 'wb_rg': 0.04, 'wb_bg': 0.04, 'aspect': 0.02, 'jpeg_q': 3.0, 'fnumber': 0.3}
+ABSOLUTE = ('cast_a', 'cast_b')                     # centred on 0: a change in units, never a percentage / ratio
+
+
+def compare_metric(a, b, log=False, key=''):
     """The statistics of one metric (NaNs dropped). None when a side has no value."""
     a, b = a[np.isfinite(a)], b[np.isfinite(b)]
     if not len(a) or not len(b):
@@ -103,7 +111,8 @@ def compare_metric(a, b, log=False):
     qa = np.quantile(ta, [0.25, 0.5, 0.75])
     qb = np.quantile(tb, [0.25, 0.5, 0.75])
     span = max(abs(qa[1]), abs(qb[1]))
-    scale = max((qa[2] - qa[0]) / 1.349, (qb[2] - qb[0]) / 1.349, 0.02 * span if not log else 0.01, 1e-9)
+    scale = max((qa[2] - qa[0]) / 1.349, (qb[2] - qb[0]) / 1.349, 0.05 * span if not log else 0.02,
+                MIN_SCALE.get(key, 0.0), 1e-9)
     effect = float((qb[1] - qa[1]) / scale)
     p1, p99 = np.quantile(a, [0.01, 0.99])
     out_a = float(((a < p1) | (a > p99)).mean())
@@ -114,9 +123,10 @@ def compare_metric(a, b, log=False):
     p = psi(a, b)
     score = max(p / PSI_REF, abs(effect), excess / OUT_REF)
     ma, mb = float(np.median(a)), float(np.median(b))
+    rel = key not in ABSOLUTE and ma > 1e-9 and mb >= 0
     return {'a': _q(a), 'b': _q(b), 'delta': mb - ma,
-            'delta_pct': (mb - ma) / abs(ma) * 100 if abs(ma) > 1e-9 else None,
-            'ratio': mb / ma if abs(ma) > 1e-9 else None,
+            'delta_pct': (mb - ma) / ma * 100 if rel else None,
+            'ratio': mb / ma if rel else None,
             'effect': effect, 'ks': ks_2samp(a, b), 'psi': p, 'w1': w1, 'out_a': out_a, 'out_b': out_b,
             'band': [float(p1), float(p99)], 'score': float(score), 'severity': severity(score),
             'n_a': len(a), 'n_b': len(b), 'low_n': bool(min(len(a), len(b)) < LOW_N)}
@@ -164,6 +174,11 @@ def auc_words(auc):
 
 # ---------------------------------------------------------------- recommendations
 
+def _ratio(by, k):
+    r = by[k].get('ratio')
+    return 1.0 if r is None else float(r)
+
+
 def _pct(x):
     return f'{abs(x):.0f}%'
 
@@ -189,7 +204,7 @@ def recommendations(by, cams, sep):
         out.append({'key': key, 'severity': sev(key) if key in by else 'minor', 'text': text, **({'aug': aug} if aug else {})})
 
     if bad('brightness'):
-        r = by['brightness']['ratio'] or 1
+        r = _ratio(by, 'brightness')
         need = abs(r - 1) + 0.1
         word = 'darker' if r < 1 else 'brighter'
         if need > hyp['hsv_v']:
@@ -199,7 +214,7 @@ def recommendations(by, cams, sep):
             f'exposure / lighting of the new setup.', {'hsv_v': hyp['hsv_v']})
     if bad('contrast') or bad('dyn_range'):
         k = 'contrast' if SEV_RANK[sev('contrast')] >= SEV_RANK[sev('dyn_range')] else 'dyn_range'
-        r = by[k]['ratio'] or 1
+        r = _ratio(by, k)
         add(k, f'Contrast differs: B has {_pct((r - 1) * 100)} {"less" if r < 1 else "more"} tonal spread. Add '
             f'RandomBrightnessContrast (contrast_limit ≈ {min(0.5, _round_up(abs(r - 1) + 0.05))}) or CLAHE.',
             {'albumentations': f'RandomBrightnessContrast(contrast_limit={min(0.5, _round_up(abs(r - 1) + 0.05))}, p=0.5)'})
@@ -210,11 +225,11 @@ def recommendations(by, cams, sep):
         add('bright_clip', f'B blows out more highlights ({by["bright_clip"]["b"]["med"]:.1f}% vs '
             f'{by["bright_clip"]["a"]["med"]:.1f}%): reduce exposure or glare; label examples of washed-out objects.')
     if bad('saturation') or bad('colorfulness'):
-        k = 'saturation' if bad('saturation') else 'colorfulness'
-        r = by[k]['ratio'] or 1
+        k = max((x for x in ('saturation', 'colorfulness') if x in by), key=lambda x: by[x]['score'])
+        r = _ratio(by, k)
         if abs(r - 1) + 0.1 > hyp['hsv_s']:
             hyp['hsv_s'] = min(0.9, _round_up(abs(r - 1) + 0.1))
-        add(k, f'Colour saturation differs: B is {_pct((r - 1) * 100)} {"duller" if r < 1 else "more saturated"}. '
+        add(k, f'Colour differs: B is {_pct((r - 1) * 100)} {"duller" if r < 1 else "more colourful"} ({k}). '
             f'Keep hsv_s ≥ {hyp["hsv_s"]}.', {'hsv_s': hyp['hsv_s']})
     tint = [k for k in ('cast_a', 'cast_b', 'wb_rg', 'wb_bg') if bad(k)]
     if tint:
@@ -228,7 +243,7 @@ def recommendations(by, cams, sep):
             'RGBShift.', {'hsv_h': hyp['hsv_h'], 'albumentations': 'RGBShift(10, 10, 10, p=0.3)'})
     if bad('sharpness') or bad('tenengrad'):
         k = 'sharpness' if bad('sharpness') else 'tenengrad'
-        r = by[k]['ratio'] or 1
+        r = _ratio(by, k)
         if r < 1:
             add(k, f'B is blurrier (sharpness {_pct((1 - r) * 100)} lower): check focus, motion blur (shutter speed) or '
                 'lens. Add Blur / MotionBlur augmentation so A-trained features survive soft edges.',
@@ -317,9 +332,10 @@ def _driver_text(key, m):
            'dark_clip': ('fewer crushed shadows', 'more crushed shadows'),
            'bright_clip': ('fewer blown highlights', 'more blown highlights'),
            'jpeg_q': ('more compressed', 'less compressed')}.get(key)
-    if lbl and r:
+    if lbl and r is not None:
         w = lbl[0] if r < 1 else lbl[1]
-        amt = f'{r:.1f}×' if r >= 2 or r <= 0.5 else _pct((r - 1) * 100)
+        amt = (f'×{r:.1f}' if r >= 2 else f'÷{1 / r:.1f}' if r > 0.01 else '÷100+') if r >= 2 or r <= 0.5 \
+            else _pct((r - 1) * 100)
         return f'{w} ({amt})'
     if key == 'cast_a':
         return 'more magenta' if m['delta'] > 0 else 'greener'
@@ -334,7 +350,7 @@ def build(ta, tb, a_alias='A', b_alias='B', totals=None):
     info = imgstats.metrics_info()
     metrics, by = [], {}
     for j, mi in enumerate(info):
-        st = compare_metric(ta.vec[:, j], tb.vec[:, j], mi['log'])
+        st = compare_metric(ta.vec[:, j], tb.vec[:, j], mi['log'], mi['key'])
         row = {**mi, 'available': st is not None}
         if st is not None:
             e = _edges(ta.vec[:, j][np.isfinite(ta.vec[:, j])], tb.vec[:, j][np.isfinite(tb.vec[:, j])], mi['log'])

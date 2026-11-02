@@ -384,3 +384,42 @@ export interface CmpState {
   keys: Uint8Array | null;             // core/cmp-keys.ts: the colour key per box of colour-by origin / diff
   keysFor: string;                     // what `keys` was built for ('' = stale)
 }
+
+// ---------------------------------------------------------------- Compare › Image conditions (data/shift.py)
+export type ShiftSeverity = 'ok' | 'minor' | 'moderate' | 'major' | 'n/a';
+export type ShiftGroup = 'light' | 'sharpness' | 'noise' | 'colour' | 'capture';
+export interface ShiftQ { med: number; p5: number; p95: number; mean: number }
+/** One metric of POST api/compare/shift: its statistics when both sides have a value (`available`). */
+export interface ShiftMetric {
+  key: string; group: ShiftGroup; label: string; log: boolean; unit: string; available: boolean; severity: ShiftSeverity;
+  n_a: number; n_b: number; a?: ShiftQ; b?: ShiftQ; delta?: number; delta_pct?: number | null; ratio?: number | null;
+  effect?: number; ks?: number; psi?: number; w1?: number; out_a?: number; out_b?: number; band?: [number, number];
+  score?: number; low_n?: boolean; edges?: number[]; ha?: number[]; hb?: number[];
+}
+export interface ShiftModelSide {
+  images: number; labels: number; mean_top: number; none_found: number; per_image: number; conf_hist: number[];
+  map50?: number; map?: number; p?: number; r?: number; best_f1?: number;
+}
+export interface ShiftCurve { x: number[]; a: Array<number | null>; b: Array<number | null>; n_a: number[]; n_b: number[] }
+export interface ShiftModel {
+  id: string; name: string; a: ShiftModelSide | null; b: ShiftModelSide | null; conf: number; hist_bins: number[];
+  drop?: number; map_drop?: number; conf_vs?: Record<string, ShiftCurve>;
+}
+export interface ShiftRec { key: string; severity: ShiftSeverity; text: string; aug?: Record<string, string | number> }
+export interface ShiftReport {
+  key: string; a: string; b: string;
+  n: { a: number; b: number; total_a?: number; total_b?: number; sample?: number; measured: number; failed: number };
+  metrics: ShiftMetric[];
+  groups: Record<string, { worst: ShiftSeverity; n: number }>;
+  curves: Record<'luma' | 'r' | 'g' | 'b', { a: number[]; b: number[] }>;
+  scatter: Record<'a' | 'b', Record<string, number[]>>;
+  cameras: { a: Array<[string, number]>; b: Array<[string, number]>; new_in_b: Array<[string, number]>; js: number };
+  formats: { a: Array<[string, number]>; b: Array<[string, number]> };
+  separability: { auc: number | null; words: string; drivers: Array<{ key: string; label: string; weight: number }>;
+    appearance: { feature: string; auc: number; words: string; n_a: number; n_b: number } | null };
+  recommendations: ShiftRec[];
+  hyp: Record<string, number>; hyp_yaml: string;
+  models: ShiftModel[];
+  verdict: { level: 'fits' | 'check' | 'shifted'; score: number; title: string; text: string; drivers: string[]; n_major: number; n_moderate: number };
+}
+export type ShiftResult = { ready: true; key: string; report: ShiftReport } | NotReady;

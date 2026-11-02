@@ -3,8 +3,9 @@
 // status / pair / iou per box id). Summary cards load the image browser (image categories) or the gallery (box
 // categories); the map shows A / B / both / only the changes, coloured by origin or by diff kind, over an optional
 // density-difference layer. Below: the shared map (Quick = A's own layout, or the Joint projection), the boxes of B
-// unlike anything in A, the class table with its reclass confusion, stat histograms with a KS distance, the members
-// with stale badges and "Promote to labeling". S.cmp is owned here; plot/render.ts only reads it.
+// unlike anything in A, the class table with its reclass confusion, stat histograms with a KS distance, Image
+// conditions (views/compare-shift.ts, loaded when opened: light / blur / noise / colour / camera shift and model fit),
+// the members with stale badges and "Promote to labeling". S.cmp is owned here; plot/render.ts only reads it.
 
 import type * as PL from 'plotly.js';
 import type { CmpListKey, CmpParams, CmpResult, CmpRunResult, CmpState, CmpSummary, Job, Points, QuickMap, QuickMapResult, UnionMember, UnionStatus } from '../types.js';
@@ -31,7 +32,11 @@ import { isImageUnit } from './preview.js';
 declare const Plotly: typeof import('plotly.js');
 
 /** The charts of this tab (layout.ts resizes them). */
-export const CMP_PLOTS = ['cmp-confusion', 'cmp-h-area', 'cmp-h-aspect', 'cmp-h-brightness', 'cmp-h-blur'];
+export const CMP_PLOTS = ['cmp-confusion', 'cmp-h-area', 'cmp-h-aspect', 'cmp-h-brightness', 'cmp-h-blur',
+  'shf-metric-chart', 'shf-light', 'shf-scatter', 'shf-model-conf', 'shf-model-vs'];     // + compare-shift.ts SHIFT_PLOTS
+
+/** Image conditions (views/compare-shift.ts), loaded when its section first opens. */
+let shiftMod: typeof import('./compare-shift.js') | null = null;
 
 interface CmpUi {
   members: UnionMember[];
@@ -142,6 +147,8 @@ function skeleton(): string {
     <details id="cmp-hist-d" class="cmp-sec"><summary>${img ? 'Image' : 'Box'} statistics <span class="muted">A vs B, KS distance</span></summary>
       <div class="cmp-hists"><div id="cmp-h-area" class="cmp-chart sm${iou}"></div><div id="cmp-h-aspect" class="cmp-chart sm${iou}"></div>
       <div id="cmp-h-brightness" class="cmp-chart sm"></div><div id="cmp-h-blur" class="cmp-chart sm"></div></div></details>
+    <details id="cmp-shift-d" class="cmp-sec"><summary>Image conditions <span class="muted">light · blur · noise · colour · camera: will a model trained on A fit B?</span></summary>
+      <div id="cmp-shift" class="cmp-shift"></div></details>
     <h3 class="cmp-h">Members</h3>
     <div id="cmp-members" class="cmp-members"></div>
     <div class="cmp-foot"><button type="button" id="cmp-promote" class="needs-labeler">${icon('upload')}Promote to labeling…</button></div>`;
@@ -219,6 +226,7 @@ function bindPanel(): void {
   });
   $req<HTMLDetailsElement>('cmp-conf-d').addEventListener('toggle', () => { if ($req<HTMLDetailsElement>('cmp-conf-d').open) renderConfusion(); });
   $req<HTMLDetailsElement>('cmp-hist-d').addEventListener('toggle', () => { if ($req<HTMLDetailsElement>('cmp-hist-d').open) renderHists(); });
+  $req<HTMLDetailsElement>('cmp-shift-d').addEventListener('toggle', () => { if ($req<HTMLDetailsElement>('cmp-shift-d').open) void openShift(); });
   body.addEventListener('input', (e) => {
     if (e.target instanceof HTMLInputElement && e.target.id === 'cmp-novel-thr') {
       U.novelThr = +e.target.value;
@@ -242,6 +250,7 @@ export async function showCompareTab(): Promise<void> {
 export async function runCompare(): Promise<void> {
   const C = cmp();
   const seq = ++U.seq;
+  shiftMod?.onPair();
   U.running = true;
   $req('cmp-status').textContent = `Comparing ${alias(C.a)} with ${alias(C.b)}…`;
   $req<HTMLButtonElement>('cmp-run').disabled = true;
@@ -662,6 +671,23 @@ function renderHists(): void {
     }, { ...cfg, displayModeBar: false });
   }
 }
+
+// ---------------------------------------------------------------- image conditions
+
+async function openShift(): Promise<void> {
+  if (shiftMod) return;
+  const mod = await import('./compare-shift.js');
+  if (shiftMod) return;
+  shiftMod = mod;
+  mod.initShift($req('cmp-shift'), {
+    pair: () => ({ a: cmp().a, b: cmp().b }),
+    alias,
+    feature: () => $<HTMLSelectElement>('feature')?.value ?? '',
+  });
+}
+
+/** The Image conditions report on screen (the assistant's page context), null before a run. */
+export const shiftReport = (): import('../types.js').ShiftReport | null => shiftMod?.shiftReport() ?? null;
 
 // ---------------------------------------------------------------- members + promote
 

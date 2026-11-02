@@ -53,6 +53,11 @@ def test_metrics_move_the_right_way():
     noisy = png(np.clip(a + n, 0, 255).astype(np.uint8))
     assert m(base, 'noise') < 1.5
     assert 7.5 < m(noisy, 'noise') < 12.5
+    soft_noisy = png(np.clip(cv2.GaussianBlur(a.astype(np.float32), (0, 0), 1.6) + rng.normal(0, 7, a.shape[:2] + (1,)), 0, 255)
+                     .astype(np.uint8))                     # a soft, noisy camera must not read as sharp
+    assert m(soft_noisy, 'sharpness') < 0.3 * m(base, 'sharpness')
+    assert m(soft_noisy, 'tenengrad') < m(base, 'tenengrad')
+    assert abs(m(noisy, 'sharpness') / m(base, 'sharpness') - 1) < 0.15
     blue = a.astype(np.int16)
     blue[..., 2] += 40
     blue = png(np.clip(blue, 0, 255).astype(np.uint8))
