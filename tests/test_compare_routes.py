@@ -35,7 +35,7 @@ def world(pg, tmp_path):
     ctx, app = make_viz_app(tmp_path / 'ws')
     c = client(app)
     assert login(c, 'alice').status_code == 200
-    return {'c': c, 'U': U, 'plain': plain, 'ctx': ctx}
+    return {'c': c, 'U': U, 'plain': plain, 'ctx': ctx, 'alice': alice}
 
 
 def test_known_answer(world):
@@ -147,6 +147,75 @@ def test_image_conditions(world, tmp_path):
     pv = c.get(f'/s/{U}/api/compare/shift/preview', params={'key': key, 'name': 'A/same.jpg'})
     assert pv.status_code == 200 and pv.headers['content-type'] == 'image/jpeg'
     assert pv.content[:2] == b'\xff\xd8' and 'brightness_gain' in pv.headers['x-shift-params']
+    pc = c.get(f'/s/{U}/api/compare/shift/preview', params={'key': key, 'name': 'B/renamed.jpg', 'mode': 'correct'})
+    assert pc.status_code == 200 and pc.content[:2] == b'\xff\xd8' and 'residual' in pc.headers['x-shift-params']
+    lut = c.get(f'/s/{U}/api/compare/shift/lut', params={'key': key})
+    assert lut.status_code == 200 and 'attachment' in lut.headers['content-disposition']
+    lj = lut.json()
+    assert len(lj['lut']) == 3 and all(len(ch) == 256 for ch in lj['lut']) and lj['usage']
+    assert rep['light_map'] and len(rep['light_map']['diff']) == 4 and rep['exposure_mix']['a']['n'] >= 1
+    assert 'ci' in rep['metrics'][0] and 'q' in rep['metrics'][0]
+    assert c.get(f'/s/{U}/api/compare/shift/images', params={'key': key, 'which': 'uncovered'}).json()['names'] == []
     assert c.get(f'/s/{U}/api/compare/shift/images', params={'key': 'nope', 'which': 'most_b'}).status_code == 404
     assert c.post(f'/s/{U}/api/compare/shift', json={'a': 'A', 'b': 'A'}).status_code == 400
     assert c.post(f'/s/{world["plain"]}/api/compare/shift', json=body).status_code == 409
+
+
+def test_stress_test_route(world, monkeypatch):
+    """POST /api/compare/stress: a model (faked: finds every label unless the image is dark) under the brightness
+    axis on A's labelled images: a job, then the cached result + summary with B placed from the shift report; the
+    preview of one level; unknown model 404, bad axis 400."""
+    from types import SimpleNamespace
+
+    import numpy as np
+    from conftest import wait_job
+
+    from dataviz.models import predict, runners
+    from dataviz.models.registry import ModelRegistry
+    from dataviz.models.service import ModelService
+    c, U, ctx = world['c'], world['U'], world['ctx']
+    st = ctx.state_for(U)
+    monkeypatch.setattr(ctx, 'models', ModelRegistry(ctx.datasets.root), raising=False)
+    monkeypatch.setattr(ctx, 'model_service', ModelService(ctx.models, ctx.cfg), raising=False)
+    m = ctx.models.upsert({'name': 'det', 'family': 'yolo', 'format': 'api', 'api': {'url': 'http://fake'}},
+                          owner_id=world['alice']['id'], admin=True)
+    gt = {nm: [st.samples[i] for i in ids] for nm, ids in st.by_image.items()}
+    runner = SimpleNamespace(names=['cat', 'dog'], draft_size=None, imgsz=640, batch_size=4, max_batch=None)
+    monkeypatch.setattr(runners, 'get_runner', lambda *a: runner)
+    order = []
+
+    def fake(mm, fp, wd, batch):
+        out = []
+        for im in batch:
+            nm = order.pop(0) if order else None
+            dark = float(np.asarray(im.convert('L')).mean()) < 40
+            boxes = [] if dark or nm is None else [list(s['bbox']) + [0.9, s['cls']] for s in gt.get(nm, [])]
+            out.append(np.array(boxes, np.float32).reshape(-1, 6))
+        return out
+    monkeypatch.setattr(predict, 'predict_batch', fake)
+    from dataviz.data import stress as stresslib
+    real_run = stresslib.run
+
+    def run(state, mm, fp, wd, names, axes, conf, job=None, labelled=True):
+        # each predict pass walks the names in order: feed the fake its image names
+        n_pass = 1 + sum(len([lv for lv in stresslib.AXES[a][1] if lv != stresslib.AXES[a][2]]) for a in axes)
+        order.extend(names * n_pass)
+        return real_run(state, mm, fp, wd, names, axes, conf, job, labelled)
+    monkeypatch.setattr(stresslib, 'run', run)
+    body = {'member': 'A', 'model': m['id'], 'n': 50, 'axes': ['brightness']}
+    r = c.post(f'/s/{U}/api/compare/stress', json=body)
+    assert r.status_code == 200, r.text
+    first = r.json()
+    assert first['ready'] is False
+    wait_job(c, first['job_id'])
+    got = c.post(f'/s/{U}/api/compare/stress', json=body).json()
+    assert got['ready'] and got['result']['labelled'] and got['result']['n'] == 3
+    rows = {x['level']: x['map50'] for x in got['result']['axes'][0]['rows']}
+    assert rows[1.0] > 0.95 and rows[0.3] < rows[1.0]
+    assert got['summary']['axes'][0]['b'] is None                       # no shift report key given
+    assert c.get('/s/' + U + '/api/compare/stress/axes').json()['axes'][0]['key'] == 'brightness'
+    pv = c.get(f'/s/{U}/api/compare/stress/preview', params={'name': 'A/same.jpg', 'axis': 'blur', 'level': 2})
+    assert pv.status_code == 200 and pv.content[:2] == b'\xff\xd8'
+    assert c.get(f'/s/{U}/api/compare/stress/preview', params={'name': 'A/same.jpg', 'axis': 'x', 'level': 2}).status_code == 400
+    assert c.post(f'/s/{U}/api/compare/stress', json={**body, 'model': 'nope'}).status_code == 404
+    assert c.post(f'/s/{U}/api/compare/stress', json={**body, 'member': 'Z'}).status_code == 400

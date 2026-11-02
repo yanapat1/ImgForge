@@ -10,7 +10,8 @@ One decode per image (PIL, then cv2 / numpy, which release the GIL: a thread poo
     the rest   on the image shrunk by an integer factor to a long side in (WORK/2, WORK] (INTER_AREA): about one
                scale for every camera, so sharpness and edge density compare across resolutions
 Every metric is a float32 column (METRICS: key, group, label, log-scale flag); NaN = not available (EXIF missing,
-not a JPEG). `hist` per image: 32-bin luma + 32-bin R, G, B shares (the light / colour curves).
+not a JPEG). `hist` per image: 32-bin luma + 32-bin R, G, B shares (the light / colour curves) + the 4x4 grid of
+mean luma (the light map: vignetting, uneven light, light direction).
 
 Cache <member workspace>/imgstats.npz (atomic replace), keyed by the member's own image name + image_sig: every
 combined dataset that contains the member reuses it, and only new / changed images are read again.
@@ -27,12 +28,15 @@ from pathlib import Path
 
 import numpy as np
 
-VERSION = 3            # 3: sharpness net of noise (floored), edges on a sigma-1 blur
+VERSION = 4            # 4: light layout (grid, vignetting, direction), haze, CCT, blur direction, chroma noise,
+                      #    JPEG blocking, EXIF hour; 3: sharpness net of noise (floored), edges on a sigma-1 blur
 FILE = 'imgstats.npz'
 WORK = 512           # the light / sharpness / colour metrics: long side cut by an integer factor to <= this
 DRAFT = 1024         # JPEG draft decode keeps the long side at least this
 NOISE_CROP = 512
 NHIST = 32
+GRID = 4             # the light map: GRID x GRID cells of mean luma
+HIST_W = 4 * NHIST + GRID * GRID
 
 # key, group, label, log scale (for the histograms), unit / hint
 METRICS = [
@@ -42,10 +46,19 @@ METRICS = [
     ('bright_clip', 'light', 'blown highlights (% luma >= 247)', False, '%'),
     ('dyn_range', 'light', 'dynamic range (p99 - p1)', False, '0-255'),
     ('entropy', 'light', 'tonal entropy', False, 'bits'),
+    ('midtone', 'light', 'midtones (median luma)', False, '0-255'),
+    ('local_contrast', 'light', 'local contrast (16 px block std)', False, '0-255'),
+    ('vignetting', 'light', 'vignetting (corners / centre luma)', False, 'ratio'),
+    ('uniformity', 'light', 'uneven light (4x4 grid CV)', False, '%'),
+    ('light_dx', 'light', 'light direction left(-) / right(+)', False, '%'),
+    ('light_dy', 'light', 'light direction top(-) / bottom(+)', False, '%'),
+    ('haze', 'light', 'haze / glare (dark channel)', False, '0-255'),
     ('sharpness', 'sharpness', 'sharpness (Laplacian var, noise removed)', True, ''),
     ('tenengrad', 'sharpness', 'edge strength (Tenengrad, noise removed)', True, ''),
     ('edge_density', 'sharpness', 'edge density (% Canny)', False, '%'),
+    ('blur_aniso', 'sharpness', 'blur direction (0 round / 1 one way: motion)', False, '0-1'),
     ('noise', 'noise', 'noise sigma (Immerkaer)', True, '0-255'),
+    ('chroma_noise', 'noise', 'colour noise sigma (Lab a*, b*)', False, '0-255'),
     ('r_mean', 'colour', 'red mean', False, '0-255'),
     ('g_mean', 'colour', 'green mean', False, '0-255'),
     ('b_mean', 'colour', 'blue mean', False, '0-255'),
@@ -55,15 +68,18 @@ METRICS = [
     ('cast_b', 'colour', 'tint blue(-) / yellow(+) (Lab b*)', False, ''),
     ('wb_rg', 'colour', 'white balance R / G', False, 'ratio'),
     ('wb_bg', 'colour', 'white balance B / G', False, 'ratio'),
+    ('cct', 'colour', 'colour temperature (McCamy)', False, 'K'),
     ('width', 'capture', 'width', False, 'px'),
     ('height', 'capture', 'height', False, 'px'),
     ('megapixels', 'capture', 'megapixels', True, 'MP'),
     ('aspect', 'capture', 'aspect w / h', False, ''),
     ('bytes_per_px', 'capture', 'file bytes per pixel', True, 'B/px'),
     ('jpeg_q', 'capture', 'JPEG quality (estimated)', False, '1-100'),
+    ('blockiness', 'capture', 'JPEG blocking (8 px edges / inside)', False, 'ratio'),
     ('iso', 'capture', 'ISO (EXIF)', True, ''),
     ('exposure', 'capture', 'exposure time (EXIF)', True, 's'),
     ('fnumber', 'capture', 'f-number (EXIF)', False, 'f/'),
+    ('hour', 'capture', 'time of day (EXIF)', False, 'h'),
 ]
 KEYS = [m[0] for m in METRICS]
 COL = {k: i for i, k in enumerate(KEYS)}
@@ -101,14 +117,27 @@ def _ratio(v):
         return math.nan
 
 
+NO_EXIF = ('', math.nan, math.nan, math.nan, math.nan)
+
+
+def _hour(v):
+    """'YYYY:MM:DD HH:MM:SS' -> hour + minute / 60, NaN when it does not parse."""
+    try:
+        t = str(v).strip().strip('\x00').split(' ')[1].split(':')
+        h, mi = int(t[0]), int(t[1])
+        return h + mi / 60.0 if 0 <= h < 24 and 0 <= mi < 60 else math.nan
+    except (IndexError, ValueError, TypeError):
+        return math.nan
+
+
 def _exif(im):
-    """(camera 'Make Model' or '', iso, exposure s, f-number) from the header."""
+    """(camera 'Make Model' or '', iso, exposure s, f-number, hour of day) from the header."""
     try:
         ex = im.getexif()
     except Exception:          # noqa: BLE001 - broken EXIF block: no camera facts
-        return '', math.nan, math.nan, math.nan
+        return NO_EXIF
     if not ex:
-        return '', math.nan, math.nan, math.nan
+        return NO_EXIF
     make = str(ex.get(0x010F) or '').strip().strip('\x00')
     model = str(ex.get(0x0110) or '').strip().strip('\x00')
     if make and model.lower().startswith(make.lower()):
@@ -121,7 +150,9 @@ def _exif(im):
     iso = sub.get(0x8827)
     if isinstance(iso, (tuple, list)):
         iso = iso[0] if iso else None
-    return cam, _ratio(iso) if iso is not None else math.nan, _ratio(sub.get(0x829A)), _ratio(sub.get(0x829D))
+    dt = sub.get(0x9003) or sub.get(0x9004) or ex.get(0x0132)
+    return (cam, _ratio(iso) if iso is not None else math.nan, _ratio(sub.get(0x829A)), _ratio(sub.get(0x829D)),
+            _hour(dt) if dt else math.nan)
 
 
 _SOBEL_GAIN = []
@@ -139,6 +170,34 @@ def _sobel_noise_gain():
     return _SOBEL_GAIN[0]
 
 
+_DIR_GAIN = []
+
+
+def _dir_derivs(ys):
+    """Second derivatives of `ys` along 0, 45, 90 and 135 degrees (3x3 Sobel)."""
+    import cv2
+    dxx = cv2.Sobel(ys, cv2.CV_32F, 2, 0, ksize=3)
+    dyy = cv2.Sobel(ys, cv2.CV_32F, 0, 2, ksize=3)
+    dxy = cv2.Sobel(ys, cv2.CV_32F, 1, 1, ksize=3)
+    return dxx, 0.5 * (dxx + dyy) + dxy, dyy, 0.5 * (dxx + dyy) - dxy
+
+
+def blur_direction(ys, sigma):
+    """0 = blur the same every way (defocus / none), towards 1 = edges smeared one way (motion blur): 1 - min / max of
+    the second-derivative energy along 4 directions of the sigma-1 blurred luma `ys`, white noise of `sigma` removed.
+    A second derivative falls with the cube of the smear, so a few pixels of motion stand out of the content's own
+    direction mix."""
+    import cv2
+    if not _DIR_GAIN:                                        # unit white noise -> energy per direction (once)
+        d = np.zeros((31, 31), np.float32)
+        d[15, 15] = 1.0
+        _DIR_GAIN.extend(float((k * k).sum()) for k in _dir_derivs(cv2.GaussianBlur(d, (0, 0), 1.0)))
+    yv = ys.astype(np.float32)
+    e = [max(float(cv2.mean(k * k)[0]) - sigma * sigma * g, 0.0) for k, g in zip(_dir_derivs(yv), _DIR_GAIN)]
+    hi = max(e)
+    return 1.0 - min(e) / hi if hi > 1e-6 else 0.0
+
+
 def noise_sigma(gray):
     """Immerkaer (1996) fast noise sigma of a grayscale float32 image, in 0..255 units."""
     import cv2
@@ -153,16 +212,58 @@ def _pct(cum, n, p):
     return float(np.searchsorted(cum, p * n))
 
 
-def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=('', math.nan, math.nan, math.nan)):
-    """(vec float32[len(METRICS)], hist float32[4*NHIST]) of an RGB uint8 array. size: the original (w, h)."""
+# sRGB -> linear lookup (0..255 -> 0..1) and linear sRGB -> CIE XYZ (D65)
+_LIN = np.where(np.arange(256) / 255.0 <= 0.04045, np.arange(256) / 255.0 / 12.92,
+                ((np.arange(256) / 255.0 + 0.055) / 1.055) ** 2.4)
+_XYZ = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]])
+
+
+def cct_of_rgb(lin_rgb):
+    """McCamy (1992) correlated colour temperature in kelvin of a mean linear sRGB triple, clipped to 1500..20000."""
+    X, Y, Z = _XYZ @ np.asarray(lin_rgb, np.float64)
+    s = X + Y + Z
+    if s <= 1e-9:
+        return math.nan
+    x, y = X / s, Y / s
+    if abs(0.1858 - y) < 1e-9:
+        return math.nan
+    nn = (x - 0.3320) / (0.1858 - y)
+    return float(min(20000.0, max(1500.0, 449.0 * nn ** 3 + 3525.0 * nn ** 2 + 6823.3 * nn + 5520.33)))
+
+
+def blockiness(gray):
+    """JPEG 8x8 blocking of a grayscale crop (aligned to the image's own 8 px grid): the mean |step| across block
+    boundaries / the mean |step| inside blocks. ~1 = no blocking, > 1.2 = visible blocks."""
+    g = gray.astype(np.float32)
+    if g.shape[0] < 32 or g.shape[1] < 32:
+        return math.nan
+    dx = np.abs(np.diff(g, axis=1))                          # dx[:, j] = step between column j and j + 1
+    dy = np.abs(np.diff(g, axis=0))
+    cb = np.arange(dx.shape[1]) % 8 == 7
+    rb = np.arange(dy.shape[0]) % 8 == 7
+    inside = float(dx[:, ~cb].mean() + dy[~rb].mean())
+    edge = float(dx[:, cb].mean() + dy[rb].mean())
+    return edge / inside if inside > 0.05 else math.nan
+
+
+def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=NO_EXIF):
+    """(vec float32[len(METRICS)], hist float32[HIST_W]) of an RGB uint8 array. size: the original (w, h)."""
     import cv2
     h0, w0 = rgb.shape[:2]
     W, H = size or (w0, h0)
     vec = np.full(len(KEYS), np.nan, np.float32)
     # noise on the decoded pixels (centre crop) - before any resize smooths it away
     cy, cx, hc = h0 // 2, w0 // 2, NOISE_CROP // 2
-    crop = cv2.cvtColor(np.ascontiguousarray(rgb[max(0, cy - hc):cy + hc, max(0, cx - hc):cx + hc]), cv2.COLOR_RGB2GRAY)
+    y0, x0 = max(0, cy - hc) // 8 * 8, max(0, cx - hc) // 8 * 8      # on the 8 px JPEG block grid
+    crgb = np.ascontiguousarray(rgb[y0:y0 + NOISE_CROP, x0:x0 + NOISE_CROP])
+    crop = cv2.cvtColor(crgb, cv2.COLOR_RGB2GRAY)
     vec[COL['noise']] = noise_sigma(crop.astype(np.float32))
+    clab = cv2.cvtColor(crgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    vec[COL['chroma_noise']] = 0.5 * (noise_sigma(np.ascontiguousarray(clab[..., 1])) +
+                                      noise_sigma(np.ascontiguousarray(clab[..., 2])))
+    # blocking only means something on the pixels as decoded (a drafted JPEG keeps a scaled grid: 8 / scale)
+    if fmt == 'JPEG' and (W, H) == (w0, h0):
+        vec[COL['blockiness']] = blockiness(crop)
     k = -(-max(h0, w0) // WORK)                            # an integer factor: OpenCV's fast INTER_AREA path
     small = cv2.resize(rgb, (max(1, w0 // k), max(1, h0 // k)), interpolation=cv2.INTER_AREA) if k > 1 else rgb
     y = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
@@ -179,6 +280,20 @@ def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=(''
     p64 = h256.reshape(64, 4).sum(1) / n
     nz = p64[p64 > 0]
     vec[COL['entropy']] = float(-(nz * np.log2(nz)).sum())
+    vec[COL['midtone']] = _pct(cum, n, 0.5)
+    yf32 = y.astype(np.float32)
+    mu = cv2.blur(yf32, (16, 16))
+    vec[COL['local_contrast']] = float(np.sqrt(np.maximum(cv2.blur(yf32 * yf32, (16, 16)) - mu * mu, 0)).mean())
+    grid = cv2.resize(yf32, (GRID, GRID), interpolation=cv2.INTER_AREA).astype(np.float64)
+    gm = max(float(grid.mean()), 1e-3)
+    corners = (grid[0, 0] + grid[0, -1] + grid[-1, 0] + grid[-1, -1]) / 4.0
+    centre = float(grid[1:3, 1:3].mean())
+    vec[COL['vignetting']] = corners / max(centre, 1e-3)
+    vec[COL['uniformity']] = 100.0 * float(grid.std()) / gm
+    vec[COL['light_dx']] = 100.0 * float(grid[:, GRID // 2:].mean() - grid[:, :GRID // 2].mean()) / gm
+    vec[COL['light_dy']] = 100.0 * float(grid[GRID // 2:].mean() - grid[:GRID // 2].mean()) / gm
+    dark = cv2.erode(small.min(axis=2), np.ones((7, 7), np.uint8))
+    vec[COL['haze']] = float(dark.mean(dtype=np.float64))
     # sharpness without the noise: a noisy soft image must not read as sharp. Laplacian variance minus the part
     # white noise of the work image's own sigma adds (sum of the 3x3 kernel's squares = 20); edges on a sigma-1 blur
     yf = y.astype(np.float32)
@@ -189,6 +304,7 @@ def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=(''
     gx = cv2.Sobel(ys, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(ys, cv2.CV_32F, 0, 1, ksize=3)
     g2 = float(cv2.mean(gx * gx + gy * gy)[0])
+    vec[COL['blur_aniso']] = blur_direction(ys, sw)
     vec[COL['tenengrad']] = math.sqrt(max(0.0, g2 - 2.0 * sw * sw * _sobel_noise_gain()))
     med = _pct(cum, n, 0.5)
     lo, hi = max(5.0, 0.66 * med), min(255.0, max(20.0, 1.33 * med))
@@ -198,6 +314,8 @@ def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=(''
     vec[COL['r_mean']], vec[COL['g_mean']], vec[COL['b_mean']] = mR, mG, mB
     vec[COL['wb_rg']] = mR / max(mG, 1e-3)
     vec[COL['wb_bg']] = mB / max(mG, 1e-3)
+    bc = [np.bincount(f[:, c], minlength=256) for c in range(3)]          # reused for the RGB curves below
+    vec[COL['cct']] = cct_of_rgb([float(bc[c] @ _LIN) / max(1, len(f)) for c in range(3)])
     hsv = cv2.cvtColor(small, cv2.COLOR_RGB2HSV)
     vec[COL['saturation']] = float(hsv[..., 1].mean(dtype=np.float64))
     ff = small.astype(np.float32)
@@ -213,11 +331,12 @@ def measure_array(rgb, *, size=None, nbytes=None, fmt='', qtables=None, exif=(''
     if nbytes:
         vec[COL['bytes_per_px']] = nbytes / max(1, W * H)
     vec[COL['jpeg_q']] = jpeg_quality(qtables) if fmt == 'JPEG' else math.nan
-    _, vec[COL['iso']], vec[COL['exposure']], vec[COL['fnumber']] = exif
-    hist = np.empty(4 * NHIST, np.float32)
+    _, vec[COL['iso']], vec[COL['exposure']], vec[COL['fnumber']], vec[COL['hour']] = exif
+    hist = np.empty(HIST_W, np.float32)
     hist[:NHIST] = h256.reshape(NHIST, -1).sum(1) / n
     for c in range(3):
-        hist[NHIST * (c + 1):NHIST * (c + 2)] = np.bincount(f[:, c] >> 3, minlength=NHIST)[:NHIST] / n
+        hist[NHIST * (c + 1):NHIST * (c + 2)] = bc[c].reshape(NHIST, -1).sum(1) / n
+    hist[4 * NHIST:] = (grid / 255.0).ravel()
     return vec, hist
 
 
@@ -286,7 +405,7 @@ def _save(path, rows):
     ci, fi = {c: i for i, c in enumerate(cams)}, {f: i for i, f in enumerate(fmts)}
     k = len(names)
     vec = np.stack([rows[n][1] for n in names]).astype(np.float32) if k else np.zeros((0, len(KEYS)), np.float32)
-    hist = np.stack([rows[n][2] for n in names]).astype(np.float16) if k else np.zeros((0, 4 * NHIST), np.float16)
+    hist = np.stack([rows[n][2] for n in names]).astype(np.float16) if k else np.zeros((0, HIST_W), np.float16)
     tmp = Path(path).with_name(f'{FILE}.{os.getpid()}.{threading.get_ident()}.tmp')
     with open(tmp, 'wb') as fh:
         np.savez(fh, version=np.int32(VERSION), keys=np.array(KEYS), names=np.array(names, dtype=str),
@@ -367,7 +486,7 @@ def ensure(ws, names, read_bytes, sig_of=None, progress=None, cancelled=None, wo
     k = len(got)
     return Table(names=got,
                  vec=np.stack([rows[n][1] for n in got]).astype(np.float32) if k else np.zeros((0, len(KEYS)), np.float32),
-                 hist=np.stack([rows[n][2] for n in got]).astype(np.float32) if k else np.zeros((0, 4 * NHIST), np.float32),
+                 hist=np.stack([rows[n][2] for n in got]).astype(np.float32) if k else np.zeros((0, HIST_W), np.float32),
                  camera=[rows[n][3] for n in got], fmt=[rows[n][4] for n in got],
                  measured=len(todo) - len(failed), failed=len(failed))
 

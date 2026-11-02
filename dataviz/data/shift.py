@@ -6,13 +6,17 @@ dataset, from their image-condition tables (data/imgstats.py). Pure numpy + scik
 Per metric (A vs B):
     median / p5 / p95 per side, delta and delta %, effect = delta of medians / robust scale (IQR / 1.349, on log10
     for log-scale metrics), KS (two-sample, exact on the samples), PSI (10 bins at A's deciles), W1 / scale,
-    out_b = share of B outside A's p1..p99 (A's own share is ~2%: the excess is what A never showed a model).
+    out_b = share of B outside A's p1..p99 (A's own share is ~2%: the excess is what A never showed a model),
+    ci = 95 % bootstrap interval of the median delta, p = KS p-value, q = Benjamini-Hochberg over the metrics (evidence
+    only: with thousands of images everything is "significant", severity stays on the effect size).
     score = max(PSI / PSI_REF, |effect|, excess / OUT_REF)  ->  ok < 0.35 <= minor < 0.75 <= moderate < 1.5 <= major
 Separability: a logistic regression told to say A or B from the pixel metrics (light, sharpness, noise, colour), 5-fold
     cross-validated ROC AUC: 0.5 = the two look alike, 1.0 = every image gives its side away. Its out-of-fold P(B) ranks
     "the most B-like images" (the ones to label first). The same on a feature (embedding) = the appearance AUC.
 Model fit (model_fit): a model's cached predictions scored on A's images and on B's separately (mAP50 when there are
     labels), plus label-free signals: mean top confidence per image, images with nothing found, confidence vs metric.
+Light layout: the mean 4x4 luma grid of A and B (light map), the exposure mix (dark / dim / normal / bright images).
+Correction: a per-channel LUT matching B's tone / colour curves to A's (fix B at inference instead of retraining).
 Verdict: fits / check / shifted, the drivers in words, rule-based recommendations and an Ultralytics hyp snippet.
 """
 
@@ -30,7 +34,12 @@ PIXEL_GROUPS = ('light', 'sharpness', 'noise', 'colour')
 NBINS = 30
 SCATTER_MAX = 3000
 LOW_N = 30
-HEADLINE = ('brightness', 'contrast', 'dark_clip', 'bright_clip', 'sharpness', 'noise', 'saturation', 'cast_a', 'cast_b')
+HEADLINE = ('brightness', 'contrast', 'dark_clip', 'bright_clip', 'sharpness', 'noise', 'saturation', 'cast_a', 'cast_b',
+            'vignetting', 'uniformity', 'cct', 'haze', 'blur_aniso', 'chroma_noise')
+BOOT = 200              # bootstrap resamples for the median-delta interval
+BOOT_MAX = 3000         # rows per side the bootstrap draws from
+EXPOSURE = [('dark', 60), ('dim', 100), ('normal', 160), ('bright', math.inf)]   # by mean luma
+LOW_CONTRAST = 25.0     # luma std below this = a flat image
 
 
 def severity(score):
@@ -51,6 +60,43 @@ def ks_2samp(x, y):
         return 0.0
     allv = np.concatenate([x, y])
     return float(np.abs(np.searchsorted(x, allv, 'right') / len(x) - np.searchsorted(y, allv, 'right') / len(y)).max())
+
+
+def ks_pvalue(d, n, m):
+    """Asymptotic two-sided p-value of a two-sample KS statistic d (Stephens' small-sample correction)."""
+    if d <= 0 or not n or not m:
+        return 1.0
+    en = math.sqrt(n * m / (n + m))
+    lam = (en + 0.12 + 0.11 / en) * d
+    if lam < 0.2:
+        return 1.0
+    k = np.arange(1, 101)
+    return float(min(1.0, max(0.0, 2.0 * np.sum((-1.0) ** (k - 1) * np.exp(-2.0 * k * k * lam * lam)))))
+
+
+def bh(p):
+    """Benjamini-Hochberg adjusted q-values of the p-values `p` (same order)."""
+    p = np.asarray(p, np.float64)
+    m = len(p)
+    if not m:
+        return p
+    o = np.argsort(p)
+    q = p[o] * m / np.arange(1, m + 1)
+    q = np.minimum.accumulate(q[::-1])[::-1]
+    out = np.empty(m)
+    out[o] = np.minimum(q, 1.0)
+    return out
+
+
+def boot_ci(a, b, reps=BOOT, cap=BOOT_MAX, seed=0):
+    """95 % bootstrap interval of median(b) - median(a), vectorised (one index matrix per side)."""
+    rng = np.random.default_rng(seed)
+    a = a if len(a) <= cap else a[rng.choice(len(a), cap, replace=False)]
+    b = b if len(b) <= cap else b[rng.choice(len(b), cap, replace=False)]
+    ma = np.median(a[rng.integers(0, len(a), (reps, len(a)))], axis=1)
+    mb = np.median(b[rng.integers(0, len(b), (reps, len(b)))], axis=1)
+    lo, hi = np.quantile(mb - ma, [0.025, 0.975])
+    return [float(lo), float(hi)]
 
 
 def psi(a, b, bins=10, eps=1e-4):
@@ -98,8 +144,11 @@ def _q(v):
 # tight dataset's tiny spread would call a 2 % change major
 MIN_SCALE = {'brightness': 4.0, 'contrast': 3.0, 'dark_clip': 0.5, 'bright_clip': 0.5, 'dyn_range': 6.0, 'entropy': 0.1,
              'edge_density': 0.3, 'r_mean': 4.0, 'g_mean': 4.0, 'b_mean': 4.0, 'saturation': 6.0, 'colorfulness': 4.0,
-             'cast_a': 1.5, 'cast_b': 1.5, 'wb_rg': 0.04, 'wb_bg': 0.04, 'aspect': 0.02, 'jpeg_q': 3.0, 'fnumber': 0.3}
-ABSOLUTE = ('cast_a', 'cast_b')                     # centred on 0: a change in units, never a percentage / ratio
+             'cast_a': 1.5, 'cast_b': 1.5, 'wb_rg': 0.04, 'wb_bg': 0.04, 'aspect': 0.02, 'jpeg_q': 3.0, 'fnumber': 0.3,
+             'midtone': 4.0, 'local_contrast': 1.0, 'vignetting': 0.05, 'uniformity': 3.0, 'light_dx': 4.0,
+             'light_dy': 4.0, 'haze': 6.0, 'cct': 300.0, 'blur_aniso': 0.06, 'chroma_noise': 0.5, 'blockiness': 0.08,
+             'hour': 1.0}
+ABSOLUTE = ('cast_a', 'cast_b', 'light_dx', 'light_dy', 'hour')   # centred / cyclic: a change in units, never a %
 
 
 def compare_metric(a, b, log=False, key=''):
@@ -124,10 +173,11 @@ def compare_metric(a, b, log=False, key=''):
     score = max(p / PSI_REF, abs(effect), excess / OUT_REF)
     ma, mb = float(np.median(a)), float(np.median(b))
     rel = key not in ABSOLUTE and ma > 1e-9 and mb >= 0
-    return {'a': _q(a), 'b': _q(b), 'delta': mb - ma,
+    ks = ks_2samp(a, b)
+    return {'a': _q(a), 'b': _q(b), 'delta': mb - ma, 'ci': boot_ci(a, b), 'p': ks_pvalue(ks, len(a), len(b)),
             'delta_pct': (mb - ma) / ma * 100 if rel else None,
             'ratio': mb / ma if rel else None,
-            'effect': effect, 'ks': ks_2samp(a, b), 'psi': p, 'w1': w1, 'out_a': out_a, 'out_b': out_b,
+            'effect': effect, 'ks': ks, 'psi': p, 'w1': w1, 'out_a': out_a, 'out_b': out_b,
             'band': [float(p1), float(p99)], 'score': float(score), 'severity': severity(score),
             'n_a': len(a), 'n_b': len(b), 'low_n': bool(min(len(a), len(b)) < LOW_N)}
 
@@ -163,6 +213,34 @@ def domain_auc(X, y, folds=5, seed=0):
     auc = float(roc_auc_score(y, p))
     coef = np.abs(mk().fit(Z, y).coef_[0][:X.shape[1]])
     return auc, p, coef
+
+
+def coverage(za, zb, cap=200):
+    """(share of zb's rows within A's own p95 1-NN distance of their nearest za row, indices of the uncovered zb rows
+    farthest first, at most `cap`). None, [] when a side has fewer than 3 rows."""
+    from sklearn.neighbors import NearestNeighbors
+    if len(za) < 3 or not len(zb):
+        return None, []
+    nn = NearestNeighbors(n_neighbors=2).fit(za)
+    da = nn.kneighbors(za, 2, return_distance=True)[0][:, 1]           # leave-one-out: the 2nd is the nearest other
+    thr = float(np.quantile(da, 0.95))
+    db = nn.kneighbors(zb, 1, return_distance=True)[0][:, 0]
+    out = db > thr
+    ix = np.nonzero(out)[0]
+    return round(float(1.0 - out.mean()), 4), ix[np.argsort(-db[ix], kind='stable')][:cap].tolist()
+
+
+def frechet(za, zb):
+    """Frechet distance between Gaussians fit to za and zb (the FID formula), None with too few rows."""
+    from scipy import linalg
+    if len(za) < 3 or len(zb) < 3:
+        return None
+    ma, mb = za.mean(0), zb.mean(0)
+    ca, cb = np.atleast_2d(np.cov(za, rowvar=False)), np.atleast_2d(np.cov(zb, rowvar=False))
+    cs = linalg.sqrtm(ca @ cb)
+    if np.iscomplexobj(cs):
+        cs = cs.real
+    return round(float(max(0.0, ((ma - mb) ** 2).sum() + np.trace(ca + cb - 2.0 * cs))), 4)
 
 
 def auc_words(auc):
@@ -218,6 +296,31 @@ def recommendations(by, cams, sep):
         add(k, f'Contrast differs: B has {_pct((r - 1) * 100)} {"less" if r < 1 else "more"} tonal spread. Add '
             f'RandomBrightnessContrast (contrast_limit ≈ {min(0.5, _round_up(abs(r - 1) + 0.05))}) or CLAHE.',
             {'albumentations': f'RandomBrightnessContrast(contrast_limit={min(0.5, _round_up(abs(r - 1) + 0.05))}, p=0.5)'})
+    if bad('midtone') and not bad('brightness'):
+        r = _ratio(by, 'midtone')
+        add('midtone', f'Midtones moved ({by["midtone"]["a"]["med"]:.0f} → {by["midtone"]["b"]["med"]:.0f}) while the '
+            f'average brightness did not: a different tone curve / gamma. Add RandomGamma.',
+            {'albumentations': f'RandomGamma(gamma_limit=({max(40, int(100 * min(r, 1 / r) - 10))}, '
+                               f'{min(250, int(100 * max(r, 1 / r) + 10))}), p=0.3)'})
+    if bad('vignetting') and by['vignetting']['delta'] < 0:
+        add('vignetting', f'B\'s corners are darker (corner / centre light {by["vignetting"]["a"]["med"]:.2f} → '
+            f'{by["vignetting"]["b"]["med"]:.2f}): lens vignetting or a spot light. Objects near the edges get darker; '
+            'enable the lens shading correction or add RandomShadow / RandomToneCurve.',
+            {'albumentations': 'RandomShadow(p=0.2)'})
+    if bad('uniformity') and by['uniformity']['delta'] > 0 and not bad('vignetting'):
+        add('uniformity', f'B\'s light is less even across the frame (grid variation {by["uniformity"]["a"]["med"]:.0f}% → '
+            f'{by["uniformity"]["b"]["med"]:.0f}%): shadows, a single lamp or a bright window. Diffuse the light or add '
+            'RandomShadow; see the light map.', {'albumentations': 'RandomShadow(p=0.3)'})
+    for k, side in (('light_dx', ('left', 'right')), ('light_dy', ('top', 'bottom'))):
+        if bad(k):
+            d = by[k]['b']['med']
+            add(k, f'The light comes from another side in B (brighter {side[1] if d > 0 else side[0]}, {d:+.0f}% across '
+                f'the frame vs {by[k]["a"]["med"]:+.0f}% in A). Train with fliplr / RandomShadow, or move the light.',
+                {'albumentations': 'RandomShadow(p=0.3)'})
+    if bad('haze') and by['haze']['delta'] > 0:
+        add('haze', f'B is hazier / has more glare (dark-channel {by["haze"]["a"]["med"]:.0f} → {by["haze"]["b"]["med"]:.0f}): '
+            'fog, a dirty window or lens flare lifts the blacks and lowers contrast. Clean the lens / add a hood, or '
+            'train with RandomFog.', {'albumentations': 'RandomFog(p=0.2)'})
     if bad('dark_clip') and by['dark_clip']['delta'] > 0:
         add('dark_clip', f'B crushes more shadows ({by["dark_clip"]["b"]["med"]:.1f}% vs {by["dark_clip"]["a"]["med"]:.1f}% '
             'of pixels black): objects in the dark lose detail no augmentation brings back. Raise exposure / gain or add light.')
@@ -231,13 +334,15 @@ def recommendations(by, cams, sep):
             hyp['hsv_s'] = min(0.9, _round_up(abs(r - 1) + 0.1))
         add(k, f'Colour differs: B is {_pct((r - 1) * 100)} {"duller" if r < 1 else "more colourful"} ({k}). '
             f'Keep hsv_s ≥ {hyp["hsv_s"]}.', {'hsv_s': hyp['hsv_s']})
-    tint = [k for k in ('cast_a', 'cast_b', 'wb_rg', 'wb_bg') if bad(k)]
+    tint = [k for k in ('cast_a', 'cast_b', 'wb_rg', 'wb_bg', 'cct') if bad(k)]
     if tint:
         da = by['cast_a']['delta'] if 'cast_a' in by else 0
         db = by['cast_b']['delta'] if 'cast_b' in by else 0
         words = [w for w, on in ((('more magenta' if da > 0 else 'greener'), abs(da) >= 1.5),
                                  (('yellower / warmer' if db > 0 else 'bluer / cooler'), abs(db) >= 1.5)) if on]
         hyp['hsv_h'] = max(hyp['hsv_h'], min(0.05, _round_up(0.015 + (abs(da) + abs(db)) / 600, 0.005)))
+        if 'cct' in by and abs(by['cct']['delta']) >= 300:
+            words.append(f'{by["cct"]["a"]["med"]:.0f} K → {by["cct"]["b"]["med"]:.0f} K')
         add(tint[0], f'White balance / colour cast differs{": B is " + " and ".join(words) if words else ""}. Fix the '
             f'camera white balance, or train with hue augmentation hsv_h ≈ {hyp["hsv_h"]} and ColorJitter / '
             'RGBShift.', {'hsv_h': hyp['hsv_h'], 'albumentations': 'RGBShift(10, 10, 10, p=0.3)'})
@@ -252,6 +357,15 @@ def recommendations(by, cams, sep):
         else:
             add(k, f'B is sharper (+{_pct((r - 1) * 100)}): usually harmless; textures the model never saw may still '
                 'fool it — check the model rows below.')
+    if bad('blur_aniso') and by['blur_aniso']['delta'] > 0:
+        add('blur_aniso', f'B\'s blur has a direction (blur direction {by["blur_aniso"]["a"]["med"]:.2f} → '
+            f'{by["blur_aniso"]["b"]["med"]:.2f}): motion blur from a slow shutter or a moving camera / object. Use a '
+            'faster shutter (more light / gain); train with MotionBlur.',
+            {'albumentations': 'MotionBlur(blur_limit=(3, 9), p=0.3)'})
+    if bad('chroma_noise') and by['chroma_noise']['delta'] > 0:
+        add('chroma_noise', f'B has more colour noise (σ {by["chroma_noise"]["a"]["med"]:.1f} → '
+            f'{by["chroma_noise"]["b"]["med"]:.1f}): a smaller sensor or a weaker noise filter in the camera. Add ISONoise.',
+            {'albumentations': 'ISONoise(color_shift=(0.01, 0.05), intensity=(0.1, 0.5), p=0.3)'})
     if bad('noise') and by['noise']['delta'] > 0:
         s = by['noise']['b']['med']
         add('noise', f'B is noisier (σ {by["noise"]["a"]["med"]:.1f} → {s:.1f}; high ISO / low light / a smaller sensor). '
@@ -267,6 +381,10 @@ def recommendations(by, cams, sep):
     if bad('aspect'):
         add('aspect', f'Aspect ratio changed ({by["aspect"]["a"]["med"]:.2f} → {by["aspect"]["b"]["med"]:.2f}): '
             'letterbox padding and the field of view differ; validate on B with the same imgsz / rect setting.')
+    if bad('blockiness') and by['blockiness']['delta'] > 0 and not (bad('jpeg_q') and by['jpeg_q']['delta'] < 0):
+        add('blockiness', f'B shows more 8×8 JPEG blocks (blocking {by["blockiness"]["a"]["med"]:.2f} → '
+            f'{by["blockiness"]["b"]["med"]:.2f}): heavier compression or a video stream. Raise the stream bitrate / '
+            'quality, or add ImageCompression.', {'albumentations': 'ImageCompression(quality_range=(30, 100), p=0.3)'})
     if bad('jpeg_q') and by['jpeg_q']['delta'] < 0:
         q = by['jpeg_q']['b']['p5']
         add('jpeg_q', f'B is compressed harder (JPEG quality {by["jpeg_q"]["a"]["med"]:.0f} → {by["jpeg_q"]["b"]["med"]:.0f}). '
@@ -331,7 +449,11 @@ def _driver_text(key, m):
            'colorfulness': ('less colourful', 'more colourful'), 'megapixels': ('lower resolution', 'higher resolution'),
            'dark_clip': ('fewer crushed shadows', 'more crushed shadows'),
            'bright_clip': ('fewer blown highlights', 'more blown highlights'),
-           'jpeg_q': ('more compressed', 'less compressed')}.get(key)
+           'jpeg_q': ('more compressed', 'less compressed'), 'midtone': ('darker midtones', 'brighter midtones'),
+           'local_contrast': ('flatter detail', 'crisper local contrast'),
+           'vignetting': ('darker corners', 'brighter corners'), 'uniformity': ('more even light', 'less even light'),
+           'haze': ('clearer', 'hazier / more glare'), 'blur_aniso': ('less motion blur', 'more motion blur'),
+           'chroma_noise': ('less colour noise', 'more colour noise'), 'blockiness': ('less blocky', 'blockier')}.get(key)
     if lbl and r is not None:
         w = lbl[0] if r < 1 else lbl[1]
         amt = (f'×{r:.1f}' if r >= 2 else f'÷{1 / r:.1f}' if r > 0.01 else '÷100+') if r >= 2 or r <= 0.5 \
@@ -341,6 +463,11 @@ def _driver_text(key, m):
         return 'more magenta' if m['delta'] > 0 else 'greener'
     if key == 'cast_b':
         return 'yellower / warmer' if m['delta'] > 0 else 'bluer / cooler'
+    if key == 'cct':
+        return f'{"cooler / bluer" if m["delta"] > 0 else "warmer / yellower"} light ({m["delta"]:+.0f} K)'
+    if key in ('light_dx', 'light_dy'):
+        side = ('right', 'left') if key == 'light_dx' else ('bottom', 'top')
+        return f'light more from the {side[0] if m["delta"] > 0 else side[1]}'
     info = {k: lb for k, _, lb, _, _ in imgstats.METRICS}
     return f'{info.get(key, key)} {"+" if m["delta"] > 0 else "−"}{abs(m["delta"]):.2g}'
 
@@ -365,6 +492,13 @@ def build(ta, tb, a_alias='A', b_alias='B', totals=None):
             row['n_a'] = int(np.isfinite(ta.vec[:, j]).sum())
             row['n_b'] = int(np.isfinite(tb.vec[:, j]).sum())
         metrics.append(row)
+
+    avail = [r for r in metrics if r['available']]
+    if avail:
+        for r, q in zip(avail, bh([r['p'] for r in avail])):
+            r['q'] = float(q)
+            r['significant'] = bool(q < 0.05)
+            by[r['key']]['q'] = r['q']
 
     groups = {}
     for row in metrics:
@@ -399,9 +533,12 @@ def build(ta, tb, a_alias='A', b_alias='B', totals=None):
     sc = {}
     for side, t, seed in (('a', ta, 1), ('b', tb, 2)):
         ix = _sub(len(t.names), SCATTER_MAX, seed)
-        sc[side] = {k: np.round(t.vec[ix, imgstats.COL[k]], 3).tolist()
-                    for k in ('brightness', 'contrast', 'sharpness', 'noise', 'saturation', 'cast_b')}
+        sc[side] = {k: _finite_list(t.vec[ix, imgstats.COL[k]])
+                    for k in ('brightness', 'contrast', 'sharpness', 'noise', 'saturation', 'cast_b', 'cct', 'vignetting',
+                              'uniformity', 'hour')}
         sc[side]['i'] = ix.tolist()
+    hc = imgstats.COL['hour']
+    day = any(len(t.names) and np.isfinite(t.vec[:, hc]).mean() >= 0.3 for t in (ta, tb))
 
     ca, cb = dict(_tally(ta.camera)), dict(_tally(tb.camera))
     cams = {'a': list(ca.items()), 'b': list(cb.items()),
@@ -415,12 +552,90 @@ def build(ta, tb, a_alias='A', b_alias='B', totals=None):
               'n': {'a': len(ta.names), 'b': len(tb.names), **(totals or {}),
                     'measured': ta.measured + tb.measured, 'failed': ta.failed + tb.failed},
               'metrics': metrics, 'groups': groups, 'curves': curves, 'scatter': sc, 'cameras': cams,
-              'formats': formats, 'separability': sep, 'recommendations': recs, 'hyp': hyp,
+              'formats': formats, 'separability': sep, 'recommendations': recs, 'hyp': hyp, 'day': bool(day),
+              'light_map': light_map(ta, tb), 'exposure_mix': exposure_mix(ta, tb),
+              'correction': correction(curves),
               'hyp_yaml': hyp_yaml(hyp, recs), 'models': []}
     report['verdict'] = verdict(report)
     arrays = {'names_a': ta.names, 'names_b': tb.names, 'vec_a': ta.vec, 'vec_b': tb.vec,
               'p_b': p_b[len(ta.names):] if p_b is not None else None}
     return report, arrays
+
+
+def _finite_list(v, digits=3):
+    """A JSON-safe list: NaN -> None (the scatter skips it)."""
+    v = np.round(np.asarray(v, np.float64), digits)
+    return [None if not math.isfinite(x) else float(x) for x in v.tolist()]
+
+
+def light_map(ta, tb):
+    """{a, b, diff}: the mean GRIDxGRID luma (0-255) of A's and B's images, None when the tables carry no grid."""
+    g, lo = imgstats.GRID, 4 * imgstats.NHIST
+    out = {'grid': g}
+    for side, t in (('a', ta), ('b', tb)):
+        if not len(t.names) or t.hist.shape[1] < lo + g * g:
+            return None
+        out[side] = np.round(t.hist[:, lo:lo + g * g].mean(0).reshape(g, g) * 255.0, 2).tolist()
+    out['diff'] = np.round(np.asarray(out['b']) - np.asarray(out['a']), 2).tolist()
+    return out
+
+
+def exposure_mix(ta, tb):
+    """Share of images per exposure class (by mean luma) + the share of flat (low contrast) images, per side."""
+    jb, jc = imgstats.COL['brightness'], imgstats.COL['contrast']
+    out = {'classes': [c for c, _ in EXPOSURE], 'edges': [e for _, e in EXPOSURE[:-1]], 'low_contrast': LOW_CONTRAST}
+    for side, t in (('a', ta), ('b', tb)):
+        v = t.vec[:, jb]
+        v = v[np.isfinite(v)]
+        k = np.searchsorted(np.array(out['edges'], np.float64), v, 'right')
+        cnt = np.bincount(k, minlength=len(EXPOSURE))[:len(EXPOSURE)]
+        c = t.vec[:, jc]
+        c = c[np.isfinite(c)]
+        out[side] = {'share': np.round(cnt / max(1, len(v)), 4).tolist(), 'n': len(v),
+                     'flat': round(float((c < LOW_CONTRAST).mean()) if len(c) else 0.0, 4)}
+    return out
+
+
+def _lut_channel(ha, hb):
+    """256-entry LUT mapping B's tone distribution (32-bin shares hb) onto A's (ha) by CDF matching."""
+    nb = len(ha)
+    w = 256 / nb
+    x = np.arange(nb + 1) * w                                 # bin edges in pixel values
+    ramp = np.arange(nb + 1) * 1e-7                           # strictly increasing even across empty bins
+    ca = np.concatenate([[0.0], np.cumsum(np.asarray(ha, np.float64))]) + ramp
+    cb = np.concatenate([[0.0], np.cumsum(np.asarray(hb, np.float64))]) + ramp
+    ca, cb = ca / ca[-1], cb / cb[-1]
+    v = np.arange(256) + 0.5
+    q = np.interp(v, x, cb)                                   # where each B value sits in B's distribution
+    return np.clip(np.round(np.interp(q, ca, x) - 0.5), 0, 255).astype(np.uint8)
+
+
+def correction(curves):
+    """{lut: [[256] R, G, B], residual: {r, g, b, luma}, gain}: per-channel LUT that matches B's mean R / G / B curves
+    to A's (apply it to B's images at inference: cv2.LUT). residual = |mean of A - mean of B after the LUT| per
+    channel, in 0-255 (what a global curve cannot fix, e.g. noise or blur, is not here)."""
+    ch = ('r', 'g', 'b')
+    if any(not curves.get(c, {}).get('a') or not curves.get(c, {}).get('b') for c in ch):
+        return None
+    nb = len(curves['r']['a'])
+    centres = (np.arange(nb) + 0.5) * 256 / nb
+    luts, res, before = [], {}, {}
+    for c in ch:
+        ha, hb = np.asarray(curves[c]['a']), np.asarray(curves[c]['b'])
+        lut = _lut_channel(ha, hb)
+        luts.append(lut.tolist())
+        ma = float((ha * centres).sum() / max(ha.sum(), 1e-9))
+        mb = float((hb * centres).sum() / max(hb.sum(), 1e-9))
+        mb2 = float((hb * lut[np.clip(centres.astype(int), 0, 255)]).sum() / max(hb.sum(), 1e-9))
+        before[c], res[c] = round(abs(ma - mb), 2), round(abs(ma - mb2), 2)
+    return {'lut': luts, 'residual': res, 'before': before}
+
+
+def apply_lut(rgb, lut):
+    """`rgb` uint8 (H, W, 3) through the per-channel LUT [[256] x 3] of correction()."""
+    import cv2
+    t = np.stack([np.asarray(x, np.uint8) for x in lut], 1).reshape(256, 1, 3)
+    return cv2.LUT(np.ascontiguousarray(rgb, np.uint8), t)
 
 
 def verdict(report):
@@ -519,7 +734,8 @@ def model_fit(d, side_of_img, a, b, conf, ap_fn, by_name_vec=None, metric_keys=N
             ii = np.array([r[0] for r in rows])
             V = np.stack([r[1] for r in rows])
             sides = side_of_img[ii]
-            cv = {}
+            labelled = any(len(d.gt_by_img[i]) for i in ii)
+            cv, mv = {}, {}
             for key in metric_keys:
                 j = imgstats.COL[key]
                 v = V[:, j]
@@ -539,7 +755,18 @@ def model_fit(d, side_of_img, a, b, conf, ap_fn, by_name_vec=None, metric_keys=N
                         ys.append(float(top[ii[sm]].mean()) if sm.any() else None)
                     curve[key2], curve[f'n_{key2}'] = ys, ns
                 cv[key] = curve
+                if labelled:                      # mAP50 per bin, A and B pooled (the same images per bin)
+                    mp, nl = [], []
+                    for t in range(len(edges) - 1):
+                        mask = np.zeros(n_img, bool)
+                        mask[ii[ok & (bi == t)]] = True
+                        k_lab = int(sum(len(d.gt_by_img[i]) for i in np.nonzero(mask)[0]))
+                        nl.append(k_lab)
+                        mp.append(float(ap_fn(mask)['map50']) if k_lab else None)
+                    mv[key] = {'x': curve['x'], 'map50': mp, 'labels': nl}
             res['conf_vs'] = cv
+            if mv:
+                res['map_vs'] = mv
     return res
 
 
@@ -547,8 +774,9 @@ def model_fit(d, side_of_img, a, b, conf, ap_fn, by_name_vec=None, metric_keys=N
 
 def simulate(rgb, a_med, b_med, strength=1.0, img_vec=None):
     """`rgb` (an A image, uint8) moved toward B's conditions by the A -> B change of the medians: luma gain and
-    contrast, saturation gain, Lab tint shift, a Gaussian blur fitted to the sharpness ratio, added luma noise.
-    a_med / b_med: {metric: median}. Returns (uint8 image, applied params)."""
+    contrast, the gamma left in the midtones, a radial vignette, saturation gain, Lab tint shift, a Gaussian (or, when
+    B's blur has a direction, a motion) blur fitted to the sharpness ratio, added luma and colour noise, and a JPEG
+    round trip at B's quality. a_med / b_med: {metric: median}. Returns (uint8 image, applied params)."""
     import cv2
     s = float(min(1.5, max(0.0, strength)))
     out = rgb.astype(np.float32)
@@ -567,6 +795,27 @@ def simulate(rgb, a_med, b_med, strength=1.0, img_vec=None):
     out = (out - m) * c + m * g
     prm.update(brightness_gain=round(g, 3), contrast_gain=round(c, 3))
     out = np.clip(out, 0, 255)
+    # gamma: the part of B's midtone change the gain did not make
+    gam = 1.0
+    ma_mid, mb_mid = a_med.get('midtone'), b_med.get('midtone')
+    if ma_mid and mb_mid and all(map(math.isfinite, (ma_mid, mb_mid))) and abs(mb_mid / ma_mid - 1) > 0.03:
+        x0 = min(0.98, max(0.02, ma_mid * g / 255.0))
+        x1 = min(0.98, max(0.02, ma_mid * (mb_mid / ma_mid) ** s / 255.0))
+        gam = float(min(2.0, max(0.5, math.log(x1) / math.log(x0))))
+        if abs(gam - 1) > 0.03:
+            out = 255.0 * np.power(out / 255.0, gam)
+    prm['gamma'] = round(gam, 3)
+    # vignette: corners / centre moved by B's / A's vignetting ratio (1 at the centre, the full factor at the corners)
+    va, vb = a_med.get('vignetting'), b_med.get('vignetting')
+    vf = 1.0
+    if va and vb and math.isfinite(va) and math.isfinite(vb) and va > 0.05:
+        vf = float(min(2.0, max(0.3, vb / va))) ** s
+        if abs(vf - 1) > 0.02:
+            h0, w0 = out.shape[:2]
+            yy, xx = np.ogrid[0:h0, 0:w0]
+            r2 = ((xx - w0 / 2) / (0.375 * w0)) ** 2 + ((yy - h0 / 2) / (0.375 * h0)) ** 2   # corner cell centres: 2
+            out = np.clip(out * (1.0 + (vf - 1.0) * np.minimum(r2 / 2.0, 1.6))[..., None], 0, 255)
+    prm['vignette'] = round(vf, 3)
     sg = ratio('saturation')
     da = (b_med.get('cast_a', 0) - a_med.get('cast_a', 0)) * s
     db = (b_med.get('cast_b', 0) - a_med.get('cast_b', 0)) * s
@@ -590,16 +839,29 @@ def simulate(rgb, a_med, b_med, strength=1.0, img_vec=None):
         k = -(-max(h0, w0) // imgstats.WORK)
         small = cv2.resize(out.astype(np.uint8), (max(1, w0 // k), max(1, h0 // k)), interpolation=cv2.INTER_AREA)
         g0 = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
-        v0 = float(cv2.Laplacian(g0, cv2.CV_32F).var())
-        target = v0 * sr
-        lo, hi = 0.0, 8.0
-        for _ in range(10):                     # sharpness falls monotonically with the blur sigma
-            mid = (lo + hi) / 2
-            v = float(cv2.Laplacian(cv2.GaussianBlur(g0, (0, 0), max(mid, 0.05)), cv2.CV_32F).var())
-            lo, hi = (mid, hi) if v > target else (lo, mid)
-        sigma = (lo + hi) / 2 * k              # in the full image's pixels
-        if sigma > 0.1:
-            out = cv2.GaussianBlur(out, (0, 0), sigma)
+        target = float(cv2.Laplacian(g0, cv2.CV_32F).var()) * sr
+        da_ = b_med.get('blur_aniso', 0) - a_med.get('blur_aniso', 0)
+        lap = lambda im: float(cv2.Laplacian(im, cv2.CV_32F).var())
+        if math.isfinite(da_) and da_ > 0.05:
+            # B's blur has a direction: a horizontal line kernel, its length fitted to the sharpness ratio
+            line = lambda L: np.full((1, L), 1.0 / L, np.float32)
+            lo, hi = 1, 61
+            while hi - lo > 1:                  # sharpness falls monotonically with the length
+                mid = (lo + hi) // 2
+                lo, hi = (mid, hi) if lap(cv2.filter2D(g0, -1, line(mid))) > target else (lo, mid)
+            L = max(2, round(hi * k))      # in the full image's pixels
+            out = cv2.filter2D(out, -1, line(L), borderType=cv2.BORDER_REFLECT)
+            prm['motion_px'] = L
+            sigma = L / math.sqrt(12.0)         # the line's own std, for the blur figure
+        else:
+            lo, hi = 0.0, 8.0
+            for _ in range(10):                 # sharpness falls monotonically with the blur sigma
+                mid = (lo + hi) / 2
+                v = lap(cv2.GaussianBlur(g0, (0, 0), max(mid, 0.05)))
+                lo, hi = (mid, hi) if v > target else (lo, mid)
+            sigma = (lo + hi) / 2 * k          # in the full image's pixels
+            if sigma > 0.1:
+                out = cv2.GaussianBlur(out, (0, 0), sigma)
     prm['blur_sigma_px'] = round(sigma, 2)
     na, nb = a_med.get('noise'), b_med.get('noise')
     add = 0.0
@@ -610,4 +872,24 @@ def simulate(rgb, a_med, b_med, strength=1.0, img_vec=None):
             n = np.random.default_rng(0).normal(0.0, add, (h0, w0, 1)).astype(np.float32)
             out = out + n
     prm['noise_sigma'] = round(add, 2)
-    return np.clip(out, 0, 255).astype(np.uint8), prm
+    ca_, cb_ = a_med.get('chroma_noise'), b_med.get('chroma_noise')
+    addc = 0.0
+    if ca_ is not None and cb_ is not None and math.isfinite(ca_) and math.isfinite(cb_) and cb_ > ca_:
+        addc = math.sqrt(max(0.0, cb_ * cb_ - ca_ * ca_)) * s
+        if addc > 0.1:
+            lab = cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+            lab[..., 1:] += np.random.default_rng(1).normal(0.0, addc, lab.shape[:2] + (2,)).astype(np.float32)
+            out = cv2.cvtColor(np.clip(lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32)
+    prm['chroma_noise'] = round(addc, 2)
+    res = np.clip(out, 0, 255).astype(np.uint8)
+    qa, qb = a_med.get('jpeg_q'), b_med.get('jpeg_q')
+    q = None
+    if qb is not None and math.isfinite(qb):
+        q0 = qa if qa is not None and math.isfinite(qa) else 100.0
+        if qb < q0 - 2:
+            q = round(min(100.0, max(5.0, q0 + (qb - q0) * min(s, 1.0))))
+            ok, buf = cv2.imencode('.jpg', res[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, q])
+            if ok:
+                res = np.ascontiguousarray(cv2.imdecode(buf, cv2.IMREAD_COLOR)[..., ::-1])
+    prm['jpeg_quality'] = q
+    return res, prm

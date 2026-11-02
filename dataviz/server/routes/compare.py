@@ -8,12 +8,19 @@ The Compare tab of a combined dataset (data/compare.py over data/diff.py), under
     POST /api/compare/quickmap  {ref, feature} -> {ready, key, id, x, y, info} + novel (similarity to ref) or a job
     POST /api/compare/shift     {a, b, sample?, feature?} -> {ready, key, report} or {ready: false, job_id}: the
                                 "Image conditions" report (data/shift.py); measuring images is an io-lane job
-    GET  /api/compare/shift/images   ?key=&which=outside|low|high|most_b&metric=&side=a|b -> {names}
-    GET  /api/compare/shift/preview  ?key=&name=&strength= -> image/jpeg (an A image as B's conditions would make
-                                     it), header X-Shift-Params = the applied params (JSON)
+    GET  /api/compare/shift/images   ?key=&which=outside|low|high|most_b|uncovered&metric=&side=a|b -> {names}
+    GET  /api/compare/shift/lut      ?key= -> the B -> A correction LUT (JSON download, with a cv2.LUT snippet)
+    GET  /api/compare/shift/preview  ?key=&name=&strength=&mode= -> image/jpeg: as_b = an A image as B's conditions
+                                     would make it, correct = a B image through the LUT; X-Shift-Params = the params
+    GET  /api/compare/stress/axes    the stress-test axes and levels (data/stress.py)
+    POST /api/compare/stress    {member, model, n?, axes?, conf?, key? (a shift report: B's position)} -> {ready, key,
+                                result, summary} or {ready: false, job_id}: a model under graded light / blur / noise /
+                                colour / JPEG / resolution changes (main lane; io for API models)
+    GET  /api/compare/stress/preview ?name=&axis=&level= -> image/jpeg of one image at that level
     GET  /api/union/status      the members: fingerprint the union was built from vs now (stale members)
 """
 
+import io
 import json
 import time
 
@@ -24,6 +31,7 @@ from fastapi.responses import Response
 
 from ...auth import deps
 from ...data import compare
+from ...data import stress as stresslib
 from ..binary import columns_response, etag_for
 from ..deps import guards, owned
 from ..deps import json_bytes as _send
@@ -167,17 +175,92 @@ def router(state, ctx):
         return {'key': key, 'names': names}
 
     @r.get('/api/compare/shift/preview')
-    def shift_preview(key: str, name: str, strength: float = 1.0):
+    def shift_preview(key: str, name: str, strength: float = 1.0, mode: str = 'as_b'):
         s = svc()
         try:
             entry = s.shift_by_key(key)
-            data, prm = s.shift_preview(entry, name, strength)
+            data, prm = s.shift_preview(entry, name, strength, mode='correct' if mode == 'correct' else 'as_b')
         except KeyError as e:
             raise HTTPException(404, str(e).strip("'\""))
         except (OSError, ValueError) as e:
             raise HTTPException(400, f'cannot read {name}: {e}')
         return Response(data, media_type='image/jpeg', headers={'X-Shift-Params': json.dumps(prm),
                                                                 'Cache-Control': 'private, max-age=600'})
+
+    def _model(mid):
+        reg, ms = getattr(ctx, 'models', None), getattr(ctx, 'model_service', None)
+        if reg is None or ms is None:
+            raise HTTPException(409, 'models are not available on this server')
+        m = next((x for x in owned(reg.models) if x['id'] == mid and x.get('family') != 'hf'), None)
+        if m is None:
+            raise HTTPException(404, f'no detection model {mid!r}')
+        return m, ms
+
+    @r.get('/api/compare/stress/axes')
+    def stress_axes():
+        return {'axes': stresslib.axes_info(), 'sample': stresslib.SAMPLE, 'max': stresslib.SAMPLE_MAX}
+
+    @r.post('/api/compare/stress', dependencies=[Depends(deps.require_bound('labeler')), Depends(g.boxes_only)])
+    def stress(body: dict):
+        s = svc()
+        st = ctx.current()
+        member = str(body.get('member') or '')
+        try:
+            s.member_index(member)
+            n = int(body.get('n') or stresslib.SAMPLE)
+            conf = float(body['conf']) if body.get('conf') is not None else None
+        except (KeyError, ValueError, TypeError) as e:
+            raise HTTPException(400, str(e).strip("'\""))
+        m, ms = _model(str(body.get('model') or ''))
+        conf = conf if conf is not None else float(m.get('conf') or ms.cfg.get('default_conf', 0.25))
+        fp = ms.fingerprint(m)
+        axes = [str(a) for a in (body.get('axes') or [])]
+        key, names, labelled, axes = compare._stress_plan(s, member, m, fp, n, axes, conf)
+        report = None
+        if body.get('key'):
+            hit = s.shift_cached(str(body['key']))
+            report = hit['report'] if hit else None
+        res = compare.stress_cached(s, key)
+        if res is not None:
+            return json_bytes({'ready': True, 'key': key, 'result': res, 'summary': stresslib.summarise(res, report)})
+        job = st.submit(f'stress:{key}', f'Stress test · {m["name"]} on {member}',
+                        lambda job: compare.stress_run(s, key, member, m, fp, ms.workdir, names, labelled, axes, conf,
+                                                       job) and None,
+                        lane='io' if m.get('format') == 'api' else 'main')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.get('/api/compare/stress/preview')
+    def stress_preview(name: str, axis: str, level: float):
+        st = ctx.current()
+        if axis not in stresslib.AXES:
+            raise HTTPException(400, f'unknown axis {axis!r}')
+        try:
+            from PIL import Image, ImageOps
+            im = ImageOps.exif_transpose(Image.open(io.BytesIO(st.source.read_image_bytes(name)))).convert('RGB')
+            im.thumbnail((stresslib.BASE, stresslib.BASE), Image.BILINEAR)
+            out = stresslib.apply(np.asarray(im), axis, level)
+        except (OSError, ValueError, KeyError) as e:
+            raise HTTPException(400, f'cannot read {name}: {e}')
+        buf = io.BytesIO()
+        Image.fromarray(out).save(buf, 'JPEG', quality=88)
+        return Response(buf.getvalue(), media_type='image/jpeg', headers={'Cache-Control': 'private, max-age=600'})
+
+    @r.get('/api/compare/shift/lut')
+    def shift_lut(key: str):
+        s = svc()
+        try:
+            entry = s.shift_by_key(key)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\""))
+        cor = entry['report'].get('correction')
+        if not cor:
+            raise HTTPException(400, 'this report has no correction (no colour curves on one side)')
+        body = {'from': entry['b'], 'to': entry['a'], 'channels': 'RGB', 'lut': cor['lut'], 'residual': cor['residual'],
+                'usage': ['import cv2, json, numpy as np',
+                          "lut = np.array(json.load(open('correction-lut.json'))['lut'], np.uint8).T.reshape(256, 1, 3)",
+                          'rgb = cv2.LUT(rgb, lut)  # an RGB uint8 image of B, before the model']}
+        return Response(json.dumps(body), media_type='application/json', headers={
+            'Content-Disposition': f'attachment; filename="correction-lut-{entry["b"]}-to-{entry["a"]}.json"'})
 
     @r.get('/api/union/status')
     def union_status():

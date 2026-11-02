@@ -9,6 +9,8 @@ while boxes are edited, plus the "quick shared map" (one member's saved view, th
                edits never serves an old diff
     patched()  State.on_boxes_patched(images) -> diff.update() on every result in memory (milliseconds), the
                changed statuses kept for the live feed / the next /api/compare poll
+    stress     _stress_plan / stress_run / stress_cached: a model on member A's images under graded light, blur,
+               noise, colour, JPEG and resolution changes (data/stress.py), B placed on each axis by the shift report
     shift()    "Image conditions": data/imgstats.py tables of A's and B's images (a sample, cached in each member's
                own workspace) -> data/shift.py report (+ the appearance AUC of a computed feature, + the fit of
                every model that already predicted this dataset); in memory (LRU 4) by shift_key()
@@ -42,6 +44,7 @@ class CompareService:
         self.results = OrderedDict()     # (a, b, pkey) -> {'key', 'res'}
         self.changes = {}                # (a, b, pkey) -> {sid: status} since the client last asked
         self.shifts = OrderedDict()      # shift key -> {'report', 'arrays', 'a', 'b'}
+        self.stresses = OrderedDict()    # stress key -> result (data/stress.py)
 
     # ------------------------------------------------------------ inputs
     def aliases(self):
@@ -381,7 +384,12 @@ class CompareService:
         return t, len(inner)
 
     def appearance_auc(self, feature, ia, ib, job=None):
-        """Cross-validated AUC of telling A's boxes from B's by a computed feature (PCA-32), None when not computed."""
+        """What a model sees, on a computed feature (PCA-32), None when it is not computed:
+            auc        cross-validated AUC of telling A's boxes from B's
+            coverage   share of B's boxes whose nearest A box is as close as A's boxes are to each other (the p95 of
+                       A's own leave-one-out 1-NN distance): the part of B that A has shown a model something like
+            frechet    Frechet distance of the two Gaussians (FID-style, on the same 32 dims)
+            uncovered  B image names holding the boxes farthest outside A (for the image grid), farthest first"""
         st = self.state
         if not feature or not (feature in st.features or st.feature_cached(feature)):
             return None
@@ -404,8 +412,18 @@ class CompareService:
             Z = PCA(n_components=k, svd_solver='randomized', random_state=0).fit_transform(Z)
         y = np.r_[np.zeros(len(ids[0]), np.int8), np.ones(len(ids[1]), np.int8)]
         auc, _, _ = shiftlib.domain_auc(Z, y)
-        return None if auc is None else {'feature': feature, 'auc': auc, 'words': shiftlib.auc_words(auc),
-                                         'n_a': len(ids[0]), 'n_b': len(ids[1])}
+        if auc is None:
+            return None
+        za, zb = Z[:len(ids[0])], Z[len(ids[0]):]
+        cov, unc = shiftlib.coverage(za, zb)
+        names = [inp.images[inp.img_idx[ids[1][i]]] for i in unc]
+        seen, uncovered = set(), []
+        for nm in names:
+            if nm not in seen:
+                seen.add(nm)
+                uncovered.append(nm)
+        return {'feature': feature, 'auc': auc, 'words': shiftlib.auc_words(auc), 'n_a': len(ids[0]),
+                'n_b': len(ids[1]), 'coverage': cov, 'frechet': shiftlib.frechet(za, zb), '_uncovered': uncovered}
 
     def shift(self, a, b, sample=SHIFT_SAMPLE, feature=None, models=(), key=None, job=None):
         """The image-conditions report of A vs B (data/shift.py). models: [(model dict, evaluate.Data, conf)] of
@@ -426,6 +444,7 @@ class CompareService:
             app = self.appearance_auc(feature, ia, ib, job)
         except Exception:              # noqa: BLE001 - the feature is extra evidence, never a failure of the report
             app = None
+        uncovered = app.pop('_uncovered', []) if app else []
         report['separability']['appearance'] = app
         if models:
             from ..models import evaluate
@@ -449,6 +468,7 @@ class CompareService:
                 warnings.simplefilter('ignore', RuntimeWarning)
                 med = np.nanmedian(t.vec, axis=0) if len(t.names) else np.full(len(imgstats.KEYS), np.nan)
             meds[side] = {k: float(v) for k, v in zip(imgstats.KEYS, med) if np.isfinite(v)}
+        arrays['uncovered_b'] = uncovered
         entry = {'report': report, 'arrays': arrays, 'a': a, 'b': b, 'med': meds}
         with self.lock:
             self.shifts[key] = entry
@@ -463,6 +483,8 @@ class CompareService:
         ar = entry['arrays']
         names = ar['names_b'] if side == 'b' else ar['names_a']
         vec = ar['vec_b'] if side == 'b' else ar['vec_a']
+        if which == 'uncovered':
+            return list(ar.get('uncovered_b') or [])[:cap]
         if which == 'most_b':
             p = ar.get('p_b')
             if p is None or not len(p):
@@ -487,8 +509,9 @@ class CompareService:
             return [names[i] for i in ix[:cap]]
         raise KeyError(f'unknown list {which!r}')
 
-    def shift_preview(self, entry, name, strength=1.0, max_side=1024):
-        """(JPEG bytes, params) of image `name` moved from A's to B's median conditions (shift.simulate)."""
+    def shift_preview(self, entry, name, strength=1.0, max_side=1024, mode='as_b'):
+        """(JPEG bytes, params) of image `name`: mode as_b = an A image moved from A's to B's median conditions
+        (shift.simulate); correct = a B image through the correction LUT that matches its curves to A's."""
         import io
 
         from PIL import Image, ImageOps
@@ -496,10 +519,61 @@ class CompareService:
         im = im.convert('RGB')
         if max(im.size) > max_side:
             im.thumbnail((max_side, max_side), Image.BILINEAR)
-        out, prm = shiftlib.simulate(np.asarray(im), entry['med']['a'], entry['med']['b'], strength)
+        if mode == 'correct':
+            cor = entry['report'].get('correction')
+            if not cor:
+                raise ValueError('this report has no correction (no colour curves on one side)')
+            out, prm = shiftlib.apply_lut(np.asarray(im), cor['lut']), {'lut': True, 'residual': cor['residual']}
+        else:
+            out, prm = shiftlib.simulate(np.asarray(im), entry['med']['a'], entry['med']['b'], strength)
         buf = io.BytesIO()
         Image.fromarray(out).save(buf, 'JPEG', quality=90)
         return buf.getvalue(), prm
+
+
+# ------------------------------------------------------------ stress test (data/stress.py)
+def _stress_plan(svc, member, m, fp, n, axes, conf):
+    """(key, names, labelled) of a stress run: `n` images of `member` (the labelled ones when it has labels), the
+    same deterministic sample every time."""
+    from . import stress
+    inp, _ = svc.inputs()
+    ia = svc.member_index(member)
+    st = svc.state
+    mine = [nm for nm, o in zip(inp.images, inp.img_origin.tolist()) if o == ia]
+    lab = [nm for nm in mine if st.by_image.get(nm)]
+    labelled = bool(lab)
+    names = imgstats.sample(lab if labelled else mine, max(1, min(int(n), stress.SAMPLE_MAX)))
+    axes = sorted(a for a in axes if a in stress.AXES) or sorted(stress.AXES)
+    key = stress.key_of(m['id'], fp, names, axes, conf, getattr(st, 'edit_seq', 0), labelled)
+    return key, names, labelled, axes
+
+
+def stress_cached(svc, key):
+    from . import stress
+    with svc.lock:
+        hit = svc.stresses.get(key)
+        if hit is not None:
+            svc.stresses.move_to_end(key)
+            return hit
+    st = svc.state
+    hit = stress.load(st.cache_dir, key) if getattr(st, 'cache_dir', None) else None
+    if hit is not None:
+        with svc.lock:
+            svc.stresses[key] = hit
+    return hit
+
+
+def stress_run(svc, key, member, m, fp, workdir, names, labelled, axes, conf, job=None):
+    from . import stress
+    res = stress.run(svc.state, m, fp, workdir, names, axes, conf, job, labelled=labelled)
+    res.update(key=key, member=member)
+    if getattr(svc.state, 'cache_dir', None):
+        stress.save(svc.state.cache_dir, key, res)
+    with svc.lock:
+        svc.stresses[key] = res
+        while len(svc.stresses) > MAX_MEM:
+            svc.stresses.popitem(last=False)
+    return res
 
 
 def service(state):
