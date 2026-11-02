@@ -74,6 +74,46 @@ export function originMask(origin: Uint8Array, status: Uint8Array | null, mode: 
   return m;
 }
 
+/** Colour keys of colour-by 'origin' / 'diff' (one byte per box): KEY_NONE = not compared, KEY_SAME = same in A and B. */
+export const KEY_NONE = 255, KEY_SAME = 254;
+
+/**
+ * Colour-by 'origin': the member index per box; with `shared` and a status, A's and B's boxes whose status is SAME
+ * become KEY_SAME (identical, overlapping dots read as shared instead of one side hiding the other).
+ * `out` is reused when it has the right length.
+ */
+export function originKeys(origin: Uint8Array, status: Uint8Array | null, a: number, b: number, shared: boolean, out?: Uint8Array): Uint8Array {
+  const n = origin.length;
+  const k = out && out.length === n ? out : new Uint8Array(n);
+  const st = shared ? status : null;
+  for (let i = 0; i < n; i++) {
+    const o = origin[i]!;
+    k[i] = st !== null && (o === a || o === b) && st[i] === BOX.SAME ? KEY_SAME : o;
+  }
+  return k;
+}
+
+// status -> diff kind (theme.ts DIFF_STYLE index) on side A / side B; mirrors theme.diffKey
+const DIFF_A = Uint8Array.from([KEY_NONE, 0, 1, 2, 2, 3, 5]);
+const DIFF_B = Uint8Array.from([KEY_NONE, 0, 1, 2, 2, 4, 6]);
+
+/** Colour-by 'diff': the diff kind per box (side by origin); KEY_NONE for other members or an unknown status. */
+export function diffKeys(origin: Uint8Array, status: Uint8Array, a: number, b: number, out?: Uint8Array): Uint8Array {
+  const n = origin.length;
+  const k = out && out.length === n ? out : new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = origin[i]!, s = status[i] ?? 0;
+    k[i] = o === a ? (DIFF_A[s] ?? KEY_NONE) : o === b ? (DIFF_B[s] ?? KEY_NONE) : KEY_NONE;
+  }
+  return k;
+}
+
+/** Trace order of colour-by origin: other members, shared, A, then B last (drawn on top). */
+export function originOrder(keys: readonly number[], a: number, b: number): number[] {
+  const rank = (k: number): number => (k === b ? 3 : k === a ? 2 : k === KEY_SAME ? 1 : 0);
+  return keys.slice().sort((x, y) => rank(x) - rank(y) || x - y);
+}
+
 /** Density-difference grid: z[row*G+col] = blurred pB - pA (NaN under minCount), raw counts, novelty share of B. */
 export interface Grid { G: number; x0: number; y0: number; dx: number; dy: number; z: Float32Array; cA: Uint32Array; cB: Uint32Array; nA: number; nB: number; novelty: number }
 

@@ -1,6 +1,7 @@
 """static/ts/core/compare-core.ts run under node (skipped without node / esbuild): the 'DVC1' column decoder
 (views, f2 widening, bad magic), origin / diff masks, the density-difference grid (counts, mass-preserving
-blur, minCount, novelty), shared histogram edges, KS, class deltas, id selection and a 500k-point timing check."""
+blur, minCount, novelty), shared histogram edges, KS, class deltas, id selection, the origin / diff colour keys
+and a 500k-point timing check."""
 
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ CORE_TS = Path(__file__).resolve().parents[1] / 'static' / 'ts' / 'core' / 'comp
 
 SCRIPT = r"""
 import assert from 'node:assert/strict';
-import { decodeColumns, originMask, densityDiff, sharedEdges, histPair, classDelta, selectIds, BOX } from './core.mjs';
+import { decodeColumns, originMask, densityDiff, sharedEdges, histPair, classDelta, selectIds, originKeys, diffKeys, originOrder, KEY_NONE, KEY_SAME, BOX } from './core.mjs';
 
 // ---- decodeColumns: build a DVC1 buffer by hand
 const encode = (meta, cols) => {
@@ -177,6 +178,28 @@ assert.notEqual(originMask(origin, status, 'a', 1, 2, new Uint8Array(3)).length,
   assert.deepEqual(selectIds(st, org, [], null), []);
 }
 
+// ---- originKeys / diffKeys / originOrder
+{
+  // ids 0..6 of member 0 (A) and 7..13 of member 1 (B), statuses 0..6 each; 14 = a third member (2)
+  const org = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2]);
+  const st = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 1]);
+  const S = KEY_SAME, N = KEY_NONE;
+  assert.deepEqual([...originKeys(org, st, 0, 1, true)], [0, S, 0, 0, 0, 0, 0, 1, S, 1, 1, 1, 1, 1, 2]);
+  assert.deepEqual([...originKeys(org, st, 0, 1, false)], [...org]);
+  assert.deepEqual([...originKeys(org, null, 0, 1, true)], [...org]);
+  assert.deepEqual([...originKeys(org, st, 1, 2, true)], [0, 0, 0, 0, 0, 0, 0, 1, S, 1, 1, 1, 1, 1, S]);
+  const buf = new Uint8Array(org.length);
+  assert.equal(originKeys(org, st, 0, 1, true, buf), buf);
+  assert.notEqual(originKeys(org, st, 0, 1, true, new Uint8Array(3)).length, 3);
+  // theme.diffKey: same 0, moved 1, reclass 2, unmatched 3 (A) / 4 (B), image only 5 (A) / 6 (B)
+  assert.deepEqual([...diffKeys(org, st, 0, 1)], [N, 0, 1, 2, 2, 3, 5, N, 0, 1, 2, 2, 4, 6, N]);
+  assert.deepEqual([...diffKeys(org, st, 1, 0)], [N, 0, 1, 2, 2, 4, 6, N, 0, 1, 2, 2, 3, 5, N]);
+  assert.deepEqual([...diffKeys(Uint8Array.from([0]), Uint8Array.from([9]), 0, 1)], [N]);
+  assert.equal(diffKeys(org, st, 0, 1, buf), buf);
+  assert.deepEqual(originOrder([0, 1, 2, S], 1, 0), [2, S, 1, 0]);
+  assert.deepEqual(originOrder([3, 2, 1, 0], 0, 1), [2, 3, 0, 1]);
+}
+
 // ---- timing at 500k points
 {
   const n = 500000; let seed = 11;
@@ -192,9 +215,12 @@ assert.notEqual(originMask(origin, status, 'a', 1, 2, new Uint8Array(3)).length,
     histPair: ((e) => time(() => histPair(v, org, 1, 2, null, e)))(sharedEdges(v, 40, true)),
     classDelta: time(() => classDelta(st, org, null, 7, 1, 2)),
     selectIds: time(() => selectIds(st, org, [BOX.UNMATCHED], 2)),
+    originKeys: ((o) => time(() => originKeys(org, st, 1, 2, true, o)))(new Uint8Array(n)),
+    diffKeys: ((o) => time(() => diffKeys(org, st, 1, 2, o)))(new Uint8Array(n)),
   };
   console.error(JSON.stringify(Object.fromEntries(Object.entries(T).map(([k, t]) => [k, +t.toFixed(2)]))));
   assert.ok(T.densityDiff < 50, `densityDiff ${T.densityDiff} ms`);
+  assert.ok(T.originKeys < 20 && T.diffKeys < 20, `originKeys ${T.originKeys} ms, diffKeys ${T.diffKeys} ms`);
 }
 console.log('ok');
 """
