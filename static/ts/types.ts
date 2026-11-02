@@ -380,4 +380,7 @@ export interface CmpState {
   mask: Uint8Array | null;             // originMask(show): 1 = drawn; null = no origin filter
   run: CmpRun | null;
   density: CmpDensity;
+  shared: boolean;                     // colour-by origin: A's and B's "same" boxes in one shared colour
+  keys: Uint8Array | null;             // core/cmp-keys.ts: the colour key per box of colour-by origin / diff
+  keysFor: string;                     // what `keys` was built for ('' = stale)
 }

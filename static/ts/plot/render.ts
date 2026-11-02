@@ -5,7 +5,8 @@ import type { Points, ProjectionReady } from '../types.js';
 import { $req, esc, mixHex, rgba } from '../core/dom.js';
 import { pts, S } from '../core/state.js';
 import { clsColor, clsName, CONTINUOUS, densityScale, DIFF_STYLE, diffColor, diffKey, ERR, errColor, isContinuous, originColor, plotBase, SCALE, THEME } from '../core/theme.js';
-import { densityDiff } from '../core/compare-core.js';
+import { densityDiff, KEY_NONE, KEY_SAME, originOrder } from '../core/compare-core.js';
+import { cmpKeys } from '../core/cmp-keys.js';
 import { curGroups, groupList, plotDiv, restyle, viewPos, xyOf } from './access.js';
 import { isOutlier } from './groups.js';
 import { fitToVisible, redrawLasso } from './interactions.js';
@@ -121,10 +122,10 @@ function densityZ(view: ProjectionReady): DensityCache | null {
 }
 
 function densityTrace(view: ProjectionReady): Trace | null {
-  const dz = densityZ(view);
-  if (!dz) return null;
+  const dz = densityZ(view), C = S.cmp;
+  if (!dz || !C) return null;
   return { type: 'heatmap', name: 'density', z: dz.z as unknown as number[][], x0: dz.x0, dx: dz.dx, y0: dz.y0, dy: dz.dy,
-    zmin: -dz.m, zmax: dz.m, colorscale: densityScale(), showscale: false, hoverinfo: 'skip', zsmooth: 'best',
+    zmin: -dz.m, zmax: dz.m, colorscale: densityScale(C.a, C.b), showscale: false, hoverinfo: 'skip', zsmooth: 'best',
     showlegend: false } as Trace;
 }
 
@@ -272,13 +273,17 @@ function categorical(colorBy: string): Categorical {
       label: (k) => (k < 0 ? `${mc.name}: blank` : order[k]), color: (k) => (k < 0 ? THEME.ungrouped : clsColor(k)) };
   }
   const C = S.cmp;
+  // origin / diff: one precomputed byte per box (core/cmp-keys.ts), no per-dot work here
   if (colorBy === 'origin' && C) {
-    const mem = S.meta?.members ?? [];
-    return { key: (id) => C.origin[id] ?? -1, label: (k) => mem[k]?.alias ?? 'unknown', color: originColor };
+    const mem = S.meta?.members ?? [], ks = cmpKeys('origin');
+    const al = (k: number): string => mem[k]?.alias ?? `#${k}`;
+    return { key: (id) => (ks ? ks[id] ?? KEY_NONE : C.origin[id] ?? -1),
+      label: (k) => (k === KEY_SAME ? `same in ${al(C.a)} and ${al(C.b)}` : mem[k]?.alias ?? 'unknown'),
+      color: (k) => (k === KEY_SAME ? diffColor(0) : originColor(k === KEY_NONE ? -1 : k)) };
   }
   if (colorBy === 'diff' && C) {
-    const st = C.run?.status ?? null;
-    return { key: (id) => { const o = C.origin[id]; return st && (o === C.a || o === C.b) ? diffKey(st[id] ?? 0, o === C.b) : -1; },
+    const ks = cmpKeys('diff');
+    return { key: (id) => { const k = ks ? ks[id] ?? KEY_NONE : KEY_NONE; return k === KEY_NONE ? -1 : k; },
       label: (k) => (k < 0 ? 'not compared' : DIFF_STYLE[k]?.label ?? '?'), color: diffColor };
   }
   if (colorBy === 'session') {
@@ -415,7 +420,10 @@ export function renderPlot(): void {
     const { key, label, color } = categorical(colorBy);
     const groups = new Map<number, number[]>();
     // origin / diff: every key gets a trace (empty ones too), so the A / B / diff toggle stays a restyle
-    if (colorBy === 'origin' && S.cmp) (S.meta?.members ?? []).forEach((_, k) => groups.set(k, []));
+    if (colorBy === 'origin' && S.cmp) {
+      (S.meta?.members ?? []).forEach((_, k) => groups.set(k, []));
+      if (S.cmp.shared && S.cmp.run) groups.set(KEY_SAME, []);
+    }
     if (colorBy === 'diff' && S.cmp?.run) DIFF_STYLE.forEach((_, k) => groups.set(k, []));
     for (const i of vis) {
       const k = key(idAt(i));
@@ -423,7 +431,8 @@ export function renderPlot(): void {
       if (!g) { g = []; groups.set(k, g); }
       g.push(i);
     }
-    const keys = [...groups.keys()].sort((a, b) => a - b);
+    let keys = [...groups.keys()].sort((a, b) => a - b);
+    if (colorBy === 'origin' && S.cmp) keys = originOrder(keys, S.cmp.a, S.cmp.b);     // B drawn last, on top
     // with a lasso, the dots outside it go into one faded, legend-less trace drawn first (underneath), so the
     // selected dots stay on top and every legend swatch keeps its real colour
     if (S.dimSet) {

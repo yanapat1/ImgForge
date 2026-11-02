@@ -171,9 +171,9 @@ export let ORIGIN_COLORS: readonly string[] = ORIGIN[THEME.name];
 export const originColor = (k: number): string => (k < 0 ? THEME.ungrouped : ORIGIN_COLORS[k % ORIGIN_COLORS.length] ?? THEME.ungrouped);
 export const diffColor = (k: number): string => (k < 0 ? THEME.ungrouped : DIFF_STYLE[k]?.color ?? THEME.ungrouped);
 
-/** Density-difference colour scale: A denser (z < 0) in A's colour, B denser in B's, ~0 transparent. */
-export const densityScale = (): ColorScale => [[0, rgba(originColor(0), 0.8)], [0.38, rgba(originColor(0), 0.22)], [0.5, rgba(THEME.plot, 0)],
-  [0.62, rgba(originColor(1), 0.22)], [1, rgba(originColor(1), 0.8)]];
+/** Density-difference colour scale of members a / b: A denser (z < 0) in A's colour, B denser in B's, ~0 transparent. */
+export const densityScale = (a = 0, b = 1): ColorScale => [[0, rgba(originColor(a), 0.8)], [0.38, rgba(originColor(a), 0.22)], [0.5, rgba(THEME.plot, 0)],
+  [0.62, rgba(originColor(b), 0.22)], [1, rgba(originColor(b), 0.8)]];
 
 /** Layout fields every Plotly chart shares (background, font, hover label). */
 export const plotBase = (bg: string, size = 12): Partial<Plotly.Layout> => ({

@@ -11,6 +11,7 @@ import type { CmpListKey, CmpParams, CmpResult, CmpRunResult, CmpState, CmpSumma
 import { api, errText, getJSON, isStatus, postJSON } from '../core/api.js';
 import { BOX, decodeColumns, histPair, originMask, selectIds, sharedEdges } from '../core/compare-core.js';
 import type { OriginMode } from '../core/compare-core.js';
+import { staleKeys } from '../core/cmp-keys.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { hideWait, showWait, waitJob } from '../core/jobs.js';
 import { labelUrl, vizUrl } from '../core/nav.js';
@@ -59,7 +60,7 @@ export function initCompare(points: Points): void {
   U.members = mem;
   const origin = points.origin ? Uint8Array.from(points.origin) : new Uint8Array(points.id.length);
   S.cmp = { origin, a: 0, b: 1, show: 'both', mask: null, run: null,
-    density: { on: false, G: 64, blur: 1, novelty: null, nA: 0, nB: 0 } };
+    density: { on: false, G: 64, blur: 1, novelty: null, nA: 0, nB: 0 }, shared: true, keys: null, keysFor: '' };
   syncMask();
   $req('act-compare').classList.remove('hidden');
   const og = $req<HTMLSelectElement>('color-by').querySelector<HTMLOptGroupElement>('optgroup[data-needs="union"]');
@@ -294,6 +295,7 @@ export function patchDiff(key: string, status: Record<string, number> | undefine
   if (!r || r.key !== key) return;
   for (const [sid, st] of Object.entries(status ?? {})) { const i = +sid; if (i >= 0 && i < r.status.length) r.status[i] = st; }
   if (summary) r.summary = summary;
+  staleKeys();                            // same run key, new statuses: the colour keys are rebuilt
   U.chartsDrawn = false;
   U.histDrawn = false;
   afterRun();
