@@ -13,6 +13,8 @@ Always `inspect_dataset_source` first (title, size, files, license, versions), t
 | `openml` | a dataset id or its link | none | format (parquet, else ARFF) |
 - The job (activity strip): download (resumable, parallel parts, internal addresses blocked), unpack archives (zip,
   tar.*, gz, 7z; `extract` default true, `nested` unpacks archives inside), detect the format and tag it.
+- While a Data Center job (import, frames, sync, export, …) runs, sessions still open at once (their own job
+  lane). Each account's Data Center jobs run one after another; other accounts' jobs do not wait for them.
 - Into a **new managed bucket** (named from the ref, or `name`) or into a folder of a writable `bucket` (`path`).
   A new bucket whose import fails or is cancelled is removed; while it runs the bucket is busy (writes answer 409).
 - A missing / wrong token: the error says which connection kind to add (Settings › Connections). Never ask the user

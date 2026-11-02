@@ -151,9 +151,9 @@ class State:
 
     def start(self, precompute=(), auto_compute=False):
         """Queue the index build; with auto_compute also the one startup projection; precomputed feature spaces always."""
-        # the io lane: an S3 sync / listing never waits behind a long UMAP of the previous dataset
+        # its own lane: opening never waits behind a UMAP, an S3 sync or a Data Center import / frame extraction
         self.index_job = self.submit(f'index:{self.tag}', f'Open dataset · {self.source.name}', self._index_job,
-                                     lane='io')
+                                     lane='open')
         if auto_compute:
             self.request_projection(self.default_feature, self.startup_method, {}, None)
         for key in precompute:             # an explicit --precompute is a request, so it runs either way

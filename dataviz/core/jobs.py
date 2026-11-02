@@ -1,11 +1,15 @@
 """
 Background job queue with progress reporting (live rich bar in the terminal + JSON for the UI).
 
-A single worker thread runs jobs one at a time: the GPU models and numba (UMAP)
-must not run concurrently anyway, and it keeps progress easy to follow. A second
-"io" lane runs network work (S3 sync) so a long download never waits behind a UMAP,
-and a third "model" lane runs the labeling page's model jobs (remote inference), so
-a long label-all never blocks an export or a feature job.
+Jobs run on lanes (LANES), each with its own worker thread(s), so a long job on one lane never makes another
+lane wait. "main" has one worker: the GPU models and numba (UMAP) must not run concurrently anyway, and it keeps
+progress easy to follow. "io" runs a session's network / disk work (S3 sync, curation scans, label imports in
+FIFO order). "open" builds the index of a session being opened (four workers: several accounts open sessions at
+once, and opening never waits behind an import or a frame extraction). "dc" runs the Data Center's bulk jobs
+(import, video frames, sync, export, ...) as a fair lane: one running job per account, up to three accounts at
+once, so one person's long trim never makes someone else's import wait, while one person's own jobs still run
+in order. "model" runs the labeling page's model jobs (remote inference), so a long label-all never blocks an
+export or a feature job.
 
 Cancel: JobManager.cancel(jid) sets job.cancelled (a threading.Event). A queued job
 never starts; a running one sees it only if its fn checks job.cancelled (between
@@ -22,6 +26,7 @@ import queue
 import threading
 import itertools
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 
 from rich.progress import (Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn,
@@ -142,6 +147,55 @@ class Job:
         return self._event.wait(timeout)
 
 
+# lane -> (worker threads, running jobs allowed per owner; None = plain FIFO)
+LANES = {'main': (1, None), 'io': (1, None), 'open': (4, None), 'dc': (3, 1), 'model': (1, None)}
+
+
+class _Fifo(queue.Queue):
+    """A plain lane: first in, first out."""
+    def release(self, job):
+        pass
+
+
+class _FairQueue:
+    """A fair lane: one FIFO per owner (user id; None = the server), at most `per_owner` of an owner's jobs
+    running at a time, owners served round-robin. get() blocks until some owner's next job may start;
+    release(job) after it ran frees that owner's slot."""
+
+    def __init__(self, per_owner=1):
+        self.per_owner = per_owner
+        self._cv = threading.Condition()
+        self._waiting = {}      # owner -> deque of queued jobs (dict order = round-robin order)
+        self._running = {}      # owner -> running count
+
+    def put(self, job):
+        with self._cv:
+            self._waiting.setdefault(job.owner, deque()).append(job)
+            self._cv.notify_all()
+
+    def get(self):
+        with self._cv:
+            while True:
+                for owner, jobs in self._waiting.items():
+                    if self._running.get(owner, 0) < self.per_owner:
+                        job = jobs.popleft()
+                        del self._waiting[owner]            # to the back of the round
+                        if jobs:
+                            self._waiting[owner] = jobs
+                        self._running[owner] = self._running.get(owner, 0) + 1
+                        return job
+                self._cv.wait()
+
+    def release(self, job):
+        with self._cv:
+            n = self._running.get(job.owner, 0) - 1
+            if n > 0:
+                self._running[job.owner] = n
+            else:
+                self._running.pop(job.owner, None)
+            self._cv.notify_all()
+
+
 class JobManager:
     def __init__(self, log=None, keep=200):   # shared by every user: room for their finished jobs
         self.keep = keep
@@ -149,9 +203,12 @@ class JobManager:
         self._jobs = {}            # id -> Job (recent history)
         self._active = {}          # key -> Job (queued/running)
         self._lock = threading.Lock()
-        self._queues = {'main': queue.Queue(), 'io': queue.Queue(), 'model': queue.Queue()}
-        for lane, q in self._queues.items():
-            threading.Thread(target=self._worker, args=(q,), daemon=True, name=f'dataviz-jobs-{lane}').start()
+        self._queues = {}
+        for lane, (workers, per_owner) in LANES.items():
+            q = self._queues[lane] = _Fifo() if per_owner is None else _FairQueue(per_owner)
+            for i in range(workers):
+                threading.Thread(target=self._worker, args=(q,), daemon=True,
+                                 name=f'dataviz-jobs-{lane}' + (f'-{i}' if workers > 1 else '')).start()
 
     def submit(self, key, label, fn, lane='main', public_result=False, owner=None, session_id=None):
         """Queue fn(job) -> result. Returns the existing job if `key` is already queued/running.
@@ -164,6 +221,8 @@ class JobManager:
             if session_id is None:
                 b = context.bound()
                 session_id = b.session_id if b is not None and b.session_id else None
+        if lane not in self._queues:
+            raise ValueError(f'unknown job lane {lane!r} (one of {", ".join(self._queues)})')
         with self._lock:
             if key in self._active and not self._active[key].cancelled.is_set():
                 return self._active[key]
@@ -222,42 +281,48 @@ class JobManager:
     def _worker(self, q):
         while True:
             job = q.get()
-            if job.cancelled.is_set():             # cancelled while queued: never started
-                job.status, job.stage, job.result = 'done', 'cancelled', {'cancelled': True}
-                job.started = job.finished = time.time()
-                with self._lock:
-                    if self._active.get(job.key) is job:     # a cancelled job may have been replaced
-                        self._active.pop(job.key)
-                job._event.set()
-                self._log_finished(job)
-                continue
-            job.status = 'running'
-            job.started = time.time()
-            job._stage_start = job.started
-            job.stage = 'starting'
-            _log.info(f'[cyan]● started[/] {vlog.esc(job.label)}')
-            _progress_acquire()
-            job._task = _progress.add_task('', total=None, label=vlog.esc(job.label), stage='starting', extra='')
             try:
-                job.result = job.fn(job)
-                job.status = 'done'
-                job.stage = 'done'
-                if job.total is not None:
-                    job.done = job.total
-            except Exception as e:  # noqa: BLE001 - surface any failure to the UI
-                job.status = 'error'
-                job.error = f'{type(e).__name__}: {e}'
-                _log.exception(f'[bold red]✖ failed[/]  {vlog.esc(job.label)} — {vlog.esc(job.error)}')
+                self._run(job)
             finally:
-                job.finished = time.time()
-                task, job._task = job._task, None
-                _progress.remove_task(task)
-                _progress_release()
-                took = job.finished - job.started
-                if job.status == 'done':
-                    _log.info(f'[green]✔ done[/]    {vlog.esc(job.label)} [dim]in {took:.1f}s[/]')
-                with self._lock:
-                    if self._active.get(job.key) is job:
-                        self._active.pop(job.key)
-                job._event.set()
-                self._log_finished(job)
+                q.release(job)
+
+    def _run(self, job):
+        if job.cancelled.is_set():             # cancelled while queued: never started
+            job.status, job.stage, job.result = 'done', 'cancelled', {'cancelled': True}
+            job.started = job.finished = time.time()
+            with self._lock:
+                if self._active.get(job.key) is job:     # a cancelled job may have been replaced
+                    self._active.pop(job.key)
+            job._event.set()
+            self._log_finished(job)
+            return
+        job.status = 'running'
+        job.started = time.time()
+        job._stage_start = job.started
+        job.stage = 'starting'
+        _log.info(f'[cyan]● started[/] {vlog.esc(job.label)}')
+        _progress_acquire()
+        job._task = _progress.add_task('', total=None, label=vlog.esc(job.label), stage='starting', extra='')
+        try:
+            job.result = job.fn(job)
+            job.status = 'done'
+            job.stage = 'done'
+            if job.total is not None:
+                job.done = job.total
+        except Exception as e:  # noqa: BLE001 - surface any failure to the UI
+            job.status = 'error'
+            job.error = f'{type(e).__name__}: {e}'
+            _log.exception(f'[bold red]✖ failed[/]  {vlog.esc(job.label)} — {vlog.esc(job.error)}')
+        finally:
+            job.finished = time.time()
+            task, job._task = job._task, None
+            _progress.remove_task(task)
+            _progress_release()
+            took = job.finished - job.started
+            if job.status == 'done':
+                _log.info(f'[green]✔ done[/]    {vlog.esc(job.label)} [dim]in {took:.1f}s[/]')
+            with self._lock:
+                if self._active.get(job.key) is job:
+                    self._active.pop(job.key)
+            job._event.set()
+            self._log_finished(job)

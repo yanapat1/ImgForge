@@ -36,7 +36,7 @@ export const syncBucket = (bid: string): Promise<SyncResult> => postJSON<SyncRes
 export const exportUrl = (bid: string, path = ''): string => `${B(bid)}/export${qs({ path })}`;
 /** Ask first whether the zip can be made (the download itself is an anchor, so its error would be a broken file). */
 export const exportCheck = (bid: string, path = ''): Promise<ExportCheck> => getJSON<ExportCheck>(`${B(bid)}/export/check${qs({ path })}`);
-/** Copy a folder to S3 / FTP / SFTP through a saved connection (a job on the io lane, dc-export:<bid>). */
+/** Copy a folder to S3 / FTP / SFTP through a saved connection (a job on the dc lane, dc-export:<bid>). */
 export const exportTo = (bid: string, body: ExportRemoteBody): Promise<ExportRemoteResult> => postJSON<ExportRemoteResult>(`${B(bid)}/export`, body);
 export const createRemoteBucket = (id: string, bucket: string): Promise<{ ok: boolean; bucket: string; created: boolean }> =>
   postJSON<{ ok: boolean; bucket: string; created: boolean }>('api/connections/create-bucket', { id, bucket });
@@ -63,7 +63,7 @@ export const fileUrl = (bid: string, path: string, w?: number, t?: number): stri
 export const videoInfo = (bid: string, path: string): Promise<VideoInfo> => getJSON<VideoInfo>(`${B(bid)}/video${qs({ path })}`);
 export const framesEstimate = (bucket: string, paths: string[], opts: FramesOpts): Promise<FramesEstimate> =>
   postJSON<FramesEstimate>('api/dc/frames/estimate', { bucket, paths, opts });
-/** Cut videos into frames: one io-lane job (dc-frames:<bucket>:<out path>). */
+/** Cut videos into frames: one dc-lane job (dc-frames:<bucket>:<out path>). */
 export const frames = (body: FramesBody): Promise<FramesResult> => postJSON<FramesResult>('api/dc/frames', body);
 export const setVideoAuto = (bid: string, opts: FramesOpts | null): Promise<{ video_auto: FramesOpts | null }> =>
   postJSON<{ video_auto: FramesOpts | null }>(`${B(bid)}/video-auto`, { opts });

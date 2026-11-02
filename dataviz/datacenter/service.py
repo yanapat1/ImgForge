@@ -39,6 +39,7 @@ __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket'
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
 PERM = 'data.manage'
+LANE = 'dc'                         # job lane of the bulk work: fair per account, never in the way of opening a session
 S3_TTL = 3600                       # an S3 detection is fresh this long (no cheap fingerprint for a prefix)
 SEARCH_SCAN = 300_000               # entries walked by one search
 _JSONB = bindparam('result', type_=JSONB)
@@ -215,7 +216,7 @@ def _cached(r, rel, force=False, want_tree=False, user=None, wait=True):
         return hit.result
     if r.kind == 's3' and not wait:
         jobs = getattr(_conf['ctx'], 'jobs', None) if _conf['ctx'] is not None else None
-        if jobs is None or not jobs.busy(f'dc-scan:{r.id}:'):      # one scan per bucket at a time on the io lane
+        if jobs is None or not jobs.busy(f'dc-scan:{r.id}:'):      # one scan per bucket at a time on the dc lane
             _scan_soon(user, r, rel)
         return hit.result if hit is not None else None
     res = _scan(r, rel, want_tree or not rel)
@@ -257,7 +258,7 @@ def _store_cache(r, rel, fp, res):
 
 
 def _scan_soon(user, r, rel=''):
-    """List + detect folder `rel` of S3 link `r` in an io-lane job dc-scan:<bid>:<rel> (the running one when it is
+    """List + detect folder `rel` of S3 link `r` in a dc-lane job dc-scan:<bid>:<rel> (the running one when it is
     already queued; inline from the CLI): progress shows the object count, Cancel stores nothing. -> job id."""
     rel = store.clean_rel(rel)
 
@@ -275,7 +276,7 @@ def _scan_soon(user, r, rel=''):
     if jobs is None:
         fn()
         return None
-    return jobs.submit(f'dc-scan:{r.id}:{rel}', f'scan {r.name}{"/" + rel if rel else ""} on S3', fn, lane='io',
+    return jobs.submit(f'dc-scan:{r.id}:{rel}', f'scan {r.name}{"/" + rel if rel else ""} on S3', fn, lane=LANE,
                        public_result=True, owner=(user or {}).get('id') or r.owner_id).id
 
 
@@ -536,7 +537,7 @@ def _local_root(r):
 
 def sync(user, bid):
     """(Re-)load an S3 link (mode local) into its local folder: every object is downloaded, replacing the local
-    file of the same name; files only the local copy has are kept. A job on the io lane (inline from the CLI)
+    file of the same name; files only the local copy has are kept. A job on the dc lane (inline from the CLI)
     -> {job_id, result}."""
     r = _row(user, bid)
     _need(user)
@@ -568,13 +569,13 @@ def sync(user, bid):
     jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
     if jobs is None:
         return {'job_id': None, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-sync:{r.id}', f'load {r.name} from S3', fn, lane='io',
+    return {'job_id': jobs.submit(f'dc-sync:{r.id}', f'load {r.name} from S3', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'result': None}
 
 
 def convert_vectors(user, bid, path='', to='parquet'):
     """Convert the embeddings folder `path` (npy + meta.csv, embeddings.parquet or embeddings.csv) into layout `to`
-    (labeling/writers/vector.py), in a new sibling folder <name>-<to>. A job on the io lane -> {job_id, path}."""
+    (labeling/writers/vector.py), in a new sibling folder <name>-<to>. A job on the dc lane -> {job_id, path}."""
     from ..labeling.writers import vector
     r = _row(user, bid)
     _need(user)
@@ -611,7 +612,7 @@ def convert_vectors(user, bid, path='', to='parquet'):
     if jobs is None:
         return {'job_id': None, 'path': out, 'result': fn()}
     return {'job_id': jobs.submit(f'dc-convert:{r.id}', f'convert {base} to {vector.LAYOUTS[to]["label"]}', fn,
-                                  lane='io', public_result=True, owner=user['id']).id, 'path': out, 'result': None}
+                                  lane=LANE, public_result=True, owner=user['id']).id, 'path': out, 'result': None}
 
 
 # ---------------------------------------------------------------------------------------------- video -> frames
@@ -772,7 +773,7 @@ def extract_frames(user, bid, paths, opts=None, target='inplace', new_name=None,
     `new_name` ('copy'; the only way for a bucket streamed from S3: each video is downloaded first). The folder is
     written hidden and appears in one rename when complete; layout yolo / yolo-split also writes labels/ and
     data.yaml, every layout writes frames.csv. remember=True saves `opts` as the bucket's auto-extract settings.
-    One io-lane job -> {job_id, bucket, path, estimate, result}."""
+    One dc-lane job -> {job_id, bucket, path, estimate, result}."""
     r = _row(user, bid)
     _need(user)
     o = video.options(opts)
@@ -882,7 +883,7 @@ def _frames_job(user, r, rels, o, est, name, target='inplace', new_name=None):
     base = {'bucket': dest.id, 'path': out_rel, 'estimate': {k: est[k] for k in ('frames', 'approx', 'bytes')}}
     if jobs is None:
         return {'job_id': None, **base, 'result': fn()}
-    job = jobs.submit(f'dc-frames:{dest.id}:{out_rel}', label, fn, lane='io', public_result=True, owner=user['id'])
+    job = jobs.submit(f'dc-frames:{dest.id}:{out_rel}', label, fn, lane=LANE, public_result=True, owner=user['id'])
     return {'job_id': job.id, **base, 'result': None}
 
 
@@ -977,7 +978,7 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
     """Download a dataset from the web (Kaggle, Hugging Face, Roboflow, a link, Zenodo, OpenML) into a new managed
     bucket (named from the ref, or `name`), or into folder `path` of an existing writable `bucket`. Archives are
     unpacked (opts.extract, default on; opts.nested: archives inside too; opts.keep_archive keeps the download), files
-    of the same name are replaced, then the format is detected. An io-lane job keyed dc-import:<bid> (inline from
+    of the same name are replaced, then the format is detected. A dc-lane job keyed dc-import:<bid> (inline from
     the CLI); a new bucket whose import fails or is cancelled is removed again. -> {job_id, bucket, result}"""
     from . import sources
     _need(user)
@@ -1073,7 +1074,7 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
     jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
     if jobs is None:
         return {'job_id': None, 'bucket': r.id, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-import:{r.id}', f'import {pref["ref"]} from {src.label}', fn, lane='io',
+    return {'job_id': jobs.submit(f'dc-import:{r.id}', f'import {pref["ref"]} from {src.label}', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'bucket': r.id, 'result': None}
 
 
@@ -1150,7 +1151,7 @@ def export_to(user, bid, path='', target=None, create_bucket=False, overwrite=Fa
     (labeling/sinks). Layout: destination = target prefix (S3) or path (FTP / SFTP) + the path RELATIVE TO THE
     BUCKET ROOT, so exporting data/image or all of the bucket puts data/image/im1.png at the same key.
     create_bucket (S3): make the target bucket when missing. A non-empty destination needs overwrite.
-    A job on the io lane dc-export:<bid> (inline from the CLI) -> {job_id, result: {files, bytes, uri, created}}."""
+    A job on the dc lane dc-export:<bid> (inline from the CLI) -> {job_id, result: {files, bytes, uri, created}}."""
     _need(user)
     r, rel, _ = _export_check(user, bid, path)
     t = dict(target or {})
@@ -1229,7 +1230,7 @@ def export_to(user, bid, path='', target=None, create_bucket=False, overwrite=Fa
 
     if jobs is None:
         return {'job_id': None, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-export:{r.id}', f'export {r.name} to {sink.uri}', fn, lane='io',
+    return {'job_id': jobs.submit(f'dc-export:{r.id}', f'export {r.name} to {sink.uri}', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'result': None}
 
 

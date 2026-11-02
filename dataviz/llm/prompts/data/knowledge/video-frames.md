@@ -5,6 +5,8 @@ summary: cut videos into images: fps / bursts / every Nth / count / keyframes / 
 - Videos (mp4, mov, avi, mkv, webm, m4v, wmv, mpg) are files of kind `video`. On the page they show a poster;
   double-click (or details › Extract frames…, or Send to… › Extract frames…) opens the dialog: a player with
   Set start / Set end, a live frame count and a film strip of the planned frames.
+- While a Data Center job (import, frames, sync, export, …) runs, sessions still open at once (their own job
+  lane). Each account's Data Center jobs run one after another; other accounts' jobs do not wait for them.
 - `extract_frames` (a background job, dc-frames, cancellable) on a video file, several, or a folder (its videos).
   Which frames:
   - `fps` = frames per second spread over each second (15 of 30 fps = every 2nd; 0.5 = one every 2 s).

@@ -7,7 +7,7 @@ This is the shared contract between `dataviz/datacenter/` (the backend), `datavi
   - `managed`: a folder under `storage.data_root` (config; default `data/` under the project root, always allowed). Imports land here.
   - `local`: a linked folder anywhere inside `storage.allowed_roots`. It is used in place.
   - `s3`: a linked bucket and prefix that goes through one of the owner's S3 connections. It has a load `mode`:
-    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it. Linking returns at once: an io-lane job `dc-scan:<bid>:` lists the objects (in parallel, `s3list.py`) and detects the format, with the object count as progress and Cancel. `ls` never lists the whole prefix inline: a stale detection (older than `S3_TTL`, 1 h) is returned as it is while a scan job refreshes it, and `format` is null until the first scan is done.
+    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it. Linking returns at once: a dc-lane job `dc-scan:<bid>:` lists the objects (in parallel, `s3list.py`) and detects the format, with the object count as progress and Cancel. `ls` never lists the whole prefix inline: a stale detection (older than `S3_TTL`, 1 h) is returned as it is while a scan job refreshes it, and `format` is null until the first scan is done.
     - `local`: a pull job downloads every object into `local_root` (`<data_root>/.s3/<name>-<id>`). Once the first pull has finished (`synced_at`), the bucket reads and writes that copy, so it is editable, undoable and exportable like a local bucket. Its `kind` stays `s3` and `root` is the copy.
     - Re-sync (`sync`) downloads again. An object replaces the local file with the same name, unless that file is unchanged (same size, and the mtime the pull set to the object's LastModified), which is skipped; files only the copy has are kept, and nothing is deleted. Downloads start while the listing still runs (`extra` shows `listing… n found`; `total` is set once the listing ends); objects of 64 MB or more are fetched in parallel ranges.
     - Switching back to `stream` keeps the copy on disk.
@@ -52,7 +52,7 @@ export_to(user, bid, path='', target={kind, connection_id, bucket?, prefix?, pat
     # Same filtering as export. create_bucket (S3): the bucket is made when missing (sinks.ensure_bucket; S3 naming
     # rules, else 400). A non-empty destination without overwrite, a missing bucket, an unreachable target: 400
     # before the job starts (S3 unreadable for export_check / export: 502);
-    # a second export of the same bucket while one runs: 409. An io-lane job dc-export:<bid>, cancellable (stops
+    # a second export of the same bucket while one runs: 409. A dc-lane job dc-export:<bid>, cancellable (stops
     # queueing files; what is already uploaded stays).
 source(user, bid, path='')                                     -> {source, format, classes, bucket, path, name}
     # the POST /api/label/projects `source` of a bucket folder (New label › Data Center), classes from its data.yaml
@@ -78,7 +78,7 @@ autolabel(user, bid, path='', model={registry_id | connection_id + model_id, ver
     #   {files, n_media, ...}}}, copied, restructured: {moved, undo_id}, formats_skipped?}
 convert_vectors(user, bid, path='', to='parquet'|'csv'|'npy') -> {job_id, path, result}
     # an embeddings folder (meta.csv + .npy, embeddings.parquet or embeddings.csv) into another layout, in a new
-    # sibling folder <name>-<to> (labeling/writers/vector.py); an io-lane job, key dc-convert:<bid>
+    # sibling folder <name>-<to> (labeling/writers/vector.py); a dc-lane job, key dc-convert:<bid>
 video_info(user, bid, path) -> {path, w, h, fps, frames, duration, codec, rotation, size, decoder}
     # w / h as shown (rotation applied); a video streamed from S3 only {path, size, streamed: true}. PyAV probe
     # (datacenter/video.py), OpenCV fallback (decoder 'opencv'), cached per path + mtime + size
@@ -97,7 +97,7 @@ extract_frames(user, bid, paths, opts=None, target='inplace'|'copy', new_name=No
     # first video, or at the root of a new managed bucket new_name (target copy: the only way for a streamed S3
     # bucket, each video downloaded first). Written as .frames-<hex>/ and renamed when complete (removed on error or
     # cancel, the copy bucket too). yolo*: images/ (+ train|val|test by time block), empty labels/, data.yaml with
-    # nc: 0; every layout: frames.csv (file, video, frame, time_s, split). An io-lane job dc-frames:<bid>:<path>.
+    # nc: 0; every layout: frames.csv (file, video, frame, time_s, split). A dc-lane job dc-frames:<bid>:<path>.
     # result {bucket, path, frames, bytes, videos: [{path, frames, skipped_dupes, errors, decoder, duration}],
     #   layout, format, describe, capped, splits?, retagged}. remember=True also runs set_video_auto(opts)
 set_video_auto(user, bid, opts|None) -> {video_auto}
@@ -109,7 +109,7 @@ inspect_source(user, source, ref, connection_id=None, opts={}) -> {title, size, 
 import_source(user, source, ref, name=None, connection_id=None, opts={}, bucket=None, path='') -> {job_id, bucket, result}
     # source: kaggle | huggingface | roboflow | url | zenodo | openml (datacenter/sources). Into a new managed bucket
     # (named from the ref) or folder `path` of a writable `bucket`. opts: the source's fields (version, revision,
-    # patterns, format) + extract (default true), nested, keep_archive. An io-lane job dc-import:<bid>: download
+    # patterns, format) + extract (default true), nested, keep_archive. A dc-lane job dc-import:<bid>: download
     # (SSRF-guarded, resumable, ranged parallel parts), unpack (zip / tar.* / gz / 7z with py7zr), detect the format.
     # A new bucket whose import fails or is cancelled is removed; while it runs the bucket is busy (409 on writes).
     # The token comes from the picked connection, else the caller's first one of that kind (kaggle / huggingface /
