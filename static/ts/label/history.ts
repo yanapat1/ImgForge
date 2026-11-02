@@ -17,6 +17,15 @@ export function onEdit(fn: Notify): void { notify = fn; }
 
 export const newHistory = (): History => ({ undo: [], redo: [] });
 
+/** A model run replaced the model shapes of task `tid`: steps that touch one of them would bring a stale shape
+ *  back next to the new predictions, so they are dropped from both stacks (steps on other shapes stay). */
+export function dropModelSteps(h: History, tid: string): void {
+  const stale = (e: { changes: Change[] }): boolean => e.changes.some(([, b, a]) =>
+    (b !== null && b.task_id === tid && b.source === 'model') || (a !== null && a.task_id === tid && a.source === 'model'));
+  h.undo = h.undo.filter((e) => !stale(e));
+  h.redo = h.redo.filter((e) => !stale(e));
+}
+
 function apply(changes: Change[], forward: boolean): void {
   const tasks = new Set<string>();
   for (const [id, before, after] of changes) {

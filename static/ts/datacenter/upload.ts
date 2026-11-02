@@ -117,7 +117,9 @@ function webPane(W: Web): string {
     '<p class="hint">The download runs in the background (progress at the top of the page); the format is detected when it is done.</p>';
 }
 
-async function walk(items: DataTransferItemList): Promise<File[]> {
+/** Files of a drop, folders walked (each file named by its path inside the dropped folder). The entries are taken
+ *  synchronously, so call it inside the drop event; `dataTransfer.files` alone gives a 0-byte file for a folder. */
+export async function walk(items: DataTransferItemList): Promise<File[]> {
   const out: File[] = [];
   const entries = [...items].map((i) => i.webkitGetAsEntry?.()).filter((e): e is FileSystemEntry => !!e);
   const read = async (e: FileSystemEntry, pre: string): Promise<void> => {

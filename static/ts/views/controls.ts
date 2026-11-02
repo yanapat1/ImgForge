@@ -88,7 +88,9 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function saveSettings(): void {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { postJSON('api/settings', collectSettings()).catch(() => {}); }, 500);
+  saveTimer = setTimeout(() => {
+    postJSON('api/settings', collectSettings()).catch((e: unknown) => { toast(`Settings not saved: ${errMessage(e)}`, 'err'); });
+  }, 500);
 }
 
 function sameClasses(a: number[] | null | undefined, b: number[] | null | undefined): boolean {

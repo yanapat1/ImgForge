@@ -17,6 +17,10 @@ export const $q = <T extends Element = HTMLElement>(sel: string, root: ParentNod
 /** querySelectorAll as a real array. */
 export const $qa = <T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T[] => [...root.querySelectorAll<T>(sel)];
 
+/** True when a key event's target takes text (an input, textarea, select or contenteditable): global keys skip it. */
+export const isTypingTarget = (t: EventTarget | null): boolean =>
+  t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // sliders paint their filled part from --fill (see input[type=range] in css/base.css)

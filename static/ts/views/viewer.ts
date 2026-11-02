@@ -6,7 +6,7 @@
 
 import { apiFetch, errMessage, getJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
-import { $, $req, textOn } from '../core/dom.js';
+import { $, $req, textOn, isTypingTarget } from '../core/dom.js';
 import { S } from '../core/state.js';
 import { clsColor, THEME } from '../core/theme.js';
 import type { EditResult, ImagePred, ImgBox, ImgBoxes, ViewerState } from '../types-views.js';
@@ -177,7 +177,7 @@ function initZoom(): void {
   $req('vw').addEventListener('dblclick', (e) => { if (!ED.active()) { e.preventDefault(); resetZoom(); } });
   // drag to move: left button on a zoomed image (viewing), middle button or Space + drag (editing)
   let pan: { x: number; y: number } | null = null, space = false;
-  addEventListener('keydown', (e) => { if (e.code === 'Space' && V.name) space = true; });
+  addEventListener('keydown', (e) => { if (e.code === 'Space' && V.name && !isTypingTarget(e.target)) space = true; });
   addEventListener('keyup', (e) => { if (e.code === 'Space') space = false; });
   $req('vw').addEventListener('pointerdown', (e) => {
     const ok = e.button === 1 || (e.button === 0 && (ED.active() ? space : Z.s > 1));

@@ -59,9 +59,13 @@ function paint(): void {
   }
 }
 
+let polling = false, again = false;              // one poll loop only: a watchJobs() during a request re-polls after it
+
 async function poll(): Promise<void> {
   timer = 0;
+  if (polling) { again = true; return; }
   if (!document.getElementById('dc-activity')) { started = false; return; }    // left the page
+  polling = true;
   let delay = 5000;
   if (!document.hidden) {
     try {
@@ -77,6 +81,8 @@ async function poll(): Promise<void> {
       if (active.length) delay = 1000;
     } catch { /* server restarting: try again later */ }
   }
+  polling = false;
+  if (again) { again = false; delay = 0; }
   timer = window.setTimeout(() => { void poll(); }, delay);
 }
 

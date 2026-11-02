@@ -2,6 +2,7 @@
 // (class balance, train/val gap, sessions, calibration, box fit, kNN agreement, box sizes, worst images), a
 // ranked list of plain-language findings, and a report / CSV / JSON export. Data: GET api/eval/overview.
 
+import { toast } from '../core/toast.js';
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
@@ -64,6 +65,7 @@ async function refresh(): Promise<void> {
 }
 
 async function runModels(ids: string[]): Promise<void> {
+  const failed: string[] = [];                         // one toast at the end, not a blocking alert per model
   for (const id of ids) {
     if (E.running.has(id)) continue;
     E.running.add(id);
@@ -72,7 +74,7 @@ async function runModels(ids: string[]): Promise<void> {
       const r = await postJSON<PredictResult>(`api/models/${encodeURIComponent(id)}/predict`, {});
       if (!r.ready) {
         await waitJob(r.job_id, (j) => {
-          const box = document.querySelector(`#e-models [data-mid="${id}"] .m-prog`);
+          const box = document.querySelector(`#e-models [data-mid="${CSS.escape(id)}"] .m-prog`);
           if (!box) return;
           const fill = box.querySelector<HTMLElement>('.bar > div');
           if (fill) setBar(fill, j);
@@ -80,9 +82,10 @@ async function runModels(ids: string[]): Promise<void> {
           if (num) num.textContent = j.total ? `${j.done}/${j.total}` : j.stage;
         });
       }
-    } catch (e) { alert(`${id}: ${errText(e)}`); }
+    } catch (e) { failed.push(`${id}: ${errText(e)}`); }
     E.running.delete(id);
   }
+  if (failed.length) toast(failed.length === 1 ? `Prediction failed. ${failed[0]}` : `${failed.length} models failed. ${failed.join(' · ')}`, 'err');
   void modelsChanged();
   await refresh();
 }

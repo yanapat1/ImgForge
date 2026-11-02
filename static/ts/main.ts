@@ -25,6 +25,7 @@ import { far2dIds, setExplainDot } from './plot/explain.js';
 import { initLLM } from './core/llm.js';
 import { applySettings, applyUiDefaults, applyView, bindFeatureImport, buildParamInputs, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshSavedViews, refreshTagList, renderFeatureSelect, runLabelQuality, saveSettings, SETTING_IDS, syncLqControls, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './views/controls.js';
 import { checkLabelsAI } from './views/assistant.js';
+import { openDialog } from './views/dialog.js';
 import { backToInspect, enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './views/gallery.js';
 import { showMissedObjects } from './views/model.js';
 import { bindBar, bindControlsToggle, bindGroupsPopover, bindSplitter, buildClassFilter, switchTab, updateBarSummary, updateGroupsBadge } from './views/layout.js';
@@ -440,18 +441,22 @@ function bindEvents(): void {
     setSelection(far2dIds().slice(0, UI.check_list_size), `Far from class on the map · ${$req<HTMLSelectElement>('method').selectedOptions[0]?.textContent ?? ''}`, { view: 'far2d' });
   };
   $req<HTMLInputElement>('show-centres').onchange = scheduleRender;
+  let dupsSeq = 0;
   $req('btn-dups').onclick = async () => {
     if (toggleOff('dups')) return;
+    const btn = $req<HTMLButtonElement>('btn-dups'), seq = ++dupsSeq;
+    btn.disabled = true;                              // one search at a time; a stale answer is dropped below
     try {
       const vis = new Set(viewIdsVisible());
       const { pairs, cutoff } = await getJSON<DuplicatesPayload>(`api/duplicates?threshold=${UI.duplicate_threshold}&feature=${encodeURIComponent(String(S.scoresFeature))}`);
+      if (seq !== dupsSeq) return;
       const keep = pairs.filter((p) => vis.has(p.a) && vis.has(p.b));
       const rule = cutoff?.by === 'rank'
         ? `closest ${+((cutoff.quantile ?? 0) * 100).toFixed(2)}%, distance ≤ ${(cutoff.distance ?? 0).toPrecision(3)}`
         : `cos ≥ ${UI.duplicate_threshold}`;
       setSelection([...new Set(keep.flatMap((p) => [p.a, p.b]))], `Near-duplicates (${rule}) · ${featureLabel(S.scoresFeature)}`,
         { kind: 'pairs', pairs: keep, view: 'dups' });
-    } catch (e) { toast(errText(e), 'err'); }
+    } catch (e) { toast(errText(e), 'err'); } finally { if (seq === dupsSeq) btn.disabled = false; }
   };
 
   $req<HTMLSelectElement>('sort').onchange = () => { S.page = 0; renderGallery(); };
@@ -460,12 +465,22 @@ function bindEvents(): void {
   $req('btn-clear').onclick = () => { setSelection([], 'No selection'); };
   $req('btn-export').onclick = () => { void exportCSV(); };
   $req('btn-ai-check').onclick = () => { void checkLabelsAI(); };      // ◆ hidden unless label_check is on (core/llm.js)
-  $req('btn-tag').onclick = async () => {
+  $req('btn-tag').onclick = () => {
     if (!S.sel.length || document.documentElement.dataset['role'] === 'viewer') return;
-    const tag = prompt(`Tag ${S.sel.length} ${unit(S.sel.length)} as:`, 'relabel');
-    if (!tag) return;
-    await postJSON('api/tags', { tag, ids: S.sel });
-    void refreshTagList();
+    const ids = [...S.sel];                          // the selection the user saw when they opened the dialog
+    void openDialog({
+      title: `Tag ${ids.length} ${unit(ids.length)}`, ok: 'Tag', focus: '#tag-name',
+      body: '<label class="fld"><span>Tag</span><input type="text" class="txt" id="tag-name" value="relabel" autocomplete="off" spellcheck="false"></label>',
+      bind: (r) => r.querySelector<HTMLInputElement>('#tag-name')?.select(),
+      onOk: async (r) => {
+        const tag = r.querySelector<HTMLInputElement>('#tag-name')?.value.trim() ?? '';
+        if (!tag) return 'Give the tag a name';
+        await postJSON('api/tags', { tag, ids });      // a failure throws: the dialog stays open and shows it
+        void refreshTagList();
+        toast(`Tagged ${ids.length} ${unit(ids.length)} “${tag}”`);
+        return null;
+      },
+    });
   };
   const tagList = $req<HTMLSelectElement>('tag-list');
   tagList.onchange = () => {

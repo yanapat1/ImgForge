@@ -15,7 +15,8 @@ summary: create folder, move, copy, rename, delete, write a text file, upload; u
   yolo-detect → other because labels/ moved). Tell the user and offer `undo`.
 - The page: drag onto a folder moves (Ctrl / Alt copies), F2 renames, Delete deletes, and every action toast has Undo.
 - Upload (page only): files, folders (with their sub-folders) or archives (zip / tar / tar.gz / 7z, unpacked) into the
-  open folder, or a new bucket from Import data. It runs in the background: the dialog closes at once and the user
+  open folder, or a new bucket from Import data. Dropping files or folders from the desktop onto the file grid
+  uploads them too (onto a folder tile: into that folder; folders keep their sub-folders). It runs in the background: the dialog closes at once and the user
   keeps working in the Data Center while a row at the top of the page (the activity strip) shows files done, MB/s,
   bytes, time left and the finish clock, with Cancel. Several uploads queue one after another.
   - Speed: 4 requests in flight (small files in batches, a big file in chunks sent in parallel). No request is

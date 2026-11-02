@@ -26,6 +26,7 @@ import {
   locationOf, PREF, selEntries, tagChip, writable,
 } from './state.js';
 import { openTagEditor } from './tags.js';
+import { walk } from './upload.js';
 import { queueUpload } from './uploads.js';
 import type { Entry, LsSort } from '../types-datacenter.js';
 import type { ViewMode } from './state.js';
@@ -608,10 +609,12 @@ export function bindBrowser(): void {
       void moveTo(d.bid, d.paths, t.dataset['path'] ?? '', e.ctrlKey || e.altKey ? 'copy' : 'move');
       return;
     }
-    const files = e.dataTransfer ? [...e.dataTransfer.files] : [];
-    if (!files.length || !D.bid || !D.listing?.writable) return;
+    const dt = e.dataTransfer, plain = dt ? [...dt.files] : [];
+    if (!plain.length || !D.bid || !D.listing?.writable) return;
     e.preventDefault();
-    queueUpload(D.bid, t ? t.dataset['path'] ?? '' : D.path, files);
+    const bid = D.bid, dest = t ? t.dataset['path'] ?? '' : D.path;
+    const walked = dt ? walk(dt.items) : Promise.resolve([]);     // started inside the event: entries expire after it
+    void walked.then((fs) => queueUpload(bid, dest, fs.length ? fs : plain), () => queueUpload(bid, dest, plain));
   });
 }
 

@@ -67,7 +67,7 @@ function tagsSec(bid: string, path: string, tags: Tag[], canEdit: boolean): stri
 function contentsSec(s: FolderStats | null, b: Bucket | undefined, title = 'Contents'): string {
   const st = b?.stats ?? {};
   const v = (n: number | null | undefined, f = fmtN): string => (n == null ? '<span class="faint">…</span>' : f(n));
-  const kv = `<div class="kv"><div><span>Images</span><b>${v(s?.images ?? st.images)}</b></div><div><span>Label files</span><b>${v(s?.labels ?? st.labels)}</b></div>` +
+  const kv = `<div class="d-kv"><div><span>Images</span><b>${v(s?.images ?? st.images)}</b></div><div><span>Label files</span><b>${v(s?.labels ?? st.labels)}</b></div>` +
     `<div><span>Boxes</span><b>${s ? (s.boxes ? fmtN(s.boxes) : '–') : v(null)}</b></div><div><span>Size</span><b>${v(s?.size ?? st.size, fmtSize)}</b></div></div>`;
   const splits = s ? Object.entries(s.splits ?? {}).filter(([, n]) => n > 0) : [];
   const split = splits.length > 1 ? `<div class="split" aria-hidden="true">${splits.map(([, n], i) => `<i style="flex:${n};background:${SPLIT_COLORS[i % SPLIT_COLORS.length]}"></i>`).join('')}</div>` +
@@ -183,7 +183,7 @@ function selectionDetails(b: Bucket): string {
     `<button type="button" class="icon-btn ghost sm dc-only-overlay" data-act="close-overlays" aria-label="Close details">${icon('x')}</button></div>` +
     (stack ? `<div class="stack">${stack}</div>` : '') +
     `<div class="d-path"><i class="dc-fdot" style="--fc:var(--accent)" aria-hidden="true"></i><span>${esc(b.name)}/${esc(D.path)}${D.path ? '/' : ''}</span></div></section>` +
-    `<section class="d-sec"><h4 class="d-h">Selection</h4><div class="kv">` +
+    `<section class="d-sec"><h4 class="d-h">Selection</h4><div class="d-kv">` +
     `<div><span>Total size</span><b>${dirs.length ? '–' : fmtSize(size)}</b></div>` +
     `<div><span>${dirs.length && !imgs.length ? 'Items' : 'Dimensions'}</span><b>${dirs.length && !imgs.length ? fmtN(dirs.reduce((a, e) => a + (e.items ?? 0), 0)) : dims.length === 1 ? dims[0] : dims.length ? 'mixed' : '–'}</b></div>` +
     `<div><span>Labeled</span><b>${withL.length ? `${labeled} / ${imgs.length}` : '–'}</b></div>` +
@@ -204,7 +204,7 @@ function overviewDetails(): string {
   const n = D.buckets.length;
   return `<div class="d-scroll"><section class="d-sec">${head(icon('db'), 'Data Center')}` +
     `<p class="muted">Every image dataset in one place. Pick a bucket card to see its format, tags, contents and the sessions that use it.</p></section>` +
-    `<section class="d-sec"><h4 class="d-h">Totals</h4><div class="kv"><div><span>Buckets</span><b>${fmtN(n)}</b></div><div><span>Images</span><b>${fmtN(s?.images ?? null)}</b></div>` +
+    `<section class="d-sec"><h4 class="d-h">Totals</h4><div class="d-kv"><div><span>Buckets</span><b>${fmtN(n)}</b></div><div><span>Images</span><b>${fmtN(s?.images ?? null)}</b></div>` +
     `<div><span>Size</span><b>${fmtSize(s?.size ?? null)}</b></div><div><span>Links</span><b>${s ? fmtN(s.links.local + s.links.s3) : '–'}</b></div></div></section>` +
     `<section class="d-sec"><h4 class="d-h">Keys</h4><div class="dc-keys hint"><span><kbd>/</kbd> search</span><span><kbd>Del</kbd> delete</span><span><kbd>F2</kbd> rename</span><span><kbd>Ctrl</kbd> <kbd>A</kbd> select all</span><span><kbd>Esc</kbd> clear</span></div></section></div>`;
 }

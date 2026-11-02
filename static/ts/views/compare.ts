@@ -231,7 +231,7 @@ function bindPanel(): void {
   body.addEventListener('input', (e) => {
     if (e.target instanceof HTMLInputElement && e.target.id === 'cmp-novel-thr') {
       U.novelThr = +e.target.value;
-      renderNovel();
+      renderNovelResults();
     }
   });
 }
@@ -534,21 +534,38 @@ function novelIds(): number[] {
   return out.map((x) => x[0]);
 }
 
+// The slider is built once per renderNovel(); dragging it only refreshes the label and the result row below it,
+// so the element under the pointer is never replaced (that would end the drag and lose focus).
 function renderNovel(): void {
   const el = $('cmp-novel');
   if (!el || !S.cmp) return;
-  const B = alias(S.cmp.b), A = alias(S.cmp.a);
+  const B = alias(S.cmp.b);
   if (!U.quick) {
-    el.innerHTML = `<p class="muted hint">The Quick layout also scores how novel each box of ${esc(B)} is (its similarity to the nearest box of ${esc(A)}).</p>`;
+    el.innerHTML = `<p class="muted hint">The Quick layout also scores how novel each box of ${esc(B)} is (its similarity to the nearest box of ${esc(alias(S.cmp.a))}).</p>`;
     return;
   }
-  const ids = novelIds();
   el.innerHTML = `<div class="m-ctl"><span class="m-lbl" title="cosine similarity to the nearest box of A">Novel in ${esc(B)}</span>` +
     `<input id="cmp-novel-thr" type="range" min="0.3" max="1" step="0.01" value="${U.novelThr}" aria-label="Similarity threshold">` +
-    `<span class="num">&lt; ${U.novelThr.toFixed(2)}</span></div>` +
-    `<div class="cmp-novel-row"><b class="num">${n(ids.length)}</b> boxes unlike anything in ${esc(A)}` +
-    (ids.length ? ` <button type="button" class="ghost" data-novel>${icon('search')}Show in gallery</button>` : '') + '</div>' +
-    `<div class="cmp-strip">${ids.slice(0, 12).map((id) => `<img loading="lazy" alt="" src="api/crop/${id}" title="#${id} ${esc(clsName(pts().cls[id] ?? -1))}">`).join('')}</div>`;
+    `<span class="num" id="cmp-novel-v"></span></div><div class="cmp-novel-row"></div><div class="cmp-strip"></div>`;
+  novelStrip = '';
+  renderNovelResults();
+}
+
+let novelStrip = '';                           // ids shown in the strip: unchanged ids keep their <img> (no refetch)
+
+function renderNovelResults(): void {
+  const el = $('cmp-novel'), v = $('cmp-novel-v');
+  if (!el || !v || !S.cmp) return;
+  const ids = novelIds();
+  v.textContent = `< ${U.novelThr.toFixed(2)}`;
+  const row = el.querySelector<HTMLElement>('.cmp-novel-row'), strip = el.querySelector<HTMLElement>('.cmp-strip');
+  if (row) row.innerHTML = `<b class="num">${n(ids.length)}</b> boxes unlike anything in ${esc(alias(S.cmp.a))}` +
+    (ids.length ? ` <button type="button" class="ghost" data-novel>${icon('search')}Show in gallery</button>` : '');
+  const top = ids.slice(0, 12), key = top.join();
+  if (strip && key !== novelStrip) {
+    novelStrip = key;
+    strip.innerHTML = top.map((id) => `<img loading="lazy" alt="" src="api/crop/${id}" title="#${id} ${esc(clsName(pts().cls[id] ?? -1))}">`).join('');
+  }
 }
 
 function showNovel(): void {

@@ -17,7 +17,7 @@ import type { Ann, AnnotationsPayload, Change, History, LabelProject, LabelSetti
 import { openSettings } from '../settings/dialog.js';
 import * as cv from './canvas.js';
 import { openExportDialog } from './export.js';
-import { edit, newHistory, onEdit, redo, undo } from './history.js';
+import { dropModelSteps, edit, newHistory, onEdit, redo, undo } from './history.js';
 import { bindHotkeys, combosFor, prettyCombo, rebuildHotkeys } from './hotkeys.js';
 import * as P from './panels.js';
 import * as M from './model.js';
@@ -654,6 +654,7 @@ function mergePredictions(e: LruEntry, tid: string, res: RunResult, markRun = tr
   const removed: string[] = [];
   for (const [id, a] of anns) if (a.task_id === tid && a.source === 'model') { anns.delete(id); removed.push(id); }
   for (const a of res.annotations || []) if (a.source === 'model' && a.task_id === tid && !anns.has(a.id)) anns.set(a.id, a);
+  dropModelSteps(e.history, tid);
   if (!(L.media && L.media.id === e.mid && L.anns === anns)) return;
   for (const id of removed) { if (!anns.has(id)) { L.selected.delete(id); L.hidden.delete(id); L.editing.delete(id); if (L.hoverId === id) L.hoverId = null; } }
   cv.shapesChanged();

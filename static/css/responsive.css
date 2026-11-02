@@ -30,6 +30,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation: none !important; }
+  /* finish every animation at once instead of removing it: a fade-in with `forwards` (.startup.delayed) still lands
+     on its end state, so it shows instead of staying at opacity 0. Looping spinners stop in their own blocks. */
+  *, *::before, *::after { transition: none !important; animation-duration: .01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; }
   .bar.indeterminate > div { width: 100% !important; opacity: .5; }
 }

@@ -189,16 +189,25 @@ export function dropMid(mid: string): void {
 // last chance: keepalive PUTs for what is queued, and the browser's "leave page?" prompt for anything that cannot
 // be sent safely now: offline, an open conflict, or a key whose PUT is in flight (a keepalive PUT would carry the
 // pre-response base_version and lose to it with a 409), or edits the page holds back while the model runs
+// The browser caps all in-flight keepalive bodies at 64 KiB together. An over-quota fetch rejects asynchronously
+// (apiFetch is async, so a try/catch never sees it), so the budget is checked up front: a body that does not fit
+// stays pending and the prompt below asks the user to stay.
+const KEEPALIVE_BUDGET = 60_000;
+const enc = new TextEncoder();
+
 function unloadFlush(ev: BeforeUnloadEvent): void {
   clearTimeout(timer);
+  let budget = KEEPALIVE_BUDGET;
   for (const [k, p] of pending) {
     if (failing || inflight.has(k)) continue;
     const b = body(p.mid, p.tid);
     if (!b) continue;
-    try {
-      void apiFetch(url(p.mid), { method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: b.json });
-      pending.delete(k);
-    } catch (e) { /* body over the keepalive quota: keep it, the prompt below asks the user to stay */ }
+    const size = enc.encode(b.json).byteLength;
+    if (size > budget) continue;
+    budget -= size;
+    void apiFetch(url(p.mid), { method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: b.json })
+      .catch(() => { /* page is closing; nothing left to report to */ });
+    pending.delete(k);
   }
   if (pending.size || inflight.size || conflicts.size || H.held()) { ev.preventDefault(); ev.returnValue = ''; }
 }

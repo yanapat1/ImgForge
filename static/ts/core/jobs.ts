@@ -17,6 +17,7 @@ export function setBar(fillEl: HTMLElement, job: { total?: number | undefined; p
 }
 
 let lastErrorShown = 0;
+let errShowing = 0, hideTimer = 0;               // the error on the bar now, and its one 12 s hide timer
 
 let prevActive = 0;
 
@@ -41,6 +42,7 @@ function renderJobsBar(jobs: Job[], active: Job[]): void {
   if (active.length) {
     const j = active.find((x) => x.status === 'running') || active[0];
     if (!j) return;
+    if (errShowing) { lastErrorShown = Math.max(lastErrorShown, errShowing); errShowing = 0; clearTimeout(hideTimer); }
     bar.classList.remove('hidden', 'error');
     $req('job-label').textContent = j.label;
     $req('job-stage').textContent = j.stage;
@@ -49,12 +51,21 @@ function renderJobsBar(jobs: Job[], active: Job[]): void {
     $req('job-eta').textContent = fmtEta(j.eta);
     $req('job-queued').textContent = active.length > 1 ? `+${active.length - 1} queued` : '';
   } else if (err && err.id > lastErrorShown) {
+    if (errShowing === err.id) return;            // already on the bar, its hide timer is running
+    errShowing = err.id;
     bar.classList.remove('hidden');
     bar.classList.add('error');
     $req('job-label').textContent = `${err.label} failed`;
     $req('job-stage').textContent = err.error;
     $req('job-pct').textContent = $req('job-eta').textContent = $req('job-queued').textContent = '';
-    setTimeout(() => { lastErrorShown = Math.max(lastErrorShown, err.id); bar.classList.add('hidden'); }, 12000);
+    clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => {
+      lastErrorShown = Math.max(lastErrorShown, err.id);
+      if (errShowing !== err.id) return;          // a job started since: the bar is not this error's any more
+      errShowing = 0;
+      bar.classList.add('hidden');
+      bar.classList.remove('error');
+    }, 12000);
   } else if (!bar.classList.contains('error')) {
     bar.classList.add('hidden');
   }

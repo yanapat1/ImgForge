@@ -20,7 +20,9 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a
 .ai-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 7px;
   background: linear-gradient(135deg, var(--gem-1, #7dd3fc), var(--gem-2, #a78bfa) 55%, var(--gem-3, #f0abfc));
   box-shadow: 0 2px 10px var(--gem-glow, rgba(167, 139, 250, .3)); }
-.ai-mark .ico { width: 15px; height: 15px; color: #fff; stroke: #fff; }
+/* the gem gradient is light in dark themes and dark in light ones: the icon takes the opposite tag-text token */
+.ai-mark .ico { width: 15px; height: 15px; color: var(--lb-tag-dark); stroke: currentColor; }
+:root[data-theme="light"] .ai-mark .ico { color: var(--lb-tag-light); }
 .ai-model { font-size: var(--fs-xs); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-meter { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }
 
