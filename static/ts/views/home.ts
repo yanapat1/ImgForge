@@ -433,16 +433,29 @@ function renderTagbar(): void {
   }).join('') + (H.tagSel.size ? `<button class="ghost htb-clear" data-act="tagclear">${icon('x')}Clear</button>` : '') : '';
 }
 
-// the grids, the tab counts and the tag bar (not the tabs / search box: typing keeps its focus)
+// the tab counts for both tabs, the grid of the tab on screen (the hidden one is drawn when it is opened: a search
+// keystroke builds one grid, not two) and the tag bar (not the tabs / search box: typing keeps its focus)
+const stalePanels = new Set<TabId>();
+
+function paintPanel(t: TabId, list: Item[], total: number): void {
+  stalePanels.delete(t);
+  $req(`home-panel-${t}`).classList.remove('is-empty');
+  $req(`home-panel-${t}`).innerHTML = panelHTML(t, list, total);
+}
+
+function listOf(t: TabId): { list: Item[]; total: number } {
+  const all = TAB[t].items();
+  const list = filtering() ? all.filter((x) => { const o = TAB[t].of(x); return matches(o.name, tagsOf(o)); }) : all;
+  return { list, total: all.length };
+}
+
 function renderPanels(): void {
   closeCardMenu(false);
   const on = filtering();
   for (const t of TABS) {
-    const all = TAB[t].items();
-    const list = on ? all.filter((x) => { const o = TAB[t].of(x); return matches(o.name, tagsOf(o)); }) : all;
-    $req(`home-n-${t}`).textContent = H.errs[TAB[t].err] ? '' : on ? `${list.length}/${all.length}` : String(all.length);   // no count while its list failed to load
-    $req(`home-panel-${t}`).classList.remove('is-empty');
-    $req(`home-panel-${t}`).innerHTML = panelHTML(t, list, all.length);
+    const { list, total } = listOf(t);
+    $req(`home-n-${t}`).textContent = H.errs[TAB[t].err] ? '' : on ? `${list.length}/${total}` : String(total);   // no count while its list failed to load
+    if (t === (H.tab || 'viz')) paintPanel(t, list, total); else stalePanels.add(t);
   }
   renderTagbar();
   renderSelBar();
@@ -454,8 +467,9 @@ function readTab(): TabId | null {
 }
 
 // remember: a choice of the user (a click / arrow key), not the first render's pick
-function setTab(t: TabId, focus: boolean, remember: boolean): void {
+function setTab(t: TabId, focus: boolean, remember: boolean, bars = true): void {
   H.tab = t;
+  if (stalePanels.has(t)) { const { list, total } = listOf(t); paintPanel(t, list, total); }
   if (remember) rememberPref(TAB_PREF, t);
   for (const k of TABS) {
     const on = k === t;
@@ -467,6 +481,7 @@ function setTab(t: TabId, focus: boolean, remember: boolean): void {
   $req('home-new-text').textContent = NEW_TEXT[t];
   if (focus) $req(`home-tab-${t}`).focus();
   closeCardMenu(false);
+  if (!bars) return;
   renderTagbar();
   renderSelBar();
 }
@@ -492,7 +507,7 @@ function render(): void {
     H.tab = !lists[want].length && lists[other].length ? other : want;
   }
   renderPanels();
-  setTab(H.tab, false, false);
+  setTab(H.tab, false, false, false);            // the tag bar and selection bar were just drawn by renderPanels
 }
 
 const scopeQ = (): string => `?scope=${encodeURIComponent(H.scope)}`;

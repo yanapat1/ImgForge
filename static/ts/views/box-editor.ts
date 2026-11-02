@@ -274,11 +274,18 @@ function down(e: PointerEvent): void {
   E.redraw();
 }
 
+// pointermove fires faster than the screen refreshes: redraw once per frame. Between frames nothing writes the DOM,
+// so the layout reads in toNorm / scaleK stay cheap (no forced layout per event).
+let moveRaf = 0;
+function redrawSoon(): void {
+  if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; E.redraw(); });
+}
+
 function move(e: PointerEvent): void {
   const d = E.drag;
   if (!d) return;
   const [x, y] = toNorm(e);
-  if (d.kind === 'draw' || d.kind === 'region') { d.cur = [x, y]; E.redraw(); return; }
+  if (d.kind === 'draw' || d.kind === 'region') { d.cur = [x, y]; redrawSoon(); return; }
   const b = selBox(), o = d.box;
   if (!b) return;
   if (d.kind === 'move') {
@@ -296,12 +303,13 @@ function move(e: PointerEvent): void {
     if (Math.abs(x2 - x1) < minw || Math.abs(y2 - y1) < minh) return;
     b.cx = (x1 + x2) / 2; b.cy = (y1 + y2) / 2; b.w = Math.abs(x2 - x1); b.h = Math.abs(y2 - y1);
   }
-  E.redraw();
+  redrawSoon();
 }
 
 function up(e: PointerEvent): void {
   const d = E.drag;
   E.drag = null;
+  if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }   // the final draw below covers it
   if (!d) return;
   if (d.kind === 'region') {
     if (d.cur && Math.abs(e.clientX - d.sx) >= MIN_PX && Math.abs(e.clientY - d.sy) >= MIN_PX) {

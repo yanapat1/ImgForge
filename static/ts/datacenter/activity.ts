@@ -44,13 +44,34 @@ function row(j: Job): string {
     `<button type="button" class="icon-btn ghost sm" data-act="cancel-job" data-jid="${j.id}" aria-label="Cancel ${esc(j.label)}" title="Cancel"${j.cancelled ? ' disabled' : ''}>${icon('x')}</button></div>`;
 }
 
+function patchRow(box: HTMLElement, j: Job): void {
+  const r = box.querySelector<HTMLElement>(`.dc-act-row[data-jid="${j.id}"]`);
+  if (!r) return;
+  const det = !!j.total;
+  const w = det ? Math.min(100, j.pct ?? 0) : 30;
+  const set = (sel: string, text: string): void => { const el = r.querySelector(sel); if (el && el.textContent !== text) el.textContent = text; };
+  set('.dc-act-s', j.status === 'queued' ? 'queued' : j.stage || j.status);
+  const nums = det ? `${j.done.toLocaleString('en-US')}/${j.total.toLocaleString('en-US')}` : `${j.elapsed}s`;
+  set(':scope > span.num:not(.muted)', `${nums}${j.extra ? ` · ${j.extra}` : ''}`);
+  set(':scope > span.muted.num', fmtEta(j.eta));
+  const fill = r.querySelector<HTMLElement>('.bar > div');
+  if (fill) fill.style.width = `${w}%`;
+  if (det) r.querySelector('.bar')?.setAttribute('aria-valuenow', String(Math.round(w)));
+}
+
 function paint(): void {
   const el = document.getElementById('dc-activity'), jobs = stripPart('dc-act-jobs');
   if (!el || !jobs) return;
   el.classList.toggle('hidden', !active.length && !uploadRows());
-  const html = active.slice(0, 3).map(row).join('') +
-    (active.length > 3 ? `<div class="dc-act-more muted">+${active.length - 3} more queued</div>` : '');
-  if (jobs.innerHTML !== html) jobs.innerHTML = html;                // unchanged: leave the buttons alone
+  const shown = active.slice(0, 3);
+  const key = shown.map((j) => `${j.id}:${j.total ? 1 : 0}:${j.cancelled ? 1 : 0}`).join() + `|${Math.max(0, active.length - 3)}`;
+  if (jobs.dataset['k'] !== key) {                 // other jobs (or a kind of bar) than drawn here: one rebuild
+    jobs.dataset['k'] = key;
+    jobs.innerHTML = shown.map(row).join('') +
+      (active.length > 3 ? `<div class="dc-act-more muted">+${active.length - 3} more queued</div>` : '');
+  } else {
+    for (const j of shown) patchRow(jobs, j);      // the same jobs: numbers and bar in place (hover / focus on Cancel stay)
+  }
   // badges in place: no full repaint for a percentage
   for (const b of document.querySelectorAll<HTMLElement>('.dc-jobb[data-jb]')) {
     const j = byBucket.get(b.dataset['jb'] ?? '');

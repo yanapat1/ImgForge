@@ -81,6 +81,7 @@ Job    {job_id}   -> poll the existing GET /api/jobs/{id}
 | GET | `/api/label/projects` | | `{projects:[{id,name,created,updated,source:{kind,…},n_media,cover:[media_id ≤4],tasks:[{id,name,task_type,n_classes,done,in_progress,skipped,todo}]}]}` |
 | POST | `/api/label/projects` | `{name, description?, source, tasks:[{name, task_type, config?, classes:[{name, color?}]}], export_default?}` | `{project: Project, job_id: id\|null}` (job = import; null for `upload` until finalize) |
 | GET | `/api/label/projects/{pid}` | | `Project = {id,name,description,created,updated,source,export_default,n_media,tasks:[Task]}` |
+| GET | `/api/label/projects/{pid}/stats` | | the Sessions-home card of this one project (`tasks:[{id, done, in_progress, …, review_manual, review_bulk}]`): the label page refreshes its counts with it after a save |
 | PATCH | `/api/label/projects/{pid}` | `{name?, description?, export_default?}` | Project |
 | DELETE | `/api/label/projects/{pid}?delete_files=0\|1` | | `{ok:true}` |
 | POST | `/api/label/projects/{pid}/tasks` | `{name, task_type, config?, classes?:[{name,color?}]}` | Task |

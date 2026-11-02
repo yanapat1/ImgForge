@@ -36,7 +36,8 @@ export async function api(path: string, opts?: RequestInit): Promise<Response> {
 export const isStatus = (e: unknown, status: number): boolean => new RegExp(`: ${status} `).test(errMessage(e));
 
 /** GET path, parse JSON as T (T is the caller's claim about the server payload; types.ts has the shapes). */
-export const getJSON = <T = unknown>(path: string): Promise<T> => api(path).then((r): Promise<T> => r.json());
+export const getJSON = <T = unknown>(path: string, signal?: AbortSignal): Promise<T> =>
+  api(path, signal ? { signal } : undefined).then((r): Promise<T> => r.json());
 
 /** POST body as JSON, parse the JSON answer as T. */
 export const postJSON = <T = unknown>(path: string, body?: unknown): Promise<T> => sendJSON<T>('POST', path, body);

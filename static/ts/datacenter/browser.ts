@@ -46,6 +46,8 @@ let retryS3 = false;
 let refreshNext = false;
 /** a streamed S3 folder still being listed: asked again shortly */
 let partialTimer = 0;
+/** the listing request in flight */
+let listAbort: AbortController | null = null;
 
 // ---------------------------------------------------------------- loading
 
@@ -63,10 +65,25 @@ export async function loadListing(keep = false): Promise<void> {
   const retry = retryS3, refresh = refreshNext;
   retryS3 = false;
   refreshNext = false;
+  listAbort?.abort();                              // a newer listing replaces it: stop the old request on the server too
+  const ac = new AbortController();
+  listAbort = ac;
   try {
-    const r = await api.ls(bid, D.path, 0, Math.min(2000, Math.max(api.PAGE, had)), D.sort, D.nameQ, retry, refresh);
+    const r = await api.ls(bid, D.path, 0, Math.min(2000, Math.max(api.PAGE, had)), D.sort, D.nameQ, retry, refresh, ac.signal);
     if (seq !== D.seq) return;
     if (r.partial) partialTimer = window.setTimeout(() => { if (seq === D.seq) void loadListing(true); }, 1000);
+    // a streamed S3 folder still being listed asks again every second: while the answer only adds entries after
+    // the ones shown, append their tiles instead of re-rendering the page (focus, hover, a playing video stay)
+    const prev = keep ? D.listing : null, grid = $('dc-grid');
+    if (r.partial && prev && grid && !D.listErr && r.entries.length >= prev.entries.length &&
+        prev.entries.every((e, i) => r.entries[i]?.path === e.path)) {
+      const added = r.entries.slice(prev.entries.length);
+      D.listing = r;
+      D.loading = false;
+      if (added.length) { grid.insertAdjacentHTML('beforeend', added.map(D.view === 'thumbs' ? tile : lrow).join('')); observeThumbs(); }
+      renderStripCount();
+      return;
+    }
     D.listing = r;
     D.listErr = null;
     const have = new Set(r.entries.map((e) => e.path));
@@ -352,17 +369,32 @@ function ensureFolderStats(): void {
 }
 
 /** The selection changed: flip classes, repaint the bulk bar and the details (no tile is re-rendered). */
+// The grid element the marks were last painted on and the paths marked there: a click then touches only the rows
+// whose state can have changed (was or is selected), not all of a 2,000-tile folder. A new grid element (a full
+// render) is painted in one pass.
+let paintedGrid: Element | null = null;
+let painted = new Set<string>();
+
+function markRow(el: HTMLElement, on: boolean): void {
+  if (el.classList.contains('sel') === on) return;
+  el.classList.toggle('sel', on);
+  el.setAttribute('aria-selected', String(on));
+  el.querySelector('.cb')?.classList.toggle('on', on);
+}
+
 export function selChanged(): void {
   const grid = $('dc-grid');
   if (grid) {
-    for (const el of grid.querySelectorAll<HTMLElement>('[data-path]')) {
-      const on = D.sel.has(el.dataset['path'] ?? '');
-      if (el.classList.contains('sel') !== on) {
-        el.classList.toggle('sel', on);
-        el.setAttribute('aria-selected', String(on));
-        el.querySelector('.cb')?.classList.toggle('on', on);
+    const touch = grid === paintedGrid ? new Set([...painted, ...D.sel]) : null;
+    if (!touch || touch.size > 300) {
+      for (const el of grid.querySelectorAll<HTMLElement>('[data-path]')) markRow(el, D.sel.has(el.dataset['path'] ?? ''));
+    } else {
+      for (const p of touch) {
+        for (const el of grid.querySelectorAll<HTMLElement>(`[data-path="${CSS.escape(p)}"]`)) markRow(el, D.sel.has(p));
       }
     }
+    paintedGrid = grid;
+    painted = new Set(D.sel);
   }
   const L = D.listing;
   const head = document.querySelector('#dc-body .dc-lrow.head .cb');
@@ -545,7 +577,10 @@ const dropTarget = (t: EventTarget | null): HTMLElement | null => {
   const bid = el.dataset['bid'] ?? D.bid;
   return bid === D.bid ? el : null;
 };
-const clearDrop = (): void => { for (const x of document.querySelectorAll('.drop-on')) x.classList.remove('drop-on'); };
+// the one element marked as the drop target (dragover fires every few ms: no document query each time)
+let dropOn: Element | null = null;
+const clearDrop = (): void => { dropOn?.classList.remove('drop-on'); dropOn = null; };
+const markDrop = (el: Element): void => { if (dropOn !== el) { clearDrop(); el.classList.add('drop-on'); dropOn = el; } };
 
 export function bindBrowser(): void {
   const app = $('dc-app'), body = $('dc-body'), main = $('dc-main');
@@ -574,16 +609,14 @@ export function bindBrowser(): void {
     const files = !dragging && !!e.dataTransfer?.types.includes('Files');
     if (dragging) {
       const t = dropTarget(e.target);
-      clearDrop();
-      if (!t || dragging.paths.includes(t.dataset['path'] ?? '') || (t.dataset['path'] ?? '') === parentOf(dragging.paths[0] ?? '') && dragging.paths.every((p) => parentOf(p) === (t.dataset['path'] ?? ''))) return;
+      if (!t || dragging.paths.includes(t.dataset['path'] ?? '') || (t.dataset['path'] ?? '') === parentOf(dragging.paths[0] ?? '') && dragging.paths.every((p) => parentOf(p) === (t.dataset['path'] ?? ''))) { clearDrop(); return; }
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = e.ctrlKey || e.altKey ? 'copy' : 'move';
-      t.classList.add('drop-on');
+      markDrop(t);
     } else if (files && D.bid && D.listing?.writable && !D.search) {
       e.preventDefault();
       const t = dropTarget(e.target);
-      clearDrop();
-      t?.classList.add('drop-on');
+      if (t) markDrop(t); else clearDrop();
       const ov = $('dc-drop');
       if (ov) {
         ov.classList.remove('hidden');

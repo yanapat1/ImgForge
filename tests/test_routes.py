@@ -393,6 +393,10 @@ def test_review_endpoint_flag_and_card(client):
     assert r.json() == {'changed': {det['id']: 1}}
     t = next(x for x in card()['tasks'] if x['id'] == det['id'])
     assert (t['done'], t['review_manual'], t['review_bulk']) == (2, 1, 1)
+    # the label page's one-project stats give the same counts as the card in the list
+    one = client.get(f'/api/label/projects/{pid}/stats').json()
+    assert one['id'] == pid and next(x for x in one['tasks'] if x['id'] == det['id']) == t
+    assert client.get(f'/api/label/projects/{"0" * 32}/stats').status_code in (403, 404)
     page = client.get(f'/api/label/projects/{pid}/media', params={'task_id': det['id'], 'review': 'bulk'}).json()
     assert page['total'] == 1 and page['items'][0]['review'] == {det['id']: 'bulk'}
     assert client.post(f'/api/label/projects/{pid}/review', json={'task_ids': [det['id']], 'mode': 'nope'}).status_code == 400

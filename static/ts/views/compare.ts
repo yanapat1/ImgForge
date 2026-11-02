@@ -190,8 +190,11 @@ function bindPanel(): void {
     U.params.name_key = (e.target as HTMLSelectElement).value as CmpParams['name_key'] & string;
     void runCompare();
   };
-  slider('cmp-dens-g', 0, (v) => { cmp().density.G = v; applyFilterMask(); });
-  slider('cmp-dens-blur', 0, (v) => { cmp().density.blur = v; applyFilterMask(); });
+  // a drag fires input many times per frame: one restyle of the density per frame
+  let densRaf = 0;
+  const densSoon = (): void => { if (!densRaf) densRaf = requestAnimationFrame(() => { densRaf = 0; applyFilterMask(); }); };
+  slider('cmp-dens-g', 0, (v) => { cmp().density.G = v; densSoon(); });
+  slider('cmp-dens-blur', 0, (v) => { cmp().density.blur = v; densSoon(); });
   $req<HTMLInputElement>('cmp-dens').onchange = (e) => {
     const on = (e.target as HTMLInputElement).checked;
     cmp().density.on = on;

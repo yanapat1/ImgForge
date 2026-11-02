@@ -56,8 +56,8 @@ export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: bo
 
 export const PAGE = 500;
 /** One page of a folder. retry: ask an unreachable S3 again now; refresh: list S3 again (Reload), not the kept listing. */
-export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = '', retry = false, refresh = false): Promise<Listing> =>
-  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null, refresh: refresh ? 1 : null })}`);
+export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = '', retry = false, refresh = false, signal?: AbortSignal): Promise<Listing> =>
+  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null, refresh: refresh ? 1 : null })}`, signal);
 /** A streamed S3 link: download folders into its read-only local copy (again = update; mirror removes what S3 lost). */
 export const fetchLocal = (bid: string, paths: string[], mirror = false): Promise<LocalJob> =>
   postJSON<LocalJob>(`${B(bid)}/local`, { paths, mirror });
@@ -102,8 +102,8 @@ export const detect = (bid: string, path = '', force = false): Promise<Format> =
 export const stats = (bid: string, path = ''): Promise<FolderStats> => getJSON<FolderStats>(`${B(bid)}/stats${qs({ path })}`);
 
 export interface SearchQuery { q?: string; tags?: string[]; formats?: string[]; bucket?: string; path?: string; glob?: string }
-export const search = (o: SearchQuery): Promise<SearchResult> =>
-  getJSON<SearchResult>(`api/dc/search${qs({ q: o.q ?? '', tag: o.tags ?? [], format: o.formats ?? [], bucket: o.bucket ?? '', path: o.path ?? '', glob: o.glob ?? '' })}`);
+export const search = (o: SearchQuery, signal?: AbortSignal): Promise<SearchResult> =>
+  getJSON<SearchResult>(`api/dc/search${qs({ q: o.q ?? '', tag: o.tags ?? [], format: o.formats ?? [], bucket: o.bucket ?? '', path: o.path ?? '', glob: o.glob ?? '' })}`, signal);
 
 export const send = (bucket: string, paths: string[], target: SendTarget, name: string, taskType: string): Promise<SendResult> =>
   postJSON<SendResult>('api/dc/send', { bucket, paths, target, name, task_type: taskType });

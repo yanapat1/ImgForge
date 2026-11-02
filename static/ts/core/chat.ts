@@ -677,7 +677,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   function blockHTML(b: Block, t: AiTurn, ti: number, bi: number, lastText: boolean): string {
     switch (b.k) {
-      case 'text': return `<div class="ct-md${lastText && t.status === 'streaming' ? ' streaming' : ''}">${md(b.text)}</div>`;
+      case 'text': return lastText && t.status === 'streaming'
+        ? `<div class="ct-md streaming">${mdLive(b.text)}</div>` : `<div class="ct-md">${md(b.text)}</div>`;
       case 'tools': return cardHTML(b, ti, bi);
       case 'think': case 'search': case 'skill': return '';                    // rows of the activity dropdown
       case 'todo': {
@@ -754,6 +755,19 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     return notes + body;
   }
 
+  // A streamed answer grows every frame: re-parsing all of it each time costs O(n²) over the answer. The finished
+  // part (up to the last blank line outside a code fence) is parsed once and kept; only the open block is parsed
+  // per frame. The final render (status done) parses the whole text as usual.
+  const live = { prefix: '', html: '' };
+  function mdLive(text: string): string {
+    let cut = text.lastIndexOf('\n\n');
+    while (cut > 0 && (text.slice(0, cut).match(/^```/gm)?.length ?? 0) % 2) cut = text.lastIndexOf('\n\n', cut - 1);
+    if (cut <= 0) return md(text);
+    const prefix = text.slice(0, cut);
+    if (prefix !== live.prefix) { live.prefix = prefix; live.html = md(prefix); }
+    return live.html + md(text.slice(cut + 2));
+  }
+
   const nearBottom = (): boolean => logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
   const toBottom = (): void => { logEl.scrollTop = logEl.scrollHeight; };
 
@@ -761,6 +775,13 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const has = C.turns.length > 0;
     logEl.innerHTML = has ? C.turns.map(entryHTML).join('') : emptyHTML();
     logEl.classList.toggle('is-empty', !has);
+    toBottom();
+  }
+
+  /** Show turns from index `from` on (pushed at the end): appended to the log, the earlier ones stay as they are. */
+  function appendLog(from: number): void {
+    if (from === 0 || logEl.classList.contains('is-empty') || logEl.querySelectorAll(':scope > .chat-turn').length !== from) { renderLog(); return; }
+    logEl.insertAdjacentHTML('beforeend', C.turns.slice(from).map((e, k) => entryHTML(e, from + k)).join(''));
     toBottom();
   }
 
@@ -1131,7 +1152,9 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       if (cmd && text.indexOf(' ') < 0) { note(`Unknown command \`/${cmd.name}\`. Type \`/help\` for the list.`); return; }
     }
     closeSlash();
+    const before = C.turns;
     C.turns = C.turns.map((e) => (e.role === 'ai' ? reduce(e, { type: 'x_answered' }) : e));
+    const changed = C.turns.flatMap((e, i) => (e !== before[i] ? [i] : []));
     const ac = new AbortController();
     C.busy = ac;
     C.blocked = null;
@@ -1140,7 +1163,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     C.turns.push(newTurn(performance.now(), o.kind ?? null));
     const idx = C.turns.length - 1;
     C.live = idx;
-    renderLog();
+    for (const i of changed) renderTurn(i);         // an answered question / confirm folds; the rest stays in place
+    appendLog(idx - 1);
     startTicker();
     // the server keeps the history: session_id continues a chat, none starts one (a 'session' event names it)
     const body: Record<string, unknown> = { text, scope: opts.scope(), mode: mode(), effort: effort(), web: web() };
@@ -1197,7 +1221,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     stopTicker();
     C.ticker = window.setInterval(() => {
       const now = performance.now();
-      for (const el of root.querySelectorAll<HTMLElement>('[data-since]')) el.textContent = fmtSince(Math.max(0, now - Number(el.dataset['since'])));
+      const scope = (C.live >= 0 && logEl.querySelector(`.chat-turn[data-ti="${C.live}"]`)) || root;   // only the live turn ticks
+      for (const el of scope.querySelectorAll<HTMLElement>('[data-since]')) el.textContent = fmtSince(Math.max(0, now - Number(el.dataset['since'])));
     }, 250);
   }
   function stopTicker(): void { if (C.ticker) { clearInterval(C.ticker); C.ticker = 0; } }
@@ -1205,7 +1230,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   // ---------------------------------------------------------------- local turns
   function note(markdown: string, level: 'info' | 'err' = 'info'): void {
     C.turns.push({ role: 'note', md: markdown, level });
-    renderLog();
+    appendLog(C.turns.length - 1);
   }
 
   function exportMd(): string {
@@ -1641,12 +1666,12 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     focus: () => ta.focus({ preventScroll: true }),
     input: () => ta,
     setDraft: (text) => { ta.value = text; autosize(); },
-    user: (text, voice = false) => { C.turns.push({ role: 'user', text, label: null, voice }); renderLog(); },
+    user: (text, voice = false) => { C.turns.push({ role: 'user', text, label: null, voice }); appendLog(C.turns.length - 1); },
     note,
     custom: (html) => {
       const entry: CustomEntry = { role: 'custom', html };
       C.turns.push(entry);
-      renderLog();
+      appendLog(C.turns.length - 1);
       const at = (): number => C.turns.indexOf(entry);
       return {
         update: () => { const i = at(); if (i >= 0) renderTurn(i); },

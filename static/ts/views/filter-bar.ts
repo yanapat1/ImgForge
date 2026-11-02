@@ -234,8 +234,12 @@ function fitChips(): void {
   if (chips.length && row.scrollWidth > row.clientWidth) {
     more.classList.remove('hidden');
     more.textContent = `+${chips.length}`;               // widest label while measuring
+    // measure every chip once (one layout), then drop the ones past the row's right edge
     const els = [...row.querySelectorAll('.fb-chip')];
-    while (n < els.length && row.scrollWidth > row.clientWidth) els[els.length - 1 - n++]?.remove();
+    const edge = row.getBoundingClientRect().left + row.clientWidth;
+    const fit = els.findIndex((el) => el.getBoundingClientRect().right > edge + 0.5);
+    n = fit < 0 ? 0 : els.length - fit;
+    for (const el of els.slice(els.length - n)) el.remove();
     more.textContent = `+${n}`;
     more.setAttribute('aria-label', `${n} more active filter${n > 1 ? 's' : ''}`);
   }

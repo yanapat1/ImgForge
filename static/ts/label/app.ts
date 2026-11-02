@@ -444,7 +444,8 @@ let statsTimer = 0;
 function refreshStats(): void {
   clearTimeout(statsTimer);
   statsTimer = setTimeout(() => {
-    getJSON<{ projects?: ProjectStatsRow[] }>('api/label/projects').then((d) => P.setStats((d.projects || []).find((p) => p.id === L.pid))).catch(() => {});
+    if (!L.pid) return;
+    getJSON<ProjectStatsRow>(`api/label/projects/${encodeURIComponent(L.pid)}/stats`).then((d) => P.setStats(d)).catch(() => { /* the next save refreshes it */ });
   }, 1200);
 }
 

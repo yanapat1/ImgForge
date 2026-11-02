@@ -310,6 +310,14 @@ def router(state, ctx):
             job_id = submit_import(entry['id'], entry['source'])
         return {'project': project(entry['id']), 'job_id': job_id}
 
+    @r.get('/api/label/projects/{pid}/stats')
+    def project_stats(pid: str, role=Depends(VIEWER)):
+        """One project's card counts (per-task done / in progress / review): the label page refreshes these after a
+        save without listing every project the user can see."""
+        with _errors():
+            store = need()
+            return _json(store.card(store.get(pid)))
+
     @r.get('/api/label/projects/{pid}')
     def get_project(pid: str, role=Depends(VIEWER)):
         out = project(pid)

@@ -222,6 +222,8 @@ function bind(root: HTMLElement): void {
   document.addEventListener('me-changed', () => render());
 }
 
+let searchAbort: AbortController | null = null;
+
 async function runSearch(text: string): Promise<void> {
   if (!text) { if (D.search) { D.search = null; render(); } return; }
   const tags = [...text.matchAll(/(?:^|\s)#(\S+)/g)].map((m) => m[1] ?? '').filter(Boolean);
@@ -229,10 +231,14 @@ async function runSearch(text: string): Promise<void> {
   const glob = /[*?]/.test(qtext) ? qtext : '';
   D.search = { q: text, res: null, err: null };
   render();
+  searchAbort?.abort();                            // the previous search is superseded
+  const ac = new AbortController();
+  searchAbort = ac;
   try {
-    const res = await api.search({ q: glob ? '' : qtext, tags, glob });
+    const res = await api.search({ q: glob ? '' : qtext, tags, glob }, ac.signal);
     if (D.search?.q === text) D.search.res = res;
   } catch (e) {
+    if (ac.signal.aborted) return;
     if (D.search?.q === text) D.search.err = errText(e);
   }
   if (D.search?.q === text) render();

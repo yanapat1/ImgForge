@@ -251,6 +251,10 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .dc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); gap: 10px; align-content: start; }
 .dc-th { position: relative; border-radius: var(--r-md); background: var(--surface); outline: 1px solid var(--border); outline-offset: -1px; overflow: hidden; cursor: pointer; user-select: none; }
 .dc-th:hover { outline-color: var(--border-hover); }
+/* a 2,000-entry folder: tiles / rows off screen are not laid out or painted until scrolled near (the selection ring is
+   the tile's own outline / shadow, which containment does not clip) */
+.dc-th { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+.dc-rows > .dc-lrow:not(.head) { content-visibility: auto; contain-intrinsic-size: auto 31px; }
 .dc-th .im { position: relative; aspect-ratio: 4 / 3; background: var(--media-fill); }
 .dc-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .dc-th img:not([src]) { visibility: hidden; }
