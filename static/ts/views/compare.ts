@@ -9,9 +9,9 @@
 import type * as PL from 'plotly.js';
 import type { CmpListKey, CmpParams, CmpResult, CmpRunResult, CmpState, CmpSummary, Job, Points, QuickMap, QuickMapResult, UnionMember, UnionStatus } from '../types.js';
 import { api, errText, getJSON, isStatus, postJSON } from '../core/api.js';
-import { BOX, decodeColumns, histPair, originMask, selectIds, sharedEdges } from '../core/compare-core.js';
+import { BOX, decodeColumns, histPair, KEY_SAME, originMask, selectIds, sharedEdges } from '../core/compare-core.js';
 import type { OriginMode } from '../core/compare-core.js';
-import { staleKeys } from '../core/cmp-keys.js';
+import { cmpKeys, staleKeys } from '../core/cmp-keys.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { hideWait, showWait, waitJob } from '../core/jobs.js';
 import { labelUrl, vizUrl } from '../core/nav.js';
@@ -26,6 +26,7 @@ import { closestOf } from './ev-util.js';
 import { setSelection } from './gallery.js';
 import { setImageSubset } from './image-grid.js';
 import { switchTab } from './layout.js';
+import { isImageUnit } from './preview.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -48,13 +49,22 @@ const U: CmpUi = { members: [], params: {}, seq: 0, running: false, quick: null,
   union: null, rerun: undefined };
 
 const cmp = (): CmpState => { if (!S.cmp) throw new Error('not a combined dataset'); return S.cmp; };
+/** 'box' / 'boxes', or 'image' / 'images' on a combined dataset of image-only members (one point per image). */
+const unitWord = (count: number, cap = false): string => {
+  const w = isImageUnit() ? (count === 1 ? 'image' : 'images') : (count === 1 ? 'box' : 'boxes');
+  return cap ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+};
 const alias = (k: number): string => U.members[k]?.alias ?? `#${k}`;
 const n = (v: number | undefined): string => (v ?? 0).toLocaleString();
 
 // ---------------------------------------------------------------- setup
 
-/** A combined dataset was opened (api/meta has members): S.cmp, the tab button, the colour options, the panel. */
-export function initCompare(points: Points): void {
+/**
+ * A combined dataset was opened (api/meta has members): S.cmp, the tab button, the colour options, the panel.
+ * It opens coloured by dataset unless the user saved another colouring (class colours say nothing with one class,
+ * e.g. two image-only datasets whose every image is class 'image').
+ */
+export function initCompare(points: Points, opts: { colorSaved?: boolean } = {}): void {
   const mem = meta().members ?? [];
   if (mem.length < 2) return;
   U.members = mem;
@@ -65,9 +75,13 @@ export function initCompare(points: Points): void {
   $req('act-compare').classList.remove('hidden');
   const og = $req<HTMLSelectElement>('color-by').querySelector<HTMLOptGroupElement>('optgroup[data-needs="union"]');
   if (og) { og.hidden = false; og.disabled = false; }
+  const sel = $req<HTMLSelectElement>('color-by');
+  if (sel.value === 'class' && (!opts.colorSaved || meta().classes.length <= 1)) sel.value = 'origin';   // before the first render
   $req('cmp-body').innerHTML = skeleton();
   bindPanel();
   syncPickers();
+  syncColorSeg();
+  renderLegend();
   window.addEventListener('labels-patched', scheduleRerun);
   window.addEventListener('cmp-density', renderDensityLegend);
   window.addEventListener('theme-changed', () => { U.chartsDrawn = false; U.histDrawn = false; renderAll(); });
@@ -102,6 +116,8 @@ function skeleton(): string {
       ['both', 'Both', 'Every box of A and B'], ['diff', 'Diff only', 'Only boxes that changed: moved, class changed, removed, added, image in one only']], 'both')}</div>
     <div class="m-ctl"><span class="m-lbl">Colour</span>${seg('color', [['origin', 'Dataset', 'A in one colour, B in another'],
       ['diff', 'Diff', 'Same / moved / class changed / removed / added'], ['class', 'Class', 'The class colours']], '')}</div>
+    <div class="m-ctl"><label class="cmp-check" title="${esc(`${unitWord(2, true)} that are the same in A and B in grey, so the colours show only what differs (after a run)`)}">
+      <input id="cmp-shared" type="checkbox" checked> Shared ${unitWord(2)} in grey</label></div>
     <div id="cmp-legend" class="cmp-legend"></div>
     <div class="m-ctl"><label class="cmp-check"><input id="cmp-dens" type="checkbox"> Density difference</label></div>
     <div id="cmp-dens-ctl" class="cmp-dens hidden">
@@ -170,6 +186,11 @@ function bindPanel(): void {
     $req('cmp-dens-ctl').classList.toggle('hidden', !on);
     if (S.view) renderPlot();
     renderDensityLegend();
+  };
+  $req<HTMLInputElement>('cmp-shared').onchange = (e) => {
+    cmp().shared = (e.target as HTMLInputElement).checked;
+    renderLegend();
+    if (S.view && $req<HTMLSelectElement>('color-by').value === 'origin') renderPlot();    // the trace set changes
   };
   $req('cmp-promote').onclick = () => { void openPromote(); };
   // one delegated listener for the segmented groups, the cards and the lists
@@ -347,9 +368,22 @@ function renderLegend(): void {
   const el = $('cmp-legend');
   if (!el || !S.cmp) return;
   const by = $req<HTMLSelectElement>('color-by').value, C = S.cmp;
-  const item = (c: string, t: string): string => `<span class="cmp-li"><span class="dot" style="background:${c}"></span>${esc(t)}</span>`;
-  el.innerHTML = by === 'origin' ? [C.a, C.b].map((k) => item(originColor(k), alias(k))).join('')
-    : by === 'diff' ? DIFF_STYLE.map((d) => item(d.color, d.label)).join('') : '';
+  const item = (c: string, t: string, v?: number): string =>
+    `<span class="cmp-li"><span class="dot" style="background:${c}"></span>${esc(t)}${v === undefined ? '' : ` <span class="num">${n(v)}</span>`}</span>`;
+  if (by === 'origin') {
+    // counts from the key column (every box, the filter bar aside): one pass over a Uint8Array
+    const ks = cmpKeys('origin'), cnt = new Uint32Array(256);
+    if (ks) for (let i = 0; i < ks.length; i++) cnt[ks[i]!]!++;
+    const shared = C.shared && !!C.run;
+    el.innerHTML = (shared ? item(diffColor(0), `same in ${alias(C.a)} and ${alias(C.b)}`, cnt[KEY_SAME]) : '') +
+      [C.a, C.b].map((k) => item(originColor(k), shared ? `${alias(k)} (differs)` : alias(k), cnt[k])).join('');
+  } else if (by === 'diff') {
+    el.innerHTML = DIFF_STYLE.map((d) => item(d.color, d.label)).join('');
+  } else if (by === 'class' && meta().classes.length <= 1) {
+    el.innerHTML = '<span class="muted">One class across these datasets: colour by Dataset or Diff to tell them apart.</span>';
+  } else {
+    el.innerHTML = '';
+  }
 }
 
 function renderDensityLegend(): void {

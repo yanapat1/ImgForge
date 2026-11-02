@@ -226,7 +226,8 @@ async function init(st: Status): Promise<void> {
   if (caps.curation) await initCuration();      // an embeddings session has no label files to fix
   // ---- end filters + curation
   applyUiDefaults(st.ui || {});        // config defaults first, then the user's last-used settings on top
-  try { applySettings(await getJSON('api/settings')); } catch (e) { /* first run */ }
+  let saved: Record<string, unknown> = {};
+  try { saved = await getJSON<Record<string, unknown>>('api/settings'); applySettings(saved); } catch (e) { /* first run */ }
   updateGroupsBadge();
   updateModeControls();
   updateMethodControls();
@@ -244,7 +245,7 @@ async function init(st: Status): Promise<void> {
   await refreshSavedViews();
   // a combined dataset: S.cmp, the Compare tab (opened right away by a #compare link from the Sessions home)
   if (meta.members && meta.members.length > 1) {
-    initCompare(points);
+    initCompare(points, { colorSaved: 'color-by' in saved });
     if (location.hash === '#compare') switchTab('compare');
   }
   // nothing heavy runs until the user asks: a cached startup view loads at once, otherwise wait for "Compute embedding"

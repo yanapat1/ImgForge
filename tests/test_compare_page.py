@@ -98,6 +98,19 @@ def test_compare_tab_end_to_end(server, tmp_path):  # noqa: F811
         # ---- the map: compute it, then Both vs Diff only (a restyle: the number of traces stays)
         page.click('#btn-compute')
         page.wait_for_function(f'({DOTS})() > 0 && document.getElementById("plot-wait").classList.contains("hidden")', timeout=90000)
+        # ---- a combined dataset opens coloured by dataset: same boxes in one grey trace, B drawn last (on top)
+        assert page.eval_on_selector('#color-by', 'e => e.value') == 'origin'
+        names = "(document.getElementById('plot').data || []).map(t => String(t.name))"
+        page.wait_for_function(f"{names}.some(n => n.startsWith('same in A and B'))", timeout=20000)
+        tr = page.evaluate(names)
+        assert 'same in A and B (12)' in tr and 'A (3)' in tr and 'B (4)' in tr, tr      # 6 same boxes on each side
+        assert tr.index('B (4)') > tr.index('A (3)') > tr.index('same in A and B (12)'), tr
+        assert page.locator('#cmp-legend .cmp-li').count() == 3
+        page.uncheck('#cmp-shared')
+        page.wait_for_function(f"{names}.includes('B (10)')", timeout=10000)
+        assert 'A (9)' in page.evaluate(names) and page.locator('#cmp-legend .cmp-li').count() == 2
+        page.check('#cmp-shared')
+        page.wait_for_function(f"{names}.includes('B (4)')", timeout=10000)
         page.click('#cmp-body [data-color="diff"]')
         page.wait_for_function("(document.getElementById('plot').data || []).some(t => String(t.name).startsWith('moved'))", timeout=20000)
         both = page.evaluate(DOTS)
