@@ -21,7 +21,7 @@
 .fb-chips-line { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 .fb-chips-line > .fb-chips { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; overflow: hidden; }
 .fb-chips-line .fb-chip, .fb-chips-line .fb-clear { flex: none; }
-.fb-pop.fb-chips-pop { width: 300px; left: auto; right: 0; }
+.fb-pop.fb-chips-pop { width: min(300px, calc(100vw - 16px)); left: auto; right: 0; }
 .fb-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 300px; max-width: 520px;
   height: var(--control-h); padding: 0 4px 0 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); }
 .fb-name:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -37,13 +37,13 @@
 .fb-opt-btn.on { background: var(--accent-soft); color: var(--accent-text); }
 .fb-opt-btn .chev { width: 12px; height: 12px; transition: transform var(--t) var(--ease); }
 .fb-opt-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
-.fb-pop.fb-name-pop { width: 280px; left: auto; right: -4px; gap: var(--s2); }
+.fb-pop.fb-name-pop { width: min(280px, calc(100vw - 16px)); left: auto; right: -4px; gap: var(--s2); }
 .fb-name-pop select { width: 100%; }
 .fb-btn .chev { width: 13px; height: 13px; vertical-align: 0; transition: transform var(--t) var(--ease); }
 .fb-btn[aria-expanded="true"] { background: var(--surface-3); border-color: var(--border-hover); }
 .fb-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
-.fb-pop { left: 0; right: auto; width: 320px; max-height: min(70vh, 560px); overflow-y: auto; gap: 6px; }
-.fb-presets { left: auto; right: 0; width: 260px; }
+.fb-pop { left: 0; right: auto; width: min(320px, calc(100vw - 16px)); max-height: min(70vh, 560px); overflow-y: auto; gap: 6px; }
+.fb-presets { left: auto; right: 0; width: min(260px, calc(100vw - 16px)); }
 .fb-count { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap; }
 .filter-bar.active .fb-count { color: var(--accent-text); font-weight: 600; }
 .fb-err { font-size: var(--fs-xs); color: var(--danger-text); background: var(--danger-soft); border: 1px solid var(--danger-line);
@@ -83,7 +83,7 @@
 
 /* ---------------------------------------------------------------- activity bar badge */
 .act-badge { position: absolute; right: -3px; top: 1px; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 999px;
-  display: grid; place-items: center; background: var(--danger); color: var(--on-danger); font-size: 10px; font-weight: 700; line-height: 1; }
+  display: grid; place-items: center; background: var(--danger); color: var(--on-danger); font-size: var(--fs-2xs); font-weight: 700; line-height: 1; }
 
 /* ---------------------------------------------------------------- curation: left panel */
 #cur-side { display: flex; flex-direction: column; min-height: 0; background: var(--surface); overflow: hidden; }

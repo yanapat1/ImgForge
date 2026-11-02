@@ -18,7 +18,7 @@
 .pill.ws { cursor: help; }
 button.pill { height: auto; font-weight: normal; cursor: pointer; }
 button.pill:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
-.pill .src { font: 600 10.5px var(--font); letter-spacing: .03em; text-transform: uppercase; color: var(--accent-text);
+.pill .src { font: 600 var(--fs-2xs) var(--font); letter-spacing: .03em; text-transform: uppercase; color: var(--accent-text);
   padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); }
 .header-actions { display: flex; align-items: center; gap: var(--s1); flex: none; }
 .header-actions .icon-btn { width: 34px; height: 34px; border-radius: var(--r-md); }
@@ -69,7 +69,7 @@ main.left-collapsed .activity-bar .act.active { background: transparent; }
 .activity-bar .act-bottom { margin-top: auto; }
 /* data views above, model views below: a rule with a small caption between the two groups */
 .activity-bar .act-sep { width: 40px; margin: 4px 0 0; padding-top: 4px; border-top: 1px solid var(--border); text-align: center;
-  font-size: 9px; line-height: 1; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); user-select: none; }
+  font-size: var(--fs-2xs); line-height: 1; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); user-select: none; }
 .activity-bar .act-bottom .ico { transition: transform .4s var(--ease); }
 .activity-bar .act-bottom:hover .ico { transform: rotate(45deg); }
 main.left-collapsed .activity-bar .act.active::before { opacity: .45; }

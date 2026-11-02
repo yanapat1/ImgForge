@@ -1,6 +1,14 @@
-/* Responsive overrides (loaded last so they win) and reduced motion. */
+/* Responsive overrides (loaded last so they win) and reduced motion.
+   Breakpoints used across the files: 1920 (large monitors, below), 1280 / 1100 / 900 / 600 (the visualizer, here),
+   1100 / 760 (Data Center: details then tree become overlays), 720 / 560 (dialogs, wizard). Containers that change
+   with their own width (filter bar, bar search, Data Center panes) use container queries instead. */
 
 /* ---------------------------------------------------------------- responsive */
+/* a 2560px-wide monitor: the image viewer uses the room instead of a 1500px box in the middle */
+@media (min-width: 1920px) {
+  .modal-box { width: min(1840px, 100%); }
+  .modal-side { width: 340px; }
+}
 @media (max-width: 1280px) {
   .ds-info .pill.opt { display: none; }
 }

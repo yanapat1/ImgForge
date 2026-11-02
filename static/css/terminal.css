@@ -28,6 +28,4 @@
 
 /* accounts: square avatars, no shadows */
 :root[data-look="terminal"] .avatar { border-radius: var(--r-sm); }
-:root[data-look="terminal"] .login-card,
-:root[data-look="terminal"] .ui-dlg { box-shadow: var(--shadow-3); }
 :root[data-look="terminal"] .sc-vis { border-radius: var(--r-sm); }

@@ -30,8 +30,7 @@
 :root[data-look="soft"] .theme-choice { border-color: transparent; background: var(--surface); box-shadow: var(--shadow-2); }
 :root[data-look="soft"] .theme-choice[aria-pressed="true"] { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); }
 :root[data-look="soft"] .sec-sub { color: var(--text); }
-:root[data-look="soft"] dialog,
-:root[data-look="soft"] .modal-box { border-color: transparent; box-shadow: var(--shadow-3); }
+:root[data-look="soft"] { --dialog-border-c: transparent; }
 /* plain buttons that are not controls (card title, tag chips, the new-session tile) stay flat */
 :root[data-look="soft"] .sc-open,
 :root[data-look="soft"] .sc-tag,
@@ -43,6 +42,4 @@
 :root[data-look="soft"] .session-new:hover:not(:disabled) { background: var(--accent-soft); }
 
 /* accounts: the sign-in card and dialogs float on the same shadows as the panels */
-:root[data-look="soft"] .login-card,
-:root[data-look="soft"] .ui-dlg { border-color: transparent; box-shadow: var(--shadow-3); }
 :root[data-look="soft"] .avatar-stack .avatar { box-shadow: 0 0 0 2px var(--surface); }

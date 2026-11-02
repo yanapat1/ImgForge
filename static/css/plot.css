@@ -29,11 +29,11 @@
 .bar-search .text-q { flex: 1 1 18ch; width: 18ch; min-width: 8ch; border: none; background: transparent; height: calc(var(--control-h) - 2px); padding: 0 4px;
   transition: width var(--t) var(--ease); }
 .bar-search .text-q:focus, .bar-search .text-q:focus-visible { outline: none; box-shadow: none; width: 30ch; }
-.bar-search .icon-btn { flex: none; width: 26px !important; height: 26px; min-height: 0; border-color: transparent; }
+.bar-search .icon-btn { flex: none; width: 26px; height: 26px; min-height: 0; border-color: transparent; }
 .bar-search.no-text { display: none; }
 
 /* popovers of the bar: anchored left (they open towards the plot), the last ones to the right edge */
-.popover.bar-pop { left: 0; right: auto; width: 300px; gap: var(--s2); }
+.popover.bar-pop { left: 0; right: auto; width: min(300px, calc(100vw - 16px)); gap: var(--s2); }
 .ctl-bar > .grow ~ .popover-anchor .bar-pop { left: auto; right: 0; }
 .bar-pop .field.stack { flex-direction: column; align-items: stretch; gap: 4px; }
 .bar-pop .field.stack select { width: 100%; max-width: none; }
@@ -41,7 +41,7 @@
 .bar-pop .hint { white-space: normal; }
 .pop-sep { margin-top: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--border); }
 .pop-title .muted { font-weight: 400; font-size: var(--fs-xs); }
-.popover.issues-pop { width: 340px; gap: 0; }
+.popover.issues-pop { width: min(340px, calc(100vw - 16px)); gap: 0; }
 .menu-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 0;
   align-items: center; justify-items: start; width: 100%; height: auto; min-height: 0; padding: 5px 8px; line-height: 1.3; text-align: left;
   border-color: transparent; background: transparent; }
@@ -59,7 +59,7 @@
 .lq-info b { color: var(--text); }
 
 /* hide / show the bar: collapsed leaves a one-line strip with the current view */
-.ctl-toggle { position: absolute; top: 6px; right: 6px; z-index: 1; width: 28px !important; height: 28px; min-height: 0;
+.ctl-toggle { position: absolute; top: 6px; right: 6px; z-index: 1; width: 28px; height: 28px; min-height: 0;
   border-color: transparent; background: transparent; color: var(--text-muted); }
 .ctl-toggle:hover { background: var(--surface-3); color: var(--text); }
 .ctl-toggle .ico { transform: rotate(180deg); transition: transform var(--t-fast) var(--ease); }
@@ -119,7 +119,7 @@
   overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; background: var(--surface); }
 .class-filter > .chip { flex: none; }
 .class-filter.open { flex-wrap: wrap; max-height: 112px; overflow-x: hidden; overflow-y: auto; }   /* 3 rows of chips */
-.class-filter .cf-expand { position: sticky; right: 0; flex: none; width: 40px !important; height: 26px; min-height: 0; margin-left: auto;
+.class-filter .cf-expand { position: sticky; right: 0; flex: none; width: 40px; height: 26px; min-height: 0; margin-left: auto;
   border-radius: 0; background: var(--surface); box-shadow: -10px 0 8px var(--surface); }
 .class-filter.open .cf-expand { position: static; box-shadow: none; }
 .cf-expand .ico { transition: transform var(--t-fast) var(--ease); }
@@ -128,8 +128,8 @@
 /* popovers */
 .popover-anchor { position: relative; }
 .badge-count { min-width: 19px; height: 19px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center;
-  background: var(--accent); color: var(--on-accent); font-size: 11.5px; font-weight: 700; }
-.popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-popover); width: 280px; padding: var(--s3) var(--s4) var(--s4);
+  background: var(--accent); color: var(--on-accent); font-size: var(--fs-xs); font-weight: 700; }
+.popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-popover); width: min(280px, calc(100vw - 16px)); padding: var(--s3) var(--s4) var(--s4);
   display: flex; flex-direction: column; gap: 2px; box-shadow: var(--shadow-3); }
 .pop-title { font-size: var(--fs); font-weight: 650; margin-bottom: var(--s1); }
 .pop-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px var(--s3); align-items: center; margin: var(--s2) 0 var(--s3);

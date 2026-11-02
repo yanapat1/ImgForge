@@ -64,7 +64,7 @@
 .card .pick-badge { position: absolute; right: 4px; bottom: 4px; z-index: 1; width: 20px; height: 20px; border-radius: 50%;
   display: none; place-items: center; background: var(--highlight); color: var(--on-highlight); }
 .card .pick-badge .ico { width: 12px; height: 12px; stroke-width: 3; vertical-align: 0; }
-.card .pick-badge .pick-n { font: 700 11.5px/1 var(--mono); }
+.card .pick-badge .pick-n { font: 700 var(--fs-xs)/1 var(--mono); }
 .card .pick-badge .pick-n:not(:empty) + .ico { display: none; }
 .card.picked .pick-badge { display: grid; }
 .card.picked .score { right: 28px; }
@@ -141,19 +141,19 @@
 @media (max-width: 720px) { .vw-zhint { display: none; } }
 /* big prev / next targets on the left and right edge of the image stage */
 .vw-side { position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 44px; height: 72px; padding: 0; border-radius: var(--r-md);
-  display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); color: #fff; border: 0; box-shadow: none;
+  display: flex; align-items: center; justify-content: center; background: var(--media-scrim); color: var(--on-media); border: 0; box-shadow: none;
   opacity: 0; transition: opacity .15s; }
 .vw-side.prev { left: 8px; } .vw-side.next { right: 8px; }
 .vw-side svg { width: 26px; height: 26px; }
 .modal-stage:hover .vw-side, .vw-side:focus-visible { opacity: .85; }
-.vw-side:hover { opacity: 1; background: rgba(0,0,0,.7); }
+.vw-side:hover { opacity: 1; background: var(--media-scrim-strong); }
 @media (hover: none) { .vw-side { opacity: .6; } }
 .modal-stage:has(.vw.editing) .vw-side { width: 32px; height: 56px; }
 /* boxes are outlines; the tag backgrounds (.vw-tag-bg) keep their fill attribute = the class colour */
 .vw-svg rect:not(.vw-tag-bg) { fill: none; }
 .vw-svg rect { vector-effect: non-scaling-stroke; }
 .vw-box { stroke-width: 2; }
-.vw-focus { stroke: #fff; stroke-width: 5; }
+.vw-focus { stroke: var(--on-media); stroke-width: 5; }
 .vw-pred { stroke-width: 2; stroke-dasharray: 6 4; }
 /* tags are drawn above every box, so they must not catch the editor's clicks meant for the box under them */
 .vw-tag-bg { stroke: none; opacity: .92; pointer-events: none; }
@@ -170,7 +170,7 @@
 .vw.editing.drawing .vw-ebox, .vw.editing.drawing .vw-pred { cursor: crosshair; }
 .vw-drawing { stroke-dasharray: 4 3; }
 .vw-region { stroke: var(--accent); fill: var(--accent) !important; fill-opacity: .12; stroke-dasharray: 4 3; }
-.vw-handle { fill: #fff !important; stroke: var(--accent); stroke-width: 1.5; pointer-events: all; }
+.vw-handle { fill: var(--on-media) !important; stroke: var(--accent); stroke-width: 1.5; pointer-events: all; }
 .vw-handle.h-nw, .vw-handle.h-se { cursor: nwse-resize; } .vw-handle.h-ne, .vw-handle.h-sw { cursor: nesw-resize; }
 .vw-handle.h-n, .vw-handle.h-s { cursor: ns-resize; } .vw-handle.h-e, .vw-handle.h-w { cursor: ew-resize; }
 .vw-editbar { align-self: stretch; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); padding: var(--s2);
@@ -241,7 +241,7 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .um-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .um-who b, .um-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .um-who span { font-size: var(--fs-xs); }
-.um-admin { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em;
+.um-admin { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-2xs); font-weight: 650; text-transform: uppercase; letter-spacing: .04em;
   color: var(--accent-text); }
 .um-admin .ico { width: 13px; height: 13px; color: var(--accent); }
 .um-sep { height: 1px; margin: 4px 0; background: var(--border); }
@@ -314,7 +314,7 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .rc-text { font-size: var(--fs-xs); line-height: 1.38; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 4; overflow-wrap: anywhere; }
 .rc-quote .rc-text { -webkit-line-clamp: 5; }
-.rc-meta { margin-top: auto; display: flex; flex-wrap: wrap; gap: 1px 8px; font-size: 11px; line-height: 1.35; color: var(--text-muted);
+.rc-meta { margin-top: auto; display: flex; flex-wrap: wrap; gap: 1px 8px; font-size: var(--fs-2xs); line-height: 1.35; color: var(--text-muted);
   overflow: hidden; max-height: 2.8em; }
 .rc-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-variant-numeric: tabular-nums; }
 .rc-meta i { font-style: normal; color: var(--text-faint); margin-right: 3px; }
@@ -383,9 +383,18 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .card:has(> .score) .rc-audio .rc-text { -webkit-line-clamp: 3; }
 
 /* ---------------------------------------------------------------- keyboard shortcut sheet ("?", core/keys.ts) */
-.kh-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s4); max-height: min(70vh, 640px); overflow-y: auto; }
+.ui-dlg.wide:has(.kh-wrap) { width: min(880px, 100%); }
+.kh-wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--s4); max-height: min(70vh, 640px); overflow-y: auto; }
 .kh-sec h4 { margin: 0 0 6px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
 .kh { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px var(--s3); margin: 0; font-size: var(--fs-sm); }
-.kh dt { white-space: nowrap; color: var(--text-muted); }
+.kh dt { max-width: 170px; color: var(--text-muted); line-height: 1.9; }
 .kh dd { margin: 0; }
 .kh kbd { font: 600 var(--fs-xs) var(--mono); padding: 1px 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text); }
+
+/* spacing that used to be inline style= in index.html */
+#stats-idle { margin: var(--s4); }
+.h-gap { margin-top: var(--s4); }
+
+/* every dialog box (a .panel straight inside a .modal: image viewer, settings, wizard, label dialogs; the small dialog;
+   the sign-in card) takes its edge from tokens, so each look styles all of them at once (tokens.css / <look>.css) */
+.modal > .panel, .ui-dlg, .login-card { border: var(--dialog-border-w, 1px) solid var(--dialog-border-c, var(--border-strong)); box-shadow: var(--dialog-shadow, var(--shadow-3)); }

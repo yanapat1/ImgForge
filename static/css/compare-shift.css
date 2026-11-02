@@ -1,10 +1,6 @@
 /* Compare › Image conditions (views/compare-shift.ts): verdict, KPI tiles, metric table, charts, preview.
    Severity colours come from the --ok / --warn / --danger tokens; members' colours from core/theme.ts as --c. */
 
-:root { --ch-r: #ff7b72; --ch-g: #5fd17a; --ch-b: #6ea8ff;
-  --ex-dark: #2b3240; --ex-dim: #5b6474; --ex-normal: #a7adb8; --ex-bright: #e9c46a; }   /* exposure mix classes */
-:root[data-theme="light"] { --ch-r: #cf3328; --ch-g: #23833a; --ch-b: #1f6fd6;
-  --ex-dark: #1f2633; --ex-dim: #556070; --ex-normal: #b9bfc9; --ex-bright: #e0b44c; }
 
 .cmp-shift { display: flex; flex-direction: column; gap: var(--s2); padding: 0 10px 10px; }
 .shf-run { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }

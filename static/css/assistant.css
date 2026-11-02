@@ -7,10 +7,10 @@
 main:not([data-tab="ai"]) #ai-side { display: none !important; }
 
 /* ---- small ◆ marks on AI buttons */
-.gem-mark { color: var(--gem-2, #a78bfa); }
-button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a78bfa); }
-.gem-btn { border-color: color-mix(in srgb, var(--gem-2, #a78bfa) 45%, var(--border-strong)); }
-.gem-btn:hover:not(:disabled) { border-color: var(--gem-2, #a78bfa); box-shadow: 0 0 0 3px var(--gem-glow, rgba(167, 139, 250, .25)); }
+.gem-mark { color: var(--gem-2); }
+button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2); }
+.gem-btn { border-color: color-mix(in srgb, var(--gem-2) 45%, var(--border-strong)); }
+.gem-btn:hover:not(:disabled) { border-color: var(--gem-2); box-shadow: 0 0 0 3px var(--gem-glow); }
 .side-head .gem-btn { margin-left: auto; align-self: center; height: 26px; font-size: var(--fs-xs); }
 
 /* ---- header */
@@ -18,8 +18,8 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a
 .ai-head .grow { flex: 1; }
 .ai-head .icon-btn { width: 28px; height: 28px; }
 .ai-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 7px;
-  background: linear-gradient(135deg, var(--gem-1, #7dd3fc), var(--gem-2, #a78bfa) 55%, var(--gem-3, #f0abfc));
-  box-shadow: 0 2px 10px var(--gem-glow, rgba(167, 139, 250, .3)); }
+  background: linear-gradient(135deg, var(--gem-1), var(--gem-2) 55%, var(--gem-3));
+  box-shadow: 0 2px 10px var(--gem-glow); }
 /* the gem gradient is light in dark themes and dark in light ones: the icon takes the opposite tag-text token */
 .ai-mark .ico { width: 15px; height: 15px; color: var(--lb-tag-dark); stroke: currentColor; }
 :root[data-theme="light"] .ai-mark .ico { color: var(--lb-tag-light); }
@@ -37,12 +37,12 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a
 /* ---- page turns inside the chat: label check, auto-tag */
 
 .ai-wait { display: flex; align-items: center; gap: var(--s2); color: var(--text-muted); font-size: var(--fs-sm); }
-.ai-wait .ico { color: var(--gem-2, #a78bfa); animation: ai-pulse 1.4s infinite ease-in-out; }
+.ai-wait .ico { color: var(--gem-2); animation: ai-pulse 1.4s infinite ease-in-out; }
 @keyframes ai-pulse { 50% { opacity: .35; } }
 
 .ai-job { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-xs); }
 .ai-job .bar { flex: 1; width: auto; min-width: 80px; }
-.ai-job .bar > div { background: linear-gradient(90deg, var(--gem-1, #7dd3fc), var(--gem-2, #a78bfa)); }
+.ai-job .bar > div { background: linear-gradient(90deg, var(--gem-1), var(--gem-2)); }
 
 /* ---- label-check verdict cards */
 .ai-vlist { display: flex; flex-direction: column; gap: 6px; }
@@ -59,7 +59,7 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a
 .ai-vc-sug { display: flex; align-items: center; gap: 4px; color: var(--text); }
 .ai-vc-sug .ico { width: 12px; height: 12px; }
 .ai-vc-why { overflow-wrap: anywhere; }
-.ai-pill { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+.ai-pill { flex: none; padding: 1px 8px; border-radius: 999px; font-size: var(--fs-2xs); font-weight: 650; }
 .ai-pill.p-wrong { background: var(--danger-soft); color: var(--danger-text); }
 .ai-pill.p-unsure { background: var(--warn-soft); color: var(--warn-text); }
 .ai-pill.p-ok { background: var(--ok-soft); color: var(--ok-text); }
@@ -70,15 +70,15 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a
 .ai-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--s2); padding: var(--s4) 0; }
 .ai-empty h3 { font-size: var(--fs-lg); color: var(--text); }
 .ai-empty p { margin: 0; max-width: 340px; font-size: var(--fs-sm); }
-.ai-hero-gem { width: 72px; height: 72px; margin-bottom: var(--s2); filter: drop-shadow(0 6px 22px var(--gem-glow, rgba(167, 139, 250, .35))); }
+.ai-hero-gem { width: 72px; height: 72px; margin-bottom: var(--s2); filter: drop-shadow(0 6px 22px var(--gem-glow)); }
 .ai-hero-gem .gem-body { fill: url(#ai-gem-g); fill-opacity: .9; stroke: url(#ai-gem-g); stroke-width: 1.2; stroke-linejoin: round; }
-.ai-hero-gem .gem-facet { fill: none; stroke: #fff; stroke-opacity: .55; stroke-width: .8; stroke-linejoin: round; }
+.ai-hero-gem .gem-facet { fill: none; stroke: var(--on-media); stroke-opacity: .55; stroke-width: .8; stroke-linejoin: round; }
 .ai-qgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); width: 100%; margin-top: var(--s3); }
 .ai-qa { height: auto; min-height: 56px; padding: var(--s2) var(--s3); justify-content: flex-start; align-items: flex-start; gap: var(--s2);
   text-align: left; white-space: normal; font-size: var(--fs-sm); line-height: 1.35; border-radius: var(--r-md); background: var(--surface); }
-.ai-qa .ico { margin-top: 1px; color: var(--gem-2, #a78bfa); }
-.ai-qa:hover:not(:disabled) { border-color: color-mix(in srgb, var(--gem-2, #a78bfa) 60%, var(--border)); background: var(--surface-2); }
-.ai-qa:hover:not(:disabled) .ico { color: var(--gem-2, #a78bfa); }
+.ai-qa .ico { margin-top: 1px; color: var(--gem-2); }
+.ai-qa:hover:not(:disabled) { border-color: color-mix(in srgb, var(--gem-2) 60%, var(--border)); background: var(--surface-2); }
+.ai-qa:hover:not(:disabled) .ico { color: var(--gem-2); }
 
 /* ---- the mic in the chat's composer bar (core/chat.ts composerExtra) */
 .ai-mic { width: 32px; height: 32px; border-radius: 9px; touch-action: none; user-select: none; }
@@ -92,8 +92,8 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2, #a
 /* ---- filter bar: ◆ Describe… */
 .fb-ai-row { flex-wrap: wrap; }
 .fb-ai-form { flex: 1 1 320px !important; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 4px 0 10px;
-  background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--gem-2, #a78bfa) 40%, var(--border-strong)); border-radius: var(--r); }
-.fb-ai-form:focus-within { border-color: var(--gem-2, #a78bfa); box-shadow: 0 0 0 3px var(--gem-glow, rgba(167, 139, 250, .25)); }
+  background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--gem-2) 40%, var(--border-strong)); border-radius: var(--r); }
+.fb-ai-form:focus-within { border-color: var(--gem-2); box-shadow: 0 0 0 3px var(--gem-glow); }
 .fb-ai-form input { flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-sm); }
 .fb-ai-form .fb-btn { height: 24px; }
 .fb-ai-row .fb-clear { align-self: center; }

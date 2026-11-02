@@ -21,5 +21,3 @@
 :root[data-look="editorial"] a { text-underline-offset: 3px; text-decoration-thickness: 1px; }
 
 /* accounts: a ruled sign-in card and dialogs that sit on the page like a plate */
-:root[data-look="editorial"] .login-card,
-:root[data-look="editorial"] .ui-dlg { border: 1px solid var(--border-strong); box-shadow: var(--shadow-3); }

@@ -75,6 +75,7 @@
   --font: "Atkinson Hyperlegible Next", "DV Thai", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "Atkinson Hyperlegible Mono", "DV Thai", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-display: var(--font);  /* headings; the editorial and brutalist looks swap it */
+  --fs-2xs: 11px;   /* the smallest text: counts, badges, captions (nothing smaller) */
   --fs-xs: 12px;
   --fs-sm: 13px;
   --fs: 14px;
@@ -84,6 +85,7 @@
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px;
   /* shape: small things are less round than big things */
   --r-sm: 5px; --r: 7px; --r-md: 8px; --r-lg: 12px;
+  --shadow-1: 0 1px 3px rgba(8, 11, 16, .3);     /* a chip or card lifted off its ground */
   --shadow-2: 0 10px 28px rgba(8, 11, 16, .45), 0 1px 0 rgba(255, 255, 255, .04) inset;
   --shadow-3: 0 24px 60px rgba(8, 11, 16, .6), 0 1px 0 rgba(255, 255, 255, .05) inset;
   /* layers */
@@ -159,6 +161,7 @@
   --scrim: rgba(30, 40, 55, .42);
   --overlay: rgba(255, 255, 255, .9);
   --plot-dim: rgba(247, 249, 251, .78);
+  --shadow-1: 0 1px 2px rgba(30, 45, 70, .14);
   --shadow-2: 0 10px 28px rgba(30, 45, 70, .12), 0 1px 0 rgba(255, 255, 255, .7) inset;
   --shadow-3: 0 24px 60px rgba(30, 45, 70, .22), 0 1px 0 rgba(255, 255, 255, .7) inset;
   --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b5666' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
@@ -383,6 +386,7 @@
    ticks on cards (--bp-tick), annotation-style section labels in the mono face. Dark first; light is the vellum print. */
 :root[data-look="blueprint"] {
   --r-sm: 0; --r: 1px; --r-md: 2px; --r-lg: 2px;
+  --shadow-1: none;
   --shadow-2: none;
   --shadow-3: 0 0 0 1px var(--border-strong), 0 24px 60px rgba(3, 10, 20, .55);
 }
@@ -497,6 +501,7 @@
   --font: "Archivo", "DV Thai", "Helvetica Neue", Arial, system-ui, sans-serif;
   --font-display: "Archivo", "DV Thai", "Helvetica Neue", Arial, system-ui, sans-serif;
   --r-sm: 0; --r: 0; --r-md: 0; --r-lg: 0;
+  --shadow-1: none;
 }
 :root[data-look="brutalist"][data-theme="light"] {
   color-scheme: light;
@@ -606,7 +611,7 @@
    the light block is a green-bar printout. */
 :root[data-look="terminal"] {
   --font: "Atkinson Hyperlegible Mono", "DV Thai", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --fs-xs: 11.5px; --fs-sm: 12.5px; --fs: 13px; --fs-lg: 15px; --fs-xl: 18px;
+  --fs-2xs: 10.5px; --fs-xs: 11.5px; --fs-sm: 12.5px; --fs: 13px; --fs-lg: 15px; --fs-xl: 18px;
   --r-sm: 0; --r: 2px; --r-md: 2px; --r-lg: 3px;
   --shadow-2: none;
   --shadow-3: 0 0 0 1px var(--border-strong), 0 20px 50px rgba(0, 0, 0, .5);
@@ -843,3 +848,12 @@
   --syn-tag: #00777a;
   --syn-sel: rgba(39, 102, 196, .18);
 }
+
+/* on top of a photo (image viewer arrows, handles): the same in every theme, the image behind decides */
+:root { --on-media: #fff; --media-scrim: rgba(0, 0, 0, .45); --media-scrim-strong: rgba(0, 0, 0, .7); }
+
+/* Compare › Image conditions (css/compare-shift.css): colour channels and the exposure mix classes */
+:root { --ch-r: #ff7b72; --ch-g: #5fd17a; --ch-b: #6ea8ff;
+  --ex-dark: #2b3240; --ex-dim: #5b6474; --ex-normal: #a7adb8; --ex-bright: #e9c46a; }   /* exposure mix classes */
+:root[data-theme="light"] { --ch-r: #cf3328; --ch-g: #23833a; --ch-b: #1f6fd6;
+  --ex-dark: #1f2633; --ex-dim: #556070; --ex-normal: #b9bfc9; --ex-bright: #e0b44c; }

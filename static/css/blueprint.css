@@ -23,7 +23,8 @@
 :root[data-look="blueprint"] .radio-card,
 :root[data-look="blueprint"] .theme-choice,
 :root[data-look="blueprint"] .login-card,
-:root[data-look="blueprint"] .ui-dlg {
+:root[data-look="blueprint"] .ui-dlg,
+:root[data-look="blueprint"] .modal > .panel {
   --bp-c: linear-gradient(var(--bp-tick), var(--bp-tick));
   background: var(--bp-c) top left / 10px 1px, var(--bp-c) top left / 1px 10px, var(--bp-c) top right / 10px 1px, var(--bp-c) top right / 1px 10px,
     var(--bp-c) bottom left / 10px 1px, var(--bp-c) bottom left / 1px 10px, var(--bp-c) bottom right / 10px 1px, var(--bp-c) bottom right / 1px 10px,
@@ -33,5 +34,6 @@
 :root[data-look="blueprint"] .theme-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 :root[data-look="blueprint"] { --focus-w: 1px; --focus-style: dashed; --focus-off: 3px; }
 :root[data-look="blueprint"] .ui-dlg,
-:root[data-look="blueprint"] .login-card { box-shadow: var(--shadow-3); }
+:root[data-look="blueprint"] .login-card,
+:root[data-look="blueprint"] .modal > .panel { box-shadow: var(--dialog-shadow, var(--shadow-3)); }
 :root[data-look="blueprint"] .avatar { border-radius: var(--r-sm); }

@@ -135,7 +135,7 @@
 .lb-strip-inputs { padding-bottom: 6px; }
 .lb-strip-more { position: relative; }
 .lb-strip-more.on { color: var(--accent); }
-.lb-badge { position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 10px;
+.lb-badge { position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: var(--fs-2xs);
   line-height: 14px; font-weight: 700; letter-spacing: 0; text-align: center; background: var(--accent); color: var(--on-accent); }
 .lb-strip-pop { display: flex; flex-direction: column; gap: 6px; padding: 6px var(--s2) var(--s2); margin: 0 var(--s2) 6px; flex: none;
   max-height: 45%; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); font-size: var(--fs-xs); }
@@ -292,7 +292,7 @@
 .lb-selcount:empty { display: none; }
 .lb-head .lb-more-btn span { font-size: var(--fs-lg); line-height: 1; letter-spacing: 0; }
 .lb-obj-model { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--text-muted); font-size: var(--fs-xs); }
-.lb-obj-model .lb-robot { font-size: 12px; line-height: 1; }
+.lb-obj-model .lb-robot { font-size: var(--fs-xs); line-height: 1; }
 
 /* export: class chips per task, re-export strip */
 .lbx-cls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 var(--s2) 30px; }
@@ -481,7 +481,7 @@
 
 /* ================================================================ ◆ label assistant (js/label/assist.js): the
    #lb-ai toolbar button and the drawer over the stage (right slide-over; a bottom sheet under 900 px) */
-#lb-ai .ico { color: var(--gem-2, var(--accent)); }
+#lb-ai .ico { color: var(--gem-2); }
 #lb-ai[aria-expanded="true"] { background: var(--surface-3); }
 .lb-assist { position: absolute; top: var(--s2); right: var(--s2); bottom: var(--s2); z-index: 4; width: min(340px, calc(100% - 16px));
   display: flex; flex-direction: column; min-height: 0; background: var(--surface); color: var(--text);
@@ -497,7 +497,7 @@
 .lba-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--s2); }
 .lba-chip { height: auto; min-height: 24px; padding: 2px 9px; border-radius: 999px; font-size: var(--fs-xs); background: var(--surface-2);
   border-color: var(--border); color: var(--text-muted); text-align: left; white-space: normal; }
-.lba-chip:hover:not(:disabled) { color: var(--text); border-color: var(--gem-2, var(--accent)); }
+.lba-chip:hover:not(:disabled) { color: var(--text); border-color: var(--gem-2); }
 .lba-input { display: flex; align-items: flex-end; gap: 4px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }
 .lba-input:focus-within { border-color: var(--gem-2); box-shadow: 0 0 0 3px var(--gem-glow); }
 .lba-input textarea { flex: 1; min-width: 0; resize: vertical; min-height: 40px; max-height: 200px; border: 0; background: transparent; padding: 4px 6px;
@@ -505,7 +505,7 @@
 .lba-input-btns { display: flex; flex-direction: column; gap: 2px; }
 .lba-mic.rec { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
 .lba-busy { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); color: var(--text-muted); }
-.lba-busy .spin { border-top-color: var(--gem-2, var(--accent)); }
+.lba-busy .spin { border-top-color: var(--gem-2); }
 .lba-busy button { height: 26px; }
 .lba-answer { font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
 .lba-answer > :first-child { margin-top: 0; }
@@ -513,7 +513,7 @@
 .lba-boxes { display: flex; flex-direction: column; gap: 2px; }
 .lba-boxes:empty { display: none; }
 .lba-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 4px 4px 6px; border-radius: var(--r); border: 1px dashed transparent; }
-.lba-row:hover, .lba-row:focus-within { border-color: var(--gem-2, var(--accent)); background: var(--surface-2); }
+.lba-row:hover, .lba-row:focus-within { border-color: var(--gem-2); background: var(--surface-2); }
 .lba-row .icon-btn { width: 26px; height: 26px; }
 .lba-ok:not(:disabled) .ico { color: var(--lb-ok-text); }
 .lba-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 150px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--fs-xs);
