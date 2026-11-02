@@ -14,5 +14,10 @@ summary: run a detector, val / train split, confidence and IoU, leaderboard and 
 - **Compare** (`compare`): only in a combined dataset (2+ sessions joined): pick members A and B, the diff (images:
   only in A / only in B / same / labels changed / pixels changed, matched by content hash then name; boxes: same /
   moved / reclassed / reclassed + moved / unmatched, matched at IoU ≥ 0.5), the shared map, boxes of B unlike anything in A, class
-  table, stat histograms; Colour by `origin` / `diff`.
+  table, stat histograms; Colour by `origin` / `diff`. A combined dataset opens coloured by `origin` (unless the user
+  saved another colouring; always when there is one class, e.g. image-only members whose every image is class
+  `image`, where class colours paint every dot alike). With **Shared boxes in grey** (on by default, after a run) the
+  boxes that are the same in A and B form one grey "same in A and B" trace, so identical dots do not hide each other
+  and the A / B colours show only what differs; B is drawn on top of A. The density layer uses A's and B's colours.
+  Image-only members (one point per image): the IoU sliders and area / aspect histograms are hidden.
 - Include model checks in Curation adds the model's disagreements to the scan.

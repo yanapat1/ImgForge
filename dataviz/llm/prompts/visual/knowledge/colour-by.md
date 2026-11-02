@@ -10,7 +10,7 @@ summary: every colour-by option, what it shows and when it is available
   clusters that a feature space picked up instead of the object.
 - cleanlab (after Run label-quality check): `cl_issue`, `cl_quality`, `cl_suggested`, `cl_given_prob` P(given class),
   `cl_ood_feat`, `cl_ood_prob`.
-- combined dataset (Compare): `origin` dataset A / B / …, `diff` box diff.
+- combined dataset (Compare): `origin` dataset A / B / … (the default there; same-in-both boxes grey), `diff` box diff.
 - a model picked in the Model tab: `m_status` found / missed / wrong, `m_pred` predicted class, `m_score` confidence,
   `cl_swap`, `cl_badloc`, `cl_image_quality` (cleanlab on the model's predictions).
 - Embeddings sessions (rows, not boxes) drop the box-geometry options and add metadata columns; image sessions drop
