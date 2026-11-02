@@ -1,6 +1,6 @@
 ---
 name: datacenter
-description: "Drive the Data Center of the dataviz app (image dataset buckets: managed folders, linked local folders, read-only S3 links): list, search, inspect, detect formats, and propose moves / copies / renames / deletes / tags / sends to the visualizer or a labeling project. Use when asked to find, organise, tag, inspect or open datasets kept in Data Center buckets, through the CLI (`python -m dataviz dc`), the HTTP API (/api/dc/*, /api/llm/dc/*), or as the in-app ◆ agent."
+description: "Drive the Data Center of the dataviz app (image dataset buckets: managed folders, linked local folders, S3 links: streamed read-only except downloaded folders): list, search, inspect, detect formats, and propose moves / copies / renames / deletes / tags / sends to the visualizer or a labeling project. Use when asked to find, organise, tag, inspect or open datasets kept in Data Center buckets, through the CLI (`python -m dataviz dc`), the HTTP API (/api/dc/*, /api/llm/dc/*), or as the in-app ◆ agent."
 ---
 
 # Data Center
@@ -41,9 +41,9 @@ tools.py). `?` marks an optional argument.
 | `add_tags` | change | bucket, path?, tags | Add user tags to a bucket ('' path) or a folder / file. format:* tags are automatic. |
 | `remove_tags` | change | bucket, path?, tags | Remove user tags (automatic format:* tags cannot be removed). |
 | `send_to_session` | change | bucket, paths, target, name?, task_type? | Open folders / files in the visualizer (target visualize) or as a labeling project (target label). |
-| `set_s3_mode` | change | bucket, mode | Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local (downloaded into an editable local folder that can be re-synced and exported). |
+| `set_s3_mode` | change | bucket, mode | Choose how a WHOLE S3 bucket is read: stream (from S3 on every request) or local (every object downloaded into an editable local folder that can be re-synced and exported). Not needed to change one folder: download_s3_folders that folder instead. |
 | `sync_from_s3` | change | bucket | Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 version (unchanged files are skipped), local-only files are kept. |
-| `download_s3_folders` | change | bucket, paths, mirror? | Download folders (or files) of a STREAMED S3 bucket into its read-only local copy: fast to open and readable while S3 is unreachable; the rest keeps streaming. Run it again on a downloaded folder to update it (new + changed files; unchanged skipped). mirror also deletes local files S3 no longer has: only when the user asks. |
+| `download_s3_folders` | change | bucket, paths, mirror? | Download folders (or files) of a STREAMED S3 bucket into its local copy: fast to open, readable while S3 is unreachable, and EDITABLE (create_folder / move / rename / delete / upload inside it change only the local copy, never S3); the rest keeps streaming and stays read-only. Run it again on a downloaded folder to update it (new + changed files; unchanged skipped). mirror also deletes local files S3 no longer has: only when the user asks. |
 | `check_s3_local` | read | bucket | Compare the downloaded folders of a streamed S3 bucket with S3 now: new / changed / removed files per folder (a job; list_folder then shows local_copy.state outdated). |
 | `remove_local_copy` | change | bucket, paths | Delete the downloaded copy of folders of a streamed S3 bucket (S3 is not touched; they stream again). Only whole downloaded folders (or folders holding them). |
 | `export_to` | change | bucket, path?, to, connection, s3_bucket?, prefix?, create_bucket?, overwrite? | Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user's connections as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png. |
@@ -86,7 +86,7 @@ As Claude Code: show the user the `confirm` line and only re-run with `--yes` af
 ## HTTP
 
 - Direct API, `/api/dc/*` (JSON in and out, errors `{detail}`): `GET /summary`, `GET|POST /buckets`,
-  `GET|PATCH|DELETE /buckets/{bid}`, `GET /buckets/{bid}/ls?path=`, `GET .../file?path=&w=`, `GET .../text?path=`,
+  `GET|PATCH|DELETE /buckets/{bid}`, `GET /buckets/{bid}/ls?path=&refresh=` (answers `location`, `s3_url`, `writable`), `GET .../file?path=&w=`, `GET .../text?path=`,
   `POST .../ops {ops}`, `POST .../undo {undo_id}`, `POST .../upload?path=` (+ `POST|GET .../upload/part`: raw chunks of one big file, any order, resumable), `PUT .../tags {path, add, remove}`,
   `GET .../detect?path=&force=`, `GET .../stats?path=`, `GET /tags`, `GET /search?q=&tag=&format=&bucket=&path=&glob=`,
   `POST /send {bucket, paths, target, name, task_type}`. Full table in `dataviz/datacenter/API.md`.
@@ -107,7 +107,8 @@ As Claude Code: show the user the `confirm` line and only re-run with `--yes` af
    the request is clear.
 3. **Impossible → refuse** with `cannot_do`, the reason and the closest alternative. Out of reach: converting
    formats, making a video from images (cutting a video into frames is `extract_frames`), editing pixels or labels, training, anything outside the user's buckets, and changing
-   an S3 bucket (offer copying into a managed bucket).
+   a streamed S3 bucket outside its downloaded folders (offer `download_s3_folders` for just that folder, or
+   copying into a managed bucket; inside a downloaded folder changes are allowed and stay local).
 4. **Changes are proposals.** Put every change of the request into one plan, after the lookups. Never claim a
    change is done before it was confirmed.
 5. **Never touch `format:*` tags** (automatic). Warn when a plan removes `images/`, `labels/` or `data.yaml`: the
@@ -136,8 +137,10 @@ As Claude Code: show the user the `confirm` line and only re-run with `--yes` af
 3. After the job: `send_to_session {bucket: "b4", paths: ["raw/drive-frames"], target: "label"}`. "Every new video like
    this" → `set_video_auto` with the same settings.
 
-**Read-only bucket.** "Delete the blurry images in the cloud bucket" (an `s3` bucket) → `cannot_do` (S3 links are
-read-only), alternative: copy them into a managed bucket, or tag them `blurry`.
+**Streamed S3 bucket.** "Delete the blurry images in cam3/" of a streamed `s3` bucket: if `cam3` is downloaded (the
+scope says "downloaded and editable", or `list_folder` gives `local_copy`), propose the `delete` directly (it changes
+only the local copy). If not, propose `download_s3_folders {paths: ["cam3"]}` first (only that prefix, never the whole
+bucket), then the delete once it finished. Outside the downloaded folders the bucket stays read-only.
 
 ## Format detection (`detect_format`)
 

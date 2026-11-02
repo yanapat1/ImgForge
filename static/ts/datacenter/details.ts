@@ -250,6 +250,16 @@ function openConvert(bid: string, path: string): void {
   });
 }
 
+/** The bucket actions of the ⋯ menu and of a right-click on a bucket (card, list row, tree row). */
+export function bucketMenuItems(b: Bucket): string {
+  const bid = esc(b.id);
+  return `<button type="button" role="menuitem" data-act="edit-bucket" data-bid="${bid}">${icon('edit')}Edit…<span class="faint">${b.kind === 's3' ? 'name, tags, load mode' : 'name, tags'}</span></button>` +
+    `<button type="button" role="menuitem" data-act="rename-bucket" data-bid="${bid}">${icon('text')}Rename…</button>` +
+    `<button type="button" role="menuitem" data-act="autolabel" data-bid="${bid}" data-path="">${icon('robot')}Label with model…</button>` +
+    `<button type="button" role="menuitem" data-act="redetect" data-bid="${bid}" data-path="">${icon('refresh')}Re-detect format</button>` +
+    `<button type="button" role="menuitem" class="danger" data-act="delete-bucket" data-bid="${bid}">${icon('trash')}${b.kind === 'managed' ? 'Delete…' : 'Unlink…'}</button>`;
+}
+
 export const DETAIL_ACTIONS: Record<string, Action> = {
   reimport: (el) => {
     const bid = el.dataset['bid'] || '';
@@ -283,12 +293,7 @@ export const DETAIL_ACTIONS: Record<string, Action> = {
     const b = bucketOf(bid);
     const m = document.getElementById('dc-menu');
     if (!b || !m) return;
-    m.innerHTML = `<button type="button" role="menuitem" data-act="go" data-bid="${esc(bid)}" data-path="">${icon('folder')}Open</button>` +
-      `<button type="button" role="menuitem" data-act="edit-bucket" data-bid="${esc(bid)}">${icon('edit')}Edit…</button>` +
-      `<button type="button" role="menuitem" data-act="rename-bucket" data-bid="${esc(bid)}">${icon('text')}Rename…</button>` +
-      `<button type="button" role="menuitem" data-act="autolabel" data-bid="${esc(bid)}" data-path="">${icon('robot')}Label with model…</button>` +
-      `<button type="button" role="menuitem" data-act="redetect" data-bid="${esc(bid)}" data-path="">${icon('refresh')}Re-detect format</button>` +
-      `<button type="button" role="menuitem" class="danger" data-act="delete-bucket" data-bid="${esc(bid)}">${icon('trash')}${b.kind === 'managed' ? 'Delete…' : 'Unlink…'}</button>`;
+    m.innerHTML = `<button type="button" role="menuitem" data-act="go" data-bid="${esc(bid)}" data-path="">${icon('folder')}Open</button>` + bucketMenuItems(b);
     floatPopover(m, el);
   },
 };

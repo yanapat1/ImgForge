@@ -94,8 +94,9 @@ def router(state, ctx):
 
     @r.get('/buckets/{bid}/ls')
     def ls(bid: str, path: str = '', offset: int = 0, limit: int = 500, sort: str = 'name', q: str = '',
-           retry: int = 0, user=Depends(deps.current_user)):
-        return _call(service.ls, user, bid, path, offset=offset, limit=limit, sort=sort, q=q, retry=bool(retry))
+           retry: int = 0, refresh: int = 0, user=Depends(deps.current_user)):
+        return _call(service.ls, user, bid, path, offset=offset, limit=limit, sort=sort, q=q, retry=bool(retry),
+                     refresh=bool(refresh))
 
     @r.post('/buckets/{bid}/local')
     def fetch_local(bid: str, body: dict, user=Depends(MANAGE)):

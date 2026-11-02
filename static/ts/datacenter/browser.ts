@@ -10,7 +10,8 @@
 
 import { errText } from '../core/api.js';
 import { rememberPref } from '../core/auth.js';
-import { $, esc, icon } from '../core/dom.js';
+import { $, copyText, esc, icon } from '../core/dom.js';
+import { toast } from '../core/toast.js';
 import { closeFloat, floatPopover } from '../core/popover.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
@@ -22,7 +23,7 @@ import { localBadge, localStrip, streamed } from './localcopy.js';
 import { openSend } from './send.js';
 import {
   baseName, bucketOf, curBucket, D, fbadge, fdot, fmtDate, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, parentOf,
-  PREF, selEntries, tagChip, writable,
+  locationOf, PREF, selEntries, tagChip, writable,
 } from './state.js';
 import { openTagEditor } from './tags.js';
 import { queueUpload } from './uploads.js';
@@ -40,6 +41,8 @@ let reveal: string | null = null;
 let dragging: { bid: string; paths: string[] } | null = null;
 /** the next listing asks S3 again at once (Retry S3 after it was unreachable) */
 let retryS3 = false;
+/** the next listing lists S3 again instead of the listing the server keeps for a minute (Reload) */
+let refreshNext = false;
 /** a streamed S3 folder still being listed: asked again shortly */
 let partialTimer = 0;
 
@@ -56,10 +59,11 @@ export async function loadListing(keep = false): Promise<void> {
   D.loading = true;
   if (!keep) renderFolder();
   clearTimeout(partialTimer);
-  const retry = retryS3;
+  const retry = retryS3, refresh = refreshNext;
   retryS3 = false;
+  refreshNext = false;
   try {
-    const r = await api.ls(bid, D.path, 0, Math.min(2000, Math.max(api.PAGE, had)), D.sort, D.nameQ, retry);
+    const r = await api.ls(bid, D.path, 0, Math.min(2000, Math.max(api.PAGE, had)), D.sort, D.nameQ, retry, refresh);
     if (seq !== D.seq) return;
     if (r.partial) partialTimer = window.setTimeout(() => { if (seq === D.seq) void loadListing(true); }, 1000);
     D.listing = r;
@@ -189,7 +193,9 @@ function crumbs(): string {
     const cur = i === parts.length - 1;
     out.push(`${icon('chev-r')}<button type="button" class="crumb${cur ? ' cur' : ''}" data-act="go" data-bid="${esc(D.bid ?? '')}" data-path="${esc(path)}" data-drop="1"${cur ? ' aria-current="page"' : ''}>${esc(p)}</button>`);
   });
-  return `<nav class="dc-crumbs" aria-label="Folder">${out.join('')}</nav>`;
+  const loc = locationOf(D.bid ?? '', D.path);
+  return `<nav class="dc-crumbs" aria-label="Folder">${out.join('')}</nav>` +
+    `<button type="button" class="icon-btn ghost sm dc-copypath" data-act="copy-path" data-bid="${esc(D.bid ?? '')}" data-path="${esc(D.path)}" aria-label="Copy the path of this folder" title="Copy path${loc ? `: ${esc(loc)}` : ''}">${icon('link')}</button>`;
 }
 
 function renderBar(): void {
@@ -203,6 +209,7 @@ function renderBar(): void {
     `<button type="button" class="view-btn${D.view === 'names' ? ' active' : ''}" data-act="view" data-mode="names" aria-pressed="${D.view === 'names'}" id="dc-view-names">${icon('list')}<span class="dc-wide-txt">Names only</span></button></div>` +
     `<button type="button" class="icon-btn" data-act="sort-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Sort: ${esc(SORTS.find(([k]) => k === D.sort)?.[1] ?? '')}" title="Sort">${icon('sort')}</button>` +
     `<button type="button" class="dc-dd" data-act="filter-menu" aria-haspopup="dialog" aria-expanded="false" title="Filter by name">${icon('filter')}<span class="dc-wide-txt">${D.nameQ ? esc(D.nameQ) : 'Filter'}</span>${nm}${icon('chev-d')}</button>` +
+    `<button type="button" class="icon-btn" data-act="refresh" aria-label="Reload this folder" title="Reload">${icon('refresh')}</button>` +
     '<span class="tb-sep" aria-hidden="true"></span>' +
     `<button type="button" class="icon-btn" data-act="mkdir" aria-label="New folder" title="New folder"${w ? '' : ' disabled'}>${icon('folder-plus')}</button>` +
     `<button type="button" class="icon-btn" data-act="upload" aria-label="Upload files here" title="Upload files here"${w ? '' : ' disabled'}>${icon('upload')}</button>` +
@@ -263,7 +270,7 @@ function renderSelbar(): void {
     `<button type="button" class="ghost" data-act="rename"${n === 1 && w ? '' : ' disabled'}>${icon('edit')}<span class="dc-wide-txt">Rename</span></button>` +
     `<button type="button" class="ghost" data-act="tag-sel">${icon('tag')}<span class="dc-wide-txt">Tag</span></button>` +
     (streamed(curBucket()) && !L?.offline
-      ? `<button type="button" class="ghost" data-act="dl-local" title="Keep a read-only copy here: fast, and readable while S3 is unreachable">${icon('hdd')}<span class="dc-wide-txt">Download to local</span></button>` +
+      ? `<button type="button" class="ghost" data-act="dl-local" title="Download an editable copy of just these: fast, readable while S3 is unreachable, changes stay local">${icon('hdd')}<span class="dc-wide-txt">Download to local</span></button>` +
         (selEntries().some((x) => x.local && x.local !== 'new')
           ? `<button type="button" class="ghost" data-act="drop-local">${icon('x-c')}<span class="dc-wide-txt">Remove local copy</span></button>` : '')
       : '') +
@@ -394,7 +401,8 @@ export function renderSearch(): void {
 
 // ---------------------------------------------------------------- open, menus
 
-async function openEntry(e: Entry): Promise<void> {
+/** Open an entry as a double click does: a folder navigates, an image opens in a tab, a video in Extract frames, text in the editor. */
+export async function openEntry(e: Entry): Promise<void> {
   const bid = D.bid;
   if (!bid) return;
   if (e.type === 'dir') { hooks.navigate(bid, e.path); return; }
@@ -497,6 +505,16 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
   },
   more: () => { void loadMore(); },
   'reload-folder': () => { void loadListing(); },
+  /** Reload: the buckets, the tree and the open folder (an S3 folder is listed from S3 again). */
+  refresh: () => { closeFloat(); refreshNext = true; void hooks.reload().then(() => toast('Reloaded', 'ok')); },
+  'copy-path': (el) => {
+    closeFloat();
+    const bid = el.dataset['bid'] || D.bid || '';
+    const paths = (el.dataset['paths'] ?? el.dataset['path'] ?? D.path).split('\n');
+    const text = paths.map((p) => locationOf(bid, p)).filter(Boolean).join('\n');
+    if (!text) return;
+    void copyText(text).then((ok) => toast(ok ? `Copied ${paths.length === 1 ? text : `${paths.length} paths`}` : 'Could not copy: your browser blocked the clipboard', ok ? 'ok' : 'err'));
+  },
   'retry-s3': () => { retryS3 = true; void loadListing(true); },
   mkdir: () => { void newFolder(); },
   move: () => { void moveSel(); },

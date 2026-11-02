@@ -127,6 +127,7 @@ function renderBar(): void {
     `<button type="button" class="icon-btn view-btn${D.cards === 'grid' ? ' active' : ''}" data-act="cards" data-mode="grid" aria-pressed="${D.cards === 'grid'}" aria-label="Cards" title="Cards">${icon('grid')}</button>` +
     `<button type="button" class="icon-btn view-btn${D.cards === 'list' ? ' active' : ''}" data-act="cards" data-mode="list" aria-pressed="${D.cards === 'list'}" aria-label="List" title="List">${icon('list')}</button></div>` +
     `<span class="grow"></span>` +
+    `<button type="button" class="icon-btn" data-act="refresh" aria-label="Reload the buckets" title="Reload">${icon('refresh')}</button>` +
     `<button type="button" data-act="import-web" class="dc-wide">${icon('globe')}From the web</button>` +
     `<button type="button" data-act="link" class="dc-wide">${icon('link')}Link source</button>` +
     `<button type="button" class="primary" data-act="import">${icon('upload')}<span class="dc-wide-txt">Import data</span></button>` +

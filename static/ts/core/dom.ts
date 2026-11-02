@@ -70,3 +70,23 @@ export function fmtEta(s: number | null | undefined): string {
   if (s == null) return '';
   return s >= 60 ? `~${Math.floor(s / 60)}m ${Math.round(s % 60)}s left` : `~${Math.round(s)}s left`;
 }
+
+/** Put `text` on the clipboard -> whether it worked. The async clipboard needs a secure context (https, localhost);
+ *  over plain http the page falls back to a hidden textarea + execCommand('copy'). */
+export async function copyText(text: string): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard) {
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* fall back below */ }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+  const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  prev?.focus();
+  return ok;
+}

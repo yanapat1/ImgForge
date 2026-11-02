@@ -186,6 +186,86 @@ def _need_write(r):
         raise DCError(f'bucket “{r.name}” cannot be written ({r.root} is missing or read-only)')
 
 
+class _LocalView:
+    """The downloaded folders of a streamed S3 link seen as a local bucket: root = its local copy, which mirrors the
+    bucket's layout, so the bucket's own paths, store ops and undo manifests work unchanged. Changes stay local
+    (never written back to S3)."""
+    local_view = True
+
+    def __init__(self, r):
+        self._v = r
+        self.kind = 'local'
+        self.root = r.local_root
+
+    def __getattr__(self, k):
+        return getattr(self._v, k)
+
+
+def _streamed(r):
+    return r.kind == 's3' and not getattr(r, 'local_view', False)
+
+
+def _outside(r, rel):
+    return DCError(f'{rel or "the bucket root"} of “{r.name}” is streamed from S3 and read-only: download that '
+                   'folder first (Download to local) and change it there, or load the whole bucket into local')
+
+
+def _write_view(r, sources=(), targets=()):
+    """The row to write through after the write checks: `r` itself, or for a streamed S3 link its local copy
+    (_LocalView) when every path is in a downloaded folder: `sources` (moved, renamed, deleted, rewritten) strictly
+    inside one, `targets` (a destination folder, a new file's path) inside or equal to one. A download running into
+    the bucket blocks writes (409)."""
+    if not _streamed(r):
+        _need_write(r)
+        return r
+    rows = _local_rows(r.id) if r.local_root else {}
+    if not rows:
+        _need_write(r)                                  # the "streamed and read-only" message
+    if _busy(f'dc-fetch:{r.id}:'):
+        raise DCError(f'a download into “{r.name}” is running: it can be changed once it finished', 409)
+    _need_inside(r, rows, sources, targets)
+    v = _LocalView(r)
+    _need_write(v)
+    return v
+
+
+def _need_inside(r, rows, sources=(), targets=()):
+    for p in sources:
+        p = store.clean_rel(p)
+        c = _cover(rows, p)
+        if c is None:
+            raise _outside(r, p)
+        if c['path'] == p:
+            raise DCError(f'{p or "the whole bucket"} is a downloaded folder itself: change what is inside it, or '
+                          'use Remove local copy to drop the download')
+    for p in targets:
+        p = store.clean_rel(p)
+        if _cover(rows, p) is None:
+            raise _outside(r, p)
+
+
+def _op_paths(op):
+    """(sources, targets) of one file op, for _need_inside."""
+    kind = op.get('op')
+    if kind in ('mkdir', 'create'):
+        return (), (str(op.get('path') or ''),)
+    src = (str(op.get('path') or ''),)
+    return (src, (str(op.get('to') or ''),)) if kind in ('move', 'copy') else (src, ())
+
+
+def _location(r, rel=''):
+    """Where folder `rel` of a bucket is read from: s3://bucket/prefix/rel for a streamed link, else the local path."""
+    rel = store.clean_rel(rel)
+    if _streamed(r):
+        return _s3_url(r, rel)
+    root = r.root or ''
+    return os.path.join(root, rel) if rel else root
+
+
+def _s3_url(r, rel=''):
+    return 's3://' + '/'.join(x for x in (r.s3_bucket or '', (r.prefix or '').strip('/'), store.clean_rel(rel)) if x)
+
+
 def _s3(r, rel='', shared=False):
     """The S3 view of a link (of its sub-folder `rel`); shared: the interactive one (a reused client, short
     timeouts, offline breaker) for listings and reads, else a job's own client."""
@@ -296,7 +376,12 @@ def _scan_soon(user, r, rel=''):
 
 
 def _revalidate(r):
-    """Re-detect the bucket root (forced) and swap its auto tag -> retagged or None."""
+    """Re-detect the bucket root (forced) and swap its auto tag -> retagged or None. A change in the downloaded
+    folders of a streamed link only asks for a new comparison with S3 (the copy is partial: the format is S3's)."""
+    if getattr(r, 'local_view', False):
+        with db.begin() as c:
+            c.execute(text('UPDATE app.dc_s3_local SET checked_at = NULL WHERE bucket_id = :b'), {'b': r.id})
+        return None
     try:
         res = _cached(r, '', force=True)
     except DCError:
@@ -361,6 +446,7 @@ def _shape(rows, conn):
         tree = res.get('tree') or {}
         out.append({
             'id': r.id, 'name': r.name, 'kind': r.link, 'root': r.root, 'writable': _writable(r),
+            'location': _location(r),
             'owner': {'id': r.owner_id, 'username': r.username, 'display_name': r.display_name},
             'created_at': _epoch(r.created_at), 'updated_at': _epoch(r.updated_at),
             'format': fmt, 'tags': tg.get(r.id, []),
@@ -602,8 +688,8 @@ def convert_vectors(user, bid, path='', to='parquet'):
     from ..labeling.writers import vector
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
     rel = store.clean_rel(path)
+    r = _write_view(r, sources=(rel,))                  # the new sibling folder lands next to it
     src = _abs(r, rel)
     if not os.path.isdir(src):
         raise DCError(f'{rel or "/"} is not a folder')
@@ -1292,14 +1378,19 @@ def summary(user):
 
 
 # ---------------------------------------------------------------------------------------------- browsing
-def ls(user, bid, path='', offset=0, limit=500, sort='name', q='', retry=False):
+def ls(user, bid, path='', offset=0, limit=500, sort='name', q='', retry=False, refresh=False):
     """One page of folder `path`. A streamed S3 link answers with what its listing holds after LS_WAIT s
     (partial: true while it runs; the page asks again), every entry carries `local` (its downloaded copy's state)
     and `here` is the downloaded folder holding `path`; when S3 cannot be reached the downloaded folders are listed
-    from the local copy (offline: true). retry: ask S3 again at once after it was found unreachable."""
+    from the local copy (offline: true). A downloaded folder (not being downloaded) is listed from its copy and is
+    writable: it is edited in place. retry: ask S3 again at once after it was found unreachable; refresh: list
+    the folder from S3 again (the Reload button) instead of the listing kept for a minute. `location`: where the
+    folder is read from (s3://… or a local path)."""
     r = _row(user, bid)
     rel = store.clean_rel(path)
     offline = False
+    if refresh and r.kind == 's3':
+        s3dir.invalidate(r.id, rel)
     if r.kind == 's3':
         out = _s3_ls(user, r, rel, offset, limit, sort, q, retry)
         offline = bool(out.get('offline'))
@@ -1313,7 +1404,11 @@ def ls(user, bid, path='', offset=0, limit=500, sort='name', q='', retry=False):
     except DCError:
         out['format'] = None
     out['tags'] = vtags.get(r.id, rel)
-    out['writable'] = _writable(r)
+    edit = out.pop('editable', False)
+    out['writable'] = edit or _writable(r)
+    out['location'] = os.path.join(r.local_root, rel) if edit and rel else r.local_root if edit else _location(r, rel)
+    if r.link == 's3':
+        out['s3_url'] = _s3_url(r, rel)
     return out
 
 
@@ -1395,6 +1490,15 @@ def _local_entries(r, rel):
 
 def _s3_ls(user, r, rel, offset, limit, sort, q, retry):
     rows = _local_rows(r.id)
+    cover = _cover(rows, rel)
+    if (cover is not None and cover['state'] != 'fetching' and r.local_root and not _busy(f'dc-fetch:{r.id}:')
+            and os.path.isdir(os.path.join(r.local_root, rel) if rel else r.local_root)):
+        out = store.list_local(r.local_root, rel, _allowed(), offset, limit, sort, q)   # edited in place
+        st = 'error' if cover['state'] == 'error' else 'fresh'
+        out['entries'] = [{**e, 'local': st} for e in out['entries']]
+        out.update(partial=False, loaded=out['total'], here=cover, local_folders=len(rows), editable=True)
+        _check_soon(user, r, rows)
+        return out
     try:
         view = _s3(r, shared=True)
         view.online(retry)
@@ -1409,7 +1513,6 @@ def _s3_ls(user, r, rel, offset, limit, sort, q, retry):
         if rows and r.local_root:
             return _offline_ls(r, rel, rows, offset, limit, sort, q, e)
         raise
-    cover = _cover(rows, rel)
     if cover is not None and done and err is None and r.local_root:     # only a complete listing can tell "gone"
         names = {e['name'] for e in dirs} | {e['name'] for e in files}
         for e in _local_entries(r, rel):
@@ -1450,16 +1553,38 @@ def _offline_ls(r, rel, rows, offset, limit, sort, q, e):
             'offline': True, 'error': e.message, 'local_folders': len(rows)}
 
 
+def folder_state(user, bid, path=''):
+    """What the assistant needs about the open folder: {name, kind, mode, location, s3_url, writable, local,
+    downloaded_in, editable}. local: the folder's downloaded state on a streamed S3 link (fresh | outdated |
+    error | fetching | partial | None); editable: changes here are allowed (they land in the local copy)."""
+    r = _row(user, bid)
+    rel = store.clean_rel(path)
+    out = {'name': r.name, 'kind': r.link, 'mode': r.mode if r.link == 's3' else None,
+           'location': _location(r, rel), 's3_url': _s3_url(r, rel) if r.link == 's3' else None,
+           'writable': _writable(r), 'local': None, 'downloaded_in': None, 'editable': _writable(r)}
+    if _streamed(r) and r.local_root:
+        rows = _local_rows(r.id)
+        c = _cover(rows, rel)
+        busy = _busy(f'dc-fetch:{r.id}:')
+        if c is not None:
+            out.update(local='fetching' if busy else c['state'], downloaded_in=c['path'], editable=not busy)
+            out['location'] = os.path.join(r.local_root, rel) if rel else r.local_root
+        elif _holds(rows, rel):
+            out['local'] = 'partial'
+        out['downloaded'] = sorted(rows)[:20]
+    return out
+
+
 def _local_file(r, rel):
-    """(path of the downloaded copy of file `rel`, whether its folder is fresh) for a streamed S3 link, else
-    (None, False)."""
+    """(path of the downloaded copy of file `rel`, whether to read it rather than S3) for a streamed S3 link, else
+    (None, False). A downloaded folder is edited in place, so its copy is what the user sees (outdated or not)."""
     if r.kind != 's3' or not r.local_root:
         return None, False
     c = _cover(_local_rows(r.id), rel)
     if c is None or c['state'] == 'fetching':
         return None, False
     p = os.path.join(r.local_root, rel)
-    return (p, c['state'] == 'fresh') if os.path.isfile(p) else (None, False)
+    return (p, True) if os.path.isfile(p) else (None, False)
 
 
 def _set_local(bid, path, **cols):
@@ -1823,7 +1948,7 @@ def read_text(user, bid, path, limit=65536):
         reason = 'your tier cannot change data'
     else:
         try:
-            _need_write(r)
+            _write_view(r, targets=(rel,))
         except DCError as e:
             reason = e.message
     out = {'text': text_, 'truncated': truncated, 'size': size, 'mtime_ns': mtime_ns,
@@ -1841,8 +1966,8 @@ def write_text(user, bid, path, text, expect_mtime_ns=None, create=False):
     from sqlalchemy import text as sql                  # `text` is the file content here
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
     rel = _file(r, path)
+    r = _write_view(r, targets=(rel,))
     if not isinstance(text, str):
         raise DCError('text must be a string')
     p = os.path.realpath(_abs(r, rel, must_exist=not create))
@@ -1912,9 +2037,10 @@ def ops(user, bid, ops):
     """Apply file ops in order (each one may fail on its own) -> {applied, errors, undo_id, retagged}."""
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
     if not isinstance(ops, (list, tuple)) or not ops:
         raise DCError('ops must be a non-empty list')
+    rows = _local_rows(r.id) if _streamed(r) else None    # a streamed link: each op must stay in its downloads
+    r = _write_view(r)
     if len(ops) > 5000:
         raise DCError('at most 5000 ops at once')
     allowed = _allowed()
@@ -1927,6 +2053,8 @@ def ops(user, bid, ops):
             errors.append({'op': op, 'error': 'an op is an object like {op: "move", path, to}'})
             continue
         try:
+            if rows is not None:
+                _need_inside(r, rows, *_op_paths(op))
             info, step = store.apply_op(r.root, allowed, op, str(trash), i)
         except DCError as e:
             errors.append({'op': op, 'error': e.message})
@@ -1957,7 +2085,7 @@ def ops(user, bid, ops):
 def undo(user, bid, undo_id):
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
+    r = _write_view(r)
     with db.connect() as c:
         u = c.execute(text('SELECT * FROM app.dc_undo WHERE id = :id AND bucket_id = :b'),
                       {'id': str(undo_id or ''), 'b': r.id}).first()
@@ -1993,8 +2121,8 @@ def upload(user, bid, path, files, unzip=True):
     """Stream files into folder `path` (zips unpacked there unless unzip=False) -> {added, skipped, retagged}."""
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
-    auto = getattr(r._r, 'video_auto', None)
+    r = _write_view(r, targets=(str(path or ''),))
+    auto = getattr(r._r, 'video_auto', None) and not getattr(r, 'local_view', False)
     before = _videos_below(r, path) if auto else None
     return _after_upload(user, r, path, store.upload_local(r.root, _allowed(), path, files, unzip=unzip), before)
 
@@ -2014,13 +2142,14 @@ def upload_part(user, bid, path, name, uid, offset, total, data, unzip=True):
     until the file is whole, then what upload() answers plus done: True."""
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
+    r = _write_view(r, targets=(str(path or ''),))
     out = store.upload_part(r.root, _allowed(), path, name, uid, offset, total, data, unzip=unzip)
     if not out.get('ready'):
         if out.get('done'):
             out['retagged'] = None
         return out
-    before = _videos_below(r, path) if getattr(r._r, 'video_auto', None) else None
+    before = (_videos_below(r, path) if getattr(r._r, 'video_auto', None) and not getattr(r, 'local_view', False)
+              else None)
     out = store.finish_part(r.root, _allowed(), path, name, uid, out['path'], unzip=unzip)
     if not out['added']:
         out['retagged'] = None
@@ -2032,7 +2161,7 @@ def part_status(user, bid, path, name, uid, total, unzip=True):
     """The ranges the server holds of a file uploaded in parts (resume), or skipped: True-ish SKIP."""
     r = _row(user, bid)
     _need(user)
-    _need_write(r)
+    r = _write_view(r, targets=(str(path or ''),))
     out = store.part_status(r.root, _allowed(), path, name, uid, total, unzip=unzip)
     if out.get('done'):
         out['retagged'] = None

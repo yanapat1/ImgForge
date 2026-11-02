@@ -81,7 +81,7 @@ export const hooks = {
 };
 
 /** User prefs (core/auth.ts pref / rememberPref) of the page. */
-export const PREF = { view: 'dc_view', cards: 'dc_cards', sort: 'dc_sort', bucketSort: 'dc_bucket_sort', ai: 'dc_ai_open', exp: 'dc_export' } as const;
+export const PREF = { view: 'dc_view', cards: 'dc_cards', sort: 'dc_sort', bucketSort: 'dc_bucket_sort', ai: 'dc_ai_open', exp: 'dc_export', treeW: 'dc_tree_w', aiH: 'dc_ai_h' } as const;
 
 /** Whether the user may change data here (tier permission data.manage; an S3 bucket is read-only). */
 export const writable = (): boolean => !!(D.listing ? D.listing.writable : curBucket()?.writable);
@@ -94,6 +94,17 @@ export const isImage = (e: { name: string; type: string; kind?: string | undefin
 export const key = (bid: string, path: string): string => `${bid}\u0000${path}`;
 export const bucketOf = (bid: string | null): Bucket | undefined => (bid ? D.buckets.find((b) => b.id === bid) : undefined);
 export const curBucket = (): Bucket | undefined => bucketOf(D.bid);
+
+/** The full path of folder / file `path` of a bucket, as the user would paste it: s3://bucket/prefix/path for an S3
+ *  link that streams, else the folder on the server (the open folder's own `location` when the server sent it: a
+ *  downloaded S3 folder answers with its local copy). '' when the bucket is unknown. */
+export function locationOf(bid: string, path: string): string {
+  if (bid === D.bid && path === D.path && D.listing?.location) return D.listing.location;
+  const b = bucketOf(bid);
+  const base = b?.location ?? b?.root ?? '';
+  if (!b || !base) return '';
+  return path ? `${base.replace(/\/+$/, '')}/${path}` : base;
+}
 export const joinPath = (dir: string, name: string): string => (dir ? `${dir.replace(/\/$/, '')}/${name}` : name);
 export const parentOf = (p: string): string => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 export const baseName = (p: string): string => p.slice(p.lastIndexOf('/') + 1);

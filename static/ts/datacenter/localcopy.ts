@@ -1,8 +1,9 @@
 // The per-folder local copy of a streamed S3 link: Download to local (the selection), Update an outdated folder
 // (new + changed files; "also remove files S3 no longer has" is opt-in), Check for updates, Remove local copy, and
 // the badge every entry of such a bucket carries (localBadge): cloud = stream only, hdd = downloaded and the same as
-// S3, amber = S3 changed it, new = only in S3 so far, gone = only here (S3 removed it). The copy is read-only: to
-// edit, load the whole bucket into local (Edit › Load mode).
+// S3, amber = S3 changed it, new = only in S3 so far, gone = only here (S3 removed it). A downloaded folder is
+// listed from the copy and edited in place (changes stay local, S3 is never written); the rest of the bucket streams
+// read-only. To edit everything, load the whole bucket into local (Edit › Load mode).
 
 import { errText } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
@@ -20,7 +21,7 @@ export const streamed = (b: Bucket | undefined | null): boolean => !!b && b.kind
 
 const META: Record<LocalState | 'stream', [string, string, string]> = {
   stream: ['cloud', 'stream', 'In S3 only: streamed when opened'],
-  fresh: ['hdd', 'local', 'Downloaded: the same as S3'],
+  fresh: ['hdd', 'local', 'Downloaded: opened from the local copy (changes here stay local)'],
   outdated: ['refresh', 'outdated', 'Downloaded, but S3 changed it: Update to get the new version'],
   new: ['download', 'new', 'New in S3: not downloaded yet (Update)'],
   gone: ['x-c', 'not in S3', 'Only in the local copy: S3 no longer has it'],
@@ -81,7 +82,7 @@ export async function openUpdate(bid: string, row: LocalRow): Promise<void> {
   await openDialog({
     title: `Update ${name} from S3`, ok: 'Update',
     body: `<p>${d && !d.error ? `S3 changed since the download${row.checked_at ? ` (checked ${esc(timeAgo(row.checked_at))})` : ''}: <b>${esc(diffText(row) || 'nothing')}</b>.` : 'Downloads what S3 has now.'}</p>` +
-      '<p class="hint">New and changed files are downloaded; unchanged ones are skipped.</p>' +
+      '<p class="hint">New and changed files are downloaded; unchanged ones are skipped. An S3 file replaces a local edit of the same name, and files you deleted here come back.</p>' +
       (removed ? `<label class="check"><input type="checkbox" id="dc-upd-mirror"> Also remove the ${fmtN(removed)} local file${removed === 1 ? '' : 's'} S3 no longer has</label>` : ''),
     onOk: async (root) => {
       const mirror = !!root.querySelector<HTMLInputElement>('#dc-upd-mirror')?.checked;
@@ -129,7 +130,8 @@ export function localStrip(): string {
   if (h) {
     const old = h.state === 'outdated' || h.state === 'error';
     const when = h.fetched_at ? `downloaded ${esc(timeAgo(h.fetched_at))}` : 'downloading';
-    out.push(`<div class="dc-strip-row dc-localrow${old ? ' old' : ''}"><span class="lbl">${icon(old ? 'refresh' : 'hdd')}<b>${old ? 'S3 changed this folder' : 'Local copy'}</b></span>` +
+    out.push(`<div class="dc-strip-row dc-localrow${old ? ' old' : ''}"><span class="lbl">${icon(old ? 'refresh' : 'hdd')}<b>${old ? 'S3 differs from this folder' : 'Local copy'}</b></span>` +
+      (L.writable ? '<span class="faint">editable · changes stay local</span>' : '') +
       `<span class="muted">${old && diffText(h) ? `${esc(diffText(h))} · ` : ''}${when}${h.bytes ? ` · ${fmtSize(h.bytes)}` : ''}${h.path !== D.path ? ` · in ${esc(h.path || 'the whole bucket')}` : ''}</span><span class="grow"></span>` +
       (L.offline ? '' : `<button type="button" class="ghost sm" data-act="check-local">${icon('refresh')}Check for updates</button>` +
         `<button type="button" class="${old ? 'primary' : 'ghost'} sm" data-act="update-local">${icon('download')}Update</button>`) + '</div>');

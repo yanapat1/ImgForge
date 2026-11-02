@@ -44,10 +44,16 @@ def resolve_bucket(user, ref):
 
 
 def _writable(b, tool):
-    if not b.get('writable', True) and not tool.s3_ok:
-        kind = 's3 buckets are read-only' if b.get('kind') == 's3' else 'it is read-only'
-        raise ToolError(f'bucket {b.get("name")!r} cannot be changed ({kind}): use cannot_do, offer copying '
-                        'into a managed bucket instead')
+    if b.get('writable', True) or tool.s3_ok:
+        return
+    if b.get('kind') == 's3' and b.get('local_folders'):
+        return          # a streamed link with downloaded folders: the service allows changes inside those, per path
+    if b.get('kind') == 's3':
+        raise ToolError(f'bucket {b.get("name")!r} cannot be changed here (streamed from S3, read-only): propose '
+                        'download_s3_folders for the folder to change (then change it there, only that prefix is downloaded), or offer '
+                        'copying into a managed bucket')
+    raise ToolError(f'bucket {b.get("name")!r} cannot be changed (it is read-only): use cannot_do, offer copying '
+                    'into a managed bucket instead')
 
 
 def _tags(tags):
@@ -440,8 +446,9 @@ _add(Tool('send_to_session', 'Open folders / files in the visualizer (target vis
                                     f'{"the visualizer" if a["target"] == "visualize" else "a labeling project"}'
                                     + (f' as {a["name"]!r}' if a.get('name') else ''), s3_ok=True))
 
-_add(Tool('set_s3_mode', 'Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local '
-                        '(downloaded into an editable local folder that can be re-synced and exported).',
+_add(Tool('set_s3_mode', 'Choose how a WHOLE S3 bucket is read: stream (from S3 on every request) or local '
+                        '(every object downloaded into an editable local folder that can be re-synced and exported). '
+                        'Not needed to change one folder: download_s3_folders that folder instead.',
           _obj({'bucket': BUCKET, 'mode': {'type': 'string', 'enum': ['stream', 'local'], 'description': 'load mode'}},
                ['bucket', 'mode']),
           True, _s3_mode, lambda b, a: f'Set {_bname(b, a)} to '
@@ -452,8 +459,10 @@ _add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files wi
           _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
           lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True, risk='danger'))
 
-_add(Tool('download_s3_folders', 'Download folders (or files) of a STREAMED S3 bucket into its read-only local copy: '
-                                 'fast to open and readable while S3 is unreachable; the rest keeps streaming. Run it '
+_add(Tool('download_s3_folders', 'Download folders (or files) of a STREAMED S3 bucket into its local copy: fast to '
+                                 'open, readable while S3 is unreachable, and EDITABLE (create_folder / move / rename '
+                                 '/ delete / upload inside it change only the local copy, never S3); the rest keeps '
+                                 'streaming and stays read-only. Run it '
                                  'again on a downloaded folder to update it (new + changed files; unchanged skipped). '
                                  'mirror also deletes local files S3 no longer has: only when the user asks.',
           _obj({'bucket': BUCKET, 'paths': A('folders / files to download'),

@@ -52,20 +52,27 @@ export function arrowNav(popId: string, selector = 'button:not([disabled]):not(.
 }
 
 /** Show `pop` (position: fixed, appended to the body by the caller) under `from`, right-aligned, flipped up when there is
- *  no room. A mousedown outside both, Escape, or calling the returned function closes it (onClose runs once). */
-export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () => void, align: 'left' | 'right' = 'right'): () => void {
+ *  no room; `at` (a context menu) opens it at that point instead, flipped left / up near the edges. A mousedown outside
+ *  both, Escape, or calling the returned function closes it (onClose runs once; Escape puts the focus back on `from`). */
+export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () => void, align: 'left' | 'right' = 'right',
+  at?: { x: number; y: number }): () => void {
   for (const p of all) p.close();
   floatClose?.();
   const place = (): void => {
     pop.classList.remove('hidden');
-    const r = from.getBoundingClientRect();
     const w = pop.offsetWidth, h = pop.offsetHeight;
+    if (at) {
+      pop.style.left = `${Math.max(8, at.x + w <= innerWidth - 8 ? at.x : at.x - w)}px`;
+      pop.style.top = `${Math.max(8, at.y + h <= innerHeight - 8 ? at.y : Math.min(at.y - h, innerHeight - 8 - h))}px`;
+      return;
+    }
+    const r = from.getBoundingClientRect();
     const x = align === 'right' ? r.right - w : r.left;
     pop.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, x))}px`;
     pop.style.top = `${r.bottom + 4 + h <= innerHeight - 8 ? r.bottom + 4 : Math.max(8, r.top - 4 - h)}px`;
   };
   place();
-  from.setAttribute('aria-expanded', 'true');
+  if (!at) from.setAttribute('aria-expanded', 'true');
   const down = (e: MouseEvent): void => {
     const t = e.target;
     if (t instanceof Node && !pop.contains(t) && !from.contains(t)) close();
@@ -83,7 +90,7 @@ export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () =
     pop.removeEventListener('keydown', key);
     window.removeEventListener('resize', close);
     pop.classList.add('hidden');
-    from.setAttribute('aria-expanded', 'false');
+    if (!at) from.setAttribute('aria-expanded', 'false');
     if (onClose) onClose();
   };
   floatClose = close;

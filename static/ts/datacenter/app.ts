@@ -28,6 +28,8 @@ import { deleteSel, OPS_ACTIONS, renameSel } from './ops.js';
 import { bucketOf, D, hooks, key, parentOf, PREF } from './state.js';
 import { LOCAL_ACTIONS } from './localcopy.js';
 import { renderTree, TREE_ACTIONS } from './tree.js';
+import { bindCtxMenu, CTX_ACTIONS } from './ctxmenu.js';
+import { bindResize } from './resize.js';
 import { bindUpload, UPLOAD_ACTIONS } from './upload.js';
 import { hasUploads } from './uploads.js';
 import { UPLOADS_ACTIONS } from './uploads.js';
@@ -75,6 +77,8 @@ const SKELETON = (): string => `
   </section>
   <aside id="dc-details" class="dc-details" aria-label="Details"></aside>
   <section id="dc-ai" class="dc-drawer hidden" data-llm="data_center" aria-label="Data Center assistant"></section>
+  <div id="dc-split-tree" class="dc-split v" role="separator" aria-orientation="vertical" aria-controls="dc-tree" aria-label="Resize the bucket tree (double-click: default)" title="Drag to resize · double-click: default" tabindex="0"></div>
+  <div id="dc-split-ai" class="dc-split h" role="separator" aria-orientation="horizontal" aria-controls="dc-ai" aria-label="Resize the assistant (double-click: default)" title="Drag to resize · double-click: default" tabindex="0"></div>
   <div id="dc-scrim" class="dc-scrim" data-act="close-overlays"></div>
 </div>
 <div id="dc-menu" class="dc-pop dc-menu hidden" role="menu"></div>
@@ -273,7 +277,7 @@ export async function start(): Promise<void> {
   if (c === 'grid' || c === 'list') D.cards = c as CardMode;
   if (s === 'name' || s === '-mtime' || s === 'size') D.sort = s as LsSort;
   if (bs === 'recent' || bs === 'name' || bs === 'size' || bs === 'images') D.bucketSort = bs as BucketSort;
-  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, UPLOADS_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS, LOCAL_ACTIONS);
+  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, UPLOADS_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS, LOCAL_ACTIONS, CTX_ACTIONS);
   hooks.navigate = navigate;
   hooks.reload = reload;
   hooks.render = render;
@@ -283,6 +287,8 @@ export async function start(): Promise<void> {
   bindBrowser();
   bindUpload();
   bindAi();
+  bindCtxMenu();
+  bindResize();
   readLocation();
   history.replaceState({ dc: 1 }, '', dataUrl(D.bid, D.path));
   render();                                        // the frame at once (skeleton rows), then the data

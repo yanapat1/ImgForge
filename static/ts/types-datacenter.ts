@@ -28,6 +28,8 @@ export interface BucketSession { id: string; kind: 'visualize' | 'label'; name: 
 
 export interface Bucket {
   id: string; name: string; kind: BucketKind; root: string; writable: boolean;
+  /** where the bucket root is read from: s3://bucket/prefix for a streamed link, else its local folder */
+  location?: string;
   owner?: { id: string; username?: string; display_name?: string } | string | null;
   created_at?: string | number | null; updated_at?: string | number | null;
   format: Format | null;
@@ -87,6 +89,9 @@ export interface Listing {
   /** a streamed S3 folder still being listed (ask again), the entries listed so far, the downloaded folder holding
    *  this one, S3 unreachable (only downloaded folders), why */
   partial?: boolean; loaded?: number; here?: LocalRow | null; offline?: boolean; error?: string; local_folders?: number;
+  /** where the folder is read from (s3://bucket/prefix/path, or a local path: also a downloaded S3 folder's copy);
+   *  an S3 link's own s3:// path */
+  location?: string; s3_url?: string;
 }
 
 /** GET /api/dc/buckets/{bid}/stats */

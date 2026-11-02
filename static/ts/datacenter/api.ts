@@ -55,8 +55,9 @@ export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: bo
   sendJSON<{ ok: boolean }>('DELETE', `${B(bid)}${deleteFiles ? '?delete_files=1' : ''}`);
 
 export const PAGE = 500;
-export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = '', retry = false): Promise<Listing> =>
-  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null })}`);
+/** One page of a folder. retry: ask an unreachable S3 again now; refresh: list S3 again (Reload), not the kept listing. */
+export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = '', retry = false, refresh = false): Promise<Listing> =>
+  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null, refresh: refresh ? 1 : null })}`);
 /** A streamed S3 link: download folders into its read-only local copy (again = update; mirror removes what S3 lost). */
 export const fetchLocal = (bid: string, paths: string[], mirror = false): Promise<LocalJob> =>
   postJSON<LocalJob>(`${B(bid)}/local`, { paths, mirror });

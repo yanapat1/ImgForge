@@ -32,21 +32,37 @@ def get(name):
 
 # ---------------------------------------------------------------- "where the user is"
 def data_scope(user, scope):
-    """The open bucket / folder / selection (the bucket's name looked up, best effort): makes "this folder" resolvable."""
+    """The open bucket / folder / selection, where it is read from and whether it can be changed (looked up, best
+    effort): makes "this folder" resolvable and keeps the agent from proposing a full S3 load for one prefix."""
     from .. import tools
     scope = scope if isinstance(scope, dict) else {}
     bid, path = scope.get('bucket'), str(scope.get('path') or '')
     sel = [str(x) for x in scope.get('selection') or [] if isinstance(x, str)]
     if not bid:
         return 'The user is on the Data Center overview (no bucket open).'
-    name = kind = None
+    st = None
     try:
-        b = tools._svc().get_bucket(user, bid)
-        name, kind = b.get('name'), b.get('kind')
+        st = tools._svc().folder_state(user, bid, path)
     except Exception:  # noqa: BLE001 - a stale scope: the model still has the id and the tools
         pass
-    out = [f'The user has bucket {bid!r}' + (f' ({name!r}, {kind})' if name else '') + ' open, folder '
-           + (repr(path) if path else 'the root') + '.']
+    kind = st and (st['kind'] + (f', mode {st["mode"]}' if st.get('mode') else ''))
+    out = [f'The user has bucket {bid!r}' + (f' ({st["name"]!r}, {kind})' if st else '') + ' open, folder '
+           + (repr(path) if path else 'the root') + (f' (location {st["location"]})' if st else '') + '.']
+    if st and st.get('s3_url') and st['s3_url'] != st['location']:
+        out.append(f'In S3: {st["s3_url"]}.')
+    if st and st['kind'] == 's3' and not st['writable']:          # streamed (a loaded-whole link is writable)
+        if st['editable']:
+            out.append(f'This folder is downloaded (in {st["downloaded_in"] or "the whole bucket"!r}, state '
+                       f'{st["local"]}) and editable: create_folder / move / rename / delete / upload here change only '
+                       'the local copy (not S3). Do NOT propose loading the whole bucket for it.')
+        elif st.get('local') == 'fetching':
+            out.append('This folder is being downloaded right now: changes wait until the download finished.')
+        else:
+            down = st.get('downloaded') or []
+            out.append('This folder is streamed (read-only). To change it, propose download_s3_folders for just '
+                       'this folder (only that prefix is downloaded), then the changes inside it; set_s3_mode local '
+                       'only when the user wants the whole bucket.'
+                       + (f' Downloaded folders: {", ".join(repr(p) for p in down)}.' if down else ''))
     if sel:
         shown = sel[:50]
         out.append(f'Selected ({len(sel)}): ' + ', '.join(shown) + (' ...' if len(sel) > len(shown) else '')
