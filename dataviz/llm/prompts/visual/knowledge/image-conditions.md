@@ -1,6 +1,6 @@
 ---
 title: Compare › Image conditions (camera / lighting shift)
-summary: will a model trained on A fit B (new camera, new lighting): light, blur, noise, colour, capture metrics, shift-detector AUC, model fit, preview, recommendations
+summary: will a model trained on A fit B (new camera, new lighting): light, light layout, blur, noise, colour, capture metrics, CI / q, light map, exposure mix, coverage, shift-detector AUC, model fit, preview, B → A correction LUT, model stress test, recommendations
 ---
 - Where: the Compare tab of a combined dataset (2+ datasets joined), the **Image conditions** section (collapsed).
   A = the data the model was trained on, B = the new data (new camera brand, new lighting, new site). **images**
@@ -42,3 +42,39 @@ summary: will a model trained on A fit B (new camera, new lighting): light, blur
   ImageCompression, new camera / high AUC → label most-B-like images and fine-tune on A + B, validate on B) and a
   copyable Ultralytics hyp snippet. Export JSON / CSV.
 - It measures image conditions, not labels: the label diff (cards, class table) above is a separate analysis.
+- More metrics (same decode): **Light** midtones (median luma: a tone-curve / gamma change), local contrast (16 px
+  block std), **vignetting** (corner / centre light, < 1 = darker corners), **uneven light** (4×4 grid CV %), **light
+  direction** left(−)/right(+) and top(−)/bottom(+) in % of the mean, **haze / glare** (dark channel: lifted blacks) ·
+  **Blur** blur direction (0 = defocus, → 1 = motion blur; n/a when no detail stays above the noise) · **Noise**
+  colour noise (Lab a*/b* sigma) · **Colour** colour temperature in kelvin (McCamy; lower = warmer / yellower) ·
+  **Capture** JPEG blocking (8 px edges / inside, > 1.2 visible blocks), time of day (EXIF).
+- Statistics per metric: **95 % CI** of the median change (bootstrap) and **q** (KS p-value, Benjamini-Hochberg over
+  the metrics). With many images almost everything is "significant": severity stays on the size of the change; q
+  only tells whether a small change is real. Table tooltip, the line under the chart and the CSV carry them.
+- **Light map**: mean brightness of a 4×4 grid over A's images, B's, and B − A (red = darker in B, blue = brighter):
+  shows vignetting, a lamp on one side, a darker bottom. **Exposure mix**: share of images dark < 60 / dim 60–100 /
+  normal 100–160 / bright > 160 (mean luma) per side + flat images (contrast < 25). **Light over the day**: brightness
+  by EXIF hour (only when ≥ 30 % have a time). Scatters add Temperature × brightness and Light layout (vignetting ×
+  uneven light).
+- **B covered by A** KPI (when the Explore feature is computed): share of B's boxes with an A box as close as A's boxes
+  are to each other; the rest is appearance the model never saw. **Uncovered B images** lists them in the grid
+  (label these). Fréchet distance in its tooltip.
+- Model fit adds a **Confidence | mAP50** toggle on "vs <metric>": mAP50 of the images per metric bin (A + B, labels
+  needed), e.g. mAP falling below a brightness.
+- **Preview › B corrected to A**: a per-channel curve (LUT, CDF matching of B's R / G / B to A's) applied to a B image;
+  **LUT** downloads it as JSON with a 3-line `cv2.LUT` snippet to run before the model (a fix at inference instead of
+  retraining). It fixes brightness / contrast / colour cast only, never blur, noise or compression; the hint shows
+  the mean R / G / B gap before and after. `compare_shift` returns it as its correction field.
+- **A as B** preview now also applies gamma, vignette, motion blur (when B's blur has a direction), colour noise and
+  JPEG at B's quality.
+- **Stress test** (collapsed, under the report): pick a model (Settings › Models; it does not need to have run here),
+  images (50 / 150 / 500 of A, the labelled ones when A has labels) and axes, **Run stress test** (a job: the model runs
+  images × steps times, e.g. 150 × 65 ≈ 10 k inferences, minutes on CPU). Axes: brightness ×0.3–1.75, midtones
+  (gamma 0.5–2), contrast ×0.4–1.6, defocus blur σ 0–4 px, motion blur 0–15 px (px at a 640 px long side), noise σ
+  0–25, colour temperature −3000…+3000 K, saturation ×0–2, JPEG quality 100–10, resolution ×1–0.25. Score = mAP50
+  with labels, else **consistency** (mAP50 against its own clean predictions: how much it still finds). Per axis:
+  the **safe window** (steps keeping ≥ 95 % of the clean score), A's own p5–p95 (grey), **B's position** (from the
+  Image conditions report: B's median change mapped through what each step measurably does) and the **expected
+  score at B**; status ok (< 5 % drop) / moderate / major (≥ 15 %). The headline = the worst axis: "Expected mAP50 on
+  B ≈ …". It covers conditions only (not new objects / backgrounds): still validate on a few labelled B images.
+  Clicking a row / point shows one image at every step. CSV export. `compare_stress` reads it.

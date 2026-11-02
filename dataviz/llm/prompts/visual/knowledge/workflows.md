@@ -14,4 +14,5 @@ summary: first look at a dataset, clean labels, find duplicates / leakage, expla
    Evaluation to compare models (skill `compare-models`).
 6. **Map looks odd**: `projection_quality`, try `pacmap` or more `n_neighbors`, check on `pca` (skill `read-the-map`).
 7. **New camera / lighting**: combine old (A) and new (B) data, Compare › Image conditions › Analyse, `compare_shift`
-   for the verdict, drifting metrics and model fit (skill `check-camera-shift`).
+   for the verdict, drifting metrics and model fit, then its **Stress test** with the A-trained model and
+   `compare_stress` for the expected score on B before B is labelled (skill `check-camera-shift`).

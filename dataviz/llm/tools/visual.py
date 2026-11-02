@@ -9,7 +9,10 @@ Read tools (risk read, run at once):
     class_stats           per class: boxes, images, area % / aspect / brightness / blur quantiles, k-NN suspicion
     eval_summary          the Evaluation tab's leaderboard and findings
     compare_shift         Compare › Image conditions of a combined dataset: will a model trained on A fit B (light,
-                          blur, noise, colour, camera drift, shift-detector AUC, model fit, recommendations)
+                          blur, noise, colour, camera drift, light map, exposure mix, CI / q, coverage, correction LUT,
+                          shift-detector AUC, model fit, recommendations)
+    compare_stress        Compare › Image conditions › Stress test: a model's score at every step of brightness, blur,
+                          noise, colour… on A, its safe window per axis and the expected score at B's conditions
     list_features         the feature registry (Features dropdown): id, label, group, kind, dims, computed, text
     list_methods          analysis.METHODS (Method dropdown) with parameters, defaults and the page's hints
     projection_quality    trustworthiness / continuity / kNN kept of a computed map
@@ -300,13 +303,16 @@ def _compare_shift(ctx, a):
                                         'conditions", pick A (the training data) and B (the new data) and press '
                                         'Analyse conditions'}, '→ none yet'
     r = hit['report']
-    keep = ('key', 'label', 'group', 'unit', 'severity', 'delta', 'delta_pct', 'ks', 'psi', 'out_b', 'effect')
+    keep = ('key', 'label', 'group', 'unit', 'severity', 'delta', 'delta_pct', 'ks', 'psi', 'out_b', 'effect', 'q',
+            'significant')
     moved = []
     for m in sorted((m for m in r['metrics'] if m.get('available')), key=lambda m: -m.get('score', 0)):
         if m['severity'] == 'ok' and len(moved) >= 6:
             continue
         row = {k: (round(m[k], 3) if isinstance(m.get(k), float) else m.get(k)) for k in keep if m.get(k) is not None}
         row['a_median'], row['b_median'] = round(m['a']['med'], 3), round(m['b']['med'], 3)
+        if m.get('ci'):
+            row['delta_ci95'] = [round(x, 3) for x in m['ci']]
         moved.append(row)
     models = [{'name': x['name'], 'conf': x['conf'], 'drop': None if x.get('drop') is None else round(x['drop'], 3),
                **{side: {k: round(v, 3) if isinstance(v, float) else v for k, v in (x.get(side) or {}).items()
@@ -316,7 +322,61 @@ def _compare_shift(ctx, a):
            'groups': r['groups'], 'cameras': {'new_in_b': r['cameras']['new_in_b'][:8], 'a': r['cameras']['a'][:6],
                                               'b': r['cameras']['b'][:6]},
            'models': models, 'recommendations': r['recommendations'], 'hyp_yaml': r['hyp_yaml']}
+    lm = r.get('light_map')
+    if lm:
+        def layout(g):
+            g = np.asarray(g, np.float64)
+            return {'mean': round(float(g.mean()), 1), 'corners': round(float(g[[0, 0, -1, -1], [0, -1, 0, -1]].mean()), 1),
+                    'centre': round(float(g[1:3, 1:3].mean()), 1), 'left': round(float(g[:, :2].mean()), 1),
+                    'right': round(float(g[:, 2:].mean()), 1), 'top': round(float(g[:2].mean()), 1),
+                    'bottom': round(float(g[2:].mean()), 1)}
+        out['light_map'] = {'a': layout(lm['a']), 'b': layout(lm['b'])}
+    ex = r.get('exposure_mix')
+    if ex:
+        out['exposure_mix'] = {side: {**dict(zip(ex['classes'], ex[side]['share'])), 'flat': ex[side]['flat']}
+                               for side in ('a', 'b')}
+    if r.get('correction'):
+        out['correction'] = {'mean_rgb_gap_before': r['correction']['before'],
+                             'after_lut': r['correction']['residual'],
+                             'note': 'B corrected to A: per-channel LUT, Preview › B corrected to A, Download LUT'}
     return {'report': out}, f'→ {r["a"]} vs {r["b"]}: {r["verdict"]["level"]}'
+
+
+def _compare_stress(ctx, a):
+    """The newest stress test of this combined dataset (optionally of a model name / member), with B placed from
+    the matching Image conditions report."""
+    st = _state(ctx)
+    if not getattr(st, 'members', None):
+        return {'stress': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined'}, '→ not combined'
+    from ...data import compare, stress
+    svc = compare.service(st)
+    want_m, want_a = (a.get('model') or '').strip().lower(), (a.get('member') or '').strip()
+    with svc.lock:
+        runs = list(svc.stresses.values())[::-1]
+        shifts = list(svc.shifts.values())[::-1]
+    hit = next((x for x in runs if (not want_m or x['model']['name'].lower() == want_m or x['model']['id'] == want_m)
+                and (not want_a or x.get('member') == want_a)), None)
+    if hit is None:
+        return {'stress': None, 'note': 'no stress test yet: Compare › Image conditions › Stress test, pick the model '
+                                        'trained on A and press Run stress test (it runs the model many times: a job)'}, \
+            '→ none yet'
+    rep = next((e['report'] for e in shifts if e['a'] == hit.get('member')), None)
+    sm = stress.summarise(hit, rep)
+    sk = hit['score_key']
+    axes = []
+    for ax, s in zip(hit['axes'], sm['axes']):
+        axes.append({'axis': ax['key'], 'unit': ax['unit'], 'neutral': ax['neutral'],
+                     'scores': {str(r['level']): r.get(sk) for r in ax['rows']}, 'safe_window': s['window'],
+                     'window_open_ends': s['open'], 'worst': s['worst'], 'b_at': s['b'],
+                     **({'expected_at_b': s['expected'], 'drop': s['drop'], 'status': s['status']} if 'expected' in s else {})})
+    out = {'model': hit['model']['name'], 'member': hit.get('member'), 'images': hit['n'], 'labelled': hit['labelled'],
+           'score': stress.sk_label(sk) if hit['labelled'] or sk != 'map50' else 'consistency (mAP50 vs its own clean '
+                                                                                 'predictions, no labels)',
+           'conf': hit['conf'], 'clean': sm['clean'], 'axes': axes, 'headline': sm['headline'], 'advice': sm['advice'],
+           'b_report': rep['b'] if rep else None}
+    if rep is None:
+        out['note'] = 'no Image conditions report of this A: B is not placed on the axes (Analyse conditions first)'
+    return {'stress': out}, f'→ {hit["model"]["name"]} on {hit.get("member")}: {len(axes)} axes'
 
 
 def _list_features(ctx, a):
@@ -615,6 +675,13 @@ register(Tool('compare_shift', 'Compare › Image conditions of a combined datas
                                'the report the page computed (Analyse conditions).',
               _obj({'a': S('member alias of A (default: the newest report)'), 'b': S('member alias of B')}),
               False, _compare_shift, **_R))
+register(Tool('compare_stress', 'Compare › Image conditions › Stress test: how a model scores on A\'s images made '
+                                'darker / brighter, lower contrast, blurred, motion-blurred, noisier, warmer / cooler, '
+                                'desaturated, JPEG-compressed or lower resolution, step by step; the safe window per '
+                                'axis (>= 95 % of the clean score) and, with an Image conditions report, where B sits '
+                                'and the score expected there. Reads the run the page made (Run stress test).',
+              _obj({'model': S('model name or id (default: the newest run)'), 'member': S('member alias the model ran on')}),
+              False, _compare_stress, **_R))
 register(Tool('list_features', 'The feature spaces of the Features dropdown: id, label, kind (clip / siglip / dinov2 / '
                                'yolo / simple), dims, computed or not, text search support.',
               _obj({}), False, _list_features, **_R))

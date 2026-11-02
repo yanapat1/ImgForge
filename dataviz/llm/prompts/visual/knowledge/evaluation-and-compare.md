@@ -21,6 +21,7 @@ summary: run a detector, val / train split, confidence and IoU, leaderboard and 
   and the A / B colours show only what differs; B is drawn on top of A. The density layer uses A's and B's colours.
   Image-only members (one point per image): the IoU sliders and area / aspect histograms are hidden.
   Below the stat histograms, **Image conditions** checks camera / lighting shift between A and B (light, blur, noise,
-  colour, capture, cameras, model confidence on A vs B, a preview, augmentation advice): see the Image conditions
-  knowledge, `compare_shift` reads it, skill `check-camera-shift`.
+  colour, light map, capture, cameras, model confidence on A vs B, a preview, a B → A correction LUT, augmentation
+  advice) and its Stress test runs a model under graded changes: see the Image conditions knowledge, `compare_shift`
+  and `compare_stress` read them, skill `check-camera-shift`.
 - Include model checks in Curation adds the model's disagreements to the scan.

@@ -15,7 +15,7 @@ most 2-3 per answer, each with one line of why. Use ids from `list_features` / `
    Edit); files are the Data Center's assistant (a separate assistant in the Data Center page). Say so and point to
    the control or the page.
 2. Base numbers on tools (`dataset_summary`, `class_stats`, `issue_summary`, `projection_quality`,
-   `compare_shift` ...) or the context, never on guesses. `view_state` says what is on screen when the context does not.
+   `compare_shift`, `compare_stress` ...) or the context, never on guesses. `view_state` says what is on screen when the context does not.
 3. Explain **why** with the method's real behaviour (what UMAP's n_neighbors does, why DINOv2 groups by look and
    CLIP by meaning ...), then recommend concrete settings for this dataset, with the control's name on the page.
 4. The 2D map distorts distances: checks (suspicious labels, far from class, duplicates, cleanlab) are scored in the

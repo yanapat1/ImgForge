@@ -143,6 +143,9 @@ def test_image_conditions(world, tmp_path):
     out, summary = visual._compare_shift(SimpleNamespace(state=world['ctx'].state_for(U)), {})   # the assistant's view
     assert out['report']['a'] == 'A' and out['report']['verdict']['level'] == rep['verdict']['level']
     assert out['report']['metrics'] and 'hyp_yaml' in out['report'] and summary.startswith('→ A vs B')
+    assert out['report']['light_map']['b']['mean'] < out['report']['light_map']['a']['mean']
+    assert set(out['report']['exposure_mix']['a']) >= {'dark', 'normal', 'flat'} and 'after_lut' in out['report']['correction']
+    assert 'q' in out['report']['metrics'][0] and 'delta_ci95' in out['report']['metrics'][0]
     assert visual._compare_shift(SimpleNamespace(state=world['ctx'].state_for(U)), {'a': 'B'})[0]['report'] is None
     pv = c.get(f'/s/{U}/api/compare/shift/preview', params={'key': key, 'name': 'A/same.jpg'})
     assert pv.status_code == 200 and pv.headers['content-type'] == 'image/jpeg'
@@ -213,6 +216,12 @@ def test_stress_test_route(world, monkeypatch):
     rows = {x['level']: x['map50'] for x in got['result']['axes'][0]['rows']}
     assert rows[1.0] > 0.95 and rows[0.3] < rows[1.0]
     assert got['summary']['axes'][0]['b'] is None                       # no shift report key given
+    from dataviz.llm.tools import visual
+    out, summary = visual._compare_stress(SimpleNamespace(state=st), {})     # the assistant's view
+    sv = out['stress']
+    assert sv['model'] == 'det' and sv['axes'][0]['axis'] == 'brightness' and sv['axes'][0]['scores']['1.0'] > 0.95
+    assert sv['b_report'] is None and 'Analyse conditions' in sv['note'] and summary.startswith('→ det on A')
+    assert visual._compare_stress(SimpleNamespace(state=st), {'model': 'other'})[0]['stress'] is None
     assert c.get('/s/' + U + '/api/compare/stress/axes').json()['axes'][0]['key'] == 'brightness'
     pv = c.get(f'/s/{U}/api/compare/stress/preview', params={'name': 'A/same.jpg', 'axis': 'blur', 'level': 2})
     assert pv.status_code == 200 and pv.content[:2] == b'\xff\xd8'
