@@ -5,13 +5,15 @@ an HTTP error. Visibility (owner / admin) and the data.manage permission are dec
 assistant cannot do more than the page; the routes add the sign-in guard and the permission dependency on the
 changing routes so a refused call never reaches the service.
 
-Handlers are plain `def`: FastAPI runs them in its thread pool (disk and S3 work never blocks the event loop).
+Handlers are plain `def`: FastAPI runs them in its thread pool (disk and S3 work never blocks the event loop);
+upload/part reads its raw body async, then does the same.
 """
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from ...auth import deps
@@ -19,6 +21,7 @@ from ...datacenter import DCError, service
 
 MANAGE = deps.require_perm('data.manage')
 CACHE = {'Cache-Control': 'private, max-age=300'}
+PART_MAX = 64 << 20                 # one upload chunk (POST upload/part); the page sends 8 MB or less
 
 
 def _call(fn, *a, **kw):
@@ -91,8 +94,20 @@ def router(state, ctx):
 
     @r.get('/buckets/{bid}/ls')
     def ls(bid: str, path: str = '', offset: int = 0, limit: int = 500, sort: str = 'name', q: str = '',
-           user=Depends(deps.current_user)):
-        return _call(service.ls, user, bid, path, offset=offset, limit=limit, sort=sort, q=q)
+           retry: int = 0, user=Depends(deps.current_user)):
+        return _call(service.ls, user, bid, path, offset=offset, limit=limit, sort=sort, q=q, retry=bool(retry))
+
+    @r.post('/buckets/{bid}/local')
+    def fetch_local(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.fetch_local, user, bid, body.get('paths') or [], mirror=bool(body.get('mirror')))
+
+    @r.post('/buckets/{bid}/local/check')
+    def check_local(bid: str, user=Depends(MANAGE)):
+        return _call(service.check_local, user, bid)
+
+    @r.post('/buckets/{bid}/local/remove')
+    def drop_local(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.drop_local, user, bid, body.get('paths') or [])
 
     @r.get('/buckets/{bid}/file')
     def read_file(bid: str, path: str, w: int | None = None, t: float | None = None, user=Depends(deps.current_user)):
@@ -150,6 +165,22 @@ def router(state, ctx):
         finally:
             for f in files:
                 f.file.close()
+
+    @r.post('/buckets/{bid}/upload/part')
+    async def upload_part(bid: str, request: Request, name: str, id: str, offset: int, total: int, path: str = '',
+                          unzip: int = 1, user=Depends(MANAGE)):
+        # a raw chunk (application/octet-stream), not multipart: one big file in requests a proxy lets through
+        if int(request.headers.get('content-length') or 0) > PART_MAX:
+            raise HTTPException(413, f'a chunk is {PART_MAX >> 20} MB at most')
+        data = await request.body()
+        if len(data) > PART_MAX:
+            raise HTTPException(413, f'a chunk is {PART_MAX >> 20} MB at most')
+        return await run_in_threadpool(_call, service.upload_part, user, bid, path, name, id, offset, total, data,
+                                       unzip=bool(unzip))
+
+    @r.get('/buckets/{bid}/upload/part')
+    def part_status(bid: str, name: str, id: str, total: int, path: str = '', unzip: int = 1, user=Depends(MANAGE)):
+        return _call(service.part_status, user, bid, path, name, id, total, unzip=bool(unzip))
 
     @r.put('/buckets/{bid}/tags')
     def set_tags(bid: str, body: dict, user=Depends(MANAGE)):

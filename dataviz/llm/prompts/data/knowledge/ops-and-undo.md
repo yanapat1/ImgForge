@@ -14,4 +14,15 @@ summary: create folder, move, copy, rename, delete, write a text file, upload; u
 - After every change the bucket root is re-detected: a result with `retagged` means the format changed (e.g.
   yolo-detect → other because labels/ moved). Tell the user and offer `undo`.
 - The page: drag onto a folder moves (Ctrl / Alt copies), F2 renames, Delete deletes, and every action toast has Undo.
-- Upload (page only): files, folders or archives (zip / tar / tar.gz / 7z, unpacked) into the open folder.
+- Upload (page only): files, folders (with their sub-folders) or archives (zip / tar / tar.gz / 7z, unpacked) into the
+  open folder, or a new bucket from Import data. It runs in the background: the dialog closes at once and the user
+  keeps working in the Data Center while a row at the top of the page (the activity strip) shows files done, MB/s,
+  bytes, time left and the finish clock, with Cancel. Several uploads queue one after another.
+  - Speed: 4 requests in flight (small files in batches, a big file in chunks sent in parallel). No request is
+    bigger than 8 MB; the size halves (down to 256 KB) when a proxy in front of the app (JupyterHub, nginx) cuts or
+    refuses one, and the browser keeps the size that worked.
+  - The browser tab sends the bytes: closing or reloading it asks first and stops the upload. Send to opens the new
+    session in a new tab while an upload runs. Uploading the same files again resumes: files already there are
+    skipped and a half-sent big file continues from what the server holds (Retry on a failed row does the same).
+  - "Upload stopped after N files: the connection was cut" means even the smallest chunk failed: check the proxy or
+    the network, then Retry.

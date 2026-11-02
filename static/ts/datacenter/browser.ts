@@ -1,5 +1,5 @@
 // The folder view (centre pane, a bucket open): toolbar (breadcrumb, Thumbnails / Names only, sort, name filter, New
-// folder, Upload, Send to…), the folder strip (counts, tags, Edit tags, the format-change banner, upload progress),
+// folder, Upload, Send to…), the folder strip (counts, tags, Edit tags, the format-change banner),
 // the bulk action bar, and the entries as a thumbnail grid or a names list. Big folders stay fast: the listing comes
 // in pages of 500 (the next page when the scroll nears the end), thumbnails (…/file?w=256) load only when they scroll
 // into view (IntersectionObserver), one innerHTML per change (a next page is appended) and one delegated listener
@@ -18,13 +18,14 @@ import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } 
 import { downloadZip, openExportDialog } from './export.js';
 import { openFile, TEXTY } from './editor.js';
 import { openFrames } from './frames.js';
+import { localBadge, localStrip, streamed } from './localcopy.js';
 import { openSend } from './send.js';
 import {
   baseName, bucketOf, curBucket, D, fbadge, fdot, fmtDate, fmtKey, fmtLabel, fmtN, fmtSize, hooks, isImage, parentOf,
   PREF, selEntries, tagChip, writable,
 } from './state.js';
 import { openTagEditor } from './tags.js';
-import { uploadFiles } from './upload.js';
+import { queueUpload } from './uploads.js';
 import type { Entry, LsSort } from '../types-datacenter.js';
 import type { ViewMode } from './state.js';
 
@@ -37,6 +38,10 @@ let io: IntersectionObserver | null = null;
 let reveal: string | null = null;
 /** the paths being dragged inside the page (dataTransfer is unreadable during dragover) */
 let dragging: { bid: string; paths: string[] } | null = null;
+/** the next listing asks S3 again at once (Retry S3 after it was unreachable) */
+let retryS3 = false;
+/** a streamed S3 folder still being listed: asked again shortly */
+let partialTimer = 0;
 
 // ---------------------------------------------------------------- loading
 
@@ -50,9 +55,13 @@ export async function loadListing(keep = false): Promise<void> {
   if (!keep) { D.listing = null; D.listErr = null; }
   D.loading = true;
   if (!keep) renderFolder();
+  clearTimeout(partialTimer);
+  const retry = retryS3;
+  retryS3 = false;
   try {
-    const r = await api.ls(bid, D.path, 0, Math.min(2000, Math.max(api.PAGE, had)), D.sort, D.nameQ);
+    const r = await api.ls(bid, D.path, 0, Math.min(2000, Math.max(api.PAGE, had)), D.sort, D.nameQ, retry);
     if (seq !== D.seq) return;
+    if (r.partial) partialTimer = window.setTimeout(() => { if (seq === D.seq) void loadListing(true); }, 1000);
     D.listing = r;
     D.listErr = null;
     const have = new Set(r.entries.map((e) => e.path));
@@ -132,7 +141,7 @@ function fileIcon(e: Entry): string {
 }
 
 /** A video's poster frame can be made (a local file; a bucket streamed from S3 has none). */
-const posterOk = (bid: string): boolean => { const b = bucketOf(bid); return !!b && (b.kind !== 's3' || !!b.local_ready); };
+const posterOk = (bid: string, e?: Entry): boolean => { const b = bucketOf(bid); return !!b && (b.kind !== 's3' || !!b.local_ready || e?.local === 'fresh'); };
 
 function tile(e: Entry): string {
   const bid = D.bid ?? '';
@@ -142,13 +151,13 @@ function tile(e: Entry): string {
     ? `<span class="meta">${e.items != null ? `${fmtN(e.items)} items` : 'folder'}</span>`
     : `<span class="meta">${fmtSize(e.size)}${e.w && e.h ? ` · ${e.w}×${e.h}` : ''}</span>`;
   let media: string;
-  if (isImage(e) || (e.kind === 'video' && posterOk(bid))) {
+  if (isImage(e) || (e.kind === 'video' && posterOk(bid, e))) {
     const u = thumbUrl(bid, e.path);
     media = (seen.has(u) ? `<img src="${esc(u)}" alt="" decoding="async">` : `<img data-src="${esc(u)}" alt="" decoding="async">`) +
       (e.kind === 'video' ? `<span class="vb" aria-hidden="true">${icon('play')}</span>` : '');
   } else media = `<span class="ph${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}</span>`;
   return `<div class="dc-th${sel ? ' sel' : ''}${e.type === 'dir' ? ' dir' : ''}" role="option" aria-selected="${sel}" tabindex="-1" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag} title="${esc(e.name)}">` +
-    `<div class="im">${media}${labelBadge(e)}<i class="ck" data-ck="1" aria-hidden="true"></i></div>` +
+    `<div class="im">${media}${labelBadge(e)}${localBadge(e)}<i class="ck" data-ck="1" aria-hidden="true"></i></div>` +
     `<div class="cap"><span class="fn">${esc(e.name)}</span>${cap}</div></div>`;
 }
 
@@ -164,7 +173,7 @@ function lrow(e: Entry): string {
   const drag = writable() ? ' draggable="true"' : '';
   return `<div class="dc-lrow${sel ? ' sel' : ''}" role="row" aria-selected="${sel}" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag}>` +
     `<span class="c-ck"><i class="cb${sel ? ' on' : ''}" data-ck="1" aria-hidden="true"></i></span>` +
-    `<span class="c-n${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}<span>${esc(e.name)}${e.type === 'dir' ? '/' : ''}</span></span>` +
+    `<span class="c-n${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}<span>${esc(e.name)}${e.type === 'dir' ? '/' : ''}</span>${localBadge(e)}</span>` +
     `<span class="r num">${e.type === 'dir' ? '' : fmtSize(e.size)}</span>` +
     `<span class="r num">${e.w && e.h ? `${e.w}×${e.h}` : ''}</span>` +
     `<span class="c-l">${labelsCell(e)}</span>` +
@@ -222,12 +231,8 @@ function renderStrip(): void {
       `<button type="button" class="ghost sm" data-act="redetect" data-path="${esc(rt.path)}">Re-detect</button>` +
       `<button type="button" class="icon-btn ghost sm" data-act="dismiss-retag" aria-label="Dismiss">${icon('x')}</button></div>`);
   }
-  if (D.upload) {
-    const u = D.upload;
-    const pct = u.total ? Math.round((100 * u.done) / u.total) : 0;
-    out.push(`<div class="dc-upline${u.err ? ' err' : ''}" role="status">${icon(u.err ? 'alert' : 'upload')}<span>${u.err ? esc(u.err) : `Uploading ${fmtN(u.files)} file${u.files === 1 ? '' : 's'}… ${pct}%`}</span>` +
-      `<div class="bar"><div style="width:${pct}%"></div></div>${u.err ? `<button type="button" class="icon-btn ghost sm" data-act="dismiss-upload" aria-label="Dismiss">${icon('x')}</button>` : ''}</div>`);
-  }
+  const loc = localStrip();
+  if (loc) out.push(loc);
   if (L && b) {
     const st = D.stats.get(`${b.id}\u0000${D.path}`);
     const imgs = st && typeof st === 'object' ? `${fmtN(st.images)} img · ${fmtSize(st.size)}` : `${fmtN(L.total)} items`;
@@ -257,6 +262,11 @@ function renderSelbar(): void {
     `<button type="button" class="ghost" data-act="copy"${dis}>${icon('copy')}<span class="dc-wide-txt">Copy</span></button>` +
     `<button type="button" class="ghost" data-act="rename"${n === 1 && w ? '' : ' disabled'}>${icon('edit')}<span class="dc-wide-txt">Rename</span></button>` +
     `<button type="button" class="ghost" data-act="tag-sel">${icon('tag')}<span class="dc-wide-txt">Tag</span></button>` +
+    (streamed(curBucket()) && !L?.offline
+      ? `<button type="button" class="ghost" data-act="dl-local" title="Keep a read-only copy here: fast, and readable while S3 is unreachable">${icon('hdd')}<span class="dc-wide-txt">Download to local</span></button>` +
+        (selEntries().some((x) => x.local && x.local !== 'new')
+          ? `<button type="button" class="ghost" data-act="drop-local">${icon('x-c')}<span class="dc-wide-txt">Remove local copy</span></button>` : '')
+      : '') +
     `<button type="button" class="ghost danger-ghost" data-act="delete"${dis}>${icon('trash')}<span class="dc-wide-txt">Delete</span></button>` +
     `<span class="grow"></span><span class="hint dc-wide">Shift-click for a range · <kbd>Ctrl</kbd> <kbd>A</kbd> all ${L ? fmtN(L.entries.length) : ''}</span>` +
     `<button type="button" class="ghost sm" data-act="clear-sel">Clear</button>`;
@@ -268,7 +278,7 @@ function renderBody(): void {
   const L = D.listing;
   if (!L) {
     body.innerHTML = D.listErr
-      ? `<div class="dc-empty">${icon('alert')}<b>Could not open this folder</b><span class="muted">${esc(D.listErr)}</span><button type="button" data-act="reload-folder">${icon('refresh')}Retry</button></div>`
+      ? `<div class="dc-empty">${icon('alert')}<b>Could not open this folder</b><span class="muted">${esc(D.listErr)}</span><button type="button" data-act="${streamed(curBucket()) ? 'retry-s3' : 'reload-folder'}">${icon('refresh')}Retry</button></div>`
       : `<div class="dc-pad"><div class="${D.view === 'thumbs' ? 'dc-grid' : 'dc-rows'} skel" aria-busy="true">${'<div class="sk"></div>'.repeat(D.view === 'thumbs' ? 18 : 14)}</div></div>`;
     return;
   }
@@ -487,6 +497,7 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
   },
   more: () => { void loadMore(); },
   'reload-folder': () => { void loadListing(); },
+  'retry-s3': () => { retryS3 = true; void loadListing(true); },
   mkdir: () => { void newFolder(); },
   move: () => { void moveSel(); },
   copy: () => { void copySel(); },
@@ -496,7 +507,6 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
   'edit-tags': (el) => { if (D.bid) openTagEditor(el, D.bid, [el.dataset['path'] ?? D.path]); },
   'undo-retag': () => { if (D.bid) void undoRetag(D.bid); },
   'dismiss-retag': () => { if (D.bid) { D.retag.delete(D.bid); renderStrip(); } },
-  'dismiss-upload': () => { D.upload = null; renderStrip(); },
   reveal: (el) => {
     const bid = el.dataset['bid'] ?? '', p = el.dataset['path'] ?? '';
     if (el.dataset['type'] === 'dir') { hooks.navigate(bid, p); return; }
@@ -583,7 +593,7 @@ export function bindBrowser(): void {
     const files = e.dataTransfer ? [...e.dataTransfer.files] : [];
     if (!files.length || !D.bid || !D.listing?.writable) return;
     e.preventDefault();
-    void uploadFiles(D.bid, t ? t.dataset['path'] ?? '' : D.path, files);
+    queueUpload(D.bid, t ? t.dataset['path'] ?? '' : D.path, files);
   });
 }
 

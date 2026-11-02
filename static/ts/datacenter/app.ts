@@ -12,6 +12,7 @@ import { dataUrl, homeUrl } from '../core/nav.js';
 import { closeFloat } from '../core/popover.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { openSettings } from '../settings/dialog.js';
+import { toast } from '../core/toast.js';
 import { mountUserMenu } from '../views/usermenu.js';
 import * as api from './api.js';
 import { ACTIVITY_ACTIONS, watchJobs } from './activity.js';
@@ -25,8 +26,11 @@ import { DETAIL_ACTIONS, renderDetails } from './details.js';
 import { EDIT_ACTIONS } from './edit.js';
 import { deleteSel, OPS_ACTIONS, renameSel } from './ops.js';
 import { bucketOf, D, hooks, key, parentOf, PREF } from './state.js';
+import { LOCAL_ACTIONS } from './localcopy.js';
 import { renderTree, TREE_ACTIONS } from './tree.js';
 import { bindUpload, UPLOAD_ACTIONS } from './upload.js';
+import { hasUploads } from './uploads.js';
+import { UPLOADS_ACTIONS } from './uploads.js';
 import type { BucketSort, CardMode, ViewMode } from './state.js';
 import type { LsSort } from '../types-datacenter.js';
 
@@ -61,9 +65,11 @@ const SKELETON = (): string => `
 <div id="dc-app" class="dc-app">
   <aside id="dc-tree" class="dc-tree" aria-label="Buckets and folders"></aside>
   <section id="dc-main" class="dc-main" aria-label="Files">
-    <div id="dc-bar" class="dc-bar"></div>
+    <div class="dc-head">
+      <div id="dc-bar" class="dc-bar"></div>
+      <div id="dc-selbar" class="dc-selbar hidden" role="toolbar" aria-label="Selection"></div>
+    </div>
     <div id="dc-strip" class="dc-strip hidden"></div>
-    <div id="dc-selbar" class="dc-selbar hidden" role="toolbar" aria-label="Selection"></div>
     <div id="dc-body" class="dc-body" tabindex="-1"></div>
     <div id="dc-drop" class="dc-drop hidden" aria-hidden="true">${icon('upload')}<b>Drop files to upload here</b><span id="dc-drop-to"></span></div>
   </section>
@@ -149,8 +155,21 @@ function render(): void {
 
 // ---------------------------------------------------------------- events
 
+/** A header link (Sessions, the brand) clicked while this tab uploads: leaving would stop the upload, so the page
+ *  opens in a new tab instead (a blocked pop-up falls back to the normal leave-page prompt). */
+function leaveKeepingUploads(e: MouseEvent): boolean {
+  const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('.dc-header a[href]') : null;
+  if (!a || !hasUploads() || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey
+      || a.target === '_blank' || a.getAttribute('aria-current') === 'page') return false;
+  if (!window.open(a.href, '_blank')) return false;
+  e.preventDefault();
+  toast('Opened in a new tab: the upload keeps going in this one', 'ok');
+  return true;
+}
+
 function bind(root: HTMLElement): void {
   root.addEventListener('click', (e) => {
+    if (leaveKeepingUploads(e)) return;
     const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-act]') : null;
     if (!el || !root.contains(el) || (el instanceof HTMLButtonElement && el.disabled)) return;
     const a = ACTIONS[el.dataset['act'] ?? ''];
@@ -254,7 +273,7 @@ export async function start(): Promise<void> {
   if (c === 'grid' || c === 'list') D.cards = c as CardMode;
   if (s === 'name' || s === '-mtime' || s === 'size') D.sort = s as LsSort;
   if (bs === 'recent' || bs === 'name' || bs === 'size' || bs === 'images') D.bucketSort = bs as BucketSort;
-  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS);
+  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, UPLOADS_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS, LOCAL_ACTIONS);
   hooks.navigate = navigate;
   hooks.reload = reload;
   hooks.render = render;

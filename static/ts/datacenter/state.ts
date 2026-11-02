@@ -55,8 +55,6 @@ export interface DCState {
   treeOpen: boolean;
   /** the tree's tag list shows every tag (else the first few + "+N") */
   allTags: boolean;
-  /** an upload into the open folder: its progress line in the strip */
-  upload: { done: number; total: number; files: number; err: string | null } | null;
 }
 
 export const D: DCState = {
@@ -66,7 +64,7 @@ export const D: DCState = {
   view: 'thumbs', cards: 'grid', sort: 'name', bucketSort: 'recent',
   q: '', tagFilter: new Set(), fmtFilter: null, nameQ: '', focus: null,
   expanded: new Set(), children: new Map(), stats: new Map(), samples: new Map(), retag: new Map(),
-  search: null, detailsOpen: false, treeOpen: false, allTags: false, upload: null,
+  search: null, detailsOpen: false, treeOpen: false, allTags: false,
 };
 
 /** App-level actions, set by app.ts start(). */

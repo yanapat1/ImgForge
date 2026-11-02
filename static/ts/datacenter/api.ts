@@ -5,7 +5,7 @@
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
   AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
-  FramesBody, FramesEstimate, FramesOpts, FramesResult, ImportBody, Listing, LsSort, Op, OpsResult,
+  FramesBody, FramesEstimate, FramesOpts, FramesResult, ImportBody, Listing, LocalJob, LsSort, Op, OpsResult,
   S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult, VideoInfo,
 } from '../types-datacenter.js';
 
@@ -55,8 +55,14 @@ export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: bo
   sendJSON<{ ok: boolean }>('DELETE', `${B(bid)}${deleteFiles ? '?delete_files=1' : ''}`);
 
 export const PAGE = 500;
-export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = ''): Promise<Listing> =>
-  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q })}`);
+export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = '', retry = false): Promise<Listing> =>
+  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null })}`);
+/** A streamed S3 link: download folders into its read-only local copy (again = update; mirror removes what S3 lost). */
+export const fetchLocal = (bid: string, paths: string[], mirror = false): Promise<LocalJob> =>
+  postJSON<LocalJob>(`${B(bid)}/local`, { paths, mirror });
+export const checkLocal = (bid: string): Promise<LocalJob> => postJSON<LocalJob>(`${B(bid)}/local/check`, {});
+export const dropLocal = (bid: string, paths: string[]): Promise<{ removed: string[] }> =>
+  postJSON<{ removed: string[] }>(`${B(bid)}/local/remove`, { paths });
 
 /** URL of a file (raw), or of its scaled JPEG thumbnail when `w` is given (a video: its frame at `t` seconds, else a poster). */
 export const fileUrl = (bid: string, path: string, w?: number, t?: number): string => `${B(bid)}/file${qs({ path, w: w ?? null, t: t ?? null })}`;
@@ -77,6 +83,9 @@ export const ops = (bid: string, list: Op[]): Promise<OpsResult> => postJSON<Ops
 export const undo = (bid: string, undoId: string): Promise<UndoResult> => postJSON<UndoResult>(`${B(bid)}/undo`, { undo_id: undoId });
 /** The upload URL (multipart field `files`); upload.ts posts it with an XHR for byte progress. */
 export const uploadUrl = (bid: string, path: string): string => `${B(bid)}/upload${qs({ path })}`;
+/** One chunk (raw body) of a big file `name`: bytes from `offset` of its `total`, gathered under upload id `id`. */
+export const uploadPartUrl = (bid: string, path: string, name: string, id: string, offset: number, total: number): string =>
+  `${B(bid)}/upload/part${qs({ path, name, id, offset, total })}`;
 
 /** Set tags; the server may answer the tag list or {tags}. */
 export async function setTags(bid: string, path: string, add: string[], remove: string[]): Promise<Tag[]> {

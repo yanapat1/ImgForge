@@ -406,6 +406,19 @@ dc_format_cache = Table(                                 # last detection of a f
     PrimaryKeyConstraint('bucket_id', 'path'),
     schema='app')
 
+dc_s3_local = Table(                                     # a folder of a streamed S3 link downloaded into local_root
+    'dc_s3_local', metadata,
+    _bucket_fk(),
+    Column('path', Text, nullable=False),                # '' = the whole bucket
+    Column('state', String(16), nullable=False, server_default=text("'fetching'")),   # fresh|outdated|fetching|error
+    Column('objects', BigInteger, nullable=False, server_default=text('0')),
+    Column('bytes', BigInteger, nullable=False, server_default=text('0')),
+    Column('diff', JSONB),                               # {new, changed, removed, sample} of the last check
+    _ts('fetched_at'),
+    _ts('checked_at'),
+    PrimaryKeyConstraint('bucket_id', 'path'),
+    schema='app')
+
 dc_undo = Table(                                         # one ops batch: the steps that reverse it
     'dc_undo', metadata,
     Column('id', String(32), primary_key=True),

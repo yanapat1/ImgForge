@@ -14,6 +14,7 @@ is stat'ed (a 20k-file folder sorted by name costs one scandir + 500 stats).
 
 import hashlib
 import io
+import json
 import os
 import re
 import gzip
@@ -690,46 +691,208 @@ def unzip_into(zpath, folder, root, allowed):
     return r['added'], r['skipped']
 
 
-def upload_local(root, allowed, rel, files, unzip=True):
-    """Stream uploaded files into folder `rel` (their names may hold sub-folders) -> {added, skipped, files}."""
+def _upload_folder(root, allowed, rel):
+    """(absolute folder, its path below the bucket) of an upload into `rel`, created when missing."""
     folder = resolve(root, rel, allowed)
     os.makedirs(folder, exist_ok=True)
     if not os.path.isdir(folder):
         raise DCError(f'{clean_rel(rel) or "/"} is not a folder')
-    frel = _rel_of(os.path.realpath(root), folder)
+    return folder, _rel_of(os.path.realpath(root), folder)
+
+
+def _upload_name(name):
+    """The uploaded name below the folder ('' when it is skipped: empty or a dot part anywhere)."""
+    sub = clean_rel(name)
+    return '' if not sub or any(p.startswith('.') for p in sub.split('/')) else sub
+
+
+def _place(root, allowed, folder, frel, sub, write, unzip):
+    """Put one uploaded file at `sub`: write(dest) writes it; an archive is unpacked there (unless unzip=False),
+    an existing file is kept -> (added, skipped, placed)."""
+    dest = resolve(root, join(frel, sub), allowed)
+    if unzip and sub.lower().endswith(UPLOAD_ARCHIVES):
+        ext = next(e for e in UPLOAD_ARCHIVES if sub.lower().endswith(e))
+        tmp = os.path.join(folder, f'.upload-{uuid.uuid4().hex}{ext}')
+        try:
+            write(tmp)
+            try:
+                a, s = unzip_into(tmp, os.path.dirname(dest), root, allowed)
+            except (zipfile.BadZipFile, tarfile.TarError, EOFError, OSError):
+                raise DCError(f'{sub} is not a valid archive') from None
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return a, s, True
+    if os.path.lexists(dest):
+        return 0, 1, False
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    write(dest)
+    return 1, 0, True
+
+
+def upload_local(root, allowed, rel, files, unzip=True):
+    """Stream uploaded files into folder `rel` (their names may hold sub-folders) -> {added, skipped, files}."""
+    folder, frel = _upload_folder(root, allowed, rel)
     added = skipped = 0
     names = []
     for name, fobj in files:
-        sub = clean_rel(name)
-        if not sub or any(p.startswith('.') for p in sub.split('/')):
+        sub = _upload_name(name)
+        if not sub:
             skipped += 1
             continue
-        dest = resolve(root, join(frel, sub), allowed)
-        if unzip and sub.lower().endswith(UPLOAD_ARCHIVES):
-            ext = next(e for e in UPLOAD_ARCHIVES if sub.lower().endswith(e))
-            tmp = os.path.join(folder, f'.upload-{uuid.uuid4().hex}{ext}')
-            try:
-                _write_stream(fobj, tmp)
-                try:
-                    a, s = unzip_into(tmp, os.path.dirname(dest), root, allowed)
-                except (zipfile.BadZipFile, tarfile.TarError, EOFError, OSError):
-                    raise DCError(f'{sub} is not a valid archive') from None
-            finally:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-            added, skipped = added + a, skipped + s
+        a, s, placed = _place(root, allowed, folder, frel, sub, lambda dest, f=fobj: _write_stream(f, dest), unzip)
+        added, skipped = added + a, skipped + s
+        if placed:
             names.append(sub)
-            continue
-        if os.path.lexists(dest):
-            skipped += 1
-            continue
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        _write_stream(fobj, dest)
-        added += 1
-        names.append(sub)
     return {'added': added, 'skipped': skipped, 'files': names[:200]}
+
+
+_UPLOAD_ID = re.compile(r'^[0-9a-f]{32}$')
+PART_MAX_AGE = 86400                # an upload part nobody finished is removed after a day
+_part_locks = {}                    # part file -> Lock: the chunks of one file arrive in parallel
+_part_locks_guard = threading.Lock()
+
+
+def _part_lock(part):
+    with _part_locks_guard:
+        return _part_locks.setdefault(part, threading.Lock())
+
+
+def _merge(ranges, a, b):
+    out = []
+    for x, y in sorted([*ranges, [a, b]]):
+        if out and x <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], y)
+        else:
+            out.append([x, y])
+    return out
+
+
+class _Part(NamedTuple):
+    folder: str
+    frel: str
+    sub: str                        # '' when the name is skipped
+    dest: str
+    part: str                       # .upload-<uid>.part: the bytes, written at their offsets (sparse)
+    meta: str                       # .upload-<uid>.json: {name, total, ranges} received so far
+
+
+def _part_paths(root, allowed, rel, name, uid):
+    if not _UPLOAD_ID.match(str(uid or '')):
+        raise DCError('the upload id is 32 hex characters')
+    folder, frel = _upload_folder(root, allowed, rel)
+    sub = _upload_name(name)
+    dest = resolve(root, join(frel, sub), allowed) if sub else ''
+    base = os.path.join(folder, f'.upload-{uid}')
+    return _Part(folder, frel, sub, dest, f'{base}.part', f'{base}.json')
+
+
+def _read_meta(p, total):
+    """The ranges held for this part ([] when none, or when they were for another size)."""
+    try:
+        with open(p.meta, encoding='utf-8') as f:
+            m = json.load(f)
+        if int(m.get('total', -1)) == total and os.path.exists(p.part):
+            return [[int(a), int(b)] for a, b in m.get('ranges') or []]
+    except (OSError, ValueError, TypeError):
+        pass
+    return []
+
+
+def _held(ranges):
+    return sum(b - a for a, b in ranges)
+
+
+def _skipped(p, unzip):
+    """A name upload() would skip (a dot part; a file already there that is not an archive to unpack)."""
+    return not p.sub or (not (unzip and p.sub.lower().endswith(UPLOAD_ARCHIVES)) and os.path.lexists(p.dest))
+
+
+SKIP = {'added': 0, 'skipped': 1, 'files': [], 'done': True}
+
+
+def part_status(root, allowed, rel, name, uid, total, unzip=True):
+    """What the server holds of an upload in parts -> {received, ranges}, or SKIP when the file would be skipped
+    (nothing is being gathered for it). The page asks first, so a re-upload sends only the missing ranges."""
+    p = _part_paths(root, allowed, rel, name, uid)
+    total = int(total)
+    with _part_lock(p.part):
+        ranges = _read_meta(p, total)
+        if not ranges and _skipped(p, unzip):
+            return dict(SKIP)
+        return {'received': _held(ranges), 'ranges': ranges}
+
+
+def upload_part(root, allowed, rel, name, uid, offset, total, data, unzip=True):
+    """One chunk of a big upload (a proxy in front of the app may refuse large requests): bytes `data` at `offset`
+    of the file `name` (`total` bytes) into folder `rel`. Chunks may come in any order, in parallel and more than
+    once: they are written in place into the hidden `.upload-<uid>.part` and the ranges held are kept beside it
+    (`.upload-<uid>.json`), so an upload resumes after a cut or a reload. -> {received, ranges} while bytes are
+    missing; {ready: True} to exactly one caller once all are in (it then calls finish_part); SKIP for a name
+    upload() would skip, before any bytes are kept."""
+    offset, total = int(offset), int(total)
+    if total < 0 or offset < 0 or offset + len(data) > total:
+        raise DCError('the chunk does not fit the file size')
+    p = _part_paths(root, allowed, rel, name, uid)
+    with _part_lock(p.part):
+        ranges = _read_meta(p, total)
+        if not ranges:
+            if _skipped(p, unzip):
+                return dict(SKIP)
+            _drop_stale_parts(p.folder)
+            with open(p.part, 'wb') as f:
+                f.truncate(total)
+        fd = os.open(p.part, os.O_WRONLY)
+        try:
+            os.pwrite(fd, data, offset)
+        finally:
+            os.close(fd)
+        if data or not total:
+            ranges = _merge(ranges, offset, offset + len(data))
+        if ranges == [[0, total]] or not total:
+            try:
+                os.remove(p.meta)
+            except OSError:
+                pass
+            ready = f'{p.part}.ready'
+            os.replace(p.part, ready)               # claimed: a late duplicate chunk starts nothing
+            return {'ready': True, 'path': ready}
+        tmp = f'{p.meta}.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'name': p.sub, 'total': total, 'ranges': ranges}, f)
+        os.replace(tmp, p.meta)
+        return {'received': _held(ranges), 'ranges': ranges}
+
+
+def finish_part(root, allowed, rel, name, uid, ready, unzip=True):
+    """Place the file upload_part gathered (`ready`, the path it answered) -> {added, skipped, files, done}."""
+    p = _part_paths(root, allowed, rel, name, uid)
+    try:
+        a, s, placed = _place(root, allowed, p.folder, p.frel, p.sub, lambda to: os.replace(ready, to), unzip)
+    finally:
+        try:
+            os.remove(ready)
+        except OSError:
+            pass
+    return {'added': a, 'skipped': s, 'files': [p.sub] if placed else [], 'done': True}
+
+
+def _drop_stale_parts(folder):
+    now = time.time()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for n in names:
+        if n.startswith('.upload-') and n.endswith(('.part', '.json', '.ready', '.tmp')):
+            q = os.path.join(folder, n)
+            try:
+                if now - os.path.getmtime(q) > PART_MAX_AGE:
+                    os.remove(q)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------------------------- thumbnails
@@ -899,42 +1062,134 @@ def _thumb_save(p, data):
 
 
 # ---------------------------------------------------------------------------------------------- S3 (read-only)
-class S3View:
-    """A linked S3 bucket + prefix, read through the owner's connection (sources.make_client). Read-only."""
+class Offline(DCError):
+    """S3 cannot be reached (no route, refused, timed out): the browser falls back to the downloaded folders."""
 
-    def __init__(self, conn, bucket, prefix='', s3cfg=None):
+    def __init__(self, message):
+        super().__init__(message, 503)
+
+
+_OFFLINE_FOR = 30                   # s an unreachable endpoint is not asked again (thumbnails fail fast)
+_BROWSE = {'connect_timeout': 3, 'read_timeout': 20, 'retries': 2}   # an interactive read: fail in seconds
+_CLIENTS_MAX = 32
+_clients = {}                       # (connection, config) -> shared boto3 client, oldest first
+_down = {}                          # connection key -> monotonic time it may be tried again
+_READS = 16                         # object reads in flight per connection (a page of thumbnails, many tabs)
+_gates = {}                         # connection key -> BoundedSemaphore(_READS)
+_clients_lock = threading.Lock()
+
+
+def _gate(ck):
+    with _clients_lock:
+        g = _gates.get(ck)
+        if g is None:
+            g = _gates[ck] = threading.BoundedSemaphore(_READS)
+        return g
+
+
+def _conn_key(conn):
+    return (conn.get('id'), conn.get('endpoint'), conn.get('region'), conn.get('access_key'), conn.get('secret_key'),
+            bool(conn.get('verify_ssl', True)))
+
+
+def _is_offline(e):
+    try:
+        from botocore import exceptions as bx
+    except ImportError:  # pragma: no cover - boto3 is a dependency
+        return False
+    return isinstance(e, (bx.EndpointConnectionError, bx.ConnectTimeoutError, bx.ReadTimeoutError,
+                          bx.ConnectionClosedError))
+
+
+def page_rows(dirs, files, offset=0, limit=500, sort='name', q=''):
+    """One page of a folder listing: folders first, each part sorted by `sort`, names filtered by `q`."""
+    field, desc = _sort_key(sort or 'name')
+    qq = (q or '').casefold()
+    if qq:
+        dirs = [e for e in dirs if qq in e['name'].casefold()]
+        files = [e for e in files if qq in e['name'].casefold()]
+    keyf = {'name': lambda e: e['name'].casefold(), 'mtime': lambda e: e['mtime'] or 0,
+            'size': lambda e: e['size']}[field]
+    rows = sorted(dirs, key=keyf, reverse=desc) + sorted(files, key=keyf, reverse=desc)
+    offset, limit = max(0, int(offset or 0)), max(1, min(int(limit or 500), 5000))
+    return len(rows), rows[offset:offset + limit]
+
+
+class S3View:
+    """A linked S3 bucket + prefix, read through the owner's connection (sources.make_client). Read-only.
+    shared: reuse one client per connection (thread-safe; close() keeps it) with short timeouts for interactive
+    reads, and the offline circuit breaker: an endpoint that did not answer is not asked again for _OFFLINE_FOR s."""
+
+    def __init__(self, conn, bucket, prefix='', s3cfg=None, shared=False):
         from ..data import sources
-        self.client = sources.make_client(conn, s3cfg)
+        self.shared = shared
+        self._ck = _conn_key(conn)
+        if shared:
+            cfg = {**(s3cfg or {}), **_BROWSE}
+            ck = (self._ck, repr(sorted(cfg.items())))
+            with _clients_lock:
+                self.client = _clients.pop(ck, None) or sources.make_client(conn, cfg)
+                _clients[ck] = self.client
+                while len(_clients) > _CLIENTS_MAX:     # not closed: another thread may still read through it
+                    _clients.pop(next(iter(_clients)))
+        else:
+            self.client = sources.make_client(conn, s3cfg)
         self.bucket = bucket
         self.base = sources._norm_prefix(prefix)
 
     def key(self, rel):
         return self.base + clean_rel(rel)
 
-    def list(self, rel, offset=0, limit=500, sort='name', q=''):
+    def online(self, retry=False):
+        """Raise Offline while the circuit breaker is open (retry: close it and try again)."""
+        if retry:
+            _down.pop(self._ck, None)
+        if _down.get(self._ck, 0) > time.monotonic():
+            raise Offline('S3 is unreachable: only downloaded folders are available')
+
+    def _net(self, fn, *a, **kw):
+        self.online()
+        try:
+            return fn(*a, **kw)
+        except Exception as e:
+            if _is_offline(e):
+                _down[self._ck] = time.monotonic() + _OFFLINE_FOR
+                raise Offline(f'S3 is unreachable ({type(e).__name__}): only downloaded folders are available') from None
+            raise
+
+    def dir_pages(self, rel):
+        """The entries right inside folder `rel`, one S3 page at a time -> iterator of (dirs, files)."""
         rel = clean_rel(rel)
         pre = self.base + (rel + '/' if rel else '')
-        field, desc = _sort_key(sort or 'name')
-        qq = (q or '').casefold()
-        dirs, files = [], []
-        for page in self.client.get_paginator('list_objects_v2').paginate(Bucket=self.bucket, Prefix=pre,
-                                                                           Delimiter='/'):
+        kw = {'Bucket': self.bucket, 'Prefix': pre, 'Delimiter': '/'}
+        while True:
+            page = self._net(s3list.request, self.client, **kw)      # inside the process-wide request budget
+            dirs, files = [], []
             for p in page.get('CommonPrefixes', []):
                 n = p['Prefix'][len(pre):].rstrip('/')
-                if n and visible(n, True) and (not qq or qq in n.casefold()):
+                if n and visible(n, True):
                     dirs.append({'name': n, 'path': join(rel, n), 'type': 'dir', 'size': 0, 'mtime': None})
             for o in page.get('Contents', []):
                 n = o['Key'][len(pre):]
-                if not n or '/' in n or not visible(n) or (qq and qq not in n.casefold()):
+                if not n or '/' in n or not visible(n):
                     continue
                 lm = o.get('LastModified')
                 files.append({'name': n, 'path': join(rel, n), 'type': 'file', 'size': int(o.get('Size') or 0),
                               'mtime': lm.timestamp() if lm is not None else None, 'kind': kind_of(n, rel)})
-        keyf = {'name': lambda e: e['name'].casefold(), 'mtime': lambda e: e['mtime'] or 0,
-                'size': lambda e: e['size']}[field]
-        rows = sorted(dirs, key=keyf, reverse=desc) + sorted(files, key=keyf, reverse=desc)
-        offset, limit = max(0, int(offset or 0)), max(1, min(int(limit or 500), 5000))
-        return {'path': rel, 'total': len(rows), 'entries': rows[offset:offset + limit]}
+            yield dirs, files
+            tok = page.get('NextContinuationToken')
+            if not page.get('IsTruncated') or not tok:
+                return
+            kw['ContinuationToken'] = tok
+
+    def list(self, rel, offset=0, limit=500, sort='name', q=''):
+        rel = clean_rel(rel)
+        dirs, files = [], []
+        for d, f in self.dir_pages(rel):
+            dirs += d
+            files += f
+        total, rows = page_rows(dirs, files, offset, limit, sort, q)
+        return {'path': rel, 'total': total, 'entries': rows}
 
     def keys(self, rel='', cap=100_000, progress=None, cancelled=None):
         """{rel path below rel: size} of every object (capped), listed in parallel (s3list) and sorted (a detection
@@ -991,10 +1246,14 @@ class S3View:
     def read(self, rel, limit=None):
         kw = {'Range': f'bytes=0-{int(limit) - 1}'} if limit else {}
         try:
-            obj = self.client.get_object(Bucket=self.bucket, Key=self.key(rel), **kw)
+            with _gate(self._ck):
+                obj = self._net(self.client.get_object, Bucket=self.bucket, Key=self.key(rel), **kw)
+                data = obj['Body'].read()
+        except Offline:
+            raise
         except Exception as e:  # noqa: BLE001 - botocore's NoSuchKey / ClientError
             raise DCError(f'cannot read {rel}: {e}', 404) from None
-        return obj['Body'].read(), obj.get('ETag', ''), int(obj.get('ContentLength') or 0)
+        return data, obj.get('ETag', ''), int(obj.get('ContentLength') or 0)
 
     def download(self, rel, dest):
         """Stream object `rel` into local file `dest` (never whole in memory: a video can be gigabytes)."""
@@ -1010,18 +1269,21 @@ class S3View:
         except Exception:  # noqa: BLE001
             return None
 
-    def pull(self, dest, progress=None, cancelled=None, workers=16):
-        """Download every object below the prefix into folder `dest` ("load into local"): an object replaces the
-        local file of the same name unless that file is unchanged (same size, and the mtime every download sets to
-        the object's LastModified), local files S3 does not have are kept (nothing is ever deleted). Downloads start
+    def pull(self, dest, progress=None, cancelled=None, workers=16, rel='', mirror=False):
+        """Download every object below the prefix (below its folder `rel` only, written to dest/rel) into folder
+        `dest` ("load into local"): an object replaces the local file of the same name unless that file is unchanged
+        (same size, and the mtime every download sets to the object's LastModified). Local files S3 does not have
+        are kept, unless `mirror`: then, once the listing completed, they are removed (`removed`). Downloads start
         while the (parallel) listing runs; an object of BIG bytes or more is fetched in parallel ranges.
-        -> {downloaded, skipped, bytes, failed, total}."""
+        -> {downloaded, skipped, bytes (downloaded), size (of every object), failed, total, removed}."""
         progress = progress or (lambda *a, **k: None)
         stop = cancelled or (lambda: False)
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        n = {'found': 0, 'done': 0, 'skipped': 0, 'bytes': 0, 'listing': True, 'last': 0.0}
-        failed, futs = [], {}
+        rel = clean_rel(rel)
+        pre = self.base + (rel + '/' if rel else '')
+        n = {'found': 0, 'done': 0, 'skipped': 0, 'bytes': 0, 'size': 0, 'listing': True, 'last': 0.0}
+        failed, futs, seen = [], {}, set()
 
         def fetch(k, size, lm):
             dst = dest / k
@@ -1070,15 +1332,19 @@ class S3View:
 
         report(True)
         with ThreadPoolExecutor(max(1, int(workers))) as ex:
-            with closing(s3list.objects(self.client, self.bucket, self.base, cancelled=stop)) as objs:
+            with closing(s3list.objects(self.client, self.bucket, pre, cancelled=stop)) as objs:
                 for o in objs:
                     if stop():
                         break
-                    k = o['Key'][len(self.base):]
-                    if not _shown(k):
+                    sub = o['Key'][len(pre):]
+                    if not _shown(sub):
                         continue
+                    k = join(rel, sub)
+                    if mirror:
+                        seen.add(k)
                     n['found'] += 1
                     size, lm = int(o.get('Size') or 0), o.get('LastModified')
+                    n['size'] += size
                     ts = lm.timestamp() if lm is not None else None
                     if _unchanged(dest / k, size, ts):
                         n['skipped'] += 1
@@ -1099,10 +1365,20 @@ class S3View:
                 settle(True)
                 report()
         report(True)
+        removed = 0
+        top = dest / rel if rel else dest
+        if mirror and not stop() and top.is_dir():
+            for path, _isdir, absp in list(walk_files(top, rel)):
+                if path not in seen:
+                    _try(os.unlink, absp)
+                    removed += 1
+            _prune_empty(top)
         return {'downloaded': n['done'] - n['skipped'] - len(failed), 'skipped': n['skipped'], 'bytes': n['bytes'],
-                'failed': failed[:50], 'total': n['found']}
+                'size': n['size'], 'failed': failed[:50], 'total': n['found'], 'removed': removed}
 
     def close(self):
+        if self.shared:
+            return
         try:
             self.client.close()
         except Exception:  # noqa: BLE001
@@ -1114,6 +1390,34 @@ def _try(fn, *a):
         return fn(*a)
     except Exception as e:  # noqa: BLE001 - a close that fails must not hide the real outcome
         return e
+
+
+def walk_files(top, rel=''):
+    """(rel path, False, abs path) of every visible file below folder `top` (no symlinks followed); `rel` is
+    top's own path, prefixed to each one."""
+    stack = [(clean_rel(rel), str(top))]
+    while stack:
+        r, d = stack.pop()
+        try:
+            it = os.scandir(d)
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                isdir = e.is_dir(follow_symlinks=False)
+                if not visible(e.name, isdir):
+                    continue
+                if isdir:
+                    stack.append((join(r, e.name), e.path))
+                elif e.is_file(follow_symlinks=False):
+                    yield join(r, e.name), False, e.path
+
+
+def _prune_empty(top):
+    """Remove the empty folders below `top` (bottom up; top itself stays; rmdir refuses a folder still in use)."""
+    for d, _, _ in os.walk(top, topdown=False):
+        if d != str(top):
+            _try(os.rmdir, d)
 
 
 def _shown(sub):

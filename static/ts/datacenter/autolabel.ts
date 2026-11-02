@@ -16,6 +16,7 @@ import { openDialog } from '../views/dialog.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { baseName, bucketOf, D, fmtKey, hooks } from './state.js';
+import { hasUploads } from './uploads.js';
 import type { AutolabelBody, AutolabelDone } from '../types-datacenter.js';
 
 interface Model { id: string; name?: string; task_type?: string; classes?: string[]; versions?: string[] }
@@ -94,7 +95,10 @@ async function track(jobId: number, name: string, open: boolean): Promise<void> 
     const r = (j as { result?: AutolabelDone }).result;
     const n = r?.labeled?.n_images ?? 0, fs = Object.keys(r?.written?.formats ?? {});
     toast(`${name}: ${n.toLocaleString('en-US')} images labeled${fs.length ? `, written as ${fs.map((k) => k.toUpperCase().replace('_', '-')).join(', ')}` : ''}`, 'ok');
-    if (open && r?.session) location.href = labelUrl(r.session.id);
+    if (open && r?.session) {
+      const url = labelUrl(r.session.id);       // an upload from this tab would stop on leaving: open a new tab
+      if (!hasUploads() || !window.open(url, '_blank')) location.href = url;
+    }
   } catch (e) {
     toast(`${name} failed: ${errText(e)}`, 'err');
   }

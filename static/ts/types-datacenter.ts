@@ -48,7 +48,19 @@ export interface Bucket {
   job_id?: number | null;
   /** POST of a streamed S3 link: the dc-scan job that lists it and detects its format (null from the CLI) */
   scan_job_id?: number | null;
+  /** a streamed S3 link: folders downloaded into its read-only local copy, and how many of them S3 changed since */
+  local_folders?: number; local_outdated?: number;
 }
+
+/** The local copy of one S3 entry: fresh (same as S3), outdated (S3 changed it), new (only in S3 so far), gone
+ *  (only local: S3 removed it), fetching, error, partial (a folder with downloaded sub-folders); null = stream only. */
+export type LocalState = 'fresh' | 'outdated' | 'new' | 'gone' | 'fetching' | 'error' | 'partial';
+/** A downloaded folder (or file) of a streamed S3 link; path '' = the whole bucket. */
+export interface LocalRow {
+  path: string; state: LocalState; objects: number; bytes: number; fetched_at: number | null; checked_at: number | null;
+  diff: { new: number; changed: number; removed: number; sample?: Array<{ path: string; what: string }>; error?: string } | null;
+}
+export interface LocalJob { job_id: number | null; paths?: string[] }
 
 /** An S3 link is streamed (read-only) or loaded into an editable local folder (re-synced on demand). */
 export type S3Mode = 'stream' | 'local';
@@ -64,11 +76,18 @@ export type EntryKind = 'image' | 'label' | 'yaml' | 'json' | 'xml' | 'text' | '
 export interface Entry {
   name: string; path: string; type: 'dir' | 'file'; size: number; mtime: number | string | null;
   kind?: EntryKind; items?: number; w?: number; h?: number; labels?: number;
+  /** streamed S3 links: the state of its local copy */
+  local?: LocalState | null;
 }
 
 export type LsSort = 'name' | '-mtime' | 'size';
 /** GET /api/dc/buckets/{bid}/ls */
-export interface Listing { path: string; total: number; entries: Entry[]; format: Format | null; tags: Tag[]; writable: boolean }
+export interface Listing {
+  path: string; total: number; entries: Entry[]; format: Format | null; tags: Tag[]; writable: boolean;
+  /** a streamed S3 folder still being listed (ask again), the entries listed so far, the downloaded folder holding
+   *  this one, S3 unreachable (only downloaded folders), why */
+  partial?: boolean; loaded?: number; here?: LocalRow | null; offline?: boolean; error?: string; local_folders?: number;
+}
 
 /** GET /api/dc/buckets/{bid}/stats */
 export interface FolderStats { images: number; labels: number; boxes: number; classes: number; size: number; splits: Record<string, number> }

@@ -13,6 +13,7 @@ import * as api from './api.js';
 import type { Action } from './app.js';
 import { watchJobs } from './activity.js';
 import { openAutolabel } from './autolabel.js';
+import { checkNow } from './localcopy.js';
 import { downloadZip, openExportDialog } from './export.js';
 import { deleteBucket } from './ops.js';
 import { openTagEditor } from './tags.js';
@@ -52,7 +53,11 @@ function s3Sec(b: Bucket, mode: S3Mode): string {
       ? `<div class="dc-edit-row"><span class="muted">${b.local_ready ? `Local copy · ${pulled}` : 'The local copy is filled by a download job.'}</span><span class="grow"></span>` +
         `<button type="button" class="ghost sm" data-ed="sync"${b.mode === 'local' ? '' : ' disabled'}>${icon('refresh')}Re-sync from S3</button></div>` +
         '<p class="hint">Re-sync downloads what changed in S3 (unchanged files are skipped) and replaces those files; files and folders only the local copy has are kept.</p>'
-      : `<p class="hint">${b.local_ready || b.synced_at ? 'Switching to stream keeps the downloaded copy on disk; loading again only refreshes it.' : 'Switch to Load into local to change files here.'}</p>`) +
+      : `<p class="hint">${b.local_ready || b.synced_at ? 'Switching to stream keeps the downloaded copy on disk; loading again only refreshes it.' : 'Switch to Load into local to change files here.'}</p>` +
+        (b.local_folders
+          ? `<div class="dc-edit-row"><span class="muted">${icon('hdd')}${b.local_folders} folder${b.local_folders === 1 ? '' : 's'} downloaded (read-only copy)${b.local_outdated ? ` · <b>${b.local_outdated} outdated</b>` : ''}</span><span class="grow"></span>` +
+            `<button type="button" class="ghost sm" data-ed="check">${icon('refresh')}Check for updates</button></div>`
+          : '<p class="hint">Or pick folders in the bucket and choose Download to local: they stay readable while S3 is unreachable.</p>')) +
     '</section>';
 }
 
@@ -108,7 +113,8 @@ export async function openEditBucket(bid: string): Promise<void> {
           a.setAttribute('aria-busy', 'true');
           api.syncBucket(bid).then((s) => { if (s.job_id != null) void trackPull(s.job_id, b?.name ?? '').then(refresh); },
             (err: unknown) => { a.removeAttribute('aria-busy'); toast(`Could not re-sync: ${errText(err)}`, 'err'); });
-        } else if (what === 'autolabel') void openAutolabel(bid, '');        // replaces this dialog
+        } else if (what === 'check') void checkNow(bid).then(refresh);
+        else if (what === 'autolabel') void openAutolabel(bid, '');        // replaces this dialog
         else if (what === 'delete') void deleteBucket(bid);
       });
     },

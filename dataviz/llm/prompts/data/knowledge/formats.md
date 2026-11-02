@@ -7,8 +7,10 @@ core: true
   usually a `data.yaml` with class names; label lines have 5 columns (detect), 5 + 3k (pose), 9 (obb) or an odd
   number ≥ 7 of polygon coordinates (seg). Splits are sub-folders `train/`, `val/`, `test/` under images/ and labels/.
 - `coco`: a JSON with `images`, `annotations` and `categories`. `voc`: `Annotations/*.xml` next to the images.
-- `classification`: one sub-folder of images per class. `images`: images with no labels. `embeddings`: `.npy`
-  vector files. `other`: none of these. `empty`: nothing inside.
+- `classification`: one sub-folder of images per class. `images`: images with no labels (stray non-image
+  files up to 1 % of the images are ignored with a warning check, more makes it `other`). `embeddings`: `.npy`
+  vector files. `other`: none of these (its reason names the first file that broke the layout; sending it to the
+  visualizer fails with that reason). `empty`: nothing inside.
 - `detect_format` returns the format, a confidence, the checks that decided it (images/, labels/ mirror, data.yaml,
   ≤ 50 label files sampled for their column counts) and the class count; results are cached (force re-detects;
   the page: Re-detect). The bucket root is re-detected after every change and tagged `format:<format>`.

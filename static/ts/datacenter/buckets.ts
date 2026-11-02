@@ -92,7 +92,8 @@ const editBtn = (b: Bucket): string =>
 
 /** "S3 link" plus how it is read: streamed, loading, or a local copy. */
 const srcText = (b: Bucket): string =>
-  b.kind !== 's3' ? SOURCE[b.kind]?.[1] ?? b.kind : b.mode === 'local' ? (b.local_ready ? 'S3 · local' : 'S3 · loading…') : SOURCE['s3']?.[1] ?? 's3';
+  b.kind !== 's3' ? SOURCE[b.kind]?.[1] ?? b.kind : b.mode === 'local' ? (b.local_ready ? 'S3 · local' : 'S3 · loading…')
+    : b.local_folders ? `S3 · ${b.local_folders} local${b.local_outdated ? ` (${b.local_outdated} outdated)` : ''}` : SOURCE['s3']?.[1] ?? 's3';
 
 function card(b: Bucket): string {
   const user = b.tags.filter((t) => !t.auto);

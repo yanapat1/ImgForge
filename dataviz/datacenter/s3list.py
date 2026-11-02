@@ -25,7 +25,8 @@ _gate = threading.BoundedSemaphore(MAX_REQUESTS)
 _DONE = object()
 
 
-def _list(client, **kw):
+def request(client, **kw):
+    """One list_objects_v2 call inside the process-wide request budget."""
     with _gate:
         return client.list_objects_v2(**kw)
 
@@ -36,7 +37,7 @@ def _children(client, bucket, prefix, max_pages):
     kw = {'Bucket': bucket, 'Prefix': prefix, 'Delimiter': '/'}
     objs, subs = [], []
     for _ in range(max_pages):
-        page = _list(client, **kw)
+        page = request(client, **kw)
         objs += page.get('Contents', [])
         subs += [p['Prefix'] for p in page.get('CommonPrefixes', [])]
         tok = page.get('NextContinuationToken')
@@ -94,7 +95,7 @@ def _lister(client, bucket, chunk, nxt, q, stop):
         else:
             kw = {'Bucket': bucket, 'Prefix': os.path.commonprefix([chunk[0], chunk[-1]]), 'StartAfter': chunk[0][:-1]}
         while not stop.is_set():
-            page = _list(client, **kw)
+            page = request(client, **kw)
             objs, end = page.get('Contents', []), False
             if len(chunk) > 1:
                 keep = []

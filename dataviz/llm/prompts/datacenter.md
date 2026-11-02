@@ -28,5 +28,6 @@ inspects them, cuts videos into image frames, or opens them in the visualizer / 
   image), usually a `data.yaml` with class names; label lines have 5 columns (detect), 5 + 3k (pose), 9 (obb) or
   an odd number ≥ 7 of polygon coordinates (seg).
 - `coco`: a JSON with `images`, `annotations` and `categories`. `voc`: `Annotations/*.xml` next to the images.
-- `classification`: one sub-folder of images per class. `images`: images with no labels. `embeddings`: `.npy`
+- `classification`: one sub-folder of images per class. `images`: images with no labels (stray non-image
+  files up to 1 % of the images are ignored with a warning check, more makes it `other`). `embeddings`: `.npy`
   vector files. `other`: none of these. `empty`: nothing inside.

@@ -43,6 +43,9 @@ tools.py). `?` marks an optional argument.
 | `send_to_session` | change | bucket, paths, target, name?, task_type? | Open folders / files in the visualizer (target visualize) or as a labeling project (target label). |
 | `set_s3_mode` | change | bucket, mode | Choose how an S3 bucket is read: stream (from S3 on every request, read-only) or local (downloaded into an editable local folder that can be re-synced and exported). |
 | `sync_from_s3` | change | bucket | Re-sync an S3 bucket that is loaded locally: files with the same name are replaced by the S3 version (unchanged files are skipped), local-only files are kept. |
+| `download_s3_folders` | change | bucket, paths, mirror? | Download folders (or files) of a STREAMED S3 bucket into its read-only local copy: fast to open and readable while S3 is unreachable; the rest keeps streaming. Run it again on a downloaded folder to update it (new + changed files; unchanged skipped). mirror also deletes local files S3 no longer has: only when the user asks. |
+| `check_s3_local` | read | bucket | Compare the downloaded folders of a streamed S3 bucket with S3 now: new / changed / removed files per folder (a job; list_folder then shows local_copy.state outdated). |
+| `remove_local_copy` | change | bucket, paths | Delete the downloaded copy of folders of a streamed S3 bucket (S3 is not touched; they stream again). Only whole downloaded folders (or folders holding them). |
 | `export_to` | change | bucket, path?, to, connection, s3_bucket?, prefix?, create_bucket?, overwrite? | Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user's connections as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png. |
 | `extract_frames` | change | bucket, paths, fps?, mode?, n?, take?, window_s?, every_s?, pick?, start?, end?, dedupe?, format?, max_side?, layout?, target?, new_name?, out? | Cut videos (a video file, or a folder: its videos) into image frames to label or visualize: a background job writing a new folder <video>-frames (YOLO-ready by default). Pick frames with fps, or mode + its numbers; bursts = take frames from window_s every every_s. |
 | `set_video_auto` | change | bucket, fps?, mode?, n?, layout?, off? | Make a bucket cut every new video (upload, import, S3 load) into frames by itself, with extract_frames-style settings; off=true turns it off. |
@@ -84,7 +87,7 @@ As Claude Code: show the user the `confirm` line and only re-run with `--yes` af
 
 - Direct API, `/api/dc/*` (JSON in and out, errors `{detail}`): `GET /summary`, `GET|POST /buckets`,
   `GET|PATCH|DELETE /buckets/{bid}`, `GET /buckets/{bid}/ls?path=`, `GET .../file?path=&w=`, `GET .../text?path=`,
-  `POST .../ops {ops}`, `POST .../undo {undo_id}`, `POST .../upload?path=`, `PUT .../tags {path, add, remove}`,
+  `POST .../ops {ops}`, `POST .../undo {undo_id}`, `POST .../upload?path=` (+ `POST|GET .../upload/part`: raw chunks of one big file, any order, resumable), `PUT .../tags {path, add, remove}`,
   `GET .../detect?path=&force=`, `GET .../stats?path=`, `GET /tags`, `GET /search?q=&tag=&format=&bucket=&path=&glob=`,
   `POST /send {bucket, paths, target, name, task_type}`. Full table in `dataviz/datacenter/API.md`.
 - The agent: `POST /api/llm/dc/chat {messages: [{role, text}], scope: {bucket, path, selection}}` streams NDJSON,
@@ -147,6 +150,6 @@ the automatic tag `format:<key>`.
 | `coco` | a JSON with `images`, `annotations`, `categories` |
 | `voc` | `Annotations/*.xml` next to the images |
 | `classification` | one sub-folder of images per class |
-| `images` | images with no labels |
+| `images` | images with no labels (stray non-image files ≤ 1 % of the images are ignored, with a warning) |
 | `embeddings` | `.npy` vector files |
 | `other` / `empty` | none of these / nothing inside |

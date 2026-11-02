@@ -2,6 +2,7 @@
 // import from the web, export to S3 / FTP, video → frames, label import / label all) with stage, a progress bar, rate / ETA and Cancel, polled from
 // GET api/jobs (every second while one runs, every 5 s otherwise, never while the page is hidden). Bucket cards
 // show a "Labeling… 42%" badge for the job that writes into them (jobBadge). When a job ends the page reloads once.
+// Uploads from this tab (uploads.ts) have their rows above the jobs, painted there in place.
 
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { esc, fmtEta, icon } from '../core/dom.js';
@@ -9,9 +10,10 @@ import { toast } from '../core/toast.js';
 import type { Job, JobsPayload } from '../types.js';
 import type { Action } from './app.js';
 import { hooks } from './state.js';
+import { stripPart, uploadBadge, uploadRows, upStrip } from './uploads.js';
 
-const MINE = /^(dc-(autolabel|scan|sync|import|reimport|convert|export|frames)|label-(import|predict)):/;
-const VERB: Record<string, string> = { autolabel: 'Labeling', scan: 'Scanning', sync: 'Loading', import: 'Importing', reimport: 'Updating', convert: 'Converting', export: 'Exporting', frames: 'Cutting' };
+const MINE = /^(dc-(autolabel|scan|fetch|check|sync|import|reimport|convert|export|frames)|label-(import|predict)):/;
+const VERB: Record<string, string> = { autolabel: 'Labeling', scan: 'Scanning', fetch: 'Downloading', check: 'Checking', sync: 'Loading', import: 'Importing', reimport: 'Updating', convert: 'Converting', export: 'Exporting', frames: 'Cutting' };
 
 let active: Job[] = [];
 let timer = 0;
@@ -23,10 +25,11 @@ const bucketOfJob = (j: Job): string | null => /^dc-[a-z]+:([^:]+)/.exec(j.key)?
 const verb = (j: Job): string => VERB[/^dc-([a-z]+):/.exec(j.key)?.[1] ?? ''] ?? 'Working';
 const pct = (j: Job): string => (j.total ? `${Math.round(j.pct ?? 0)}%` : '…');
 
-/** "Labeling… 42%" on the card of a bucket a job is writing into ('' when none). */
+/** "Labeling… 42%" on the card of a bucket a job is writing into, else "Uploading 42%" ('' when neither). */
 export function jobBadge(bid: string): string {
   const j = byBucket.get(bid);
-  return j ? `<span class="dc-jobb" data-jb="${esc(bid)}" title="${esc(j.label)}"><span class="spin sm"></span>${esc(verb(j))} <b class="num">${pct(j)}</b></span>` : '';
+  if (!j) return uploadBadge(bid);
+  return `<span class="dc-jobb" data-jb="${esc(bid)}" title="${esc(j.label)}"><span class="spin sm"></span>${esc(verb(j))} <b class="num">${pct(j)}</b></span>`;
 }
 
 function row(j: Job): string {
@@ -42,11 +45,12 @@ function row(j: Job): string {
 }
 
 function paint(): void {
-  const el = document.getElementById('dc-activity');
-  if (!el) return;
-  el.classList.toggle('hidden', !active.length);
-  el.innerHTML = active.slice(0, 3).map(row).join('') +
+  const el = document.getElementById('dc-activity'), jobs = stripPart('dc-act-jobs');
+  if (!el || !jobs) return;
+  el.classList.toggle('hidden', !active.length && !uploadRows());
+  const html = active.slice(0, 3).map(row).join('') +
     (active.length > 3 ? `<div class="dc-act-more muted">+${active.length - 3} more queued</div>` : '');
+  if (jobs.innerHTML !== html) jobs.innerHTML = html;                // unchanged: leave the buttons alone
   // badges in place: no full repaint for a percentage
   for (const b of document.querySelectorAll<HTMLElement>('.dc-jobb[data-jb]')) {
     const j = byBucket.get(b.dataset['jb'] ?? '');
@@ -75,6 +79,8 @@ async function poll(): Promise<void> {
   }
   timer = window.setTimeout(() => { void poll(); }, delay);
 }
+
+upStrip.changed = () => { paint(); };
 
 /** Start polling (once), or poll now: call right after a job was started so it shows at once. */
 export function watchJobs(): void {

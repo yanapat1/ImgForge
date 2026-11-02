@@ -109,6 +109,14 @@ def test_images_embeddings_other_empty(tmp_path):
     f = detect(other)
     assert f['format'] == 'other' and f['reason']
 
+    stray = tmp_path / 's'
+    for i in range(100):
+        make_jpeg(stray / f'{i}.jpg')
+    (stray / 'x.png2').write_bytes(b'xx')
+    f = detect(stray)
+    assert f['format'] == 'images' and 'x.png2' in f['reason']
+    assert any(c.get('warn') and c['count'] == 1 for c in f['checks'])
+
     no_labels = tmp_path / 'nl'
     make_jpeg(no_labels / 'images' / 'a.jpg')
     (no_labels / 'data.yaml').write_text('names: [a]\n')

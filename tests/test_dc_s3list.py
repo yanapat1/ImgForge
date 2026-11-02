@@ -175,7 +175,8 @@ def test_pull_streams_skips_unchanged_and_fetches_big_objects_in_ranges(s3_serve
     seen = []
     try:
         res = view.pull(tmp_path, lambda *a, **k: seen.append(a or k))
-        assert res == {'downloaded': 4, 'skipped': 0, 'bytes': 300 + 3 * len('p/a/1.jpg'), 'failed': [], 'total': 4}
+        assert res == {'downloaded': 4, 'skipped': 0, 'bytes': 300 + 3 * len('p/a/1.jpg'), 'failed': [], 'total': 4, 'removed': 0,
+                       'size': 300 + 3 * len('p/a/1.jpg')}
         assert (tmp_path / 'big.mp4').read_bytes() == b'v' * 300 and (tmp_path / 'b' / '3.txt').read_bytes() == b'p/b/3.txt'
         assert not (tmp_path / '.hidden').exists() and not list(tmp_path.rglob('*.part'))
         assert seen[-1] == (4, 4, 'downloading', '0.0 MB')
@@ -184,5 +185,14 @@ def test_pull_streams_skips_unchanged_and_fetches_big_objects_in_ranges(s3_serve
         assert (res['downloaded'], res['skipped']) == (1, 3) and (tmp_path / 'a' / '1.jpg').read_bytes() == b'p/a/1.jpg'
         assert view.pull(tmp_path, cancelled=lambda: True)['downloaded'] == 0
         assert view.keys() == {'a/1.jpg': 9, 'a/2.jpg': 9, 'b/3.txt': 9, 'big.mp4': 300}
+        # one folder only (dest/a), then mirror: a/2.jpg gone from S3 and a local extra are removed, b/ untouched
+        client.delete_object(Bucket=bucket, Key='p/a/2.jpg')
+        (tmp_path / 'a' / 'sub').mkdir()
+        (tmp_path / 'a' / 'sub' / 'extra.txt').write_text('x')
+        res = view.pull(tmp_path, rel='a')
+        assert (res['total'], res['removed']) == (1, 0) and (tmp_path / 'a' / '2.jpg').exists()
+        res = view.pull(tmp_path, rel='a', mirror=True)
+        assert (res['skipped'], res['removed']) == (1, 2)
+        assert sorted(p.name for p in (tmp_path / 'a').iterdir()) == ['1.jpg'] and (tmp_path / 'b' / '3.txt').exists()
     finally:
         view.close()

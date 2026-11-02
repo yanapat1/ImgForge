@@ -19,6 +19,7 @@ import time
 import unicodedata
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,13 +29,14 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import db
 from ..auth import tiers as vtiers
-from . import formats, store, tags as vtags, video
+from . import formats, s3dir, s3list, store, tags as vtags, video
 from .store import DCError
 
 __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
            'summary', 'ls', 'read_file', 'read_text', 'ops', 'undo', 'upload', 'set_tags', 'all_tags', 'detect',
            'stats', 'search', 'send', 'sync', 'export', 'export_check', 'export_to', 'source', 'autolabel', 'write_text',
-           'video_info', 'estimate_frames', 'extract_frames', 'set_video_auto']
+           'video_info', 'estimate_frames', 'extract_frames', 'set_video_auto', 'fetch_local', 'check_local',
+           'drop_local']
 
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
@@ -42,10 +44,15 @@ PERM = 'data.manage'
 LANE = 'dc'                         # job lane of the bulk work: fair per account, never in the way of opening a session
 S3_TTL = 3600                       # an S3 detection is fresh this long (no cheap fingerprint for a prefix)
 SEARCH_SCAN = 300_000               # entries walked by one search
+LS_WAIT = 0.8                       # s an S3 folder listing is waited for before ls answers with what it has
+CHECK_TTL = 600                     # s a downloaded folder's comparison with S3 is trusted (ls re-checks after)
+SCAN_RETRY = 300                    # s a failed / cancelled background S3 scan is not queued again by ls
 _JSONB = bindparam('result', type_=JSONB)
 _MANIFEST = bindparam('manifest', type_=JSONB)
 
 _conf = {'ctx': None, 'cfg': None, 'datasets': None, 'labeling': None}
+_quiet = {}     # ('scan', bid, rel) | ('check', bid) -> monotonic time ls may queue that job again (it failed or was
+                # cancelled: ls is polled every second while a folder lists, it must not re-list S3 on each poll)
 _lock = threading.Lock()
 
 
@@ -179,8 +186,9 @@ def _need_write(r):
         raise DCError(f'bucket “{r.name}” cannot be written ({r.root} is missing or read-only)')
 
 
-def _s3(r, rel=''):
-    """The S3 view of a link (of its sub-folder `rel`)."""
+def _s3(r, rel='', shared=False):
+    """The S3 view of a link (of its sub-folder `rel`); shared: the interactive one (a reused client, short
+    timeouts, offline breaker) for listings and reads, else a job's own client."""
     if not r.connection_id:
         raise DCError(f'the S3 connection of bucket “{r.name}” was deleted', 409)
     try:
@@ -188,7 +196,7 @@ def _s3(r, rel=''):
     except KeyError:
         raise DCError(f'the S3 connection of bucket “{r.name}” was deleted', 409) from None
     return store.S3View(conn, r.s3_bucket, '/'.join(p for p in ((r.prefix or '').strip('/'), rel) if p),
-                        (_cfg().get('s3') or {}))
+                        (_cfg().get('s3') or {}), shared=shared)
 
 
 def _abs(r, path, must_exist=True):
@@ -196,7 +204,7 @@ def _abs(r, path, must_exist=True):
 
 
 # ---------------------------------------------------------------------------------------------- detection cache
-def _cached(r, rel, force=False, want_tree=False, user=None, wait=True):
+def _cached(r, rel, force=False, want_tree=False, user=None, wait=True, refresh=True):
     """The cache entry {format, tree} of folder `rel` of bucket row `r`, detected again when its fingerprint
     changed (or force). tree ({images, labels, size}) is filled for the root, or when want_tree. An S3 link with
     wait=False never lists inline: a stale entry is returned as is (None when there is none) while a scan job
@@ -216,7 +224,8 @@ def _cached(r, rel, force=False, want_tree=False, user=None, wait=True):
         return hit.result
     if r.kind == 's3' and not wait:
         jobs = getattr(_conf['ctx'], 'jobs', None) if _conf['ctx'] is not None else None
-        if jobs is None or not jobs.busy(f'dc-scan:{r.id}:'):      # one scan per bucket at a time on the dc lane
+        if (refresh and _quiet.get(('scan', r.id, rel), 0) <= time.monotonic()
+                and (jobs is None or not jobs.busy(f'dc-scan:{r.id}:'))):      # one scan per bucket at a time on the dc lane
             _scan_soon(user, r, rel)
         return hit.result if hit is not None else None
     res = _scan(r, rel, want_tree or not rel)
@@ -264,9 +273,15 @@ def _scan_soon(user, r, rel=''):
 
     def fn(job=None):
         cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
-        res = _scan(r, rel, True, job.progress if job is not None else None, cancelled)
+        try:
+            res = _scan(r, rel, True, job.progress if job is not None else None, cancelled)
+        except Exception:
+            _quiet[('scan', r.id, rel)] = time.monotonic() + SCAN_RETRY
+            raise
         if cancelled is not None and cancelled():
+            _quiet[('scan', r.id, rel)] = time.monotonic() + SCAN_RETRY
             return {'cancelled': True}
+        _quiet.pop(('scan', r.id, rel), None)
         _store_cache(r, rel, _s3_fp(), res)
         retagged = vtags.apply_format(r.id, res['format']) if not rel else None
         return {'format': (res['format'] or {}).get('format'), 'stats': res['tree'], 'retagged': retagged}
@@ -336,6 +351,9 @@ def _shape(rows, conn):
         {'b': ids}).all()}
     tg = vtags.for_buckets(ids, conn)
     ses = _sessions_for(rows, conn)
+    loc = {x.bucket_id: x for x in conn.execute(text(
+        """SELECT bucket_id, count(*) AS n, count(*) FILTER (WHERE state IN ('outdated', 'error')) AS old
+           FROM app.dc_s3_local WHERE bucket_id = ANY(:b) GROUP BY bucket_id"""), {'b': ids}).all()}
     out = []
     for r in rows:
         res = cache.get(r.id) or {}
@@ -355,7 +373,8 @@ def _shape(rows, conn):
                            'importing': _importing(r.id)}}
                if getattr(r._r, 'source_kind', None) else {}),
             **({'connection_id': r.connection_id, 's3_bucket': r.s3_bucket, 'prefix': r.prefix, 'mode': r.mode,
-                'local_ready': r.local_copy, 'synced_at': _epoch(r.synced_at), 's3_root': r._r.root}
+                'local_ready': r.local_copy, 'synced_at': _epoch(r.synced_at), 's3_root': r._r.root,
+                'local_folders': loc[r.id].n if r.id in loc else 0, 'local_outdated': loc[r.id].old if r.id in loc else 0}
                if r.link == 's3' else {}),
         })
     return out
@@ -560,6 +579,10 @@ def sync(user, bid):
             with db.begin() as c:
                 c.execute(text('UPDATE app.dc_buckets SET synced_at = now(), updated_at = now() WHERE id = :b'),
                           {'b': r.id})
+                c.execute(text("DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path <> ''"), {'b': r.id})
+            _set_local(r.id, '', state='fresh', objects=res['total'], bytes=res['size'], diff=None, fetched=True,
+                       checked=True)                     # streamed again later: the whole copy reads as downloaded
+            s3dir.invalidate(r.id)
             _revalidate(_row(user, bid))
             if auto:
                 res['frames'] = _auto_frames(user, _row(user, bid), sorted(_videos_in(dest) - before))
@@ -1269,19 +1292,21 @@ def summary(user):
 
 
 # ---------------------------------------------------------------------------------------------- browsing
-def ls(user, bid, path='', offset=0, limit=500, sort='name', q=''):
+def ls(user, bid, path='', offset=0, limit=500, sort='name', q='', retry=False):
+    """One page of folder `path`. A streamed S3 link answers with what its listing holds after LS_WAIT s
+    (partial: true while it runs; the page asks again), every entry carries `local` (its downloaded copy's state)
+    and `here` is the downloaded folder holding `path`; when S3 cannot be reached the downloaded folders are listed
+    from the local copy (offline: true). retry: ask S3 again at once after it was found unreachable."""
     r = _row(user, bid)
     rel = store.clean_rel(path)
+    offline = False
     if r.kind == 's3':
-        view = _s3(r)
-        try:
-            out = view.list(rel, offset, limit, sort, q)
-        finally:
-            view.close()
+        out = _s3_ls(user, r, rel, offset, limit, sort, q, retry)
+        offline = bool(out.get('offline'))
     else:
         out = store.list_local(r.root, rel, _allowed(), offset, limit, sort, q)
     try:
-        res = _cached(r, rel, user=user, wait=False)          # S3: never a full listing inside the request
+        res = _cached(r, rel, user=user, wait=False, refresh=not offline)  # S3: never a full listing in the request
         out['format'] = res['format'] if res else None
         if res and not rel:
             vtags.apply_format(r.id, res['format'])
@@ -1292,6 +1317,380 @@ def ls(user, bid, path='', offset=0, limit=500, sort='name', q=''):
     return out
 
 
+# ---------------------------------------------------------------------------------------------- S3 local copies
+def _jobs():
+    ctx = _conf['ctx']
+    return getattr(ctx, 'jobs', None) if ctx is not None else None
+
+
+def _busy(key):
+    jobs = _jobs()
+    return bool(jobs is not None and jobs.busy(key))
+
+
+def _local_rows(bid):
+    """{path: {path, state, objects, bytes, diff, fetched_at, checked_at}} of the downloaded folders of an S3 link
+    ('' = all). A download that is no longer running (cancelled, a restart) reads as outdated."""
+    with db.connect() as c:
+        rows = c.execute(text("""SELECT path, state, objects, bytes, diff, fetched_at, checked_at FROM app.dc_s3_local
+                                 WHERE bucket_id = :b"""), {'b': bid}).all()
+    fetching = _busy(f'dc-fetch:{bid}:') if rows else False
+    return {x.path: {'path': x.path, 'state': 'outdated' if x.state == 'fetching' and not fetching else x.state,
+                     'objects': x.objects, 'bytes': x.bytes, 'diff': x.diff, 'fetched_at': _epoch(x.fetched_at),
+                     'checked_at': _epoch(x.checked_at)} for x in rows}
+
+
+def _cover(rows, rel):
+    """The downloaded folder (or file) holding `rel`: rel itself or its nearest downloaded parent; None."""
+    p = rel
+    while True:
+        if p in rows:
+            return rows[p]
+        if not p:
+            return None
+        p = store.posix_parent(p)
+
+
+def _holds(rows, rel):
+    """Whether a folder below `rel` is downloaded (rel itself is not)."""
+    pre = rel + '/' if rel else ''
+    return any(p.startswith(pre) and p != rel for p in rows)
+
+
+def _entry_state(rows, e, root):
+    """`local` of one S3 entry: fresh | outdated | new (S3 has it, the copy not) | fetching | partial (a folder with
+    downloaded sub-folders) | None (stream only)."""
+    c = _cover(rows, e['path'])
+    if c is None:
+        return 'partial' if e['type'] == 'dir' and _holds(rows, e['path']) else None
+    if c['state'] in ('fetching', 'error'):
+        return c['state']
+    p = root / e['path']
+    if e['type'] == 'dir':
+        return c['state'] if p.is_dir() else 'new'
+    if store._unchanged(p, e['size'], e['mtime']):
+        return 'fresh'
+    return 'outdated' if p.exists() else 'new'
+
+
+def _local_entries(r, rel):
+    """The entries of folder `rel` of the local copy (one scandir, hidden names left out)."""
+    d = os.path.join(r.local_root, rel) if rel else r.local_root
+    out = []
+    try:
+        it = os.scandir(d)
+    except OSError:
+        return out
+    with it:
+        for e in it:
+            isdir = e.is_dir(follow_symlinks=False)
+            if not store.visible(e.name, isdir) or not (isdir or e.is_file(follow_symlinks=False)):
+                continue
+            st = e.stat(follow_symlinks=False)
+            out.append({'name': e.name, 'path': store.join(rel, e.name), 'type': 'dir' if isdir else 'file',
+                        'size': 0 if isdir else st.st_size, 'mtime': st.st_mtime,
+                        **({} if isdir else {'kind': store.kind_of(e.name, rel)})})
+    return out
+
+
+def _s3_ls(user, r, rel, offset, limit, sort, q, retry):
+    rows = _local_rows(r.id)
+    try:
+        view = _s3(r, shared=True)
+        view.online(retry)
+        x = s3dir.get((r.id, rel, r.connection_id, r.s3_bucket, r.prefix), lambda: view.dir_pages(rel))
+        x.wait(LS_WAIT)
+        dirs, files, done, err = x.snapshot()
+        if err is not None and not (dirs or files):
+            if isinstance(err, store.Offline):
+                raise err
+            raise DCError(f'cannot list S3: {err}', 502)
+    except store.Offline as e:
+        if rows and r.local_root:
+            return _offline_ls(r, rel, rows, offset, limit, sort, q, e)
+        raise
+    cover = _cover(rows, rel)
+    if cover is not None and done and err is None and r.local_root:     # only a complete listing can tell "gone"
+        names = {e['name'] for e in dirs} | {e['name'] for e in files}
+        for e in _local_entries(r, rel):
+            if e['name'] not in names:
+                (dirs if e['type'] == 'dir' else files).append({**e, 'local': 'gone'})
+    total, page = store.page_rows(dirs, files, offset, limit, sort, q)
+    root = Path(r.local_root) if r.local_root else None
+    page = [e if 'local' in e else {**e, 'local': _entry_state(rows, e, root) if root else None} for e in page]
+    out = {'path': rel, 'total': total, 'entries': page, 'partial': not done, 'loaded': len(dirs) + len(files),
+           'here': cover, 'local_folders': len(rows)}
+    if err is not None:
+        out['error'] = f'the S3 listing stopped early: {err}'
+    _check_soon(user, r, rows)
+    return out
+
+
+def _offline_ls(r, rel, rows, offset, limit, sort, q, e):
+    """ls from the local copy while S3 is unreachable: a downloaded folder lists its files; the root (or a folder
+    above downloaded ones) only the folders that lead to them. Elsewhere the Offline error stands."""
+    cover = _cover(rows, rel)
+    if cover is not None:
+        if not os.path.isdir(os.path.join(r.local_root, rel) if rel else r.local_root):
+            raise e
+        ents = [{**x, 'local': cover['state']} for x in _local_entries(r, rel)]
+        dirs, files = [x for x in ents if x['type'] == 'dir'], [x for x in ents if x['type'] == 'file']
+    else:
+        pre = rel + '/' if rel else ''
+        kids = sorted({p[len(pre):].split('/')[0] for p in rows if p.startswith(pre) and p != rel})
+        if not kids:
+            raise e
+        have = {x['name']: x for x in _local_entries(r, rel)}
+        dirs = [{**have[k], 'local': _cover(rows, store.join(rel, k))['state'] if _cover(rows, store.join(rel, k))
+                 else 'partial'} for k in kids if k in have and have[k]['type'] == 'dir']
+        files = [{**have[k], 'local': rows[store.join(rel, k)]['state']} for k in kids
+                 if k in have and have[k]['type'] == 'file' and store.join(rel, k) in rows]
+    total, page = store.page_rows(dirs, files, offset, limit, sort, q)
+    return {'path': rel, 'total': total, 'entries': page, 'partial': False, 'loaded': total, 'here': cover,
+            'offline': True, 'error': e.message, 'local_folders': len(rows)}
+
+
+def _local_file(r, rel):
+    """(path of the downloaded copy of file `rel`, whether its folder is fresh) for a streamed S3 link, else
+    (None, False)."""
+    if r.kind != 's3' or not r.local_root:
+        return None, False
+    c = _cover(_local_rows(r.id), rel)
+    if c is None or c['state'] == 'fetching':
+        return None, False
+    p = os.path.join(r.local_root, rel)
+    return (p, c['state'] == 'fresh') if os.path.isfile(p) else (None, False)
+
+
+def _set_local(bid, path, **cols):
+    """Upsert the dc_s3_local row of (bid, path) with `cols` (state, objects, bytes, diff, fetched, checked)."""
+    vals = {'b': bid, 'p': path, 'state': cols.get('state', 'fetching'), 'objects': cols.get('objects', 0),
+            'bytes': cols.get('bytes', 0), 'diff': cols.get('diff')}
+    stamp = ', '.join(f'{k}_at = now()' for k in ('fetched', 'checked') if cols.get(k))
+    sets = ['state = EXCLUDED.state'] + [f'{k} = EXCLUDED.{k}' for k in ('objects', 'bytes', 'diff') if k in cols]
+    with db.begin() as c:
+        c.execute(text(f"""INSERT INTO app.dc_s3_local(bucket_id, path, state, objects, bytes, diff
+                           {''.join(f', {k}_at' for k in ('fetched', 'checked') if cols.get(k))})
+                           VALUES (:b, :p, :state, :objects, :bytes, :diff
+                           {''.join(', now()' for k in ('fetched', 'checked') if cols.get(k))})
+                           ON CONFLICT (bucket_id, path) DO UPDATE SET {', '.join(sets)}
+                           {(', ' + stamp) if stamp else ''}""").bindparams(bindparam('diff', type_=JSONB)), vals)
+
+
+def _need_stream(user, bid):
+    r = _row(user, bid)
+    _need(user)
+    if r.link != 's3':
+        raise DCError('only a streamed S3 link downloads folders: this bucket is local already')
+    if r.kind != 's3':
+        raise DCError(f'bucket “{r.name}” is loaded into local as a whole: use Re-sync from S3')
+    return r
+
+
+def _top_paths(paths):
+    """The cleaned paths without those inside another one of them."""
+    rels = sorted({store.clean_rel(p) for p in paths or ()})
+    out = []
+    for p in rels:
+        if not any(p == o or p.startswith(o + '/') or not o for o in out):
+            out.append(p)
+    return out
+
+
+def fetch_local(user, bid, paths, mirror=False):
+    """Download folders (or files) `paths` of a streamed S3 link into its local copy (read-only; the bucket keeps
+    streaming the rest). Downloading again updates: new and changed objects are fetched, unchanged ones skipped;
+    mirror also removes local files S3 no longer has. A path inside an already downloaded folder refreshes only
+    that part; a folder above downloaded ones takes them over. A dc-lane job dc-fetch:<bid>:<hash> -> {job_id,
+    paths, result}."""
+    r = _need_stream(user, bid)
+    rels = _top_paths(paths)
+    if not rels:
+        raise DCError('pick the folders to download')
+    dest = _local_root(r)
+    rows = _local_rows(r.id)
+    own = [p for p in rels if _cover(rows, p) is None or _cover(rows, p)['path'] == p]   # rows this job writes
+    for p in own:
+        _set_local(r.id, p, state='fetching')
+    s3dir.invalidate(r.id)
+
+    def fn(job=None):
+        cancelled = (lambda: job.cancelled.is_set()) if job is not None else (lambda: False)
+        view = _s3(r)
+        out = {'downloaded': 0, 'skipped': 0, 'bytes': 0, 'removed': 0, 'failed': [], 'paths': rels}
+        try:
+            for i, p in enumerate(rels):
+                if cancelled():
+                    break
+
+                def prog(d=None, t=None, stage=None, extra=None, p=p, i=i):
+                    if job is not None:
+                        job.progress(d, t, f'{p or "all"} ({i + 1}/{len(rels)}): {stage}' if stage else None, extra)
+                if p and view.what(p) == 'file':
+                    res = _fetch_file(view, dest, p)
+                else:
+                    res = view.pull(dest, prog, cancelled, rel=p, mirror=mirror)
+                for k in ('downloaded', 'skipped', 'bytes', 'removed'):
+                    out[k] += res[k]
+                out['failed'] += res['failed']
+                if p in own:
+                    _set_local(r.id, p, state='outdated' if cancelled() or res['failed'] else 'fresh',
+                               objects=res['total'], bytes=res['size'], diff=None, fetched=True, checked=True)
+                    with db.begin() as c:                      # a folder above downloaded ones takes them over
+                        c.execute(text("""DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path <> :p
+                                          AND (:p = '' OR path LIKE :pre)"""),
+                                  {'b': r.id, 'p': p, 'pre': p.replace('%', r'\%').replace('_', r'\_') + '/%'})
+        except BaseException as e:
+            for p in own:
+                _set_local(r.id, p, state='error', diff={'error': str(e)})
+            raise
+        finally:
+            view.close()
+            s3dir.invalidate(r.id)
+        out['failed'] = out['failed'][:50]
+        out['cancelled'] = cancelled()
+        return out
+
+    jobs = _jobs()
+    if jobs is None:
+        return {'job_id': None, 'paths': rels, 'result': fn()}
+    key = f'dc-fetch:{r.id}:{uuid.uuid4().hex[:8]}'
+    return {'job_id': jobs.submit(key, f'download {", ".join(p or "all" for p in rels[:3])}'
+                                       f'{"…" if len(rels) > 3 else ""} of {r.name}', fn, lane=LANE,
+                                  public_result=True, owner=user['id']).id, 'paths': rels, 'result': None}
+
+
+def _fetch_file(view, dest, rel):
+    """Download one object as a pull would (mtime = its LastModified, so it reads as unchanged later)."""
+    h = view.client.head_object(Bucket=view.bucket, Key=view.key(rel))
+    size, lm = int(h.get('ContentLength') or 0), h.get('LastModified')
+    dst = os.path.join(dest, rel)
+    if store._unchanged(dst, size, lm.timestamp() if lm is not None else None):
+        return {'downloaded': 0, 'skipped': 1, 'bytes': 0, 'size': size, 'removed': 0, 'failed': [], 'total': 1}
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    view.download(rel, dst)
+    if lm is not None:
+        os.utime(dst, (lm.timestamp(), lm.timestamp()))
+    return {'downloaded': 1, 'skipped': 0, 'bytes': size, 'size': size, 'removed': 0, 'failed': [], 'total': 1}
+
+
+def _compare(view, dest, rel, cancelled):
+    """{new, changed, removed, sample} of the local copy of folder (or file) `rel` against S3."""
+    pre = view.base + (rel + '/' if rel else '')
+    seen, diff, sample = set(), {'new': 0, 'changed': 0, 'removed': 0}, []
+    with closing(s3list.objects(view.client, view.bucket, pre, cancelled=cancelled)) as objs:
+        for o in objs:
+            sub = o['Key'][len(pre):]
+            if not store._shown(sub):
+                continue
+            k = store.join(rel, sub)
+            seen.add(k)
+            lm = o.get('LastModified')
+            p = Path(dest) / k
+            if not store._unchanged(p, int(o.get('Size') or 0), lm.timestamp() if lm is not None else None):
+                kind = 'changed' if p.exists() else 'new'
+                diff[kind] += 1
+                if len(sample) < 20:
+                    sample.append({'path': k, 'what': kind})
+    top = Path(dest) / rel if rel else Path(dest)
+    if top.is_dir() and not (cancelled and cancelled()):
+        for k, _, _ in store.walk_files(top, rel):
+            if k not in seen:
+                diff['removed'] += 1
+                if len(sample) < 20:
+                    sample.append({'path': k, 'what': 'removed'})
+    return {**diff, 'sample': sample}
+
+
+def _check_soon(user, r, rows):
+    """Queue the comparison of the downloaded folders with S3 when the last one is older than CHECK_TTL (one
+    check per bucket at a time)."""
+    now = time.time()
+    if (not rows or _quiet.get(('check', r.id), 0) > time.monotonic() or _busy(f'dc-check:{r.id}')
+            or _busy(f'dc-fetch:{r.id}:')):
+        return None
+    if all(x['checked_at'] and now - x['checked_at'] < CHECK_TTL for x in rows.values() if x['state'] != 'fetching'):
+        return None
+    return _check_job(user, r)
+
+
+def _check_job(user, r):
+    def fn(job=None):
+        cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
+        out = {}
+        try:
+            view = _s3(r)
+            try:
+                for p, row in _local_rows(r.id).items():
+                    if row['state'] == 'fetching' or (cancelled and cancelled()):
+                        continue
+                    if job is not None:
+                        job.progress(stage=f'comparing {p or "all"} with S3')
+                    d = _compare(view, r.local_root, p, cancelled)
+                    if cancelled and cancelled():
+                        break
+                    state = 'outdated' if d['new'] or d['changed'] or d['removed'] else 'fresh'
+                    _set_local(r.id, p, state=state, diff=d, checked=True)
+                    out[p] = {'state': state, **{k: d[k] for k in ('new', 'changed', 'removed')}}
+            finally:
+                view.close()
+        except Exception:
+            _quiet[('check', r.id)] = time.monotonic() + CHECK_TTL        # ls does not queue it again at once
+            raise
+        if cancelled and cancelled():
+            _quiet[('check', r.id)] = time.monotonic() + CHECK_TTL
+        else:
+            _quiet.pop(('check', r.id), None)
+        return {'folders': out}          # S3 itself did not change: its listings stay (badges are read per ls)
+
+    jobs = _jobs()
+    if jobs is None:
+        fn()
+        return None
+    return jobs.submit(f'dc-check:{r.id}', f'check {r.name} against S3', fn, lane=LANE, public_result=True,
+                       owner=(user or {}).get('id') or r.owner_id).id
+
+
+def check_local(user, bid):
+    """Compare every downloaded folder of a streamed S3 link with S3 now (new / changed / removed files; the
+    folder turns outdated when any). A dc-lane job dc-check:<bid> -> {job_id}."""
+    r = _need_stream(user, bid)
+    if not _local_rows(r.id):
+        raise DCError(f'no folder of “{r.name}” is downloaded')
+    return {'job_id': _check_job(user, r)}
+
+
+def drop_local(user, bid, paths):
+    """Remove the local copy of downloaded folders `paths` (or of every downloaded folder below them); S3 is not
+    touched and they stream again. -> {removed: [paths]}"""
+    r = _need_stream(user, bid)
+    if _busy(f'dc-fetch:{r.id}:'):
+        raise DCError(f'a download into “{r.name}” is running: wait for it (or cancel it)', 409)
+    rows = _local_rows(r.id)
+    gone = []
+    for p in _top_paths(paths):
+        c = _cover(rows, p)
+        if c is not None and c['path'] != p:
+            raise DCError(f'{p} is part of the downloaded folder {c["path"] or "(whole bucket)"}: remove that one')
+        hit = [x for x in rows if x == p or not p or x.startswith(p + '/')]
+        if not hit:
+            raise DCError(f'{p or "/"} is not downloaded')
+        for x in hit:
+            target = Path(os.path.realpath(os.path.join(r.local_root, x) if x else r.local_root))
+            base = Path(os.path.realpath(r.local_root))
+            for e in ((list(base.iterdir()) if base.is_dir() else []) if target == base
+                      else [target] if base in target.parents else []):
+                if e.is_dir() and not e.is_symlink():
+                    shutil.rmtree(e, ignore_errors=True)
+                else:
+                    e.unlink(missing_ok=True)
+            with db.begin() as c:
+                c.execute(text('DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path = :p'), {'b': r.id, 'p': x})
+            gone.append(x)
+    s3dir.invalidate(r.id)
+    return {'removed': gone}
+
+
 def _file(r, path):
     rel = store.clean_rel(path)
     if not rel:
@@ -1300,11 +1699,13 @@ def _file(r, path):
 
 
 def file_path(user, bid, path):
-    """(absolute path, media type) of a local file, for streaming the raw bytes; None for an S3 bucket."""
+    """(absolute path, media type) of a local file, for streaming the raw bytes; for a streamed S3 link the
+    downloaded copy when its folder is fresh, else None (read from S3)."""
     r = _row(user, bid)
     _need_secret(user, path)
     if r.kind == 's3':
-        return None
+        p, fresh = _local_file(r, _file(r, path))
+        return (p, mimetypes.guess_type(p)[0] or 'application/octet-stream') if p and fresh else None
     p = _abs(r, _file(r, path))
     if not os.path.isfile(p):
         raise DCError(f'{path} is not a file', 404 if not os.path.lexists(p) else 400)
@@ -1318,18 +1719,24 @@ def read_file(user, bid, path, w=None, t=None):
     rel = _file(r, path)
     _need_secret(user, rel)
     is_video = store.kind_of(rel.rsplit('/', 1)[-1]) == 'video'
-    if r.kind == 's3' and w and is_video:
-        raise DCError('a video streamed from S3 has no preview: load the bucket locally or copy it', 415)
     if r.kind == 's3':
-        view = _s3(r)
-        try:
-            data, etag, size = view.read(rel)
-        finally:
-            view.close()
-        if w:
-            return store.thumbnail(data, f'{r.id}|{rel}|{etag}|{size}', w, _cfg()), 'image/jpeg'
-        return data, mimetypes.guess_type(rel)[0] or 'application/octet-stream'
-    p, mt = file_path(user, bid, rel)
+        local, fresh = _local_file(r, rel)
+        if local is None or not fresh:                  # an outdated copy is only the fallback while offline
+            try:
+                if w and is_video:
+                    raise DCError('a video streamed from S3 has no preview: download its folder (or load the '
+                                  'bucket locally)', 415)
+                view = _s3(r, shared=True)
+                data, etag, size = view.read(rel)
+                if w:
+                    return store.thumbnail(data, f'{r.id}|{rel}|{etag}|{size}', w, _cfg()), 'image/jpeg'
+                return data, mimetypes.guess_type(rel)[0] or 'application/octet-stream'
+            except (store.Offline, DCError) as e:
+                if local is None or (not isinstance(e, store.Offline) and e.status != 415):
+                    raise
+        p, mt = local, mimetypes.guess_type(local)[0] or 'application/octet-stream'
+    else:
+        p, mt = file_path(user, bid, rel)
     if w:
         st = os.stat(p)
         if is_video:
@@ -1377,15 +1784,22 @@ def read_text(user, bid, path, limit=65536):
     _need_secret(user, rel)
     limit = max(1, min(int(limit or 65536), TEXT_MAX))
     mtime_ns = None
-    if r.kind == 's3':
-        view = _s3(r)
+    local, fresh = _local_file(r, rel)
+    if r.kind == 's3' and not fresh:
         try:
+            view = _s3(r, shared=True)
             data, _, size = view.read(rel, limit + 1)
             if len(data) > limit:
                 size = view.size(rel) or size
-        finally:
-            view.close()
-    else:
+        except store.Offline:
+            if local is None:
+                raise
+            fresh = True                                 # offline: the (older) downloaded copy
+    if r.kind == 's3' and fresh:
+        with open(local, 'rb') as f:
+            size = os.fstat(f.fileno()).st_size
+            data = f.read(limit + 1)
+    elif r.kind != 's3':
         p, _ = file_path(user, bid, rel)
         with open(p, 'rb') as f:
             st = os.fstat(f.fileno())
@@ -1582,12 +1996,46 @@ def upload(user, bid, path, files, unzip=True):
     _need_write(r)
     auto = getattr(r._r, 'video_auto', None)
     before = _videos_below(r, path) if auto else None
-    out = store.upload_local(r.root, _allowed(), path, files, unzip=unzip)
+    return _after_upload(user, r, path, store.upload_local(r.root, _allowed(), path, files, unzip=unzip), before)
+
+
+def _after_upload(user, r, path, out, before):
+    """The bucket's touch, format re-check and auto-extract of the new videos after files landed in `path`."""
     with db.begin() as c:
         c.execute(text('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
     out['retagged'] = _revalidate(r) if out['added'] else None
-    if auto and out['added']:
+    if before is not None and out['added']:
         out['frames'] = _auto_frames(user, r, sorted(_videos_below(r, path) - before))
+    return out
+
+
+def upload_part(user, bid, path, name, uid, offset, total, data, unzip=True):
+    """One chunk of a big file uploaded in parts (store.upload_part; any order, in parallel) -> {received, ranges}
+    until the file is whole, then what upload() answers plus done: True."""
+    r = _row(user, bid)
+    _need(user)
+    _need_write(r)
+    out = store.upload_part(r.root, _allowed(), path, name, uid, offset, total, data, unzip=unzip)
+    if not out.get('ready'):
+        if out.get('done'):
+            out['retagged'] = None
+        return out
+    before = _videos_below(r, path) if getattr(r._r, 'video_auto', None) else None
+    out = store.finish_part(r.root, _allowed(), path, name, uid, out['path'], unzip=unzip)
+    if not out['added']:
+        out['retagged'] = None
+        return out
+    return _after_upload(user, r, path, out, before)
+
+
+def part_status(user, bid, path, name, uid, total, unzip=True):
+    """The ranges the server holds of a file uploaded in parts (resume), or skipped: True-ish SKIP."""
+    r = _row(user, bid)
+    _need(user)
+    _need_write(r)
+    out = store.part_status(r.root, _allowed(), path, name, uid, total, unzip=unzip)
+    if out.get('done'):
+        out['retagged'] = None
     return out
 
 
@@ -1742,8 +2190,9 @@ def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
 def _send_visualize(user, r, rel, fmt, name):
     f = fmt.get('format')
     if f not in VISUALIZABLE:
-        raise DCError(f'{rel or r.name} looks like “{fmt.get("label")}”: the visualizer opens YOLO folders, plain '
-                      'image folders, classification folders and embeddings (.npy + meta.csv). '
+        why = f' ({fmt["reason"]})' if fmt.get('reason') else ''
+        raise DCError(f'{rel or r.name} looks like “{fmt.get("label")}”{why}: the visualizer opens YOLO folders, '
+                      'plain image folders, classification folders and embeddings (.npy + meta.csv). '
                       + ('Convert it to YOLO first.' if f in ('coco', 'voc') else ''))
     body = {'name': name or None}
     if r.kind == 's3':

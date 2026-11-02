@@ -118,10 +118,12 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
         assert page.get_attribute('#dc-view-names', 'aria-pressed') == 'true'
         # selection: click + Ctrl-click -> the bulk bar and the selection details
         rows = page.locator('#dc-grid .dc-lrow')
+        top = rows.nth(2).bounding_box()['y']
         rows.nth(0).click()
         rows.nth(2).click(modifiers=['Control'])
         page.wait_for_selector('#dc-selbar:not(.hidden)')
         assert '2 selected' in page.locator('#dc-selbar').inner_text()
+        assert rows.nth(2).bounding_box()['y'] == top     # the bar lies over the folder bar: the list does not move
         page.keyboard.press('Escape')
         page.wait_for_selector('#dc-selbar.hidden', state='attached')
         # back to Thumbnails

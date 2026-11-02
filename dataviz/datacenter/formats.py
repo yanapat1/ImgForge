@@ -398,19 +398,25 @@ def _embeddings(tree, rel, top_files):
 
 
 def _images(tree, rel):
+    """Image files only, no labels; a few stray files (<= 1 % of the images) are tolerated with a warning."""
     n_img = n_other = 0
     other = None
-    for i, (p, _) in enumerate(tree.walk(rel, cap=IMAGES_CAP)):
+    for p, _ in tree.walk(rel, cap=IMAGES_CAP):
         name = os.path.basename(p).lower()
         if _img(name):
             n_img += 1
         elif name not in JUNK and not name.endswith('.md'):
             n_other += 1
             other = other or p
-            break
-    if not n_img or n_other:
+    if not n_img or n_other > n_img // 100:
         return None, other
-    return _result('images', 0.9, [_check('images', True, None, n_img)], 'only image files, no labels'), None
+    checks = [_check('images', True, None, n_img)]
+    if not n_other:
+        return _result('images', 0.9, checks, 'only image files, no labels'), None
+    stray = os.path.basename(other)
+    checks.append(_check('other files', True, f'{stray} … (ignored)', n_other, warn=True))
+    return _result('images', 0.85, checks, f'image files, no labels; {n_other} other file'
+                   f'{"s" if n_other > 1 else ""} ignored ({stray})'), None
 
 
 # ---------------------------------------------------------------------------------------------- entry points

@@ -90,7 +90,7 @@ def _list_buckets(user, a):
 
 
 def _entry(e):
-    out = {k: e.get(k) for k in ('name', 'path', 'type', 'kind', 'size', 'items', 'labels') if e.get(k) is not None}
+    out = {k: e.get(k) for k in ('name', 'path', 'type', 'kind', 'size', 'items', 'labels', 'local') if e.get(k) is not None}
     return out
 
 
@@ -105,6 +105,13 @@ def _list_folder(user, a):
            'format': _fmt(res.get('format')), 'tags': _tags(res.get('tags')), 'writable': res.get('writable')}
     if out['offset'] + len(out['entries']) < out['total']:
         out['more'] = f'{out["total"] - out["offset"] - len(out["entries"])} more: call again with a higher offset'
+    if res.get('partial'):
+        out['partial'] = 'S3 is still listing this folder: call again in a moment for the rest'
+    if res.get('offline'):
+        out['offline'] = 'S3 is unreachable: only the downloaded folders are listed'
+    if res.get('here'):
+        h = res['here']
+        out['local_copy'] = {k: h.get(k) for k in ('path', 'state', 'diff') if h.get(k) is not None}
     return out, f'→ {_plural(out["total"], "entry", "entries")}'
 
 
@@ -207,6 +214,24 @@ def _s3_sync(user, a):
     b = resolve_bucket(user, a['bucket'])
     res = _svc().sync(user, b['id'])
     return res, f'{b["name"]}: re-sync from S3 started'
+
+
+def _s3_fetch(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().fetch_local(user, b['id'], a['paths'], mirror=bool(a.get('mirror')))
+    return res, f'{b["name"]}: downloading {_items(res["paths"])} to local' + (' (mirror)' if a.get('mirror') else '')
+
+
+def _s3_check(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().check_local(user, b['id'])
+    return res, f'{b["name"]}: comparing the downloaded folders with S3 (a job)'
+
+
+def _s3_drop(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().drop_local(user, b['id'], a['paths'])
+    return res, f'{b["name"]}: local copy of {_items(res["removed"])} removed'
 
 
 def _export_target(user, a):
@@ -426,6 +451,24 @@ _add(Tool('sync_from_s3', 'Re-sync an S3 bucket that is loaded locally: files wi
                           'version (unchanged files are skipped), local-only files are kept.',
           _obj({'bucket': BUCKET}, ['bucket']), True, _s3_sync,
           lambda b, a: f'Re-sync {_bname(b, a)} from S3 (same-name files are replaced)', s3_ok=True, risk='danger'))
+
+_add(Tool('download_s3_folders', 'Download folders (or files) of a STREAMED S3 bucket into its read-only local copy: '
+                                 'fast to open and readable while S3 is unreachable; the rest keeps streaming. Run it '
+                                 'again on a downloaded folder to update it (new + changed files; unchanged skipped). '
+                                 'mirror also deletes local files S3 no longer has: only when the user asks.',
+          _obj({'bucket': BUCKET, 'paths': A('folders / files to download'),
+                'mirror': {'type': 'boolean', 'description': 'also remove local files S3 no longer has'}},
+               ['bucket', 'paths']), True, _s3_fetch,
+          lambda b, a: f'Download {_items(a["paths"])} of {_bname(b, a)} to local'
+                       + (', removing local files S3 no longer has' if a.get('mirror') else ''),
+          s3_ok=True, danger_if=lambda a: bool(a.get('mirror'))))
+_add(Tool('check_s3_local', 'Compare the downloaded folders of a streamed S3 bucket with S3 now: new / changed / '
+                            'removed files per folder (a job; list_folder then shows local_copy.state outdated).',
+          _obj({'bucket': BUCKET}, ['bucket']), False, _s3_check, s3_ok=True))
+_add(Tool('remove_local_copy', 'Delete the downloaded copy of folders of a streamed S3 bucket (S3 is not touched; they '
+                               'stream again). Only whole downloaded folders (or folders holding them).',
+          _obj({'bucket': BUCKET, 'paths': A('downloaded folders')}, ['bucket', 'paths']), True, _s3_drop,
+          lambda b, a: f'Remove the local copy of {_items(a["paths"])} of {_bname(b, a)} (S3 keeps them)', s3_ok=True))
 
 _add(Tool('export_to', 'Copy a folder (or file) of a bucket to S3, FTP or SFTP through one of the user\'s connections '
                       'as a background job. Paths are kept from the bucket root: prefix + data/image/im1.png.',

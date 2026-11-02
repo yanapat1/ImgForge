@@ -12,6 +12,7 @@ import * as api from './api.js';
 import { baseName, bucketOf, D, fmtKey, fmtLabel, fmtN, fmtSize, isYolo, key } from './state.js';
 import type { SendTarget } from '../types-datacenter.js';
 import type { TaskType } from '../types-label.js';
+import { hasUploads } from './uploads.js';
 
 /** label/state.ts task types → the send API's task_type */
 const TASK_API: Record<TaskType, string> = { object_detection: 'detect', segmentation: 'segment', keypoints: 'pose', classification: 'classify' };
@@ -81,7 +82,9 @@ export async function openSend(bid: string, paths0: string[], target0: SendTarge
       const name = root.querySelector<HTMLInputElement>('#dc-send-name')?.value.trim() || defName;
       try {
         const r = await api.send(bid, paths, target, name, TASK_API[task]);
-        location.href = r.target === 'label' ? labelUrl(r.id) : vizUrl(r.id);
+        const url = r.target === 'label' ? labelUrl(r.id) : vizUrl(r.id);
+        // an upload from this tab would stop on leaving the page: the session opens in a new tab instead
+        if (!hasUploads() || !window.open(url, '_blank')) location.href = url;
         return null;
       } catch (e) {
         return `Could not create the session: ${errText(e)}`;

@@ -7,10 +7,13 @@ This is the shared contract between `dataviz/datacenter/` (the backend), `datavi
   - `managed`: a folder under `storage.data_root` (config; default `data/` under the project root, always allowed). Imports land here.
   - `local`: a linked folder anywhere inside `storage.allowed_roots`. It is used in place.
   - `s3`: a linked bucket and prefix that goes through one of the owner's S3 connections. It has a load `mode`:
-    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it. Linking returns at once: a dc-lane job `dc-scan:<bid>:` lists the objects (in parallel, `s3list.py`) and detects the format, with the object count as progress and Cancel. `ls` never lists the whole prefix inline: a stale detection (older than `S3_TTL`, 1 h) is returned as it is while a scan job refreshes it, and `format` is null until the first scan is done.
+    - `stream` (default): read from S3 on every request. It is **read-only**: you can list, view, detect, tag and send it, but not change it. Linking returns at once: a dc-lane job `dc-scan:<bid>:` lists the objects (in parallel, `s3list.py`) and detects the format, with the object count as progress and Cancel. `ls` never lists the whole prefix inline: a stale detection (older than `S3_TTL`, 1 h) is returned as it is while a scan job refreshes it, and `format` is null until the first scan is done. A scan that failed or was cancelled is not queued again by `ls` for `SCAN_RETRY` (5 min), and a failed / cancelled check of the downloaded folders not for `CHECK_TTL` (10 min): the page polls `ls` every second while a folder lists, and must not re-list S3 on each poll.
     - `local`: a pull job downloads every object into `local_root` (`<data_root>/.s3/<name>-<id>`). Once the first pull has finished (`synced_at`), the bucket reads and writes that copy, so it is editable, undoable and exportable like a local bucket. Its `kind` stays `s3` and `root` is the copy.
     - Re-sync (`sync`) downloads again. An object replaces the local file with the same name, unless that file is unchanged (same size, and the mtime the pull set to the object's LastModified), which is skipped; files only the copy has are kept, and nothing is deleted. Downloads start while the listing still runs (`extra` shows `listing… n found`; `total` is set once the listing ends); objects of 64 MB or more are fetched in parallel ranges.
     - Switching back to `stream` keeps the copy on disk.
+    - **Per-folder local copy** (stream mode): `fetch_local` downloads only the picked folders / files into `local_root` (table `app.dc_s3_local`, one row per downloaded path, `''` = all after a full pull). The bucket stays streamed and read-only. Reads of a downloaded file come from disk (the S3 copy only when it is outdated; the outdated copy is the fallback while offline). `ls` gives each entry `local` (`fresh | outdated | new | gone | partial | fetching | error`, null = stream only), `here` (the row holding the folder) and `local_folders`. A `dc-check:<bid>` job compares the rows with S3 every `CHECK_TTL` (10 min) while browsing (`check_local` runs it at once).
+    - **Progressive listing** (`s3dir.py`): an S3 folder is listed in the background. `ls` answers after `LS_WAIT` (0.8 s) with what it has (`partial: true`, `loaded`) and later pages come from the same listing. At most 4 folders list at once, and 16 listings / 1M entries are kept 60 s.
+    - **Offline**: an unreachable endpoint (connect / read timeout, refused) opens a 30 s circuit breaker per connection. `ls` then lists only the downloaded folders (`offline: true`, `error`), other folders give 503, and `ls?retry=1` asks again at once. Interactive reads share one client per connection (3 s connect timeout, 2 attempts).
 - **Path**: relative to the bucket root, POSIX, no leading slash; `''` is the root. Every resolved local path is checked with `connections.check_local`; `..`, absolute paths and symlinks that escape are rejected with 400.
 - **Tags**: each one is on `(bucket, path)`, where `path=''` is the bucket itself. Tags are `{tag, auto}`. **Auto** tags are written only by format detection, as `format:<key>`. Users cannot remove them, and they are swapped when the format changes. User tags are cleaned with `core/names.clean_tags`.
 
@@ -33,6 +36,9 @@ get_bucket(user, bid)                                          -> Bucket
 create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_bucket=None, prefix='', tags=(), mode='stream')
     -> Bucket (+ job_id when an s3 link starts with mode='local'; + scan_job_id, the dc-scan job, for a streamed one)
 update_bucket(user, bid, name=None, mode=None)                 -> Bucket (+ job_id when switched to local)
+fetch_local(user, bid, paths, mirror=False)                    -> {job_id, paths, result}   # stream: download folders (again = update)
+check_local(user, bid)                                         -> {job_id}   # compare the downloaded folders with S3
+drop_local(user, bid, paths)                                   -> {removed}  # delete their local copy
 sync(user, bid)                                                -> {job_id, result}   # s3 + mode local: (re)pull
     # result {downloaded, skipped (unchanged), bytes, failed: [{path, error}] (first 50), total}
 export(user, bid, path='')                                     -> (zip name, chunk iterator)
@@ -117,7 +123,7 @@ import_source(user, source, ref, name=None, connection_id=None, opts={}, bucket=
 reimport(user, bid)                                            -> {job_id, bucket}   # the last import again
 delete_bucket(user, bid, delete_files=False)                   -> {ok}
 summary(user)                                                  -> {buckets, images, size, managed: {used, free}, links: {local, s3}}
-ls(user, bid, path='', offset=0, limit=500, sort='name'|'-mtime'|'size', q='')
+ls(user, bid, path='', offset=0, limit=500, sort='name'|'-mtime'|'size', q='', retry=False)   # s3 stream: + partial, loaded, here, offline; entries + local
     -> {path, total, entries: [Entry], format: Format|None, tags: [Tag], writable}
 read_file(user, bid, path, w=None) -> (bytes, media_type)      # w: scaled JPEG thumbnail (cached), else the raw file
 read_text(user, bid, path, limit=65536) -> {text, truncated, size, mtime_ns, encoding, newline, editable, reason?}
@@ -132,6 +138,14 @@ ops(user, bid, ops) -> {applied: [..], errors: [{op, error}], undo_id, retagged:
     `to` is a destination folder; delete moves into `<data_root>/.trash/<undo_id>/`, and undo restores it.
 undo(user, bid, undo_id) -> {restored, errors, retagged}
 upload(user, bid, path, files: [(name, fileobj)], unzip=True) -> {added, skipped, retagged}   # zip / tar / tar.gz / tar.bz2 / tar.xz / 7z unpacked
+upload_part(user, bid, path, name, uid, offset, total, data: bytes, unzip=True) -> {received, ranges} | {added, skipped, retagged, done: True}
+    # one chunk of a big file (the page sends files over its chunk size this way, so a proxy that refuses large
+    # requests still lets them through). Chunks may come in any order, in parallel and more than once: written in
+    # place into the hidden .upload-<uid>.part of the folder, the ranges held in .upload-<uid>.json beside it; the
+    # file is placed like upload() once all `total` bytes are in (exactly once). A name upload() would skip (dot
+    # part, file already there) answers done before any bytes are kept. Parts left for a day are removed.
+    # The page's uid: the first 32 hex of SHA-256(bid|path|name|size|lastModified), so a re-upload resumes.
+part_status(user, bid, path, name, uid, total, unzip=True) -> {received, ranges} | {skipped: 1, done: True}
 set_tags(user, bid, path='', add=(), remove=()) -> [Tag]
 all_tags(user) -> [{tag, count, auto}]
 detect(user, bid, path='', force=False) -> Format
@@ -164,6 +178,8 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | POST | `/api/dc/buckets/{bid}/ops` `{ops}` | ops |
 | POST | `/api/dc/buckets/{bid}/undo` `{undo_id}` | undo |
 | POST | `/api/dc/buckets/{bid}/upload?path=` multipart `files` | upload |
+| POST | `/api/dc/buckets/{bid}/upload/part?path=&name=&id=&offset=&total=` raw body (≤ 64 MB) | upload_part |
+| GET | `/api/dc/buckets/{bid}/upload/part?path=&name=&id=&total=` | part_status (what a resume still has to send) |
 | PUT | `/api/dc/buckets/{bid}/tags` `{path, add, remove}` | set_tags |
 | GET | `/api/dc/buckets/{bid}/detect?path=&force=` | detect |
 | GET | `/api/dc/buckets/{bid}/stats?path=` | stats |
@@ -171,6 +187,9 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | GET | `/api/dc/search?q=&tag=&format=&bucket=&path=&glob=` | search |
 | POST | `/api/dc/send` `{bucket, paths, target, name, task_type}` | send |
 | POST | `/api/dc/buckets/{bid}/sync` | sync |
+| POST | `/api/dc/buckets/{bid}/local` `{paths, mirror}` | fetch_local (data.manage) |
+| POST | `/api/dc/buckets/{bid}/local/check` | check_local (data.manage) |
+| POST | `/api/dc/buckets/{bid}/local/remove` `{paths}` | drop_local (data.manage) |
 | GET | `/api/dc/buckets/{bid}/export?path=` | export (a streamed zip) |
 | GET | `/api/dc/buckets/{bid}/export/check?path=` | export_check |
 | POST | `/api/dc/buckets/{bid}/export` `{path, target, create_bucket, overwrite}` | export_to (data.manage) |
