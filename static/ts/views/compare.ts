@@ -49,6 +49,8 @@ const U: CmpUi = { members: [], params: {}, seq: 0, running: false, quick: null,
   union: null, rerun: undefined };
 
 const cmp = (): CmpState => { if (!S.cmp) throw new Error('not a combined dataset'); return S.cmp; };
+/** `t` with box / boxes said as image / images on an image-only combined dataset. */
+const unitText = (t: string): string => (isImageUnit() ? t.replace(/\b([Bb])ox(es)?\b/g, (_, b: string, es?: string) => `${b === 'B' ? 'I' : 'i'}mage${es ? 's' : ''}`) : t);
 /** 'box' / 'boxes', or 'image' / 'images' on a combined dataset of image-only members (one point per image). */
 const unitWord = (count: number, cap = false): string => {
   const w = isImageUnit() ? (count === 1 ? 'image' : 'images') : (count === 1 ? 'box' : 'boxes');
@@ -92,6 +94,7 @@ const seg = (attr: string, items: Array<[string, string, string]>, cur: string):
     `<button type="button" class="view-btn${v === cur ? ' active' : ''}" data-${attr}="${v}" aria-pressed="${v === cur}" title="${esc(title)}">${label}</button>`).join('')}</div>`;
 
 function skeleton(): string {
+  const img = isImageUnit(), iou = img ? ' hidden' : '';      // one point per image: every box is the whole image
   return `<div class="cmp-pick">
       <label class="cmp-sel"><span class="cmp-tag" data-side="a">A</span><select id="cmp-a" aria-label="Dataset A"></select></label>
       <button type="button" id="cmp-swap" class="icon-btn ghost" title="Swap A and B" aria-label="Swap A and B">⇄</button>
@@ -99,9 +102,9 @@ function skeleton(): string {
       <button type="button" id="cmp-run" class="primary">${icon('refresh')}Compare</button>
     </div>
     <details class="cmp-params"><summary class="muted">Matching</summary>
-      <div class="m-ctl"><span class="m-lbl" title="Boxes of one image pair are matched when their IoU reaches this">match IoU</span>
+      <div class="m-ctl${iou}"><span class="m-lbl" title="Boxes of one image pair are matched when their IoU reaches this">match IoU</span>
         <input id="cmp-iou-match" type="range" min="0.1" max="0.9" step="0.05" value="0.5"><span id="cmp-iou-match-v" class="num">0.50</span></div>
-      <div class="m-ctl"><span class="m-lbl" title="A matched box with an IoU at least this counts as the same box (else moved)">same IoU</span>
+      <div class="m-ctl${iou}"><span class="m-lbl" title="A matched box with an IoU at least this counts as the same box (else moved)">same IoU</span>
         <input id="cmp-iou-same" type="range" min="0.5" max="1" step="0.01" value="0.9"><span id="cmp-iou-same-v" class="num">0.90</span></div>
       <div class="m-ctl"><span class="m-lbl" title="Images with different content are paired by name: which part of the name">names by</span>
         <select id="cmp-name-key"><option value="rel">path</option><option value="stem">name without extension</option><option value="basename">file name</option></select></div>
@@ -109,7 +112,7 @@ function skeleton(): string {
     <div id="cmp-status" class="cmp-status muted hint" role="status" aria-live="polite"></div>
     <h3 class="cmp-h">Images</h3>
     <div id="cmp-img-cards" class="cmp-cards"></div>
-    <h3 class="cmp-h">Boxes</h3>
+    <h3 class="cmp-h">${img ? 'Labels' : 'Boxes'}</h3>
     <div id="cmp-box-cards" class="cmp-cards"></div>
     <h3 class="cmp-h">On the map</h3>
     <div class="m-ctl"><span class="m-lbl">Show</span>${seg('show', [['a', 'A', 'Only the boxes of A'], ['b', 'B', 'Only the boxes of B'],
@@ -136,8 +139,8 @@ function skeleton(): string {
       <th class="r" title="boxes B has that A does not">+</th><th class="r" title="boxes A has that B does not">−</th><th class="r" title="boxes that changed class into / out of this class">reclass</th></tr></thead><tbody></tbody></table></div>
     <details id="cmp-conf-d" class="cmp-sec"><summary>Class changes A → B <span class="muted">matched boxes only</span></summary>
       <div id="cmp-confusion" class="cmp-chart"></div></details>
-    <details id="cmp-hist-d" class="cmp-sec"><summary>Box statistics <span class="muted">A vs B, KS distance</span></summary>
-      <div class="cmp-hists"><div id="cmp-h-area" class="cmp-chart sm"></div><div id="cmp-h-aspect" class="cmp-chart sm"></div>
+    <details id="cmp-hist-d" class="cmp-sec"><summary>${img ? 'Image' : 'Box'} statistics <span class="muted">A vs B, KS distance</span></summary>
+      <div class="cmp-hists"><div id="cmp-h-area" class="cmp-chart sm${iou}"></div><div id="cmp-h-aspect" class="cmp-chart sm${iou}"></div>
       <div id="cmp-h-brightness" class="cmp-chart sm"></div><div id="cmp-h-blur" class="cmp-chart sm"></div></div></details>
     <h3 class="cmp-h">Members</h3>
     <div id="cmp-members" class="cmp-members"></div>
@@ -433,7 +436,7 @@ function renderCards(): void {
     return card('img', k, label, v, col(), `${title}${sm ? ' · click: these images in the browser' : ''}`, sbs);
   }).join('');
   $req('cmp-box-cards').innerHTML = BOX_CARDS.map(([k, label, f, kind, , , title]) =>
-    card('box', k, label, sm ? f(sm) : null, diffColor(kind), `${title}${sm ? ' · click: these boxes in the gallery' : ''}`)).join('');
+    card('box', k, label, sm ? f(sm) : null, diffColor(kind), unitText(`${title}${sm ? ' · click: these boxes in the gallery' : ''}`))).join('');
 }
 
 function openImageList(k: CmpListKey): void {
@@ -642,6 +645,7 @@ function renderHists(): void {
   const P = pts();
   const mask = S.filterMask ?? null;
   for (const [id, col, label, log] of HISTS) {
+    if (isImageUnit() && (col === 'area' || col === 'aspect')) continue;     // the whole image: always 1 / its shape
     const v = P[col];
     const edges = sharedEdges(v, 30, log);
     const { ha, hb, ks } = histPair(v, C.origin, C.a, C.b, mask, edges);

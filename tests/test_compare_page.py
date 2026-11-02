@@ -204,3 +204,46 @@ def test_compare_tab_end_to_end(server, tmp_path):  # noqa: F811
         shot('dark-viewer-side-by-side')
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_combined_image_only_datasets(server, tmp_path):  # noqa: F811
+    """Two folders of images with no labels (one point per image, every image class 'image'): the combined map opens
+    coloured by dataset, identical images share one grey trace, A and B keep distinct colours, box-only controls hide."""
+    a, b = tmp_path / 'imgA', tmp_path / 'imgB'
+    b.mkdir()
+    for k in range(5):                                   # same bytes on both sides
+        make_jpeg(a / f'common{k}.jpg', 96, 72, color=(30 + 40 * k, 200 - 30 * k, (53 * k) % 255))
+        shutil.copy(a / f'common{k}.jpg', b / f'common{k}.jpg')
+    make_jpeg(a / 'onlya.jpg', 96, 72, color=(250, 250, 10))
+    make_jpeg(b / 'onlyb1.jpg', 96, 72, color=(10, 250, 250))
+    make_jpeg(b / 'onlyb2.jpg', 96, 72, color=(250, 10, 250))
+    A = _send(f'{server}/api/datasets', {'kind': 'local', 'name': 'pics A', 'path': str(a)})
+    B = _send(f'{server}/api/datasets', {'kind': 'local', 'name': 'pics B', 'path': str(b)})
+    U = _send(f'{server}/api/datasets', {'kind': 'union', 'name': 'pics A + pics B', 'reuse': True,
+                                         'parts': [{'id': A['id'], 'alias': 'A'}, {'id': B['id'], 'alias': 'B'}]})
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1280, 'height': 800})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.goto(f'{server}/s/{U["id"]}/#compare')
+        page.wait_for_selector('#cmp-side:not(.hidden)', timeout=90000)
+        page.wait_for_function(SUMMARY, timeout=60000)
+        assert page.eval_on_selector('#color-by', 'e => e.value') == 'origin'
+        # one point per image: the IoU sliders and the area / aspect histograms say nothing, so they are hidden
+        assert not page.locator('#cmp-iou-match').is_visible() and not page.locator('#cmp-iou-same').is_visible()
+        assert page.locator('#cmp-name-key').count() == 1
+        assert 'Shared images in grey' in page.locator('#cmp-body').inner_text()
+        page.click('#btn-compute')
+        page.wait_for_function(f'({DOTS})() > 0 && document.getElementById("plot-wait").classList.contains("hidden")', timeout=90000)
+        traces = "(document.getElementById('plot').data || []).filter(t => /^(same in|A |B )/.test(String(t.name)))" \
+                 ".map(t => [String(t.name), t.marker.color])"
+        page.wait_for_function(f"{traces}.length === 3", timeout=20000)
+        tr = dict(page.evaluate(traces))
+        assert set(tr) == {'same in A and B (10)', 'A (1)', 'B (2)'}, tr
+        assert len(set(tr.values())) == 3, tr                # three distinct colours, not one
+        page.click('#cmp-hist-d > summary')
+        page.wait_for_selector('#cmp-h-brightness .main-svg', timeout=10000)
+        assert not page.locator('#cmp-h-area').is_visible()
+        browser.close()
+    assert not errors, errors
