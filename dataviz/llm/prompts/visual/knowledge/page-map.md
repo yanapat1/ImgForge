@@ -5,7 +5,7 @@ core: true
 ---
 - **Activity bar** (left icons; the active one collapses the left panel): ◆ AI assistant (`ai`), Explore (`explore`),
   Class stats (`stats`), Curation (`curation`), then the model views Model (`model`) and Evaluation (`eval`), and
-  Compare (`compare`, only for a combined dataset). Settings is the gear at the bottom (Models, AI assistant,
+  Compare (`compare`, only for a combined dataset: label diff A vs B, shared map, Image conditions). Settings is the gear at the bottom (Models, AI assistant,
   datasets, S3, appearance).
 - **Explore** = gallery on the left, map on the right. The bar above the map, left to right:
   **Projection** popover (Features, Method, the method's parameters, **Re-project**, map quality line, Saved views,

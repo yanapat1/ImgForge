@@ -1,6 +1,6 @@
 ---
 title: Model, Evaluation and Compare views
-summary: run a detector, val / train split, confidence and IoU, leaderboard and findings, Compare A vs B, combined datasets
+summary: run a detector, val / train split, confidence and IoU, leaderboard and findings, Compare A vs B, combined datasets, Image conditions
 ---
 - Detectors are added in Settings › Models. **Model** (`model`): pick a model, Run on this dataset, Images val /
   train / all (val is honest; train looks too good), Confidence (best = the best F1), Match IoU 0.5 / 0.75 / 0.3.
@@ -16,8 +16,11 @@ summary: run a detector, val / train split, confidence and IoU, leaderboard and 
   moved / reclassed / reclassed + moved / unmatched, matched at IoU ≥ 0.5), the shared map, boxes of B unlike anything in A, class
   table, stat histograms; Colour by `origin` / `diff`. A combined dataset opens coloured by `origin` (unless the user
   saved another colouring; always when there is one class, e.g. image-only members whose every image is class
-  `image`, where class colours paint every dot alike). With **Shared boxes in grey** (on by default, after a run) the
+  "image", where class colours paint every dot alike). With **Shared boxes in grey** (on by default, after a run) the
   boxes that are the same in A and B form one grey "same in A and B" trace, so identical dots do not hide each other
   and the A / B colours show only what differs; B is drawn on top of A. The density layer uses A's and B's colours.
   Image-only members (one point per image): the IoU sliders and area / aspect histograms are hidden.
+  Below the stat histograms, **Image conditions** checks camera / lighting shift between A and B (light, blur, noise,
+  colour, capture, cameras, model confidence on A vs B, a preview, augmentation advice): see the Image conditions
+  knowledge, `compare_shift` reads it, skill `check-camera-shift`.
 - Include model checks in Curation adds the model's disagreements to the scan.

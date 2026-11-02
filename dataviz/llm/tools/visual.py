@@ -8,6 +8,8 @@ Read tools (risk read, run at once):
     dataset_summary       counts, per-class table, quality quantiles, curation counts, tags (llm/context.py)
     class_stats           per class: boxes, images, area % / aspect / brightness / blur quantiles, k-NN suspicion
     eval_summary          the Evaluation tab's leaderboard and findings
+    compare_shift         Compare › Image conditions of a combined dataset: will a model trained on A fit B (light,
+                          blur, noise, colour, camera drift, shift-detector AUC, model fit, recommendations)
     list_features         the feature registry (Features dropdown): id, label, group, kind, dims, computed, text
     list_methods          analysis.METHODS (Method dropdown) with parameters, defaults and the page's hints
     projection_quality    trustworthiness / continuity / kNN kept of a computed map
@@ -279,6 +281,42 @@ def _eval_summary(ctx, a):
         return {'evaluation': None, 'note': 'no model has been evaluated on this dataset yet (Model tab: pick a '
                                             'model and Run on this dataset; Settings › Models adds one)'}, '→ no models'
     return {'evaluation': ev}, '→ evaluation'
+
+
+def _compare_shift(ctx, a):
+    """The newest Image-conditions report of this combined dataset (optionally of members a / b), compacted."""
+    st = _state(ctx)
+    if not getattr(st, 'members', None):
+        return {'report': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (home page: pick '
+                                        'them, Combine)'}, '→ not combined'
+    from ...data import compare
+    svc = compare.service(st)
+    want_a, want_b = (a.get('a') or '').strip(), (a.get('b') or '').strip()
+    with svc.lock:
+        entries = list(svc.shifts.values())[::-1]
+    hit = next((e for e in entries if (not want_a or e['a'] == want_a) and (not want_b or e['b'] == want_b)), None)
+    if hit is None:
+        return {'report': None, 'note': 'no Image conditions report yet: open the Compare tab, expand "Image '
+                                        'conditions", pick A (the training data) and B (the new data) and press '
+                                        'Analyse conditions'}, '→ none yet'
+    r = hit['report']
+    keep = ('key', 'label', 'group', 'unit', 'severity', 'delta', 'delta_pct', 'ks', 'psi', 'out_b', 'effect')
+    moved = []
+    for m in sorted((m for m in r['metrics'] if m.get('available')), key=lambda m: -m.get('score', 0)):
+        if m['severity'] == 'ok' and len(moved) >= 6:
+            continue
+        row = {k: (round(m[k], 3) if isinstance(m.get(k), float) else m.get(k)) for k in keep if m.get(k) is not None}
+        row['a_median'], row['b_median'] = round(m['a']['med'], 3), round(m['b']['med'], 3)
+        moved.append(row)
+    models = [{'name': x['name'], 'conf': x['conf'], 'drop': None if x.get('drop') is None else round(x['drop'], 3),
+               **{side: {k: round(v, 3) if isinstance(v, float) else v for k, v in (x.get(side) or {}).items()
+                         if k != 'conf_hist'} for side in ('a', 'b')}} for x in r.get('models') or []]
+    out = {'a': r['a'], 'b': r['b'], 'images': r['n'], 'verdict': r['verdict'],
+           'separability': {k: v for k, v in r['separability'].items()}, 'metrics': moved[:14],
+           'groups': r['groups'], 'cameras': {'new_in_b': r['cameras']['new_in_b'][:8], 'a': r['cameras']['a'][:6],
+                                              'b': r['cameras']['b'][:6]},
+           'models': models, 'recommendations': r['recommendations'], 'hyp_yaml': r['hyp_yaml']}
+    return {'report': out}, f'→ {r["a"]} vs {r["b"]}: {r["verdict"]["level"]}'
 
 
 def _list_features(ctx, a):
@@ -570,6 +608,13 @@ register(Tool('class_stats', 'Per class: boxes, share, images, box area % / aspe
               False, _class_stats, **_R))
 register(Tool('eval_summary', 'The Evaluation tab: models evaluated on this dataset (mAP, P, R, F1, misses), per-class '
                               'AP of the best one and the findings.', _obj({}), False, _eval_summary, **_R))
+register(Tool('compare_shift', 'Compare › Image conditions of a combined dataset: does B (new camera / lighting) look '
+                               'like A (the training data)? Verdict, light / blur / noise / colour / capture metrics '
+                               'that moved (A and B medians, KS, PSI, share of B outside A), shift-detector AUC, new '
+                               'cameras, model confidence / mAP on A vs B, recommendations + augmentation hyp. Reads '
+                               'the report the page computed (Analyse conditions).',
+              _obj({'a': S('member alias of A (default: the newest report)'), 'b': S('member alias of B')}),
+              False, _compare_shift, **_R))
 register(Tool('list_features', 'The feature spaces of the Features dropdown: id, label, kind (clip / siglip / dinov2 / '
                                'yolo / simple), dims, computed or not, text search support.',
               _obj({}), False, _list_features, **_R))

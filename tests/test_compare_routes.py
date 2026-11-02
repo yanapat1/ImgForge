@@ -137,6 +137,13 @@ def test_image_conditions(world, tmp_path):
     a_low = c.get(f'/s/{U}/api/compare/shift/images',
                   params={'key': key, 'which': 'high', 'metric': 'brightness', 'side': 'a'}).json()['names']
     assert len(a_low) == 3 and all(n.startswith('A/') for n in a_low)
+    from types import SimpleNamespace
+
+    from dataviz.llm.tools import visual
+    out, summary = visual._compare_shift(SimpleNamespace(state=world['ctx'].state_for(U)), {})   # the assistant's view
+    assert out['report']['a'] == 'A' and out['report']['verdict']['level'] == rep['verdict']['level']
+    assert out['report']['metrics'] and 'hyp_yaml' in out['report'] and summary.startswith('→ A vs B')
+    assert visual._compare_shift(SimpleNamespace(state=world['ctx'].state_for(U)), {'a': 'B'})[0]['report'] is None
     pv = c.get(f'/s/{U}/api/compare/shift/preview', params={'key': key, 'name': 'A/same.jpg'})
     assert pv.status_code == 200 and pv.headers['content-type'] == 'image/jpeg'
     assert pv.content[:2] == b'\xff\xd8' and 'brightness_gain' in pv.headers['x-shift-params']

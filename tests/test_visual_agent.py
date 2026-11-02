@@ -69,7 +69,7 @@ def run(ctx, name, args=None):
 # ---------------------------------------------------------------- read tools
 def test_tools_are_visual_ctx_tools_without_the_data_center():
     names = {t.name for t in tools.REGISTRY.values() if t.domain == 'visual'}
-    assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'list_features', 'list_methods',
+    assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'compare_shift', 'list_features', 'list_methods',
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
                      'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view'}
     assert all(tools.REGISTRY[n].ctx for n in names)
@@ -117,6 +117,8 @@ def test_eval_features_methods(session):
     ctx = ctx_of(session, VIEW)
     out, _ = run(ctx, 'eval_summary')
     assert out['evaluation'] is None and 'Run on this dataset' in out['note']
+    out, _ = run(ctx, 'compare_shift')
+    assert out['report'] is None and 'combined' in out['note']
     out, _ = run(ctx, 'list_features')
     f = {r['id']: r for r in out['features']}
     assert f['geometry']['computed'] and f['geometry']['dims'] == 8 and f['geometry']['current']
@@ -318,7 +320,7 @@ def test_skills_name_only_real_tools():
     vocab = _vocab() | set(prompting.skills('data')) | args         # a tool's own argument names are fine too
     call = re.compile(r'^([a-z_][a-z0-9_]*)(\(.*\))?$')
     files = sorted((PROMPTS / 'skills').glob('*/*/SKILL.md'))
-    assert len(files) == 15
+    assert len(files) == 16
     for f in files:
         meta, body = prompting.front(f.read_text())
         assert meta['name'] == f.parent.name and meta['description'] and meta['when'], f
