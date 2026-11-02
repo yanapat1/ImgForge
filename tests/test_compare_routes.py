@@ -107,3 +107,39 @@ def test_deleting_a_box_updates_the_diff(world):
     after = c.post(f'/s/{U}/api/compare/run', json={'a': 'A', 'b': 'B'}).json()['summary']
     assert after['boxes']['same'] == before['same'] - 1 and after['boxes']['removed'] == before['removed'] + 1
     assert after['images']['labels_changed'] == 2
+
+
+def test_image_conditions(world, tmp_path):
+    """POST /api/compare/shift: a job measures A's and B's images, the re-POST returns the report (B's three images
+    are darker than A's: brightness flagged), the image lists and the simulated preview; a plain session gets 409."""
+    from PIL import Image
+
+    from conftest import wait_job
+    c, U = world['c'], world['U']
+    for p in sorted((tmp_path / 'dsB' / 'images').glob('*.jpg')):       # B: a darker camera (same names)
+        Image.open(p).convert('RGB').point(lambda v: v // 3).save(p, 'JPEG', quality=95)
+    body = {'a': 'A', 'b': 'B', 'sample': 0}
+    r = c.post(f'/s/{U}/api/compare/shift', json=body)
+    assert r.status_code == 200, r.text
+    first = r.json()
+    if not first['ready']:
+        wait_job(c, first['job_id'])
+        first = c.post(f'/s/{U}/api/compare/shift', json=body).json()
+    assert first['ready'], first
+    rep = first['report']
+    assert rep['n']['a'] == 3 and rep['n']['b'] == 3
+    by = {m['key']: m for m in rep['metrics']}
+    assert by['brightness']['b']['med'] < by['brightness']['a']['med']
+    assert rep['verdict']['level'] in ('fits', 'check', 'shifted') and rep['hyp_yaml'].startswith('#')
+    key = first['key']
+    names = c.get(f'/s/{U}/api/compare/shift/images', params={'key': key, 'which': 'low', 'metric': 'brightness'}).json()
+    assert sorted(names['names']) == ['B/edit.jpg', 'B/onlyb.jpg', 'B/renamed.jpg']
+    a_low = c.get(f'/s/{U}/api/compare/shift/images',
+                  params={'key': key, 'which': 'high', 'metric': 'brightness', 'side': 'a'}).json()['names']
+    assert len(a_low) == 3 and all(n.startswith('A/') for n in a_low)
+    pv = c.get(f'/s/{U}/api/compare/shift/preview', params={'key': key, 'name': 'A/same.jpg'})
+    assert pv.status_code == 200 and pv.headers['content-type'] == 'image/jpeg'
+    assert pv.content[:2] == b'\xff\xd8' and 'brightness_gain' in pv.headers['x-shift-params']
+    assert c.get(f'/s/{U}/api/compare/shift/images', params={'key': 'nope', 'which': 'most_b'}).status_code == 404
+    assert c.post(f'/s/{U}/api/compare/shift', json={'a': 'A', 'b': 'A'}).status_code == 400
+    assert c.post(f'/s/{world["plain"]}/api/compare/shift', json=body).status_code == 409

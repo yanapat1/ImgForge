@@ -95,8 +95,11 @@ def _ap(recall, precision):
     return float(np.trapezoid(np.interp(x, mrec, mpre), x)), np.interp(x, mrec, mpre)
 
 
-def ap_stats(data, split):
+def ap_stats(data, split, img_mask=None):
+    """img_mask: bool per data.images, ANDed with the split (the Compare tab scores members A and B apart)."""
     imask = data.image_mask(split)
+    if img_mask is not None:
+        imask = imask & np.asarray(img_mask, bool)
     tps, confs, pcls, tcls = [], [], [], []
     for i in np.nonzero(imask)[0]:
         g = data.gt_by_img[i]

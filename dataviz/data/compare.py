@@ -9,18 +9,25 @@ while boxes are edited, plus the "quick shared map" (one member's saved view, th
                edits never serves an old diff
     patched()  State.on_boxes_patched(images) -> diff.update() on every result in memory (milliseconds), the
                changed statuses kept for the live feed / the next /api/compare poll
+    shift()    "Image conditions": data/imgstats.py tables of A's and B's images (a sample, cached in each member's
+               own workspace) -> data/shift.py report (+ the appearance AUC of a computed feature, + the fit of
+               every model that already predicted this dataset); in memory (LRU 4) by shift_key()
 """
 
 import hashlib
 import json
 import threading
+import warnings
 from collections import OrderedDict
 
 import numpy as np
 
-from . import diff, imagehash
+from . import diff, imagehash, imgstats
+from . import shift as shiftlib
 
 MAX_MEM = 4
+SHIFT_SAMPLE = 3000              # images measured per side by default (0 = all)
+APPEARANCE_MAX = 4000            # boxes per side the appearance AUC reads
 
 
 def _pkey(params):
@@ -34,6 +41,7 @@ class CompareService:
         self._inp = None                 # (fingerprint, DiffInput, image index by name)
         self.results = OrderedDict()     # (a, b, pkey) -> {'key', 'res'}
         self.changes = {}                # (a, b, pkey) -> {sid: status} since the client last asked
+        self.shifts = OrderedDict()      # shift key -> {'report', 'arrays', 'a', 'b'}
 
     # ------------------------------------------------------------ inputs
     def aliases(self):
@@ -323,6 +331,175 @@ class CompareService:
                 sim[q] = s.max(1)
         info = {'method': 'quick', 'ref': ref, 'feature': feature, 'from': proj[2].get('key'), 'n_ref': int(n)}
         return {'id': np.arange(N), 'xy': xy, 'info': info, 'novel_sim': sim}
+
+
+    # ------------------------------------------------------------ image conditions (domain shift)
+    def shift_key(self, a, b, sample, feature, models_sig=''):
+        st = self.state
+        seed = f'{st.fingerprint}|{a}|{b}|{int(sample or 0)}|{feature or ""}|{models_sig}|{getattr(st, "edit_seq", 0)}'
+        return 'sh' + hashlib.sha1(seed.encode()).hexdigest()[:18]
+
+    def shift_cached(self, key):
+        with self.lock:
+            hit = self.shifts.get(key)
+            if hit is not None:
+                self.shifts.move_to_end(key)
+            return hit
+
+    def shift_by_key(self, key):
+        hit = self.shift_cached(key)
+        if hit is None:
+            raise KeyError(f'no image-conditions report {key!r}: run it again')
+        return hit
+
+    def _member_ws(self, ia):
+        st = self.state
+        blk = st.members[ia]
+        root = getattr(st, 'workspace_root', None)
+        ws = root / blk['ws'] if root is not None and blk.get('ws') else None
+        if ws is None or not ws.is_dir():
+            ws = st.cache_dir / 'compare' / f'imgstats-{blk["alias"]}'
+            ws.mkdir(parents=True, exist_ok=True)
+        return ws
+
+    def shift_table(self, alias, sample, job=None):
+        """imgstats.Table of member `alias` (union names '<alias>/<inner>'), measuring what its cache lacks."""
+        inp, _ = self.inputs()
+        ia = self.member_index(alias)
+        pre = f'{alias}/'
+        inner = [nm[len(pre):] for nm, o in zip(inp.images, inp.img_origin.tolist()) if o == ia and nm.startswith(pre)]
+        pick = imgstats.sample(inner, sample)
+        src = self.state.source
+        sig = getattr(src, 'image_sig', None)
+        prog = None
+        if job is not None:
+            prog = lambda d, t, stage: job.progress(d, t, f'{stage} · {alias}')
+        t = imgstats.ensure(self._member_ws(ia), pick, lambda n: src.read_image_bytes(pre + n),
+                            (lambda n: sig(pre + n)) if sig else None, progress=prog,
+                            cancelled=getattr(job, 'cancelled', None))
+        t.names = [pre + n for n in t.names]
+        return t, len(inner)
+
+    def appearance_auc(self, feature, ia, ib, job=None):
+        """Cross-validated AUC of telling A's boxes from B's by a computed feature (PCA-32), None when not computed."""
+        st = self.state
+        if not feature or not (feature in st.features or st.feature_cached(feature)):
+            return None
+        from ..ml import features as feats
+        X = np.asarray(st.get_features(feature, job), np.float32)
+        inp, _ = self.inputs()
+        rng = np.random.default_rng(0)
+        ids = []
+        for side in (ia, ib):
+            s = np.nonzero((inp.origin == side) & inp.alive)[0]
+            if len(s) > APPEARANCE_MAX:
+                s = np.sort(rng.choice(s, APPEARANCE_MAX, replace=False))
+            ids.append(s)
+        if min(len(ids[0]), len(ids[1])) < 5:
+            return None
+        Z = feats.l2_normalize(X[np.r_[ids[0], ids[1]]])
+        k = min(32, Z.shape[1], Z.shape[0] - 1)
+        if k >= 2 and Z.shape[1] > k:
+            from sklearn.decomposition import PCA
+            Z = PCA(n_components=k, svd_solver='randomized', random_state=0).fit_transform(Z)
+        y = np.r_[np.zeros(len(ids[0]), np.int8), np.ones(len(ids[1]), np.int8)]
+        auc, _, _ = shiftlib.domain_auc(Z, y)
+        return None if auc is None else {'feature': feature, 'auc': auc, 'words': shiftlib.auc_words(auc),
+                                         'n_a': len(ids[0]), 'n_b': len(ids[1])}
+
+    def shift(self, a, b, sample=SHIFT_SAMPLE, feature=None, models=(), key=None, job=None):
+        """The image-conditions report of A vs B (data/shift.py). models: [(model dict, evaluate.Data, conf)] of
+        models that already predicted this dataset. Memoised under `key` (shift_key)."""
+        if a == b:
+            raise ValueError('pick two different members to compare')
+        ia, ib = self.member_index(a), self.member_index(b)
+        key = key or self.shift_key(a, b, sample, feature)
+        hit = self.shift_cached(key)
+        if hit is not None:
+            return key, hit
+        ta, na = self.shift_table(a, sample, job)
+        tb, nb = self.shift_table(b, sample, job)
+        if job is not None:
+            job.progress(stage='comparing image conditions')
+        report, arrays = shiftlib.build(ta, tb, a, b, totals={'total_a': na, 'total_b': nb, 'sample': int(sample or 0)})
+        try:
+            app = self.appearance_auc(feature, ia, ib, job)
+        except Exception:              # noqa: BLE001 - the feature is extra evidence, never a failure of the report
+            app = None
+        report['separability']['appearance'] = app
+        if models:
+            from ..models import evaluate
+            vecs = {**dict(zip(ta.names, ta.vec)), **dict(zip(tb.names, tb.vec))}
+            px = [m for m in report['metrics'] if m['available'] and m['group'] in shiftlib.PIXEL_GROUPS]
+            keys = [m['key'] for m in sorted(px, key=lambda m: -m['score'])[:6]]
+            for k in ('brightness', 'contrast', 'sharpness', 'noise'):
+                if k not in keys and any(m['key'] == k for m in px):
+                    keys.append(k)
+            for m, d, conf in models:
+                side = np.array([ia if nm.startswith(f'{a}/') else ib if nm.startswith(f'{b}/') else -1
+                                 for nm in d.images], np.int16)
+                fit = shiftlib.model_fit(d, side, ia, ib, conf, lambda mask, d=d: evaluate.ap_stats(d, 'all', mask),
+                                         vecs, keys)
+                report['models'].append({'id': m['id'], 'name': m['name'], **fit})
+        report['verdict'] = shiftlib.verdict(report)
+        report['key'] = key
+        meds = {}
+        for side, t in (('a', ta), ('b', tb)):
+            with warnings.catch_warnings():               # an all-NaN column (no EXIF): no median, no warning
+                warnings.simplefilter('ignore', RuntimeWarning)
+                med = np.nanmedian(t.vec, axis=0) if len(t.names) else np.full(len(imgstats.KEYS), np.nan)
+            meds[side] = {k: float(v) for k, v in zip(imgstats.KEYS, med) if np.isfinite(v)}
+        entry = {'report': report, 'arrays': arrays, 'a': a, 'b': b, 'med': meds}
+        with self.lock:
+            self.shifts[key] = entry
+            while len(self.shifts) > MAX_MEM:
+                self.shifts.popitem(last=False)
+        return key, entry
+
+    @staticmethod
+    def shift_images(entry, which, metric=None, side='b', cap=2000):
+        """Image names of a report: outside (B outside A's p1..p99 of `metric`, farthest first), low / high (side's
+        images by `metric`), most_b (B images the shift detector is surest are B)."""
+        ar = entry['arrays']
+        names = ar['names_b'] if side == 'b' else ar['names_a']
+        vec = ar['vec_b'] if side == 'b' else ar['vec_a']
+        if which == 'most_b':
+            p = ar.get('p_b')
+            if p is None or not len(p):
+                return []
+            return [ar['names_b'][i] for i in np.argsort(-p)[:cap]]
+        if metric not in imgstats.COL:
+            raise KeyError(f'unknown metric {metric!r}')
+        v = vec[:, imgstats.COL[metric]]
+        ok = np.isfinite(v)
+        if which in ('low', 'high'):
+            ix = np.nonzero(ok)[0]
+            ix = ix[np.argsort(v[ix] if which == 'low' else -v[ix], kind='stable')]
+            return [names[i] for i in ix[:cap]]
+        if which == 'outside':
+            row = next((m for m in entry['report']['metrics'] if m['key'] == metric), None)
+            if not row or not row.get('available'):
+                return []
+            lo, hi = row['band']
+            dist = np.where(v < lo, lo - v, np.where(v > hi, v - hi, 0.0))
+            ix = np.nonzero(ok & (dist > 0))[0]
+            ix = ix[np.argsort(-dist[ix], kind='stable')]
+            return [names[i] for i in ix[:cap]]
+        raise KeyError(f'unknown list {which!r}')
+
+    def shift_preview(self, entry, name, strength=1.0, max_side=1024):
+        """(JPEG bytes, params) of image `name` moved from A's to B's median conditions (shift.simulate)."""
+        import io
+
+        from PIL import Image, ImageOps
+        im = ImageOps.exif_transpose(Image.open(io.BytesIO(self.state.source.read_image_bytes(name))))
+        im = im.convert('RGB')
+        if max(im.size) > max_side:
+            im.thumbnail((max_side, max_side), Image.BILINEAR)
+        out, prm = shiftlib.simulate(np.asarray(im), entry['med']['a'], entry['med']['b'], strength)
+        buf = io.BytesIO()
+        Image.fromarray(out).save(buf, 'JPEG', quality=90)
+        return buf.getvalue(), prm
 
 
 def service(state):
