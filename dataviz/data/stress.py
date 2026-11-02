@@ -278,7 +278,7 @@ def run(state, m, fp, workdir, names, axes, conf, job=None, labelled=True):
         nc = int(max([int(d[:, 5].max()) + 1 for d in raw_clean if len(d)] or [1]))
         gt = [(nm, d[k, :4].tolist(), int(d[k, 5])) for nm, d in zip(names, clean_ref) for k in range(len(d))]
     clean = _scores(names, gt, nc, [to_ds(d) for d in raw_clean], sizes, conf)
-    result = {'model': {'id': m['id'], 'name': m['name']}, 'n': len(names), 'labelled': bool(labelled),
+    result = {'model': {'id': m['id'], 'name': m['name']}, 'n': len(names), 'names': names[:12], 'labelled': bool(labelled),
               'n_labels': len(gt), 'conf': conf, 'clean': clean,
               'score_key': 'map50' if gt else 'mean_top', 'axes': []}
     for a in axes:

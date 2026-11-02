@@ -186,16 +186,20 @@ def blur_direction(ys, sigma):
     """0 = blur the same every way (defocus / none), towards 1 = edges smeared one way (motion blur): 1 - min / max of
     the second-derivative energy along 4 directions of the sigma-1 blurred luma `ys`, white noise of `sigma` removed.
     A second derivative falls with the cube of the smear, so a few pixels of motion stand out of the content's own
-    direction mix."""
+    direction mix. NaN when no direction keeps detail above the noise."""
     import cv2
     if not _DIR_GAIN:                                        # unit white noise -> energy per direction (once)
         d = np.zeros((31, 31), np.float32)
         d[15, 15] = 1.0
         _DIR_GAIN.extend(float((k * k).sum()) for k in _dir_derivs(cv2.GaussianBlur(d, (0, 0), 1.0)))
     yv = ys.astype(np.float32)
-    e = [max(float(cv2.mean(k * k)[0]) - sigma * sigma * g, 0.0) for k, g in zip(_dir_derivs(yv), _DIR_GAIN)]
-    hi = max(e)
-    return 1.0 - min(e) / hi if hi > 1e-6 else 0.0
+    raw = [float(cv2.mean(k * k)[0]) for k in _dir_derivs(yv)]
+    noise = [sigma * sigma * g for g in _DIR_GAIN]
+    # every direction must keep detail well above its noise share, or the ratio is noise: not measurable
+    if min(r - nz for r, nz in zip(raw, noise)) < max(noise) or max(raw) <= 1e-6:
+        return math.nan
+    e = [r - nz for r, nz in zip(raw, noise)]
+    return 1.0 - min(e) / max(e)
 
 
 def noise_sigma(gray):

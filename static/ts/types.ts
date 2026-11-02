@@ -395,6 +395,7 @@ export interface ShiftMetric {
   n_a: number; n_b: number; a?: ShiftQ; b?: ShiftQ; delta?: number; delta_pct?: number | null; ratio?: number | null;
   effect?: number; ks?: number; psi?: number; w1?: number; out_a?: number; out_b?: number; band?: [number, number];
   score?: number; low_n?: boolean; edges?: number[]; ha?: number[]; hb?: number[];
+  ci?: [number, number]; p?: number; q?: number; significant?: boolean;   // 95 % bootstrap CI of Δ, KS p, BH q
 }
 export interface ShiftModelSide {
   images: number; labels: number; mean_top: number; none_found: number; per_image: number; conf_hist: number[];
@@ -404,6 +405,7 @@ export interface ShiftCurve { x: number[]; a: Array<number | null>; b: Array<num
 export interface ShiftModel {
   id: string; name: string; a: ShiftModelSide | null; b: ShiftModelSide | null; conf: number; hist_bins: number[];
   drop?: number; map_drop?: number; conf_vs?: Record<string, ShiftCurve>;
+  map_vs?: Record<string, { x: number[]; map50: Array<number | null>; labels: number[] }>;
 }
 export interface ShiftRec { key: string; severity: ShiftSeverity; text: string; aug?: Record<string, string | number> }
 export interface ShiftReport {
@@ -412,14 +414,41 @@ export interface ShiftReport {
   metrics: ShiftMetric[];
   groups: Record<string, { worst: ShiftSeverity; n: number }>;
   curves: Record<'luma' | 'r' | 'g' | 'b', { a: number[]; b: number[] }>;
-  scatter: Record<'a' | 'b', Record<string, number[]>>;
+  scatter: Record<'a' | 'b', Record<string, Array<number | null>>>;
+  day: boolean;                                       // EXIF times on >= 30 % of a side: the light-over-the-day chart
+  light_map: { grid: number; a: number[][]; b: number[][]; diff: number[][] } | null;
+  exposure_mix: { classes: string[]; edges: number[]; low_contrast: number;
+    a: { share: number[]; n: number; flat: number }; b: { share: number[]; n: number; flat: number } };
+  correction: { lut: number[][]; residual: Record<'r' | 'g' | 'b', number>; before: Record<'r' | 'g' | 'b', number> } | null;
   cameras: { a: Array<[string, number]>; b: Array<[string, number]>; new_in_b: Array<[string, number]>; js: number };
   formats: { a: Array<[string, number]>; b: Array<[string, number]> };
   separability: { auc: number | null; words: string; drivers: Array<{ key: string; label: string; weight: number }>;
-    appearance: { feature: string; auc: number; words: string; n_a: number; n_b: number } | null };
+    appearance: { feature: string; auc: number; words: string; n_a: number; n_b: number; coverage?: number | null; frechet?: number | null } | null };
   recommendations: ShiftRec[];
   hyp: Record<string, number>; hyp_yaml: string;
   models: ShiftModel[];
   verdict: { level: 'fits' | 'check' | 'shifted'; score: number; title: string; text: string; drivers: string[]; n_major: number; n_moderate: number };
 }
 export type ShiftResult = { ready: true; key: string; report: ShiftReport } | NotReady;
+
+/** Compare › Image conditions › Stress test (data/stress.py). */
+export interface StressAxisInfo { key: string; label: string; levels: number[]; neutral: number; unit: string; metric: string }
+export interface StressScores { mean_top: number; none_found: number; per_image: number; map50?: number; map?: number; p?: number; r?: number }
+export interface StressRow extends StressScores { level: number }
+export interface StressAxis { key: string; label: string; unit: string; neutral: number; metric: string; rows: StressRow[];
+  curve: { levels: number[]; y: Array<number | null> } }
+export interface StressRun {
+  key: string; member: string; model: { id: string; name: string }; n: number; names: string[]; labelled: boolean;
+  n_labels: number; conf: number; clean: StressScores; score_key: 'map50' | 'mean_top'; axes: StressAxis[];
+}
+export interface StressAxisSummary {
+  key: string; label: string; unit: string; window: [number, number]; open: [boolean, boolean]; worst: number;
+  b: { level: number; beyond: boolean; band: [number, number] | null } | null;
+  expected?: number; drop?: number; status?: 'ok' | 'moderate' | 'major';
+}
+export interface StressSummary {
+  axes: StressAxisSummary[]; score_key: string; clean: number; threshold: number;
+  headline: { expected: number; clean: number; drop: number; axis: string; label: string; status: string } | null;
+  advice: Array<{ key: string; severity: ShiftSeverity; text: string }>;
+}
+export type StressResult = { ready: true; key: string; result: StressRun; summary: StressSummary } | NotReady;

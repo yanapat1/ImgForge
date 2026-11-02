@@ -3,7 +3,10 @@
 // (data/shift.py): a verdict, per-metric drift (light, sharpness, noise, colour, capture: KS / PSI / B outside A's
 // range), the light curve and RGB curves, scatter plots, the cameras, the shift-detector AUC, the fit of every model
 // that already ran here, recommendations with an Ultralytics hyp snippet, and a preview of an A image as B's
-// conditions would make it (api/compare/shift/preview). Loaded on demand by views/compare.ts, which owns A / B.
+// conditions would make it (api/compare/shift/preview), or of a B image through the B -> A correction LUT
+// (mode=correct, LUT download). Also the light map (4x4 mean luma: vignetting, uneven light, direction), the exposure
+// mix, light over the day (EXIF times), embedding coverage and the Stress test (views/compare-stress.ts, loaded when
+// its <details> opens). Loaded on demand by views/compare.ts, which owns A / B.
 
 import type * as PL from 'plotly.js';
 import type { Job, ShiftCurve, ShiftMetric, ShiftModel, ShiftReport, ShiftResult, ShiftSeverity } from '../types.js';
@@ -21,7 +24,11 @@ import { switchTab } from './layout.js';
 declare const Plotly: typeof import('plotly.js');
 
 /** The charts of this section (compare.ts adds them to CMP_PLOTS for resizing). */
-export const SHIFT_PLOTS = ['shf-metric-chart', 'shf-light', 'shf-scatter', 'shf-model-conf', 'shf-model-vs'];
+export const SHIFT_PLOTS = ['shf-metric-chart', 'shf-light', 'shf-scatter', 'shf-model-conf', 'shf-model-vs', 'shf-lightmap',
+  'shf-exposure', 'shf-day', 'shf-stress-chart'];
+
+/** The Stress test (views/compare-stress.ts), loaded when its section first opens. */
+let stressMod: typeof import('./compare-stress.js') | null = null;
 
 export interface ShiftHost {
   pair: () => { a: number; b: number };     // member indices of A and B
@@ -32,11 +39,12 @@ export interface ShiftHost {
 type Group = 'all' | 'light' | 'sharpness' | 'noise' | 'colour' | 'capture';
 interface ShiftUi {
   host: ShiftHost | null; report: ShiftReport | null; seq: number; running: boolean; group: Group; metric: string;
-  curve: 'luma' | 'rgb'; scatter: 'light' | 'blur' | 'colour'; model: number; vs: string; strength: number;
+  curve: 'luma' | 'rgb'; scatter: 'light' | 'blur' | 'colour' | 'temp' | 'layout'; model: number; vs: string;
+  vsKind: 'conf' | 'map'; strength: number; pmode: 'as_b' | 'correct';
   previewA: string; previewB: string; previewUrl: string; sample: number;
 }
 const H: ShiftUi = { host: null, report: null, seq: 0, running: false, group: 'all', metric: 'brightness', curve: 'luma',
-  scatter: 'light', model: 0, vs: '', strength: 1, previewA: '', previewB: '', previewUrl: '', sample: 3000 };
+  scatter: 'light', model: 0, vs: '', vsKind: 'conf', strength: 1, pmode: 'as_b', previewA: '', previewB: '', previewUrl: '', sample: 3000 };
 
 const GROUPS: Array<[Group, string]> = [['all', 'All'], ['light', 'Light'], ['sharpness', 'Blur'], ['noise', 'Noise'], ['colour', 'Colour'], ['capture', 'Capture']];
 const SEV_LABEL: Record<ShiftSeverity, string> = { ok: 'ok', minor: 'minor', moderate: 'moderate', major: 'major', 'n/a': 'n/a' };
@@ -45,7 +53,11 @@ const SCATTERS: Record<ShiftUi['scatter'], [string, string, string, boolean, boo
   light: ['brightness', 'contrast', 'Light: brightness × contrast', false, false],
   blur: ['sharpness', 'noise', 'Sharpness × noise (log)', true, true],
   colour: ['saturation', 'cast_b', 'Colour: saturation × blue(−) / yellow(+)', false, false],
+  temp: ['cct', 'brightness', 'Colour temperature (K) × brightness', false, false],
+  layout: ['vignetting', 'uniformity', 'Light layout: corners / centre × uneven light', false, false],
 };
+const SCATTER_LABEL: Record<ShiftUi['scatter'], string> = { light: 'Light', blur: 'Blur × noise', colour: 'Colour', temp: 'Temperature', layout: 'Light layout' };
+const EXPOSURE_LABEL: Record<string, string> = { dark: 'dark < 60', dim: 'dim 60–100', normal: 'normal 100–160', bright: 'bright > 160' };
 
 const A = (): number => H.host?.pair().a ?? 0;
 const B = (): number => H.host?.pair().b ?? 1;
@@ -71,6 +83,8 @@ const delta = (m: ShiftMetric): string => {
   if (r != null && Number.isFinite(r) && r > 0 && (r >= 2 || r <= 0.5)) return r >= 2 ? `×${fmt(r)}` : `÷${fmt(1 / r)}`;
   return signed(m.delta_pct);
 };
+const ci = (m: ShiftMetric): string => (m.ci ? `${fmt(m.ci[0])} … ${fmt(m.ci[1])}` : '–');
+const qv = (q: number | undefined): string => (q == null ? '–' : q < 1e-4 ? '< 0.0001' : q.toPrecision(2));
 const chip = (s: ShiftSeverity): string => `<span class="shf-sev" data-sev="${s === 'n/a' ? 'na' : s}">${SEV_LABEL[s]}</span>`;
 const css = (name: string): string => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || THEME.muted;
 const ax = (): Partial<PL.LayoutAxis> => ({ gridcolor: THEME.grid, linecolor: THEME.border, zerolinecolor: THEME.border, tickfont: { color: THEME.muted, size: 10 } });
@@ -92,17 +106,35 @@ export function initShift(el: HTMLElement, host: ShiftHost): void {
       <button type="button" id="shf-go" class="primary">${icon('sun')}Analyse conditions</button>
     </div>
     <div id="shf-status" class="cmp-status muted hint" role="status" aria-live="polite"></div>
-    <div id="shf-body"></div>`;
+    <div id="shf-body"></div>
+    <details id="shf-stress-d" class="shf-stress-d"><summary>${icon('play')}Stress test <span class="muted">run a model on A made darker, blurrier, noisier, warmer… and see where B lands</span></summary>
+      <div id="shf-stress"></div></details>`;
+  const det = $req<HTMLDetailsElement>('shf-stress-d');
+  det.addEventListener('toggle', () => { if (det.open) void openStress(); });
   $req('shf-go').onclick = () => { void runShift(); };
   $req<HTMLSelectElement>('shf-sample').onchange = (e) => { H.sample = +(e.target as HTMLSelectElement).value; };
   el.addEventListener('click', onClick);
   el.addEventListener('keydown', (e) => {
     const t = e.target instanceof HTMLElement ? e.target : null;
-    if (t && (e.key === 'Enter' || e.key === ' ') && t.matches('tr[data-shf-metric]')) { e.preventDefault(); t.click(); }
+    if (t && (e.key === 'Enter' || e.key === ' ') && t.matches('tr[data-shf-metric], tr[data-str-strip]')) { e.preventDefault(); t.click(); }
   });
   el.addEventListener('change', onChange);
   window.addEventListener('theme-changed', () => { if (H.report) renderCharts(); });
 }
+
+async function openStress(): Promise<void> {
+  if (stressMod) return;
+  const mod = await import('./compare-stress.js');
+  if (stressMod) return;
+  stressMod = mod;
+  await mod.initStress($req('shf-stress'), {
+    memberA: () => nm(A()), aliasB: () => nm(B()), colorA: A, colorB: B,
+    reportKey: () => (H.report && H.report.a === nm(A()) && H.report.b === nm(B()) ? H.report.key : ''),
+  });
+}
+
+/** The stress test on screen (the assistant's page context), null before a run. */
+export const stressRun = (): ReturnType<typeof import('./compare-stress.js').stressRun> => stressMod?.stressRun() ?? null;
 
 /** A or B changed: the report is of another pair now. */
 export function onPair(): void {
@@ -141,6 +173,7 @@ export async function runShift(): Promise<void> {
     H.model = 0;
     H.vs = '';
     H.previewA = H.previewB = '';
+    stressMod?.onReport();
     const st = r.report.n;
     $req('shf-status').textContent = `${n(st.a)} of ${n(st.total_a)} images of ${body.a} and ${n(st.b)} of ${n(st.total_b)} of ${body.b} measured`
       + `${st.failed ? ` · ${n(st.failed)} unreadable` : ''}.`;
@@ -171,6 +204,8 @@ function render(): void {
     kpi(String(v.score), 'shift score / 100', 'How far B is from A overall (0 = alike, 100 = a different domain)', v.level === 'fits' ? 'ok' : v.level === 'check' ? 'moderate' : 'major'),
     kpi(sep.auc == null ? '–' : sep.auc.toFixed(2), 'shift detector AUC', `A classifier told to say "A or B" from light, blur, noise and colour alone: 0.5 = cannot tell (alike), 1 = every image gives its side away. ${sep.words}`, aucSev(sep.auc)),
     app ? kpi(app.auc.toFixed(2), `appearance AUC · ${app.feature}`, `The same test on the ${app.feature} features (what a model sees): ${app.words}`, aucSev(app.auc)) : '',
+    app?.coverage != null ? kpi(pct(app.coverage), 'B covered by A', `Share of B's boxes with an A box as close as A's boxes are to each other (${app.feature}): the rest is appearance A never showed the model${app.frechet != null ? `. Fréchet distance ${fmt(app.frechet)}` : ''}`,
+      app.coverage >= 0.9 ? 'ok' : app.coverage >= 0.75 ? 'minor' : app.coverage >= 0.5 ? 'moderate' : 'major') : '',
     mdl && mdl.a && mdl.b ? kpi(`${pct(mdl.a.mean_top)} → ${pct(mdl.b.mean_top)}`, `confidence · ${mdl.name}`, 'Mean top detection confidence per image on A vs on B (no labels needed): a drop says the model is less sure on B', mdl.drop != null && mdl.drop >= 0.15 ? 'major' : mdl.drop != null && mdl.drop >= 0.05 ? 'moderate' : 'ok') : '',
   ].join('');
   const drivers = sep.drivers.length ? `<p class="muted hint">What gives B away: ${sep.drivers.map((d) => `<button type="button" class="linkish" data-shf-goto="${esc(d.key)}">${esc(d.label)}</button>`).join(', ')}</p>` : '';
@@ -193,16 +228,27 @@ function render(): void {
       <button type="button" class="view-btn${H.curve === 'luma' ? ' active' : ''}" data-shf-curve="luma">Luma</button>
       <button type="button" class="view-btn${H.curve === 'rgb' ? ' active' : ''}" data-shf-curve="rgb">R G B</button></div></div>
     <div id="shf-light" class="cmp-chart sm"></div>
+    ${r.light_map ? `<h4 class="shf-h">Light map <span class="muted">mean brightness across the frame: vignetting, uneven light, where the light comes from</span></h4>
+    <div id="shf-lightmap" class="cmp-chart sm"></div>` : ''}
+    <h4 class="shf-h">Exposure mix <span class="muted">share of images per brightness class</span></h4>
+    <div id="shf-exposure" class="cmp-chart xs"></div>
+    <p class="muted hint">Flat images (contrast &lt; ${r.exposure_mix.low_contrast}): ${esc(nm(A()))} ${pct(r.exposure_mix.a.flat)} · ${esc(nm(B()))} ${pct(r.exposure_mix.b.flat)}</p>
+    ${r.day ? '<h4 class="shf-h">Light over the day <span class="muted">brightness by the EXIF time taken</span></h4><div id="shf-day" class="cmp-chart sm"></div>' : ''}
     <h4 class="shf-h">Image by image</h4>
     <div class="m-ctl"><div class="segmented" role="group">${(Object.keys(SCATTERS) as Array<ShiftUi['scatter']>).map((k) =>
-      `<button type="button" class="view-btn${H.scatter === k ? ' active' : ''}" data-shf-scatter="${k}">${k === 'light' ? 'Light' : k === 'blur' ? 'Blur × noise' : 'Colour'}</button>`).join('')}</div></div>
+      `<button type="button" class="view-btn${H.scatter === k ? ' active' : ''}" data-shf-scatter="${k}">${SCATTER_LABEL[k]}</button>`).join('')}</div></div>
     <div id="shf-scatter" class="cmp-chart"></div>
     ${renderCameras(r)}
     ${renderModels(r)}
-    <h4 class="shf-h">Preview <span class="muted">an image of A as B's conditions would make it</span></h4>
-    <div class="m-ctl"><span class="m-lbl" title="0 = the A image unchanged, 1 = moved by the whole A → B change of the medians">strength</span>
-      <input id="shf-strength" type="range" min="0" max="1.5" step="0.1" value="${H.strength}"><span id="shf-strength-v" class="num">${H.strength.toFixed(1)}</span>
-      <button type="button" class="ghost" data-shf-preview="next">${icon('refresh')}Other image</button></div>
+    <h4 class="shf-h">Preview <span class="muted">${H.pmode === 'as_b' ? "an image of A as B's conditions would make it" : "an image of B with its colours and tones matched back to A's"}</span></h4>
+    <div class="m-ctl"><div class="segmented" role="group">
+      <button type="button" class="view-btn${H.pmode === 'as_b' ? ' active' : ''}" data-shf-pmode="as_b" aria-pressed="${H.pmode === 'as_b'}">A as B</button>
+      <button type="button" class="view-btn${H.pmode === 'correct' ? ' active' : ''}" data-shf-pmode="correct" aria-pressed="${H.pmode === 'correct'}"${r.correction ? '' : ' disabled'}
+        title="A per-channel curve (LUT) that maps B's colours and tones onto A's: apply it to B's images before the model instead of retraining">B corrected to A</button></div>
+      ${H.pmode === 'as_b' ? `<span class="m-lbl" title="0 = the A image unchanged, 1 = moved by the whole A → B change of the medians">strength</span>
+      <input id="shf-strength" type="range" min="0" max="1.5" step="0.1" value="${H.strength}"><span id="shf-strength-v" class="num">${H.strength.toFixed(1)}</span>` : ''}
+      <button type="button" class="ghost" data-shf-preview="next">${icon('refresh')}Other image</button>
+      ${r.correction && H.pmode === 'correct' ? `<a class="btn ghost" href="api/compare/shift/lut?key=${encodeURIComponent(r.key)}" download>${icon('download')}LUT</a>` : ''}</div>
     <div id="shf-preview" class="shf-preview"></div>
     <div id="shf-preview-p" class="muted hint"></div>
     <h4 class="shf-h">What to do</h4>
@@ -212,6 +258,7 @@ function render(): void {
       <pre id="shf-yaml">${esc(r.hyp_yaml)}</pre><button type="button" class="ghost" data-shf-copy>${icon('copy')}Copy</button></details>
     <div class="shf-actions">
       <button type="button" data-shf-list="most_b" title="B's images the shift detector is surest are B: label these first">${icon('tag')}Most B-like images</button>
+      ${app?.coverage != null && app.coverage < 1 ? `<button type="button" class="ghost" data-shf-list="uncovered" title="B images holding the boxes farthest from anything in A (${esc(app.feature)})">${icon('target')}Uncovered B images</button>` : ''}
       <button type="button" class="ghost" data-shf-export="json">${icon('download')}JSON</button>
       <button type="button" class="ghost" data-shf-export="csv">${icon('download')}CSV</button>
     </div>`;
@@ -234,7 +281,8 @@ function renderRows(): void {
     if (!m.available) {
       return `<tr class="shf-na"><td colspan="6">${esc(m.label)} <span class="muted">· no value (A ${n(m.n_a)}, B ${n(m.n_b)} images)</span></td></tr>`;
     }
-    const tip = `KS ${fmt(m.ks)} · PSI ${fmt(m.psi)} · effect ${fmt(m.effect)} · A outside its own p1–p99 ${pct(m.out_a, 1)}${m.low_n ? ' · few images' : ''}`;
+    const tip = `Δ 95% CI ${ci(m)} · KS ${fmt(m.ks)} · PSI ${fmt(m.psi)} · effect ${fmt(m.effect)} · q ${qv(m.q)}${m.significant ? ' (significant)' : ''}`
+      + ` · A outside its own p1–p99 ${pct(m.out_a, 1)}${m.low_n ? ' · few images' : ''}`;
     return `<tr data-shf-metric="${esc(m.key)}" tabindex="0" class="${m.key === H.metric ? 'sel' : ''}" title="${esc(tip)}">
       <td>${esc(m.label)}${m.unit ? ` <span class="muted">${esc(m.unit)}</span>` : ''}</td>
       <td class="r num">${fmt(m.a?.med)}</td><td class="r num">${fmt(m.b?.med)}</td>
@@ -279,7 +327,9 @@ function renderModels(r: ShiftReport): string {
     </tbody></table></div>
     ${!labelled ? '<p class="muted hint">mAP needs labels on both sides; confidence works without them.</p>' : ''}
     <div id="shf-model-conf" class="cmp-chart sm"></div>
-    ${vsKeys.length ? `<div class="m-ctl"><span class="m-lbl">confidence vs</span><select id="shf-vs">${vsKeys.map((k) => `<option value="${esc(k)}"${k === H.vs ? ' selected' : ''}>${esc(label(k))}</option>`).join('')}</select></div>
+    ${vsKeys.length ? `<div class="m-ctl">${m.map_vs ? `<div class="segmented" role="group">
+      <button type="button" class="view-btn${H.vsKind === 'conf' ? ' active' : ''}" data-shf-vskind="conf">Confidence</button>
+      <button type="button" class="view-btn${H.vsKind === 'map' ? ' active' : ''}" data-shf-vskind="map" title="mAP50 of the images in each bin (A and B together)">mAP50</button></div>` : ''}<span class="m-lbl">vs</span><select id="shf-vs">${vsKeys.map((k) => `<option value="${esc(k)}"${k === H.vs ? ' selected' : ''}>${esc(label(k))}</option>`).join('')}</select></div>
     <div id="shf-model-vs" class="cmp-chart sm"></div>` : ''}`;
 }
 
@@ -288,6 +338,9 @@ function renderModels(r: ShiftReport): string {
 function renderCharts(): void {
   renderMetricChart();
   renderLight();
+  renderLightMap();
+  renderExposure();
+  renderDay();
   renderScatter();
   renderModelCharts();
 }
@@ -315,6 +368,7 @@ function renderMetricChart(): void {
   const st = $('shf-metric-st');
   if (st) {
     st.innerHTML = `Shaded: 98% of ${esc(nm(A()))}'s images. ${pct(m.out_b)} of ${esc(nm(B()))} falls outside (A itself ${pct(m.out_a)}).
+      Median change ${fmt(m.delta)} (95% CI ${ci(m)}), q ${qv(m.q)}${m.significant ? '' : ' (not significant)'}.
       <span class="shf-links"><button type="button" class="linkish" data-shf-list="outside">B outside A's range</button> ·
       <button type="button" class="linkish" data-shf-list="low">lowest B</button> · <button type="button" class="linkish" data-shf-list="high">highest B</button> ·
       <button type="button" class="linkish" data-shf-list="low" data-side="a">lowest A</button></span>`;
@@ -335,6 +389,63 @@ function renderLight(): void {
       tr(r.curves[c].b, css(`--ch-${c}`), `${c.toUpperCase()} · ${nm(B())}`, 'dot')]);
   void Plotly.react(el, traces, layout(H.curve === 'luma' ? 'luma: dark ← → bright' : `R G B · ${nm(A())} solid, ${nm(B())} dotted`, {
     xaxis: { ...ax(), range: [0, 255] }, yaxis: { ...ax(), tickformat: '.0%' },
+  }), plotCfg);
+}
+
+function renderLightMap(): void {
+  const r = H.report, el = $('shf-lightmap');
+  if (!r || !el || !r.light_map) return;
+  const lm = r.light_map;
+  const all = [...lm.a.flat(), ...lm.b.flat()];
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const dmax = Math.max(1, ...lm.diff.flat().map(Math.abs));
+  const hm = (z: number[][], k: number, name: string, diff = false): Partial<PL.PlotData> => ({
+    type: 'heatmap', z, xaxis: k === 1 ? 'x' : `x${k}`, yaxis: k === 1 ? 'y' : `y${k}`, showscale: false, name,
+    zmin: diff ? -dmax : lo, zmax: diff ? dmax : hi, colorscale: (diff ? 'RdBu' : 'Greys') as PL.ColorScale, reversescale: diff,   // Greys: black = dark; RdBu reversed: red = darker
+    hovertemplate: `${esc(name)}: %{z:.0f}${diff ? '' : ' luma'}<extra></extra>`, xgap: 2, ygap: 2,
+    text: z.map((row) => row.map((v) => (diff ? `${v > 0 ? '+' : ''}${Math.round(v)}` : String(Math.round(v))))) as unknown as string[],
+    texttemplate: '%{text}', textfont: { size: 9 },
+  } as Partial<PL.PlotData>);
+  const axk = (k: number, d: [number, number]): Record<string, unknown> => ({
+    [`xaxis${k === 1 ? '' : k}`]: { domain: d, showticklabels: false, showgrid: false, zeroline: false, anchor: k === 1 ? 'y' : `y${k}` },
+    [`yaxis${k === 1 ? '' : k}`]: { autorange: 'reversed', showticklabels: false, showgrid: false, zeroline: false, anchor: k === 1 ? 'x' : `x${k}` },
+  });
+  const t = (x: number, s: string): Partial<PL.Annotations> => ({ text: s, xref: 'paper', yref: 'paper', x, y: 1.08, showarrow: false, font: { size: 10, color: THEME.muted } });
+  void Plotly.react(el, [hm(lm.a, 1, nm(A())), hm(lm.b, 2, nm(B())), hm(lm.diff, 3, `${nm(B())} − ${nm(A())}`, true)], {
+    ...plotBase(THEME.surface, 10), showlegend: false, margin: { t: 22, b: 6, l: 6, r: 6 },
+    ...axk(1, [0, 0.31]), ...axk(2, [0.345, 0.655]), ...axk(3, [0.69, 1]),
+    annotations: [t(0.155, esc(nm(A()))), t(0.5, esc(nm(B()))), t(0.845, `${esc(nm(B()))} − ${esc(nm(A()))} (red darker, blue brighter)`)],
+  } as Partial<PL.Layout>, plotCfg);
+}
+
+function renderExposure(): void {
+  const r = H.report, el = $('shf-exposure');
+  if (!r || !el) return;
+  const ex = r.exposure_mix;
+  const shade = ['--ex-dark', '--ex-dim', '--ex-normal', '--ex-bright'].map((v) => css(v));
+  const traces: Array<Partial<PL.PlotData>> = ex.classes.map((c, i) => ({
+    type: 'bar', orientation: 'h', name: EXPOSURE_LABEL[c] ?? c, y: [nm(B()), nm(A())], x: [ex.b.share[i] ?? 0, ex.a.share[i] ?? 0],
+    marker: { color: shade[i] }, text: [ex.b.share[i] ?? 0, ex.a.share[i] ?? 0].map((v) => (v >= 0.06 ? pct(v) : '')) as unknown as string[],
+    textposition: 'inside', insidetextanchor: 'middle', textfont: { size: 9, color: i >= 2 ? '#111' : '#fff' },
+    hovertemplate: `${esc(EXPOSURE_LABEL[c] ?? c)}: %{x:.0%}<extra>%{y}</extra>`,
+  } as Partial<PL.PlotData>));
+  void Plotly.react(el, traces, layout('', {
+    barmode: 'stack', showlegend: true, legend: { orientation: 'h', y: -0.45, font: { size: 9, color: THEME.muted } },
+    xaxis: { ...ax(), range: [0, 1], tickformat: '.0%' }, yaxis: { ...ax(), automargin: true }, margin: { t: 6, b: 40, l: 8, r: 8 },
+  }), plotCfg);
+}
+
+function renderDay(): void {
+  const r = H.report, el = $('shf-day');
+  if (!r || !el || !r.day) return;
+  const tr = (side: 'a' | 'b', k: number): Partial<PL.PlotData> => ({
+    type: 'scattergl', mode: 'markers', name: nm(k), x: r.scatter[side]['hour'] ?? [], y: r.scatter[side]['brightness'] ?? [],
+    marker: { color: originColor(k), size: 4, opacity: 0.55 }, hovertemplate: `${esc(nm(k))}: %{x:.1f} h · brightness %{y:.0f}<extra></extra>`,
+  });
+  void Plotly.react(el, [tr('a', A()), tr('b', B())], layout('', {
+    showlegend: true, legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1.1, font: { size: 10, color: THEME.muted } },
+    xaxis: { ...ax(), range: [0, 24], dtick: 3, title: { text: 'hour of day', font: { size: 10, color: THEME.muted } } },
+    yaxis: { ...ax(), title: { text: 'brightness', font: { size: 10, color: THEME.muted } } }, margin: { t: 20, b: 36, l: 44, r: 8 },
   }), plotCfg);
 }
 
@@ -368,6 +479,19 @@ function renderModelCharts(): void {
   void Plotly.react(el, [tr(m.a, A()), tr(m.b, B())], layout('detection confidence', { xaxis: { ...ax(), range: [0, 1] }, yaxis: { ...ax(), tickformat: '.0%' } }), plotCfg);
   const vs = $('shf-model-vs'), c: ShiftCurve | undefined = m.conf_vs?.[H.vs];
   if (!vs || !c) return;
+  const mv = m.map_vs?.[H.vs];
+  if (H.vsKind === 'map' && mv) {
+    const lb = r.metrics.find((x) => x.key === H.vs);
+    const mark = (x: number | undefined, k: number): Partial<PL.Shape> => ({ type: 'line', xref: 'x', yref: 'paper', x0: x ?? 0, x1: x ?? 0, y0: 0, y1: 1,
+      line: { color: originColor(k), width: x == null ? 0 : 1, dash: 'dot' } });
+    void Plotly.react(vs, [{ type: 'scatter', mode: 'lines+markers', x: mv.x, y: mv.map50, connectgaps: false, customdata: mv.labels, name: 'mAP50',
+      line: { color: THEME.text, width: 2 }, marker: { size: 5, color: THEME.text },
+      hovertemplate: 'mAP50 %{y:.2f} · %{customdata} labels<extra></extra>' }], layout(`mAP50 by ${lb?.label ?? H.vs} (A and B together; dotted: medians)`, {
+      yaxis: { ...ax(), range: [0, 1] }, xaxis: { ...ax(), type: lb?.log ? 'log' : 'linear' },
+      shapes: [mark(lb?.a?.med, A()), mark(lb?.b?.med, B())],
+    }), plotCfg);
+    return;
+  }
   const line = (y: Array<number | null>, cnt: number[], k: number): Partial<PL.PlotData> => ({
     type: 'scatter', mode: 'lines+markers', x: c.x, y, name: nm(k), connectgaps: false, customdata: cnt,
     line: { color: originColor(k), width: 2 }, marker: { size: 5, color: originColor(k) },
@@ -403,22 +527,34 @@ async function loadPreview(next: boolean): Promise<void> {
       H.previewB = pick(mid(lb)) ?? '';
     }
     if (seq !== H.seq || !H.previewA) { if (!H.previewA) box.innerHTML = '<p class="muted hint">No image of A to preview.</p>'; return; }
-    const q = new URLSearchParams({ key: r.key, name: H.previewA, strength: String(H.strength) });
+    const correct = H.pmode === 'correct' && !!r.correction && !!H.previewB;
+    const q = new URLSearchParams({ key: r.key, name: correct ? H.previewB : H.previewA, strength: String(H.strength), mode: correct ? 'correct' : 'as_b' });
     const res = await api(`api/compare/shift/preview?${q.toString()}`);
     const blob = await res.blob();
     if (seq !== H.seq) return;
     if (H.previewUrl) URL.revokeObjectURL(H.previewUrl);
     H.previewUrl = URL.createObjectURL(blob);
     const fig = (src: string, cap: string, k: number): string => `<figure><img src="${esc(src)}" alt="${esc(cap)}" loading="lazy"><figcaption><span class="cmp-tag" style="--c:${originColor(k)}">${k === A() ? 'A' : 'B'}</span>${esc(cap)}</figcaption></figure>`;
-    box.innerHTML = fig(`api/img/raw?name=${encodeURIComponent(H.previewA)}&max_w=640`, H.previewA.split('/').slice(1).join('/'), A())
-      + fig(H.previewUrl, `as ${nm(B())} would shoot it`, B())
-      + (H.previewB ? fig(`api/img/raw?name=${encodeURIComponent(H.previewB)}&max_w=640`, `a real ${nm(B())} image`, B()) : '');
+    const raw = (name: string): string => `api/img/raw?name=${encodeURIComponent(name)}&max_w=640`;
+    box.innerHTML = correct
+      ? fig(raw(H.previewB), `${H.previewB.split('/').slice(1).join('/')} as shot`, B()) + fig(H.previewUrl, `corrected to ${nm(A())}`, A())
+        + fig(raw(H.previewA), `a real ${nm(A())} image`, A())
+      : fig(raw(H.previewA), H.previewA.split('/').slice(1).join('/'), A())
+        + fig(H.previewUrl, `as ${nm(B())} would shoot it`, B())
+        + (H.previewB ? fig(raw(H.previewB), `a real ${nm(B())} image`, B()) : '');
     let prm: Record<string, number> = {};
     try { prm = JSON.parse(res.headers.get('X-Shift-Params') || '{}') as Record<string, number>; } catch { prm = {}; }
     const p = $('shf-preview-p');
-    if (p) {
+    if (p && correct && r.correction) {
+      const c = r.correction;
+      p.textContent = `Per-channel curves matched to ${nm(A())}: mean R / G / B gap ${fmt(c.before.r)} / ${fmt(c.before.g)} / ${fmt(c.before.b)} → `
+        + `${fmt(c.residual.r)} / ${fmt(c.residual.g)} / ${fmt(c.residual.b)}. Blur, noise and compression are not undone by a curve. `
+        + 'Download the LUT and apply it with cv2.LUT before the model.';
+    } else if (p) {
       p.textContent = `Applied: brightness ×${fmt(prm['brightness_gain'])}, contrast ×${fmt(prm['contrast_gain'])}, saturation ×${fmt(prm['saturation_gain'])}, `
-        + `tint a ${fmt(prm['tint_a'])} / b ${fmt(prm['tint_b'])}, blur σ ${fmt(prm['blur_sigma_px'])} px, noise σ ${fmt(prm['noise_sigma'])}. `
+        + `gamma ${fmt(prm['gamma'])}, vignette ×${fmt(prm['vignette'])}, tint a ${fmt(prm['tint_a'])} / b ${fmt(prm['tint_b'])}, `
+        + `${prm['motion_px'] ? `motion blur ${fmt(prm['motion_px'])} px` : `blur σ ${fmt(prm['blur_sigma_px'])} px`}, noise σ ${fmt(prm['noise_sigma'])}, `
+        + `colour noise σ ${fmt(prm['chroma_noise'])}${prm['jpeg_quality'] ? `, JPEG q${prm['jpeg_quality']}` : ''}. `
         + 'Run the model on such images to test it before B arrives.';
     }
   } catch (e) {
@@ -436,7 +572,8 @@ async function openList(which: string, side: 'a' | 'b' = 'b'): Promise<void> {
     if (!list.length) { toast('No image in that list', 'info'); return; }
     const lbl = r.metrics.find((m) => m.key === H.metric)?.label ?? H.metric;
     const who = side === 'a' ? r.a : r.b;
-    const title = which === 'most_b' ? `Most ${r.b}-like images (label these first)` : which === 'outside' ? `${who} outside ${r.a}'s range of ${lbl}`
+    const title = which === 'most_b' ? `Most ${r.b}-like images (label these first)`
+      : which === 'uncovered' ? `${r.b} images A never showed the model anything like` : which === 'outside' ? `${who} outside ${r.a}'s range of ${lbl}`
       : `${who} by ${lbl}, ${which === 'low' ? 'lowest' : 'highest'} first`;
     setSelection([], 'No selection');
     setImageSubset(list, title);
@@ -457,14 +594,14 @@ function download(name: string, text: string, type: string): void {
 
 /** The metric table as CSV (one row per metric). */
 export function reportCsv(r: ShiftReport): string {
-  const head = ['metric', 'group', 'unit', 'severity', 'a_median', 'b_median', 'delta', 'delta_pct', 'ks', 'psi', 'effect', 'b_outside_a', 'a_outside_a', 'n_a', 'n_b'];
+  const head = ['metric', 'group', 'unit', 'severity', 'a_median', 'b_median', 'delta', 'delta_ci_lo', 'delta_ci_hi', 'delta_pct', 'ks', 'ks_p', 'q', 'psi', 'effect', 'b_outside_a', 'a_outside_a', 'n_a', 'n_b'];
   const q = (v: unknown): string => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const rows = r.metrics.map((m) => [m.key, m.group, m.unit, m.severity, m.a?.med, m.b?.med, m.delta, m.delta_pct, m.ks, m.psi, m.effect, m.out_b, m.out_a, m.n_a, m.n_b].map(q).join(','));
+  const rows = r.metrics.map((m) => [m.key, m.group, m.unit, m.severity, m.a?.med, m.b?.med, m.delta, m.ci?.[0], m.ci?.[1], m.delta_pct, m.ks, m.p, m.q, m.psi, m.effect, m.out_b, m.out_a, m.n_a, m.n_b].map(q).join(','));
   return [head.join(','), ...rows].join('\n') + '\n';
 }
 
 function onClick(e: Event): void {
-  const t = closestOf(e, '[data-shf-metric], [data-shf-group], [data-shf-curve], [data-shf-scatter], [data-shf-list], [data-shf-export], [data-shf-copy], [data-shf-preview], [data-shf-goto]');
+  const t = closestOf(e, '[data-shf-metric], [data-shf-group], [data-shf-curve], [data-shf-scatter], [data-shf-list], [data-shf-export], [data-shf-copy], [data-shf-preview], [data-shf-goto], [data-shf-vskind], [data-shf-pmode]');
   const r = H.report;
   if (!t || !r) return;
   const d = t.dataset;
@@ -487,6 +624,8 @@ function onClick(e: Event): void {
   }
   if (d['shfCurve']) { H.curve = d['shfCurve'] as ShiftUi['curve']; segActive(t); renderLight(); return; }
   if (d['shfScatter']) { H.scatter = d['shfScatter'] as ShiftUi['scatter']; segActive(t); renderScatter(); return; }
+  if (d['shfVskind']) { H.vsKind = d['shfVskind'] === 'map' ? 'map' : 'conf'; segActive(t); renderModelCharts(); return; }
+  if (d['shfPmode']) { H.pmode = d['shfPmode'] === 'correct' ? 'correct' : 'as_b'; render(); return; }
   if (d['shfList']) { void openList(d['shfList'], d['side'] === 'a' ? 'a' : 'b'); return; }
   if (d['shfPreview'] !== undefined) { void loadPreview(true); return; }
   if (d['shfCopy'] !== undefined) {

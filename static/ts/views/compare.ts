@@ -33,7 +33,8 @@ declare const Plotly: typeof import('plotly.js');
 
 /** The charts of this tab (layout.ts resizes them). */
 export const CMP_PLOTS = ['cmp-confusion', 'cmp-h-area', 'cmp-h-aspect', 'cmp-h-brightness', 'cmp-h-blur',
-  'shf-metric-chart', 'shf-light', 'shf-scatter', 'shf-model-conf', 'shf-model-vs'];     // + compare-shift.ts SHIFT_PLOTS
+  'shf-metric-chart', 'shf-light', 'shf-scatter', 'shf-model-conf', 'shf-model-vs', 'shf-lightmap', 'shf-exposure', 'shf-day',
+  'shf-stress-chart'];     // = compare-shift.ts SHIFT_PLOTS
 
 /** Image conditions (views/compare-shift.ts), loaded when its section first opens. */
 let shiftMod: typeof import('./compare-shift.js') | null = null;
@@ -688,6 +689,9 @@ async function openShift(): Promise<void> {
 
 /** The Image conditions report on screen (the assistant's page context), null before a run. */
 export const shiftReport = (): import('../types.js').ShiftReport | null => shiftMod?.shiftReport() ?? null;
+
+/** The Stress test on screen (the assistant's page context), null before a run. */
+export const stressRun = (): ReturnType<typeof import('./compare-shift.js').stressRun> => shiftMod?.stressRun() ?? null;
 
 // ---------------------------------------------------------------- members + promote
 
