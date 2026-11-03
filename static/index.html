@@ -393,7 +393,7 @@
           <div class="popover-anchor">
             <button id="map-btn" class="bar-btn bar-map" aria-haspopup="true" aria-expanded="false" aria-controls="map-pop"
                     title="Feature space and projection method">
-              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg><span id="map-summary" class="bar-t">Projection</span><span id="map-dirty" class="dirty-dot hidden" title="parameters changed: Re-project to apply"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
+              <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg><span id="map-summary" class="bar-t">Projection</span><span id="map-dirty" class="dirty-dot hidden" title="settings changed: Generate to apply"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
             <div id="map-pop" class="popover panel hidden bar-pop map-pop" role="group" aria-label="Projection">
               <div class="pop-title">Projection</div>
               <label class="field stack" title="What each box is turned into before projecting (your own models: Settings › Models)">Features
@@ -401,7 +401,7 @@
               <label class="field stack">Method <select id="method"></select></label>
               <span id="params"></span>
               <span id="pca-info" class="muted num hint"></span>
-              <button id="btn-apply" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Re-project</button>
+              <button id="btn-apply" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Generate</button>
               <label class="field stack">Saved views
                 <select id="saved-views" title="Every projection already computed for this dataset — loads instantly"><option value="">Saved views…</option></select></label>
               <div id="feat-import" class="feat-import pop-sep">

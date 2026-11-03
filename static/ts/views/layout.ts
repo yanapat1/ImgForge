@@ -266,7 +266,7 @@ export function updateBarSummary(): void {
   $req('cls-btn').setAttribute('aria-label', `Classes shown: ${cls}`);
 }
 
-/** The dot on the projection trigger: method parameters changed since the view was computed (Re-project applies). */
+/** The dot on the projection trigger: features, method or parameters changed since the view was computed (Generate applies). */
 export function setMapDirty(on: boolean): void {
   $req('map-dirty').classList.toggle('hidden', !on);
 }

@@ -29,7 +29,7 @@ views/assistant.ts, applies `args` through its existing controls). Names, args a
         method:  pca | svd | ica | fa | umap | pacmap | localmap | tsne | kpca | isomap | lle | spectral | mds |
                  random | trees                                                                      -> #method
         params:  only the method's own (umap: n_neighbors, min_dist · pacmap / localmap / isomap / lle / spectral:
-                 n_neighbors · tsne: perplexity · kpca: gamma)           -> #p-<method>-<param>, then Re-project
+                 n_neighbors · tsne: perplexity · kpca: gamma)           -> #p-<method>-<param>, then Generate
         At least one of feature / method / params. Omitted keys keep the page's current value.
     set_color_by {by: str}                                                                       -> #color-by
         class | group | suggested | session | suspicion | outlier | area | aspect | brightness | blur |
@@ -428,12 +428,12 @@ def _projection_quality(ctx, a):
             pk = saved[0]['key']
     if proj is None:
         done = [f'{e["method"]} on {e["feature"]}' for e in st.saved_projections().values()][:15]
-        raise ToolError(f'{method} on {key} is not computed yet (Re-project on the page first)'
+        raise ToolError(f'{method} on {key} is not computed yet (set it in the Projection popover and press Generate first)'
                         + (f'; computed maps: {", ".join(done)}' if done else ''))
     q = (proj.get('info') or {}).get('quality') or {}
     out = {'map': pk, 'points': int(len(proj['id'])), **q}
     if not q:
-        out['note'] = 'this map was saved without quality numbers (computed by an older version): Re-project'
+        out['note'] = 'this map was saved without quality numbers (computed by an older version): press Generate'
     else:
         out['read'] = ('trustworthiness: share of 2D neighbours that are real neighbours (1 = no false neighbours); '
                        'continuity: real neighbours kept close in 2D (1 = none torn apart); knn_preserved: mean '
@@ -630,7 +630,7 @@ def _proj_label(b, a):
         parts.append(m['label'] if m else str(a['method']))
     if a.get('params'):
         parts.append(', '.join(f'{k}={v}' for k, v in a['params'].items()))
-    return 'Projection: ' + ' · '.join(parts) if parts else 'Re-project'
+    return 'Projection: ' + ' · '.join(parts) if parts else 'Generate projection'
 
 
 def _filter_label(b, a):
@@ -708,8 +708,8 @@ register(Tool('search_boxes_by_text', 'Boxes whose crops best match a text (e.g.
                     'k': I('how many boxes (default 50)', 1, 500)}, ['query']), False, _search_boxes_by_text, **_R))
 
 _U = dict(domain='visual', ctx=True, risk='ui')
-register(Tool('set_projection', 'Page action: switch the Features / Method / parameters and re-project (an Apply '
-                                'button for the user).',
+register(Tool('set_projection', 'Page action: switch the Features / Method / parameters and generate the projection '
+                                'at once (the user changes them in the Projection popover and presses Generate).',
               _obj({'feature': S('a feature id from list_features'),
                     'method': E('a method id from list_methods', list(_methods())), 'params': PARAMS_SCHEMA}),
               False, _ui_run(_check_projection), _proj_label, check=_check_projection, **_U))

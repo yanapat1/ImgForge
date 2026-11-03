@@ -294,12 +294,12 @@ export function bindFeatureImport(): void {
   };
 }
 
-// ---- method parameters edited but not applied yet: the dot on the projection trigger
+// ---- features / method / parameters changed but not generated yet: the dot on the projection trigger
 export function updateMapDirty(): void {
   const r = S.viewReq;
   if (!r) { setMapDirty(false); return; }
   const cur = currentRequest();
-  setMapDirty(cur.method === r.method && cur.feature === r.feature && !sameParams(cur.params, r.params));
+  setMapDirty(cur.method !== r.method || cur.feature !== r.feature || !sameParams(cur.params, r.params));
 }
 
 // ---- cleanlab label quality: k-fold out-of-fold class probabilities of the current feature, then cleanlab

@@ -21,6 +21,7 @@ core: true
   `min_dist` smaller = tighter clumps (good for seeing duplicates), larger = spread out (reading density).
   `perplexity` ≈ how many close neighbours each point considers (5-50; below the class size).
 - Pick: start with `umap`; `pacmap` when you care how classes relate; `tsne` for clean local clusters; `pca` to
-  check that a structure is real and not made by the method. Re-project applies changed parameters.
+  check that a structure is real and not made by the method. Changing Features, Method or a parameter does not recompute: press **Generate** (the dot on the Projection
+  button shows unapplied changes), so several settings can be changed before one projection job.
 - Checks (Suspicious labels, Far from class, duplicates, cleanlab) are computed in the full feature space, never
   on the map: a dot can look fine on the map and still be flagged.

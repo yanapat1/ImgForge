@@ -105,7 +105,9 @@ export function bindEvents(): void {
     savedViews.value = '';
     if (v) applyView(v);
   };
-  $req<HTMLSelectElement>('feature').onchange = () => { updateTextSearch(); void loadView(); };
+  // feature / method / parameters only mark the map as changed: Generate (#btn-apply) computes it, so several
+  // settings can be changed before one (possibly long) projection job
+  $req<HTMLSelectElement>('feature').onchange = () => { updateTextSearch(); updateMapDirty(); };
   $req<HTMLFormElement>('text-search').onsubmit = async (e) => {
     e.preventDefault();
     const q = $req<HTMLInputElement>('text-q').value.trim(), feature = $req<HTMLSelectElement>('feature').value;
@@ -123,7 +125,7 @@ export function bindEvents(): void {
       setSelection(r.id, `Text: "${q}" · ${featureLabel(feature)}`);
     } catch (err) { toast(errText(err), 'err'); } finally { updateTextSearch(); }
   };
-  $req<HTMLSelectElement>('method').onchange = () => { updateMethodControls(); void loadView(); };
+  $req<HTMLSelectElement>('method').onchange = () => { updateMethodControls(); updateMapDirty(); };
   $req('btn-apply').onclick = () => { void loadView(); };
   $req<HTMLSelectElement>('mode').onchange = () => { updateModeControls(); requestFit(); scheduleRender(); reapplyInspect(); };
   $req<HTMLSelectElement>('class-a').onchange = () => { if ($req<HTMLSelectElement>('mode').value !== 'all') { requestFit(); scheduleRender(); reapplyInspect(); } };

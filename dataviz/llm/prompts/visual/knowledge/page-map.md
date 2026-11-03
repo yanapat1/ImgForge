@@ -8,7 +8,8 @@ core: true
   Compare (`compare`, only for a combined dataset: label diff A vs B, shared map, Image conditions with its Stress test). Settings is the gear at the bottom (Models, AI assistant,
   datasets, S3, appearance).
 - **Explore** = gallery on the left, map on the right. The bar above the map, left to right:
-  **Projection** popover (Features, Method, the method's parameters, **Re-project**, map quality line, Saved views,
+  **Projection** popover (changing Features, Method or a parameter only marks the map changed (dot on the button);
+  nothing is computed until **Generate** · Features, Method, the method's parameters, **Generate**, map quality line, Saved views,
   Import embeddings…) · **Color** dropdown · **Classes** popover (Show: All classes / One class / Compare 2 classes) ·
   **Describe boxes…** text search (`/` focuses it) · **Find issues** popover · **Display** popover.
 - Under it: the **filter bar** (image name, Image has class, More filters, Images / Boxes scope, Show in gallery,
