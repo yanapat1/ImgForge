@@ -29,6 +29,14 @@ summary: run a detector, val / train split, confidence and IoU, leaderboard and 
   boxes that are the same in A and B form one grey "same in A and B" trace, so identical dots do not hide each other
   and the A / B colours show only what differs; B is drawn on top of A. The density layer uses A's and B's colours.
   Image-only members (one point per image): the IoU sliders and area / aspect histograms are hidden.
+  **Statistical tests** (a chip per panel, after Compare; hover a chip for what it asks; `compare_tests` reads them):
+  Classes: chi-square of the class mix + Cramér's V, a * on a class whose share changed (two-proportion z, BH q
+  < 0.05). Class changes A → B: Bowker symmetry ("differs" = relabelling went one way). Box statistics: KS +
+  Mann-Whitney per statistic with Cliff's δ (B vs A). Shared map: **Test A vs B in feature space** runs an MMD
+  permutation test on the current Features (≤ 1500 per side, PCA-32). Image conditions › Model fit: top confidence
+  A vs B (KS + Mann-Whitney) and images with nothing found (two-proportion z). Each chip: p, effect size, verdict
+  ("differs", "significant but negligible" when the effect is tiny, "no evidence of a difference"). Single-dataset
+  views (Class stats) have no A/B, so no test; count cards and the Stress test have none either.
   Below the stat histograms, **Image conditions** checks camera / lighting shift between A and B (light, blur, noise,
   colour, light map, capture, cameras, model confidence on A vs B, a preview, a B → A correction LUT, augmentation
   advice) and its Stress test runs a model under graded changes: see the Image conditions knowledge, `compare_shift`

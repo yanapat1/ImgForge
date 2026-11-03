@@ -13,6 +13,8 @@ Read tools (risk read, run at once):
                           shift-detector AUC, model fit, recommendations)
     compare_stress        Compare › Image conditions › Stress test: a model's score at every step of brightness, blur,
                           noise, colour… on A, its safe window per axis and the expected score at B's conditions
+    compare_tests         Compare tab statistical tests of the newest A vs B run (class mix, class changes, box
+                          statistics, feature-space MMD)
     list_features         the feature registry (Features dropdown): id, label, group, kind, dims, computed, text
     list_methods          analysis.METHODS (Method dropdown) with parameters, defaults and the page's hints
     projection_quality    trustworthiness / continuity / kNN kept of a computed map
@@ -292,6 +294,28 @@ def _eval_summary(ctx, a):
     return {'evaluation': ev}, '→ evaluation'
 
 
+def _compare_tests(ctx, a):
+    """The statistical tests of the newest Compare run the page made (class mix, class changes, box statistics,
+    embedding MMD when the user ran it)."""
+    st = _state(ctx)
+    if not getattr(st, 'members', None):
+        return {'tests': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (home page: pick '
+                                       'them, Combine)'}, '→ not combined'
+    from ...data import compare
+    svc = compare.service(st)
+    with svc.lock:
+        memo = list((getattr(svc, '_tests', None) or {}).values())
+    if not memo:
+        return {'tests': None, 'note': 'no comparison yet: open the Compare tab, pick A and B and press Compare'}, '→ none yet'
+    t = memo[-1]
+    al = svc.aliases()
+    out = {'a': al[t['a']], 'b': al[t['b']], 'classes': {k: v for k, v in t['classes'].items() if k != 'per'},
+           'classes_changed_share': [st.classes[c] for c, x in enumerate(t['classes'].get('per') or [])
+                                     if x and x.get('sig') and c < len(st.classes)],
+           'class_changes': t['class_changes'], 'box_stats': t['box_stats'], 'embedding': t['embedding']}
+    return {'tests': out}, f'→ {out["a"]} vs {out["b"]}: class mix {t["classes"]["verdict"]}'
+
+
 def _compare_shift(ctx, a):
     """The newest Image-conditions report of this combined dataset (optionally of members a / b), compacted."""
     st = _state(ctx)
@@ -321,6 +345,7 @@ def _compare_shift(ctx, a):
             row['delta_ci95'] = [round(x, 3) for x in m['ci']]
         moved.append(row)
     models = [{'name': x['name'], 'conf': x['conf'], 'drop': None if x.get('drop') is None else round(x['drop'], 3),
+               **({'tests': x['tests']} if x.get('tests') else {}),
                **{side: {k: round(v, 3) if isinstance(v, float) else v for k, v in (x.get(side) or {}).items()
                          if k != 'conf_hist'} for side in ('a', 'b')}} for x in r.get('models') or []]
     out = {'a': r['a'], 'b': r['b'], 'images': r['n'], 'verdict': r['verdict'],
@@ -681,6 +706,11 @@ register(Tool('compare_shift', 'Compare › Image conditions of a combined datas
                                'the report the page computed (Analyse conditions).',
               _obj({'a': S('member alias of A (default: the newest report)'), 'b': S('member alias of B')}),
               False, _compare_shift, **_R))
+register(Tool('compare_tests', 'Compare tab statistical tests of the newest A vs B run: chi-square on the class mix '
+                               "(Cramér's V; the classes whose share changed, BH q < 0.05), Bowker symmetry of the class "
+                               "changes, KS + Mann-Whitney per box statistic (Cliff's delta), and the MMD feature-space "
+                               'test when the user ran it. Reads what the page computed.',
+              _obj({}), False, _compare_tests, **_R))
 register(Tool('compare_stress', 'Compare › Image conditions › Stress test: how a model scores on A\'s images made '
                                 'darker / brighter, lower contrast, blurred, motion-blurred, noisier, warmer / cooler, '
                                 'desaturated, JPEG-compressed or lower resolution, step by step; the safe window per '

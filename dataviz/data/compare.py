@@ -383,6 +383,58 @@ class CompareService:
         t.names = [pre + n for n in t.names]
         return t, len(inner)
 
+    def tests(self, res, feature=None, job=None):
+        """Statistical tests for the Compare panels of diff result `res` (ml/stats.py), cached per (result, feature):
+            classes        chi-square of homogeneity of A's vs B's class mix + Cramér's V, per class two-proportion
+                           z with BH q (aligned with summary['classes'])
+            class_changes  Bowker symmetry of the matched boxes' class table (summary['confusion'])
+            box_stats      per box statistic (area, aspect, brightness, blur) KS + Mann-Whitney, Cliff's delta, W1
+            embedding      MMD permutation test on `feature` (PCA-32, <= 1500 per side), None when not computed
+        Every box of A and B that is alive counts (the filter bar does not change a test)."""
+        from ..ml import stats
+        st = self.state
+        ck = (res.a, res.b, _pkey(res.params), self.labels_tag(), feature or '')   # an edit changes labels_tag
+        with self.lock:
+            memo = getattr(self, '_tests', None)
+            if memo is None:
+                memo = self._tests = OrderedDict()
+            if ck in memo:
+                return memo[ck]
+        inp, _ = self.inputs()
+        ia, ib = res.a, res.b
+        summ = res.summary
+        rows = summ.get('classes') or []
+        out = {'a': ia, 'b': ib, 'classes': stats.contingency([r['a'] for r in rows], [r['b'] for r in rows]),
+               'class_changes': stats.bowker(summ.get('confusion') or [[0]])}
+        sa = inp.alive & (inp.origin == ia)
+        sb = inp.alive & (inp.origin == ib)
+        image_unit = getattr(st.source, 'unit', None) == 'image'
+        cols = {}
+        for col in ('area', 'aspect', 'brightness', 'blur'):
+            if image_unit and col in ('area', 'aspect'):
+                continue
+            v = np.fromiter((x.get(col, np.nan) for x in st.samples), np.float64, len(st.samples))
+            cols[col] = stats.two_sample(v[sa], v[sb])
+        out['box_stats'] = cols
+        out['embedding'] = None
+        if feature and (feature in st.features or st.feature_cached(feature)):
+            X = np.asarray(st.get_features(feature, job), np.float32)
+            rng = np.random.default_rng(stats.SEED)
+            pick = lambda m: rng.permutation(np.nonzero(m)[0])[:1500]  # noqa: E731
+            xa, xb = pick(sa), pick(sb)
+            if len(xa) >= 5 and len(xb) >= 5:
+                Z = np.vstack([X[xa], X[xb]]).astype(np.float64)
+                Z -= Z.mean(0)
+                # PCA-32 of the subsample (a 3000 x D SVD): the kernel sees the main directions, not noise dims
+                u, sv, _ = np.linalg.svd(Z, full_matrices=False)
+                Z = u[:, :32] * sv[:32]
+                out['embedding'] = {**stats.mmd(Z[:len(xa)], Z[len(xa):]), 'feature': feature}
+        with self.lock:
+            memo[ck] = out
+            while len(memo) > 8:
+                memo.popitem(last=False)
+        return out
+
     def appearance_auc(self, feature, ia, ib, job=None):
         """What a model sees, on a computed feature (PCA-32), None when it is not computed:
             auc        cross-validated AUC of telling A's boxes from B's

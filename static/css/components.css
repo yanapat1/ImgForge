@@ -409,3 +409,9 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 .stat-chip.st-diff { border-color: var(--accent-line); background: var(--accent-soft); }
 .stat-chip.st-diff .st-v { color: var(--accent-text); }
 .stat-chip.st-small .st-v, .stat-chip.st-na .st-v { color: var(--text-faint); }
+.stat-test.cmp-tests { display: grid; gap: 4px; font-size: var(--fs-xs); color: var(--text-muted); }
+/* one row per statistic: its name, then the chip (the test's name is in the section title) */
+.stat-test.cmp-tests > div { display: grid; grid-template-columns: 7.5em 1fr; align-items: center; gap: 6px; }
+.stat-test.cmp-tests .stat-chip > b { display: none; }
+.stat-test.cmp-tests .stat-chip { padding: 2px 8px; }
+.st-mark { margin-left: 2px; color: var(--accent-text); font-weight: 700; cursor: help; }

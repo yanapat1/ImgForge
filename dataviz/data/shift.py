@@ -727,6 +727,13 @@ def model_fit(d, side_of_img, a, b, conf, ap_fn, by_name_vec=None, metric_keys=N
         if 'map50' in ra and 'map50' in rb:
             res['map_drop'] = ra['map50'] - rb['map50']
             res['drop'] = max(res['drop'], res['map_drop'] / max(ra['map50'], 1e-6))
+        # is the drop real? top confidence per image A vs B (KS + Mann-Whitney), and the share of images with
+        # nothing found (two proportions)
+        from ..ml import stats
+        ma, mb = side_of_img == a, side_of_img == b
+        res['tests'] = {'top_conf': stats.two_sample(top[ma], top[mb]),
+                        'none_found': stats.two_prop(int((nhit[ma] == 0).sum()), int(ma.sum()),
+                                                     int((nhit[mb] == 0).sum()), int(mb.sum()))}
     if by_name_vec and metric_keys:
         idx = {n: i for i, n in enumerate(d.images)}
         rows = [(idx[n], v) for n, v in by_name_vec.items() if n in idx]

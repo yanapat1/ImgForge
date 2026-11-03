@@ -69,7 +69,7 @@ def run(ctx, name, args=None):
 # ---------------------------------------------------------------- read tools
 def test_tools_are_visual_ctx_tools_without_the_data_center():
     names = {t.name for t in tools.REGISTRY.values() if t.domain == 'visual'}
-    assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'compare_shift', 'compare_stress', 'list_features', 'list_methods',
+    assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'compare_shift', 'compare_stress', 'compare_tests', 'list_features', 'list_methods',
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
                      'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view'}
     assert all(tools.REGISTRY[n].ctx for n in names)
@@ -121,6 +121,8 @@ def test_eval_features_methods(session):
     assert out['report'] is None and 'combined' in out['note']
     out, _ = run(ctx, 'compare_stress')
     assert out['stress'] is None and 'combined' in out['note']
+    out, _ = run(ctx, 'compare_tests')
+    assert out['tests'] is None and 'combined' in out['note']
     out, _ = run(ctx, 'list_features')
     f = {r['id']: r for r in out['features']}
     assert f['geometry']['computed'] and f['geometry']['dims'] == 8 and f['geometry']['current']

@@ -84,6 +84,17 @@ def router(state, ctx):
                                           'iou': res.iou.astype(np.float16)},
                                 meta={'key': key, 'a': res.a, 'b': res.b}, etag=etag_for('cmp', key))
 
+    @r.get('/api/compare/tests')
+    def tests(key: str, feature: str | None = None):
+        """Statistical tests of the comparison `key` for the Compare panels (CompareService.tests): class mix,
+        class changes, box statistics and, on a computed feature, the embedding (MMD)."""
+        s = svc()
+        res = result_or_404(s, key)
+        st = ctx.current()
+        if feature and feature not in st.registry:
+            raise HTTPException(400, f'unknown feature {feature!r}')
+        return json_bytes(s.tests(res, feature))
+
     @r.get('/api/compare/image')
     def image(key: str, name: str):
         s = svc()

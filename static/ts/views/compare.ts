@@ -29,6 +29,8 @@ import { setImageSubset } from './image-grid.js';
 import { switchTab } from './layout.js';
 import { isImageUnit } from './preview.js';
 import { fmtCount } from '../core/format.js';
+import type { StatTest } from '../types-views.js';
+import { statChip } from './stat-chip.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -141,13 +143,18 @@ function skeleton(): string {
       ['joint', 'Joint', 'One projection of A and B together (the Explore projection controls)']], '')}</div>
     <div id="cmp-map-st" class="muted hint"></div>
     <div id="cmp-novel" class="cmp-novel"></div>
+    <div class="m-ctl"><button type="button" id="cmp-emb-test" class="ghost" title="Do A's and B's ${esc(unitWord(2))} come from the same distribution in feature space? MMD kernel two-sample test with a permutation p (the current Features, at most 1500 per side)">${icon('chart')}Test A vs B in feature space</button></div>
+    <div id="cmp-emb-st" class="stat-test"></div>
     <h3 class="cmp-h">Classes <span class="muted">click a row: its changed boxes</span></h3>
+    <div id="cmp-cls-test" class="stat-test"></div>
     <div class="cmp-table-wrap"><table id="cmp-classes" class="class-table cmp-classes"><thead><tr>
       <th>class</th><th class="r">A</th><th class="r">B</th><th class="r">Δ</th><th class="r">Δ%</th><th class="cmp-bar-h" aria-label="change"></th>
       <th class="r" title="boxes B has that A does not">+</th><th class="r" title="boxes A has that B does not">−</th><th class="r" title="boxes that changed class into / out of this class">reclass</th></tr></thead><tbody></tbody></table></div>
     <details id="cmp-conf-d" class="cmp-sec"><summary>Class changes A → B <span class="muted">matched boxes only</span></summary>
+      <div id="cmp-conf-test" class="stat-test"></div>
       <div id="cmp-confusion" class="cmp-chart"></div></details>
-    <details id="cmp-hist-d" class="cmp-sec"><summary>${img ? 'Image' : 'Box'} statistics <span class="muted">A vs B, KS distance</span></summary>
+    <details id="cmp-hist-d" class="cmp-sec"><summary>${img ? 'Image' : 'Box'} statistics <span class="muted">A vs B, KS + Mann-Whitney tests</span></summary>
+      <div id="cmp-hist-test" class="stat-test cmp-tests"></div>
       <div class="cmp-hists"><div id="cmp-h-area" class="cmp-chart sm${iou}"></div><div id="cmp-h-aspect" class="cmp-chart sm${iou}"></div>
       <div id="cmp-h-brightness" class="cmp-chart sm"></div><div id="cmp-h-blur" class="cmp-chart sm"></div></div></details>
     <details id="cmp-shift-d" class="cmp-sec"><summary>Image conditions <span class="muted">light · blur · noise · colour · camera: will a model trained on A fit B?</span></summary>
@@ -209,6 +216,11 @@ function bindPanel(): void {
     if (S.view && $req<HTMLSelectElement>('color-by').value === 'origin') renderPlot();    // the trace set changes
   };
   $req('cmp-promote').onclick = () => { void openPromote(); };
+  $req('cmp-emb-test').onclick = () => {
+    const f = S.viewReq?.feature ?? $req<HTMLSelectElement>('feature').value;
+    $req('cmp-emb-st').textContent = 'testing…';
+    void loadTests(f);
+  };
   // one delegated listener for the segmented groups, the cards and the lists
   body.addEventListener('click', (e) => {
     const b = closestOf(e, '[data-show], [data-color], [data-map], [data-img], [data-box], [data-sbs], [data-novel], [data-member-refresh]');
@@ -298,8 +310,61 @@ function syncParams(sm: CmpSummary): void {
   if (p.name_key) $req<HTMLSelectElement>('cmp-name-key').value = p.name_key;
 }
 
+// ---------------------------------------------------------------- statistical tests (GET api/compare/tests)
+interface CmpTests {
+  classes: StatTest; class_changes: StatTest; box_stats: Partial<Record<'area' | 'aspect' | 'brightness' | 'blur', StatTest>>;
+  embedding: (StatTest & { feature: string }) | null;
+}
+let tests: CmpTests | null = null, testSeq = 0, testsOf = '';
+
+/** The tests of the current run; `feature`: also the embedding (MMD) test on that feature space. */
+async function loadTests(feature?: string): Promise<void> {
+  const r = S.cmp?.run;
+  if (!r) return;
+  const my = ++testSeq;
+  try {
+    const t = await getJSON<CmpTests>(`api/compare/tests?key=${encodeURIComponent(r.key)}${feature ? `&feature=${encodeURIComponent(feature)}` : ''}`);
+    if (my !== testSeq || S.cmp?.run?.key !== r.key) return;
+    // a run without the feature keeps the embedding test already shown for this run
+    if (!feature && tests && tests.embedding && testsOf === r.key) t.embedding = tests.embedding;
+    tests = t;
+    testsOf = r.key;
+  } catch (e) {
+    if (my === testSeq) { tests = null; $req('cmp-emb-st').textContent = feature ? errText(e) : ''; }
+  }
+  renderTests();
+}
+
+const HIST_NAME: Record<string, string> = { area: 'box area', aspect: 'aspect', brightness: 'brightness', blur: 'sharpness' };
+
+function renderTests(): void {
+  const t = tests && testsOf === S.cmp?.run?.key ? tests : null, C = S.cmp;
+  const set = (id: string, html: string): void => { const el = $(id); if (el) el.innerHTML = html; };
+  if (!t || !C) { ['cmp-cls-test', 'cmp-conf-test', 'cmp-hist-test', 'cmp-emb-st'].forEach((id) => set(id, '')); return; }
+  const A = alias(C.a), B = alias(C.b);
+  set('cmp-cls-test', statChip(t.classes, `Is the class mix of ${A} different from ${B}'s? Chi-square test of homogeneity on the class counts; ` +
+    "Cramér's V says how different (0 alike, 0.1 small, 0.3 medium, 0.5 large). A * in the table marks a class whose share changed (two-proportion z, BH-corrected q < 0.05)."));
+  set('cmp-conf-test', statChip(t.class_changes, `Do matched ${unitWord(2)} change class ${A} → ${B} as often as ${B} → ${A}? Bowker's symmetry test on this table: ` +
+    '"differs" means relabelling went one way (e.g. a class renamed or merged), not random disagreement.'));
+  set('cmp-hist-test', Object.entries(t.box_stats).map(([k, v]) => (v ? `<div>${esc(HIST_NAME[k] ?? k)} ${statChip(v,
+    `Is ${HIST_NAME[k] ?? k} distributed differently in ${A} and ${B}? KS (any difference in shape) and Mann-Whitney (one side larger); ` +
+    "Cliff's δ: B vs A (|δ| 0.15 small, 0.33 medium, 0.47 large).")}</div>` : '')).join(''));
+  set('cmp-emb-st', t.embedding ? statChip(t.embedding, `Do ${A}'s and ${B}'s ${unitWord(2)} come from the same distribution in ${t.embedding.feature} space? ` +
+    'MMD (maximum mean discrepancy) with an RBF kernel; p from shuffling the A / B labels.') : '');
+  // per class significance mark in the Classes table (aligned with summary.classes)
+  const per = t.classes.per ?? [];
+  document.querySelectorAll<HTMLTableRowElement>('#cmp-classes tbody tr[data-c]').forEach((tr) => {
+    const k = per[+(tr.dataset['c'] ?? -1)];
+    const cell = tr.cells[4];
+    if (!cell) return;
+    cell.querySelector('.st-mark')?.remove();
+    if (k?.sig) cell.insertAdjacentHTML('beforeend', `<span class="st-mark" title="share changed: q = ${k.q?.toPrecision(2) ?? '–'}">*</span>`);
+  });
+}
+
 // a new run (or a patched one): mask, hover, plot, cards, table, open charts
 function afterRun(): void {
+  void loadTests();
   syncMask();
   invalidateHover();
   const by = $req<HTMLSelectElement>('color-by').value;
@@ -602,6 +667,7 @@ function renderClassTable(): void {
       `<td class="r">${c.added ? n(c.added) : ''}</td><td class="r">${c.removed ? n(c.removed) : ''}</td>` +
       `<td class="r">${c.reclass_in || c.reclass_out ? `+${n(c.reclass_in)} / −${n(c.reclass_out)}` : ''}</td></tr>`;
   }).join('') || '<tr><td colspan="9" class="muted">No boxes in either dataset.</td></tr>';
+  if (tests) renderTests();
 }
 
 const CHANGED = [BOX.MOVED, BOX.RECLASS, BOX.RECLASS_MOVED, BOX.UNMATCHED, BOX.IMAGE_ONLY];

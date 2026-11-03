@@ -99,6 +99,9 @@ def test_model_fit_drop():
     fit = shift.model_fit(_D(), side, 0, 1, 0.25, lambda mask: None)
     assert fit['a']['mean_top'] > 0.9 and fit['b']['none_found'] == 0.5
     assert fit['drop'] > 0.6
+    t = fit['tests']                       # 2 images a side: too few to be sure of anything
+    assert t['top_conf']['n_a'] == 2 and t['none_found']['test'] == 'two-proportion z'
+    assert t['none_found']['effect'] == 0.5 and t['none_found']['p'] > 0.05
 
 
 def test_ap_stats_mask_default_unchanged():

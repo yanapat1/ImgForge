@@ -141,6 +141,11 @@ def test_compare_tab_end_to_end(server, tmp_path):  # noqa: F811
         page.click('#cmp-hist-d > summary')
         page.wait_for_selector('#cmp-h-area .main-svg', timeout=10000)
         page.locator('#cmp-hist-d').scroll_into_view_if_needed()
+        # statistical tests of the run: class mix, class changes, one chip per box statistic
+        page.wait_for_selector('#cmp-cls-test .stat-chip', timeout=10000)
+        assert 'chi-square' in page.locator('#cmp-cls-test').inner_text()
+        assert 'Bowker' in page.locator('#cmp-conf-test').inner_text()
+        assert page.locator('#cmp-hist-test .stat-chip').count() == 4
         shot('compare-tab-classes-hists', '#cmp-side')
         # ---- Added -> the gallery with that one box
         page.click('#cmp-body .cmp-card[data-box="added"]')

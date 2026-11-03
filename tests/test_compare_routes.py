@@ -228,3 +228,23 @@ def test_stress_test_route(world, monkeypatch):
     assert c.get(f'/s/{U}/api/compare/stress/preview', params={'name': 'A/same.jpg', 'axis': 'x', 'level': 2}).status_code == 400
     assert c.post(f'/s/{U}/api/compare/stress', json={**body, 'model': 'nope'}).status_code == 404
     assert c.post(f'/s/{U}/api/compare/stress', json={**body, 'member': 'Z'}).status_code == 400
+
+
+def test_compare_tests_route(world):
+    """GET /api/compare/tests: the class mix (chi-square), class changes (Bowker) and box statistics of a run,
+    cached, unknown key 404, unknown feature 400; no feature computed -> no embedding test."""
+    c, U = world['c'], world['U']
+    key = c.post(f'/s/{U}/api/compare/run', json={'a': 'A', 'b': 'B'}).json()['key']
+    t = c.get(f'/s/{U}/api/compare/tests', params={'key': key}).json()
+    assert t['classes']['test'] == 'chi-square' and t['classes']['n_a'] == 4 and t['classes']['n_b'] == 4
+    assert len(t['classes']['per']) == 2
+    assert t['class_changes']['test'] == 'Bowker symmetry' and t['class_changes']['df'] == 1   # dog -> cat once
+    assert set(t['box_stats']) == {'area', 'aspect', 'brightness', 'blur'}
+    assert t['box_stats']['area']['n_a'] == 4 and t['embedding'] is None
+    assert c.get(f'/s/{U}/api/compare/tests', params={'key': key}).json() == t
+    assert c.get(f'/s/{U}/api/compare/tests', params={'key': 'nope'}).status_code == 404
+    assert c.get(f'/s/{U}/api/compare/tests', params={'key': key, 'feature': 'nope'}).status_code == 400
+    from types import SimpleNamespace
+    from dataviz.llm.tools import visual
+    out, summary = visual._compare_tests(SimpleNamespace(state=world['ctx'].state_for(U)), {})   # the assistant's view
+    assert out['tests']['a'] == 'A' and out['tests']['class_changes']['df'] == 1 and summary.startswith('→ A vs B')

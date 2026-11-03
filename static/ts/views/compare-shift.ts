@@ -21,6 +21,7 @@ import { setSelection } from './gallery.js';
 import { setImageSubset } from './image-grid.js';
 import { switchTab } from './layout.js';
 import { fmtCount, saveFile } from '../core/format.js';
+import { statChip } from './stat-chip.js';
 
 declare const Plotly: typeof import('plotly.js');
 
@@ -326,6 +327,9 @@ function renderModels(r: ShiftReport): string {
       ${labelled ? row('mAP50', (s) => fmt(s.map50)) + row('precision · recall', (s) => `${fmt(s.p)} · ${fmt(s.r)}`) : ''}
       ${row('labelled boxes', (s) => n(s.labels))}
     </tbody></table></div>
+    ${m.tests ? `<div class="stat-test cmp-tests">
+      <div>top confidence ${statChip(m.tests.top_conf, "Is the model really less (or more) sure on B than on A? The highest detection score per image, A vs B: KS and Mann-Whitney; Cliff's δ is B vs A (negative: lower on B).")}</div>
+      <div>nothing found ${statChip(m.tests.none_found, `Does the model find nothing (at confidence ≥ ${m.conf}) on more of B's images than A's? Two-proportion z test; Δ share is B − A.`)}</div></div>` : ''}
     ${!labelled ? '<p class="muted hint">mAP needs labels on both sides; confidence works without them.</p>' : ''}
     <div id="shf-model-conf" class="cmp-chart sm"></div>
     ${vsKeys.length ? `<div class="m-ctl">${m.map_vs ? `<div class="segmented" role="group">

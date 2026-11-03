@@ -2,6 +2,8 @@
 // page state S. Pure types: no runtime code. Fields the server may omit are optional (`?`); `| null` means the
 // server sends an explicit null. Payloads that other modules extend carry an index signature (`[k: string]: unknown`).
 
+import type { StatTest } from './types-views.js';
+
 // ------------------------------------------------------------------ generic
 /** Plain JSON value (what `JSON.parse` returns). */
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -413,6 +415,8 @@ export interface ShiftModel {
   id: string; name: string; a: ShiftModelSide | null; b: ShiftModelSide | null; conf: number; hist_bins: number[];
   drop?: number; map_drop?: number; conf_vs?: Record<string, ShiftCurve>;
   map_vs?: Record<string, { x: number[]; map50: Array<number | null>; labels: number[] }>;
+  /** is the drop real? (data/shift.py model_fit, ml/stats.py) */
+  tests?: { top_conf: StatTest; none_found: StatTest };
 }
 export interface ShiftRec { key: string; severity: ShiftSeverity; text: string; aug?: Record<string, string | number> }
 export interface ShiftReport {
