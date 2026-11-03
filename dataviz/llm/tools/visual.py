@@ -34,8 +34,10 @@ views/assistant.ts, applies `args` through its existing controls). Names, args a
     set_color_by {by: str}                                                                       -> #color-by
         class | group | suggested | session | suspicion | outlier | area | aspect | brightness | blur |
         cl_issue | cl_quality | cl_suggested | cl_given_prob | cl_ood_feat | cl_ood_prob   (after the cleanlab check)
-        origin | diff                                                                    (a combined dataset)
+        origin | diff | origin_cls                                                       (a combined dataset)
         m_status | m_pred | m_score | cl_swap | cl_badloc | cl_image_quality             (a model in the Model tab)
+        origin_pred                                                     (a model in the Model tab, combined dataset)
+        ip_cls | ip_score | origin_ip           (one point per image: a model's top class per image, Model tab)
     apply_filter {spec: object}           the filter bar (core/filter.ts emptyFilter() shape, see tasks.FILTER_SYSTEM;
                                           cleaned by tasks.clean_filter: known class ids / tags / issue types only)
     open_tab {tab: str}                   explore | stats | curation | model | eval | compare | ai  (activity bar)
@@ -68,8 +70,9 @@ PARAM_RANGE = {'n_neighbors': (2, 200), 'min_dist': (0.0, 1.0), 'perplexity': (2
 UI_ACTIONS = ('set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view')
 COLOR_BY = ('class', 'group', 'suggested', 'session', 'suspicion', 'outlier', 'area', 'aspect', 'brightness', 'blur',
             'cl_issue', 'cl_quality', 'cl_suggested', 'cl_given_prob', 'cl_ood_feat', 'cl_ood_prob',
-            'origin', 'diff',
-            'm_status', 'm_pred', 'm_score', 'cl_swap', 'cl_badloc', 'cl_image_quality')
+            'origin', 'diff', 'origin_cls',
+            'm_status', 'm_pred', 'm_score', 'cl_swap', 'cl_badloc', 'cl_image_quality', 'origin_pred',
+            'ip_cls', 'ip_score', 'origin_ip')
 COLOR_LABEL = {'class': 'class', 'group': 'group', 'suggested': 'kNN-suggested class', 'session': 'session',
                'suspicion': 'label suspicion', 'outlier': 'outlier score', 'area': 'box area (log)',
                'aspect': 'aspect ratio (log)', 'brightness': 'brightness', 'blur': 'sharpness (log)',
@@ -79,7 +82,10 @@ COLOR_LABEL = {'class': 'class', 'group': 'group', 'suggested': 'kNN-suggested c
                'origin': 'dataset (A / B / …)', 'diff': 'compare: box diff',
                'm_status': 'model: found / missed / wrong', 'm_pred': 'model: predicted class',
                'm_score': 'model: confidence', 'cl_swap': 'cleanlab: wrong-class score',
-               'cl_badloc': 'cleanlab: placement score', 'cl_image_quality': 'cleanlab: image label quality'}
+               'cl_badloc': 'cleanlab: placement score', 'cl_image_quality': 'cleanlab: image label quality',
+               'origin_cls': 'dataset × class', 'origin_pred': 'dataset × predicted class',
+               'ip_cls': 'model: predicted class', 'ip_score': 'model: top confidence',
+               'origin_ip': 'dataset × predicted class'}
 TABS = ('explore', 'stats', 'curation', 'model', 'eval', 'compare', 'ai')
 TAB_LABEL = {'explore': 'Explore', 'stats': 'Class stats', 'curation': 'Curation', 'model': 'Model',
              'eval': 'Evaluation', 'compare': 'Compare', 'ai': 'AI assistant'}

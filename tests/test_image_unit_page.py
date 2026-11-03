@@ -81,12 +81,19 @@ def test_images_only_s3_prefix_in_the_page(server, s3_server):  # noqa: F811
         assert sorted(meta['classes']) == ['(top folder)', 'cam1', 'cam2']
         assert page.locator('#ds-info').inner_text().count('per image') == 1
         assert page.locator('#activity [data-tab="curation"]').is_hidden()
-        assert page.locator('#activity [data-tab="model"]').is_hidden()
+        # a model can still name each image: the Model tab stays (predict mode), Evaluation (scores vs labels) goes
+        assert page.locator('#activity [data-tab="model"]').is_visible()
+        assert page.locator('#activity [data-tab="eval"]').is_hidden()
         assert page.locator('#color-by option[value="area"]').count() == 0
         assert page.locator('#fb-count').inner_text().strip() == '26 images'
         assert page.locator('#gallery .img-card .badge').count() == 0
         page.wait_for_load_state('networkidle')
         shot(page, '03-explore-one-point-per-image')
+        page.click('#activity [data-tab="model"]')
+        page.wait_for_selector('#m-empty:not(.hidden)', timeout=20000)          # no models yet: the add prompt
+        assert page.locator('#m-split').is_hidden() and page.locator('#m-iou').is_hidden()
+        assert page.locator('#mi-class-table').is_visible() and page.locator('#m-class-table').is_hidden()
+        page.click('#activity [data-tab="explore"]')
 
         page.wait_for_selector('#gallery .img-card', timeout=30000)
         assert page.locator('#gallery-count').text_content().startswith('26 images')

@@ -61,3 +61,5 @@ html.no-boxes .needs-boxes, html.no-boxes #activity .act-sep { display: none !im
 /* images with no labels (data/views.py ImageView): no box tools, curation or model scoring; images, text search,
    classes (sub-folders), light and sessions still apply */
 html.image-unit .needs-labels { display: none !important; }
+/* the Model tab in predict mode (a model names each image; nothing to score against): image-only parts */
+html.image-unit .box-only, html:not(.image-unit) .img-only { display: none !important; }

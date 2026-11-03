@@ -65,7 +65,7 @@ export interface DatasetInfo {
 /** What the page may offer for the open session (server/deps.py `capabilities`): an embeddings session has rows with
  *  metadata instead of boxes in images, so no curation, no models and no image viewer. */
 export interface Caps {
-  boxes: boolean; images: boolean; curation: boolean; models: boolean; meta: boolean;
+  boxes: boolean; images: boolean; curation: boolean; models: boolean | 'predict'; meta: boolean;
   /** what one point is: a labelled box, a whole image (data/views.py ImageView) or a row of an embeddings session */
   unit?: 'box' | 'image' | 'embeddings';
   /** local / S3: 'yolo' (images/ + labels/) or 'flat' (plain images) */
@@ -137,6 +137,11 @@ export interface Points {
   m_status?: number[];
   m_pred?: number[];
   m_score?: number[];
+  // Model tab on a one-point-per-image session: the model's top class per image (index into ip_names, -1 = nothing
+  // at this confidence) and its score (GET api/models/{id}/image-classes)
+  ip_cls?: number[];
+  ip_score?: number[];
+  ip_names?: string[];
   // cleanlab label quality of the current feature (GET api/label-quality, set by loadLabelQuality); null = not scored
   cl_quality?: Array<number | null>;
   cl_given_prob?: Array<number | null>;
@@ -162,7 +167,7 @@ export interface Points {
   moved?: Uint8Array;
 }
 /** Names of the numeric Points columns (colour-by / sort / filter fields). */
-export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score' |
+export type PointsColumn = 'area' | 'aspect' | 'brightness' | 'blur' | 'suspicion' | 'outlier' | 'm_score' | 'ip_score' |
   'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob' | 'cl_swap' | 'cl_badloc' | 'cl_image_quality';
 
 /** GET api/models/{id}/cleanlab */

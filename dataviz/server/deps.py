@@ -86,7 +86,8 @@ def capabilities(state):
     return {'union': union, 'live': bool(getattr(src, 'live', False)) or kind_of(state) == 'labeling',
             'boxes': not emb and not img, 'images': not emb,
             'curation': not emb and not img and (not union or bool(getattr(src, 'label_writable', False))),
-            'models': not emb and not img, 'meta': emb, 'unit': 'embeddings' if emb else 'image' if img else 'box',
+            # one point per image: no labels to score a model against, but a model can name each image ('predict')
+            'models': False if emb else 'predict' if img else True, 'meta': emb, 'unit': 'embeddings' if emb else 'image' if img else 'box',
             # the Objects | Full images switch: a labelled folder / bucket / combined dataset can also be shown one
             # point per image (/s/<sid>@images/, State.layer)
             'points': {'layer': getattr(state, 'layer', None),

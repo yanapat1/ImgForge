@@ -265,6 +265,27 @@ def router(state, ctx):
             raise HTTPException(409, f'{m["name"]}: run predictions first')
         return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
 
+    @r.get('/api/models/{mid}/image-classes', dependencies=viewer)
+    async def image_classes(mid: str, conf: float | None = None):
+        """One point per image (no labels to score against): the model's top class per point, its score, the
+        detections per point and per-class totals (ModelService.image_classes)."""
+        m = model_or_404(mid)
+        g.need_index()
+        res = await run_io(svc.image_classes, ctx.current(), m, conf)
+        if res is None:
+            raise HTTPException(409, f'{m["name"]}: run predictions first')
+        return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
+
+    @r.get('/api/image-models/agree', dependencies=viewer)
+    async def image_agree(a: str, b: str, conf: float | None = None):
+        """Two models' top class per image: agreement table, share agreeing, Cohen's kappa."""
+        ma, mb = model_or_404(a), model_or_404(b)
+        g.need_index()
+        res = await run_io(svc.image_agreement, ctx.current(), ma, mb, conf)
+        if res is None:
+            raise HTTPException(409, f'run predictions with both {ma["name"]} and {mb["name"]} first')
+        return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))
+
     @r.get('/api/models/{mid}/cleanlab', dependencies=viewer)
     async def cleanlab(mid: str, limit: int = 300):
         """cleanlab object-detection checks of this model's predictions: per box bad-location / swapped-class /

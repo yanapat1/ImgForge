@@ -45,6 +45,24 @@ interface Categorical {
   key: (id: number) => number;
   label: (k: number) => string | undefined;
   color: (k: number) => string;
+  /** marker symbol per key (dataset × class keys: one shape per dataset), default circle */
+  symbol?: (k: number) => string;
+}
+
+// dataset × class keys of a combined dataset: one key per (member, class), class -1 = none / nothing found
+const OK = 4096;
+const ORIGIN_SYMBOL = ['circle', 'diamond', 'square', 'triangle-up', 'cross', 'star', 'hexagon', 'x'];
+/** (member, class) keys: member k's classes take palette slots shifted by k × nc, so A·car and B·car differ in
+ *  colour and in shape, and the legend reads "A · car". */
+function originBy(origin: ArrayLike<number>, cls: (id: number) => number, name: (c: number) => string, nc: number,
+  none: string): Categorical {
+  const mem = S.meta?.members ?? [];
+  return {
+    key: (id) => (origin[id] ?? 0) * OK + cls(id) + 1,
+    label: (k) => { const o = Math.floor(k / OK), c = (k % OK) - 1; return `${mem[o]?.alias ?? `#${o}`} · ${c < 0 ? none : name(c)}`; },
+    color: (k) => { const o = Math.floor(k / OK), c = (k % OK) - 1; return c < 0 ? mixHex(THEME.ungrouped, originColor(o), 0.35) : clsColor(c + o * Math.max(nc, 1)); },
+    symbol: (k) => ORIGIN_SYMBOL[Math.floor(k / OK) % ORIGIN_SYMBOL.length] ?? 'circle',
+  };
 }
 
 // the class-coloured traces of the last render, so a filter change can restyle only their point arrays
@@ -145,6 +163,10 @@ function hoverText(id: number): string {
     const st = Pt.m_status[id] ?? -1, pc = Pt.m_pred?.[id] ?? -1, sc = Pt.m_score?.[id] ?? NaN;
     t += `<br>model: <b style="color:${errColor(st)}">${ERR[st]?.label}</b>` +
       (pc >= 0 && st !== 0 ? ` → ${esc(clsName(pc))}` : '') + (sc > 0 ? ` (${sc.toFixed(2)})` : '');
+  }
+  if (Pt.ip_cls) {
+    const pc = Pt.ip_cls[id] ?? -1, sc = Pt.ip_score?.[id] ?? 0;
+    t += pc < 0 ? '<br>model: nothing found' : `<br>model: <b>${esc(Pt.ip_names?.[pc] ?? String(pc))}</b> (${sc.toFixed(2)})`;
   }
   const C = S.cmp;
   if (C) {
@@ -291,6 +313,20 @@ function categorical(colorBy: string): Categorical {
     const sessions = [...idx.keys()];
     return { key: (id) => idx.get(Pt.session[id] ?? '') ?? -1, label: (k) => sessions[k], color: clsColor };
   }
+  const nClasses = S.meta?.classes.length ?? 0;
+  if (colorBy === 'origin_cls' && C) return originBy(C.origin, (id) => at(Pt.cls, id), (c) => clsName(c) ?? String(c), nClasses, '?');
+  const ipc = Pt.ip_cls, ipn = Pt.ip_names ?? [];
+  const ipName = (c: number): string => ipn[c] ?? `class ${c}`;
+  if (colorBy === 'ip_cls' && ipc) {
+    return { key: (id) => at(ipc, id), label: (k) => (k < 0 ? 'model: nothing found' : `model: ${ipName(k)}`),
+      color: (k) => (k < 0 ? THEME.ungrouped : clsColor(k)) };
+  }
+  if (colorBy === 'origin_ip' && ipc && C) return originBy(C.origin, (id) => at(ipc, id), ipName, ipn.length, 'nothing found');
+  if (colorBy === 'origin_pred' && C && Pt.m_pred && Pt.m_status) {
+    const mp0 = Pt.m_pred, ms0 = Pt.m_status;
+    return originBy(C.origin, (id) => (at(ms0, id) < 0 ? -1 : at(mp0, id)), (c) => clsName(c) ?? String(c), nClasses,
+      'nothing found / not scored');
+  }
   const sug = Pt.suggested, ms = Pt.m_status, mp = Pt.m_pred, cli = Pt.cl_issue, cls = Pt.cl_suggested;
   if (colorBy === 'suggested' && sug) return { key: (id) => at(sug, id), label: clsName, color: clsColor };
   if (colorBy === 'cl_suggested' && cls) {
@@ -417,7 +453,7 @@ export function renderPlot(): void {
       customdata: ids, text: ids.map(hoverOf), hoverinfo: 'text', marker,
     });
   } else {
-    const { key, label, color } = categorical(colorBy);
+    const { key, label, color, symbol } = categorical(colorBy);
     const groups = new Map<number, number[]>();
     // origin / diff: every key gets a trace (empty ones too), so the A / B / diff toggle stays a restyle
     if (colorBy === 'origin' && S.cmp) {
@@ -455,7 +491,7 @@ export function renderPlot(): void {
         // a class with no dot inside the lasso keeps its legend entry through one empty (null) point
         x: idx.length ? idx.map(xAt) : [null], y: idx.length ? idx.map(yAt) : [null],
         customdata: ids, text: ids.map(hoverOf), hoverinfo: 'text',
-        marker: { size: dot, color: color(k), opacity: opacityFor(ids, 0.8) },
+        marker: { size: dot, color: color(k), opacity: opacityFor(ids, 0.8), ...(symbol ? { symbol: symbol(k) } : {}) },
       });
     }
   }

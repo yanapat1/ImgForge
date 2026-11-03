@@ -19,6 +19,8 @@ import { renderGallery, setSelection } from './gallery.js';
 import { curTab, switchTab } from './layout.js';
 import { openCard } from './modal.js';
 import { pct1 } from '../core/format.js';
+import { clearImageModel, refreshImageModel, renderImageModel } from './model-images.js';
+import { isImageUnit } from './preview.js';
 
 // Plotly is loaded as a classic script by main.ts (window.Plotly)
 declare const Plotly: typeof import('plotly.js');
@@ -67,6 +69,7 @@ export async function showModelTab(): Promise<void> {
   }
   const ev = modelEval();
   if (ev && ev.model.id === M.id) { renderModel(); return; }
+  if (isImageUnit() && !$req('mi-grid').classList.contains('hidden')) { renderImageModel(); return; }
   await refreshEval();
 }
 
@@ -119,6 +122,7 @@ export async function showMissedObjects(): Promise<void> {
 }
 
 function clearModelColumns(): void {
+  if (isImageUnit()) clearImageModel();
   const P = pts();
   delete P.m_status; delete P.m_pred; delete P.m_score;
   delete P.cl_swap; delete P.cl_badloc; delete P.cl_image_quality;
@@ -132,6 +136,8 @@ export async function refreshEval(): Promise<void> {
   $req('m-run-box').classList.toggle('hidden', !m || m.predicted);
   if (!m) { M.ev = null; clearModelColumns(); renderEmpty(); return; }
   if (!m.predicted) { M.ev = null; clearModelColumns(); renderEmpty(); return; }
+  // one point per image: no labels to score against, the model names each image (views/model-images.ts)
+  if (isImageUnit()) { M.ev = null; await refreshImageModel(m, M.conf, models); return; }
   const seq = ++evalSeq;
   $req('m-sub').textContent = 'scoring…';
   try {
@@ -191,6 +197,7 @@ async function runPredictions(): Promise<void> {
 function renderEmpty(err?: string): void {
   const m = current();
   $req('m-grid').classList.add('hidden');
+  $req('mi-grid').classList.add('hidden');
   $req('m-empty').classList.remove('hidden');
   $req('m-kpis').innerHTML = '';
   $req('m-warn').innerHTML = err ? `<div class="m-note warn">${esc(err)}</div>` : '';

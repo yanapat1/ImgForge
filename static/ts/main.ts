@@ -269,6 +269,8 @@ function adaptToImages(): void {
   const sort = $req<HTMLSelectElement>('sort');
   for (const v of ['area-asc', 'area-desc', 'm-status', 'm-score']) sort.querySelector(`option[value="${v}"]`)?.remove();
   $req('stat-counts-h').textContent = 'Images per class';
+  // a model can still name each image (Model tab in predict mode): its tab stays, the Evaluation tab does not
+  if (S.status?.caps?.models === 'predict') document.querySelector('.act[data-tab="model"]')?.classList.remove('needs-labels');
 }
 
 function adaptToRows(points: Points): void {

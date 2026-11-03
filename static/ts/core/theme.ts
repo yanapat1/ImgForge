@@ -69,7 +69,7 @@ const CB_CLASS: Record<ThemeName, string[]> = {
 const isCb = (p: string): boolean => p === 'cbsafe' || p === 'contrast';
 
 /** Colour-by fields that are numbers (columns of the points payload): label, transform, colour scale. */
-export type ContinuousKey = 'suspicion' | 'outlier' | 'area' | 'aspect' | 'brightness' | 'blur' | 'm_score' |
+export type ContinuousKey = 'suspicion' | 'outlier' | 'area' | 'aspect' | 'brightness' | 'blur' | 'm_score' | 'ip_score' |
   'cl_quality' | 'cl_given_prob' | 'cl_ood_feat' | 'cl_ood_prob' | 'cl_swap' | 'cl_badloc' | 'cl_image_quality';
 export interface ContinuousField { label: string; f: (v: number) => number; scale: ScaleName }
 export const CONTINUOUS: Record<ContinuousKey, ContinuousField> = {
@@ -80,6 +80,7 @@ export const CONTINUOUS: Record<ContinuousKey, ContinuousField> = {
   brightness: { label: 'brightness', f: (v: number) => v, scale: 'grey' },
   blur: { label: 'log10 sharpness', f: (v: number) => Math.log10(v + 1), scale: 'seq' },
   m_score: { label: 'model confidence', f: (v: number) => v, scale: 'seq' },
+  ip_score: { label: 'model: top confidence', f: (v: number) => v, scale: 'seq' },
   // cleanlab (out-of-fold probabilities): drawn so that bright = suspicious, like label suspicion
   cl_quality: { label: '1 − label quality', f: (v: number) => 1 - v, scale: 'alarm' },
   cl_given_prob: { label: 'P(given class)', f: (v: number) => v, scale: 'seq' },

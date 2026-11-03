@@ -31,6 +31,7 @@ class ModelService:
         self._ap = OrderedDict()         # (tag, mid, fp, split) -> ap_stats
         self._splits = {}                # tag -> (splits, source)
         self._cleanlab = OrderedDict()   # (tag, mid, fp, edit_seq) -> cleanlab object-detection report
+        self._imgcls = OrderedDict()     # (tag, mid, fp, conf) -> image_classes() (one point per image sessions)
 
     # ------------------------------------------------------------ lookups
     def model(self, mid):
@@ -50,7 +51,7 @@ class ModelService:
         """A State was unloaded (server/app.py Ctx.close_state): forget what is kept per its tag."""
         with self._lock:
             self._splits.pop(tag, None)
-            for cache in (self._preds, self._ap):
+            for cache in (self._preds, self._ap, self._imgcls):
                 for k in [k for k in cache if k[0] == tag]:
                     del cache[k]
 
@@ -232,11 +233,92 @@ class ModelService:
         p = p[d.p_score[p] >= conf]
         return [(d.p_box[j].tolist(), float(d.p_score[j]), int(d.p_cls[j]), int(j)) for j in p]
 
+    # ------------------------------------------------------------ one point per image: predicted classes
+    def image_classes(self, state, m, conf=None):
+        """A model's answer for every point of a one-point-per-image session (no labels to score against): per
+        sample the top detection's class (an index into the MODEL's names, -1 = nothing at or above conf), its
+        score and the number of detections, plus per-class totals. None when the model has not run here."""
+        fp = self.fingerprint(m)
+        conf = float(conf if conf is not None else m.get('conf') or self.cfg.get('default_conf', 0.25))
+        key = (state.tag, m['id'], fp, round(conf, 4))
+        with self._lock:
+            if key in self._imgcls:
+                self._imgcls.move_to_end(key)
+                return self._imgcls[key]
+        preds = predict.load(predict.cache_path(state, m, fp))
+        if preds is None:
+            return None
+        det, img = preds['det'], preds['img'].astype(np.int64)
+        keep = det[:, 4] >= conf
+        det, img = det[keep], img[keep]
+        cls = det[:, 5].astype(np.int64)
+        names = [str(n) for n in preds['names']]
+        top = int(cls.max()) if len(cls) else -1
+        names += [f'class_{k}' for k in range(len(names), top + 1)]
+        n_img = len(preds['images'])
+        # the top detection per image: sort by (image, -score), the first row of each image
+        o = np.lexsort((-det[:, 4], img))
+        first = np.unique(img[o], return_index=True)[1] if len(o) else np.zeros(0, np.int64)
+        best = o[first]
+        top_cls = np.full(n_img, -1, np.int64)
+        top_score = np.zeros(n_img, np.float32)
+        top_cls[img[best]] = cls[best]
+        top_score[img[best]] = det[best, 4]
+        n_det = np.bincount(img, minlength=n_img)
+        # preds are per image name, points per sample: one point per image, so map by name
+        at = {n: i for i, n in enumerate(preds['images'])}
+        pos = np.fromiter((at.get(s['image'], -1) for s in state.samples), np.int64, len(state.samples))
+        ok = pos >= 0
+        pc = np.full(len(pos), -1, np.int64)
+        ps = np.zeros(len(pos), np.float32)
+        nd = np.zeros(len(pos), np.int64)
+        pc[ok], ps[ok], nd[ok] = top_cls[pos[ok]], top_score[pos[ok]], n_det[pos[ok]]
+        nc = len(names)
+        res = {'model': self.reg.public(m), 'conf': conf, 'names': names, 'ms': preds['ms'],
+               'pred_cls': pc, 'pred_score': np.round(ps, 3), 'n_det': nd,
+               'images_per_class': np.bincount(pc[pc >= 0], minlength=nc)[:nc].tolist(),
+               'detections_per_class': np.bincount(cls, minlength=nc)[:nc].tolist() if len(cls) else [0] * nc,
+               'no_detection': int((pc < 0).sum()), 'n_images': int(len(pc))}
+        if getattr(state, 'origin', None) is not None and len(state.origin) == len(pc):
+            res['by_origin'] = [{'alias': mem.get('alias'),
+                                 'images_per_class': np.bincount(pc[(state.origin == k) & (pc >= 0)], minlength=nc)[:nc].tolist(),
+                                 'no_detection': int(((state.origin == k) & (pc < 0)).sum()),
+                                 'n_images': int((state.origin == k).sum())}
+                                for k, mem in enumerate(state.members or [])]
+        with self._lock:
+            self._imgcls[key] = res
+            while len(self._imgcls) > 8:
+                self._imgcls.popitem(last=False)
+        return res
+
+    def image_agreement(self, state, ma, mb, conf=None):
+        """Two models' top class per image side by side: the agreement table (rows: a's classes + 'nothing',
+        columns: b's), the share of images where they agree (classes matched by name) and Cohen's kappa."""
+        from ..ml import stats
+        ra, rb = self.image_classes(state, ma, conf), self.image_classes(state, mb, conf)
+        if ra is None or rb is None:
+            return None
+        na, nb = ra['names'] + ['(nothing)'], rb['names'] + ['(nothing)']
+        ia = np.where(ra['pred_cls'] >= 0, ra['pred_cls'], len(na) - 1)
+        ib = np.where(rb['pred_cls'] >= 0, rb['pred_cls'], len(nb) - 1)
+        table = np.zeros((len(na), len(nb)), np.int64)
+        np.add.at(table, (ia, ib), 1)
+        # one shared category list (by normalised name) for agreement / kappa: the models' class orders may differ
+        cats = list(dict.fromkeys(predict._norm(n) for n in na + nb))
+        ca = np.asarray([cats.index(predict._norm(n)) for n in na])[ia]
+        cb = np.asarray([cats.index(predict._norm(n)) for n in nb])[ib]
+        sq = np.zeros((len(cats), len(cats)), np.int64)
+        np.add.at(sq, (ca, cb), 1)
+        k = stats.kappa(sq)
+        return {'a': ra['model'], 'b': rb['model'], 'conf': ra['conf'], 'rows': na, 'cols': nb,
+                'table': table.tolist(), 'agree': k['agree'], 'kappa': k['effect'], 'n': k['n_a'],
+                'disagree_ids': np.nonzero(ca != cb)[0][:5000].tolist()}
+
     def forget(self, mid):
         from . import hub
         hub.forget(mid)                                         # its API client on the labeling side too
         with self._lock:
-            for cache in (self._preds, self._ap):
+            for cache in (self._preds, self._ap, self._imgcls):
                 for k in [k for k in cache if k[1] == mid]:
                     cache.pop(k)
         runners.release()

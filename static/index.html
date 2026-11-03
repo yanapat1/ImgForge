@@ -275,7 +275,7 @@
         <button id="m-run" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-play"/></svg>Run on this dataset</button>
         <div id="m-run-prog" class="m-prog hidden"><div class="bar"><div></div></div><span class="num muted"></span></div>
       </div>
-      <div class="m-ctl">
+      <div class="m-ctl box-only">
         <span class="m-lbl" title="Images the model never saw in training give honest numbers">Images</span>
         <div id="m-split" class="segmented" role="group" aria-label="Which images to score">
           <button class="view-btn" data-split="val" aria-pressed="true" title="Validation images only (not used in training)">val</button>
@@ -287,21 +287,27 @@
         <label class="m-lbl" for="m-conf" title="Predictions below this confidence are ignored">Confidence</label>
         <input id="m-conf" type="range" min="0.01" max="0.99" step="0.01" value="0.25">
         <span id="m-conf-v" class="num">0.25</span>
-        <button id="m-best" class="ghost" title="Jump to the confidence with the best F1">best</button>
+        <button id="m-best" class="ghost box-only" title="Jump to the confidence with the best F1">best</button>
       </div>
-      <div class="m-ctl">
+      <div class="m-ctl box-only">
         <label class="m-lbl" for="m-iou" title="How much a prediction must overlap a label to count as finding it">Match IoU</label>
         <select id="m-iou"><option value="0.5">0.50</option><option value="0.75">0.75</option><option value="0.3">0.30</option></select>
       </div>
       <div id="m-warn"></div>
       <div id="m-kpis" class="kpis"></div>
-      <table id="m-class-table" class="class-table">
+      <table id="m-class-table" class="class-table box-only">
         <thead><tr><th>class</th><th class="r" title="AP at IoU 0.5 (all confidences)">AP50</th><th class="r" title="precision at this confidence">P</th>
           <th class="r" title="recall at this confidence">R</th><th class="r" title="labels the model missed, misplaced or called another class">miss</th>
           <th class="r" title="predictions with no matching label">FP</th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="muted hint side-hint">Click a class to load its mistakes into the gallery.</p>
+      <p class="muted hint side-hint box-only">Click a class to load its mistakes into the gallery.</p>
+      <table id="mi-class-table" class="class-table img-only">
+        <thead><tr><th>predicted class</th><th class="r" title="images whose most confident detection is this class">images</th>
+          <th class="r" title="every detection of this class at this confidence">detections</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted hint side-hint img-only">Click a class to load its images into the gallery. Color › model: predicted class colours the map.</p>
     </div>
   </section>
 
@@ -441,11 +447,18 @@
               <optgroup label="Compare (combined dataset)" data-needs="union" hidden disabled>
                 <option value="origin">dataset (A / B / …)</option>
                 <option value="diff">compare: box diff</option>
+                <option value="origin_cls">dataset × class</option>
+              </optgroup>
+              <optgroup label="Model (Model tab)" data-needs="ipred" hidden disabled>
+                <option value="ip_cls">model: predicted class</option>
+                <option value="ip_score">model: top confidence</option>
+                <option value="origin_ip" data-union>dataset × predicted class</option>
               </optgroup>
               <optgroup label="Model (Model tab)" data-needs="model" hidden disabled>
                 <option value="m_status">model: found / missed / wrong</option>
                 <option value="m_pred">model: predicted class</option>
                 <option value="m_score">model: confidence</option>
+                <option value="origin_pred" data-union>dataset × predicted class</option>
                 <option value="cl_swap" data-od>cleanlab: wrong-class score</option>
                 <option value="cl_badloc" data-od>cleanlab: placement score</option>
                 <option value="cl_image_quality" data-od>cleanlab: image label quality</option>
@@ -696,6 +709,24 @@
 
     <div id="tab-model" class="tab-body hidden" role="tabpanel">
       <div id="m-empty" class="m-empty hidden"></div>
+      <div id="mi-grid" class="stats-grid hidden">
+        <section class="stat-card">
+          <h3>Images per predicted class <span id="mi-bar-sub" class="muted"></span></h3>
+          <div id="mi-bar" class="stat"></div>
+        </section>
+        <section class="stat-card">
+          <h3>Top confidence per image</h3>
+          <div id="mi-hist" class="stat"></div>
+        </section>
+        <section class="stat-card wide">
+          <h3>Compare with another model
+            <select id="mi-vs" aria-label="Second model"></select> <span id="mi-agree-sub" class="muted"></span></h3>
+          <p class="muted hint">Each image's top class from both models (classes matched by name). Agreement and Cohen's κ
+            (1 = always agree, 0 = no better than chance). Click a cell to load its images.</p>
+          <div id="mi-agree" class="stat"></div>
+          <button id="mi-disagree" class="ghost hidden" type="button">Show the images they disagree on</button>
+        </section>
+      </div>
       <div id="m-grid" class="stats-grid hidden">
         <section class="stat-card wide">
           <h3>Likely label errors <span id="m-issues-sub" class="muted"></span></h3>
