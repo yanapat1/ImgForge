@@ -6,7 +6,7 @@
 
 import { apiFetch, errMessage, getJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
-import { $, $req, textOn, isTypingTarget } from '../core/dom.js';
+import { $, $req, copyImage, copyText, textOn, isTypingTarget } from '../core/dom.js';
 import { confirmDialog } from './dialog.js';
 import { S } from '../core/state.js';
 import { clsColor, THEME } from '../core/theme.js';
@@ -428,30 +428,19 @@ function openMenu(x: number, y: number): void {
 function closeMenu(): void { $req('vw-menu').classList.add('hidden'); }
 
 async function menuAction(a: string): Promise<void> {
-  if (a === 'copy-name') { await copyText(V.name ?? ''); return; }
+  if (a === 'copy-name') { flash((await copyText(V.name ?? '')) ? 'File name copied' : (V.name ?? '')); return; }
   const withBoxes = a.endsWith('-boxes');
-  let blob: Blob;
-  try { blob = await composite(withBoxes); } catch (e) { flash(`Could not build the image: ${errMessage(e)}`); return; }
-  if (a.startsWith('save')) { download(blob); return; }
-  // the async clipboard needs a secure context (https or localhost): plain http from another machine falls back
-  if (window.isSecureContext && navigator.clipboard && window.ClipboardItem) {
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      flash(`Copied ${withBoxes ? 'with' : 'without'} boxes`);
-      return;
-    } catch (e) { /* permission refused: fall through to the download */ }
+  // started before any await: the clipboard write must stay inside the click's user activation
+  const png = composite(withBoxes);
+  if (a.startsWith('save')) {
+    try { download(await png); } catch (e) { flash(`Could not build the image: ${errMessage(e)}`); }
+    return;
   }
-  download(blob);
-  flash('The browser blocks image copy on this page (http): saved as PNG instead');
-}
-
-async function copyText(text: string): Promise<void> {
-  try { await navigator.clipboard.writeText(text); flash('File name copied'); } catch (e) {
-    const ta = Object.assign(document.createElement('textarea'), { value: text });
-    document.body.append(ta); ta.select();
-    try { document.execCommand('copy'); flash('File name copied'); } catch (e2) { flash(text); }
-    ta.remove();
-  }
+  const copied = copyImage(png);        // no await before this call
+  try { await png; } catch (e) { flash(`Could not build the image: ${errMessage(e)}`); return; }
+  flash((await copied)
+    ? `Copied ${withBoxes ? 'with' : 'without'} boxes`
+    : 'The browser blocked the copy: use Save, or Shift + right-click for its own Copy image');
 }
 
 const download = (blob: Blob): void => saveFile(blob, `${(V.name || 'image').replace(/\.[^.]+$/, '')}.png`);

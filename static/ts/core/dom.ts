@@ -75,6 +75,45 @@ export function fmtEta(s: number | null | undefined): string {
   return s >= 60 ? `~${Math.floor(s / 60)}m ${Math.round(s % 60)}s left` : `~${Math.round(s)}s left`;
 }
 
+/** Put a PNG on the clipboard -> whether it worked. Call it straight from the click handler with the PROMISE of the
+ *  blob (not after awaiting it): the async clipboard needs the click's user activation, which an await of a slow
+ *  render can use up. Over plain http (no async clipboard) the image is selected in a hidden editable box and copied
+ *  with execCommand('copy'): it lands as rich content (pastes into Docs, Slack, Word, PowerPoint). */
+export async function copyImage(png: Promise<Blob>): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]); return true; } catch { /* fall back */ }
+  }
+  let url = '';
+  try {
+    const blob = await png;
+    url = await new Promise<string>((ok, fail) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result));
+      r.onerror = () => fail(r.error);
+      r.readAsDataURL(blob);
+    });
+  } catch { return false; }
+  const box = document.createElement('div');
+  box.contentEditable = 'true';
+  box.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;overflow:hidden;opacity:0';
+  const img = new Image();
+  img.src = url;
+  box.append(img);
+  const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  document.body.append(box);
+  const sel = document.getSelection();
+  const range = document.createRange();
+  range.selectNode(img);
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  sel?.removeAllRanges();
+  box.remove();
+  prev?.focus();
+  return ok;
+}
+
 /** Put `text` on the clipboard -> whether it worked. The async clipboard needs a secure context (https, localhost);
  *  over plain http the page falls back to a hidden textarea + execCommand('copy'). */
 export async function copyText(text: string): Promise<boolean> {
