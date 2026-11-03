@@ -8,7 +8,7 @@ import { userKey } from '../core/auth.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { pts, S } from '../core/state.js';
-import { clsColor, clsName, ERR, THEME } from '../core/theme.js';
+import { clsColor, clsName, ERR, originColor, THEME } from '../core/theme.js';
 import { invalidateHover, renderPlot } from '../plot/render.js';
 import { openSettings } from '../settings/dialog.js';
 import type { DetectionChecks } from '../types.js';
@@ -79,7 +79,8 @@ function syncModelControls(): void {
   const colorBy = $req<HTMLSelectElement>('color-by'), sort = $req<HTMLSelectElement>('sort');
   const og = colorBy.querySelector<HTMLOptGroupElement>('optgroup[data-needs="model"]');
   if (og) { og.hidden = !on; og.disabled = !on; }
-  if (!on && colorBy.value.startsWith('m_')) { colorBy.value = 'class'; if (S.view) renderPlot(); }
+  colorBy.querySelectorAll<HTMLOptionElement>('optgroup[data-needs="model"] option[data-union]').forEach((o) => { o.hidden = !S.cmp; o.disabled = !S.cmp; });
+  if (!on && (colorBy.value.startsWith('m_') || colorBy.value === 'origin_pred')) { colorBy.value = 'class'; if (S.view) renderPlot(); }
   for (const v of ['m-status', 'm-score']) {
     const o = sort.querySelector<HTMLOptionElement>(`option[value="${v}"]`);
     if (o) { o.hidden = !on; o.disabled = !on; }
@@ -154,7 +155,7 @@ export async function refreshEval(): Promise<void> {
     void loadDetectionChecks(m);
     drawn = false;
     renderModel();
-    if (S.view && $req<HTMLSelectElement>('color-by').value.startsWith('m_')) renderPlot();
+    if (S.view && /^(m_|origin_pred$)/.test($req<HTMLSelectElement>('color-by').value)) renderPlot();
     if (/^m-/.test($req<HTMLSelectElement>('sort').value)) renderGallery();
   } catch (e) {
     if (seq !== evalSeq) return;
@@ -253,6 +254,15 @@ function renderLeft(ev: ModelEvalFull): void {
   }
   if (ev.model.format === 'api') notes.push('<div class="m-note">API model: boxes below the server’s own confidence cut are never returned, so low-confidence curves stop early.</div>');
   $req('m-warn').innerHTML = notes.join('');
+  // a combined dataset: the same scores on A's and B's images apart (click a row: that dataset's mistakes)
+  const sides = ev.by_origin ?? [];
+  const ot = $req<HTMLTableElement>('m-origin-table');
+  ot.classList.toggle('hidden', sides.length < 2);
+  tbody(ot).innerHTML = sides.map((o, k) => `<tr data-origin="${k}" tabindex="0" role="button" title="load ${esc(o.alias)}'s labels the model got wrong">` +
+    `<td><span class="cname"><span class="dot" style="background:${originColor(k)}"></span>${esc(o.alias)}</span></td>` +
+    `<td class="r">${pct(o.map50)}</td><td class="r">${pct(o.p)}</td><td class="r">${pct(o.r)}</td>` +
+    `<td class="r${(o.missed ?? 0) + (o.wrong_cls ?? 0) ? ' bad' : ''}">${(o.missed ?? 0) + (o.wrong_cls ?? 0)}</td>` +
+    `<td class="r${o.fp_bg ? ' bad' : ''}">${o.fp_bg ?? 0}</td></tr>`).join('');
   const rows = ev.per_class.filter((c) => c.n).sort((a, b) => (a.ap50 ?? 1) - (b.ap50 ?? 1));
   tbody($req<HTMLTableElement>('m-class-table')).innerHTML = rows.map((c) => {
     const miss = c.missed + c.loc + c.wrong_cls;
@@ -532,6 +542,14 @@ function bindModel(): void {
     void refreshEval();
   };
   $req('m-recall-by').onchange = () => { renderRecall(); };
+  $req('m-origin-table').onclick = (e) => {
+    const row = closestOf(e, 'tr[data-origin]');
+    const o = S.cmp?.origin;
+    if (!row || !o) return;
+    const k = +(row.dataset['origin'] ?? NaN);
+    const P = pts();
+    toGallery(P.id.filter((id) => (o[id] ?? -1) === k && (P.m_status?.[id] ?? -1) > 0), `${S.meta?.members?.[k]?.alias ?? k}: model mistakes`);
+  };
   $req('m-class-table').onclick = (e) => {
     const row = closestOf(e, 'tr[data-c]');
     if (!row) return;

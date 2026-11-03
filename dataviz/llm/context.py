@@ -143,6 +143,11 @@ def eval_summary(ctx):
     for r in rows:
         out.append(f'| {r["name"]} | {f(r["map50"])} | {f(r["map"])} | {f(r["p"])} | {f(r["r"])} | {f(r["f1"])} | '
                    f'{f(r["conf"])} | {f(r["ms"])} | {r["missed"]} | {r["wrong_cls"]} | {r["fp_bg"]} |')
+    sides = [o['alias'] for o in (rows[0].get('by_origin') or [])]
+    if len(sides) > 1:                       # a combined dataset: the model x dataset matrix
+        out += ['', 'mAP50 per dataset (combined dataset; each on its own images only):',
+                '| model | ' + ' | '.join(sides) + ' |', '|---|' + '---|' * len(sides)]
+        out += [f'| {r["name"]} | ' + ' | '.join(f(o.get('map50')) for o in r.get('by_origin') or []) + ' |' for r in rows]
     pc = lb.get('per_class') or {}
     best = lb.get('best')
     if best in (pc.get('models') or []):

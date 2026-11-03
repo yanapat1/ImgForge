@@ -398,3 +398,14 @@ button.user-btn:hover:not(:disabled) .avatar, button.user-btn[aria-expanded="tru
 /* every dialog box (a .panel straight inside a .modal: image viewer, settings, wizard, label dialogs; the small dialog;
    the sign-in card) takes its edge from tokens, so each look styles all of them at once (tokens.css / <look>.css) */
 .modal > .panel, .ui-dlg, .login-card { border: var(--dialog-border-w, 1px) solid var(--dialog-border-c, var(--border-strong)); box-shadow: var(--dialog-shadow, var(--shadow-3)); }
+
+/* a statistical test result (views/stat-chip.ts): test · p · effect · verdict, the tooltip explains it */
+.stat-test { margin: 2px 0 6px; }
+.stat-test:empty { display: none; }
+.stat-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 3px 10px; border-radius: var(--r);
+  border: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-xs); color: var(--text-muted); cursor: help; max-width: 100%; }
+.stat-chip b { color: var(--text); font-weight: 650; }
+.stat-chip .st-v { font-weight: 650; }
+.stat-chip.st-diff { border-color: var(--accent-line); background: var(--accent-soft); }
+.stat-chip.st-diff .st-v { color: var(--accent-text); }
+.stat-chip.st-small .st-v, .stat-chip.st-na .st-v { color: var(--text-faint); }

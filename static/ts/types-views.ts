@@ -38,6 +38,13 @@ export interface ModelEvalFull extends ModelEval {
   conf: number; match_iou: number; ms: number; unmatched: string[]; n_images: number;
   ap: EvalAP; per_class: ClassRow[]; confusion: number[][]; totals: EvalTotals;
   fps: EvalFp[]; issues: EvalIssue[];
+  /** a combined dataset: the same scores per member (A, B, ...); [] otherwise */
+  by_origin?: OriginScore[];
+}
+/** One member's scores of a model on a combined dataset (ModelService.by_origin). */
+export interface OriginScore {
+  alias: string; name?: string; images: number; labels: number; preds?: number; tp?: number; p: number; r: number;
+  map50: number; map: number; n_labels?: number[]; ap50?: number[]; missed?: number; wrong_cls?: number; fp_bg?: number;
 }
 /** POST api/models/{id}/predict. */
 export type PredictResult = { ready: true } | { ready: false; job_id: number };
@@ -51,6 +58,7 @@ export interface LbRow {
   id: string; name: string; family: string; format: string; map50: number; map: number; p: number; r: number; f1: number;
   conf: number; best_conf: number; ms: number; size_mb: number | null; preds: number; tp: number; labels: number; images: number;
   missed: number; wrong_cls: number; fp_bg: number; fp_dup: number; unmatched: string[];
+  by_origin?: OriginScore[];
 }
 /** Sortable / numeric columns of a leaderboard row. */
 export type LbKey = 'map' | 'map50' | 'p' | 'r' | 'f1' | 'conf' | 'ms' | 'size_mb' | 'missed' | 'wrong_cls' | 'fp_bg' | 'fp_dup';
@@ -87,6 +95,15 @@ export interface Compare {
   per_class: { classes: string[]; labels: number[]; tp_a: number[]; tp_b: number[]; only_a: number[]; only_b: number[]; both_miss: number[];
     fp_a: number[]; fp_b: number[]; ap50_a: Array<number | null>; ap50_b: Array<number | null> };
   map_a: number; map_b: number; map50_a: number; map50_b: number;
+  origin?: string | null;
+  /** McNemar on only-A vs only-B (ml/stats.py mcnemar) */
+  test?: StatTest;
+}
+/** One two-group test result (dataviz/ml/stats.py): shown as a chip by views/stat-chip.ts. */
+export interface StatTest {
+  test: string; stat: number | null; p: number | null; effect: number | null; effect_name: string;
+  n_a: number; n_b: number; verdict: string; q?: number | null; df?: number; p_mw?: number | null; w1?: number | null;
+  perms?: number; per?: Array<{ z: number | null; p: number | null; q: number | null; sig: boolean } | null>;
 }
 export interface EvalOverview {
   leaderboard: Leaderboard; focus: string | null; insights: Insights | null; split_source: string | null;

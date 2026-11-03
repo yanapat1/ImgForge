@@ -125,7 +125,8 @@ function skeleton(): string {
     <div class="m-ctl"><span class="m-lbl">Show</span>${seg('show', [['a', 'A', 'Only the boxes of A'], ['b', 'B', 'Only the boxes of B'],
       ['both', 'Both', 'Every box of A and B'], ['diff', 'Diff only', 'Only boxes that changed: moved, class changed, removed, added, image in one only']], 'both')}</div>
     <div class="m-ctl"><span class="m-lbl">Colour</span>${seg('color', [['origin', 'Dataset', 'A in one colour, B in another'],
-      ['diff', 'Diff', 'Same / moved / class changed / removed / added'], ['class', 'Class', 'The class colours']], '')}</div>
+      ['diff', 'Diff', 'Same / moved / class changed / removed / added'], ['class', 'Class', 'The class colours'],
+      ['origin_cls', 'Dataset × class', "A's and B's classes in different colours and shapes"]], '')}</div>
     <div class="m-ctl"><label class="cmp-check" title="${esc(`${unitWord(2, true)} that are the same in A and B in grey, so the colours show only what differs (after a run)`)}">
       <input id="cmp-shared" type="checkbox" checked> Shared ${unitWord(2)} in grey</label></div>
     <div id="cmp-legend" class="cmp-legend"></div>

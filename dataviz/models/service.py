@@ -133,13 +133,13 @@ class ModelService:
             split = 'all'
         return split, avail
 
-    def ap(self, state, m, d, split):
-        """Conf-independent AP stats, cached per (dataset, model, split)."""
-        akey = (state.tag, m['id'], self.fingerprint(m), split, getattr(state, 'edit_seq', 0))
+    def ap(self, state, m, d, split, side=None, img_mask=None):
+        """Conf-independent AP stats, cached per (dataset, model, split[, member of a combined dataset])."""
+        akey = (state.tag, m['id'], self.fingerprint(m), split, getattr(state, 'edit_seq', 0), side)
         with self._lock:
             ap = self._ap.get(akey)
         if ap is None:
-            ap = evaluate.ap_stats(d, split)
+            ap = evaluate.ap_stats(d, split, img_mask)
             with self._lock:
                 self._ap[akey] = ap
                 while len(self._ap) > 32:
@@ -182,7 +182,41 @@ class ModelService:
                      'kind': evaluate.PRED_KINDS[pk[p]], 'image': d.images[int(d.p_img[p])],
                      'gt': int(out['p_gt'][p])} for p in fps],
             'issues': evaluate.label_issues(d, out, min_score=max(issues_min, conf)),
+            'by_origin': self.by_origin(state, m, d, out, split),
         }
+
+    @staticmethod
+    def image_origin(state, d):
+        """Member index of each evaluated image of a combined dataset (names are '<alias>/<name>'), None otherwise."""
+        mem = getattr(state, 'members', None) or []
+        if not mem or getattr(state, 'origin', None) is None:
+            return None
+        at = {mm.get('alias'): k for k, mm in enumerate(mem)}
+        return np.fromiter((at.get(n.split('/', 1)[0], -1) for n in d.images), np.int64, len(d.images))
+
+    def by_origin(self, state, m, d, out, split):
+        """A combined dataset: the same scores per member (A, B, ...) at this confidence, so the Model tab can show A
+        and B side by side. [] for a plain dataset."""
+        io = self.image_origin(state, d)
+        if io is None:
+            return []
+        st, pk = out['status'], out['p_kind']
+        g_org = np.asarray(state.origin, np.int64)[:d.n_gt]
+        p_org = io[d.p_img] if len(d.p_img) else np.zeros(0, np.int64)
+        res = []
+        for k, mm in enumerate(state.members):
+            ap = self.ap(state, m, d, split, side=k, img_mask=io == k)
+            g, p = g_org == k, p_org == k
+            tp = int(((st == 0) & g).sum())
+            n_lbl = int(((st >= 0) & g).sum())
+            n_pred = int(((pk >= 0) & p).sum())
+            res.append({'alias': mm.get('alias'), 'name': mm.get('name'),
+                        'images': int((d.image_mask(split) & (io == k)).sum()), 'labels': n_lbl, 'preds': n_pred,
+                        'tp': tp, 'p': tp / n_pred if n_pred else 0.0, 'r': tp / n_lbl if n_lbl else 0.0,
+                        'map50': ap['map50'], 'map': ap['map'], 'n_labels': ap['n_labels'], 'ap50': ap['ap50'],
+                        'missed': int(((st == 3) & g).sum()), 'wrong_cls': int(((st == 1) & g).sum()),
+                        'fp_bg': int(((pk == 4) & p).sum())})
+        return res
 
     def cleanlab(self, state, m, min_score=0.05):
         """cleanlab.object_detection on this model's predictions (ml/label_quality.od_report): per box bad-location /

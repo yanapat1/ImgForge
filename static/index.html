@@ -295,6 +295,12 @@
       </div>
       <div id="m-warn"></div>
       <div id="m-kpis" class="kpis"></div>
+      <table id="m-origin-table" class="class-table box-only hidden" aria-label="Scores per dataset">
+        <thead><tr><th>dataset</th><th class="r" title="AP at IoU 0.5 on this dataset's images only">mAP50</th>
+          <th class="r" title="precision at this confidence">P</th><th class="r" title="recall at this confidence">R</th>
+          <th class="r" title="labels the model missed, misplaced or called another class">miss</th><th class="r" title="predictions with nothing there">FP</th></tr></thead>
+        <tbody></tbody>
+      </table>
       <table id="m-class-table" class="class-table box-only">
         <thead><tr><th>class</th><th class="r" title="AP at IoU 0.5 (all confidences)">AP50</th><th class="r" title="precision at this confidence">P</th>
           <th class="r" title="recall at this confidence">R</th><th class="r" title="labels the model missed, misplaced or called another class">miss</th>
@@ -780,7 +786,9 @@
         </section>
         <section id="e-cmp-card" class="stat-card wide hidden">
           <h3>Compare <select id="e-cmp-a" aria-label="Model A"></select> vs <select id="e-cmp-b" aria-label="Model B"></select>
+            <select id="e-cmp-side" class="hidden" aria-label="Which dataset"></select>
             <span id="e-cmp-sub" class="muted"></span></h3>
+          <div id="e-cmp-test" class="stat-test"></div>
           <div id="e-cmp-chips" class="chips cmp-chips"></div>
           <div id="e-cmp" class="stat"></div>
         </section>

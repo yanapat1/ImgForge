@@ -20,6 +20,7 @@ import { curTab, switchTab } from './layout.js';
 import { openModal, openPredModal } from './modal.js';
 import { modelsChanged, openModelClass, useModel } from './model.js';
 import { saveFile } from '../core/format.js';
+import { statChip } from './stat-chip.js';
 
 // Plotly is loaded as a classic script by main.ts (window.Plotly)
 declare const Plotly: typeof import('plotly.js');
@@ -29,9 +30,11 @@ export const EVAL_PLOTS = ['e-cmp', 'e-speed', 'e-heat', 'e-balance', 'e-gap', '
 interface EvalState {
   cmpSeq: number; split: string; mode: string; conf: number; focus: string | null; data: EvalOverview | null;
   cmp: (Compare & { key: string }) | null; cmpA: string | null; cmpB: string | null; models: ModelInfo[];
+  /** a combined dataset: compare the two models on one member only ('' = all) */
+  cmpSide: string;
   running: Set<string>; sortKey: LbCol; seq: number;
 }
-const E: EvalState = { cmpSeq: 0, split: 'val', mode: 'best', conf: 0.25, focus: null, data: null, cmp: null, cmpA: null, cmpB: null, models: [], running: new Set(), sortKey: 'map', seq: 0 };
+const E: EvalState = { cmpSeq: 0, split: 'val', mode: 'best', conf: 0.25, focus: null, data: null, cmp: null, cmpA: null, cmpB: null, cmpSide: '', models: [], running: new Set(), sortKey: 'map', seq: 0 };
 let drawn = false, bound = false;
 
 export function invalidateEval(): void { drawn = false; }
@@ -186,7 +189,15 @@ function renderLeaderboard(): void {
     return PCT_COLS.includes(k) ? pct(v) : k === 'conf' ? v.toFixed(2) : k === 'ms' ? v.toFixed(1) : v.toLocaleString();
   };
   $req('e-lb-sub').textContent = `· ${lb.split} images · ${E.mode === 'best' ? 'each at its best-F1 confidence' : `all at confidence ${E.conf}`} · click a header to sort`;
-  $req('e-lb').innerHTML = `<thead><tr>${LB_COLS.map(([k, l]) => `<th class="${k === 'name' ? '' : 'r'}${E.sortKey === k ? ' sorted' : ''}" data-sort="${k}" role="button" tabindex="0">${l}</th>`).join('')}</tr></thead><tbody>` +
+  // a combined dataset: the model × dataset matrix, mAP50 per member after the pooled columns
+  const aliases = (lb.rows[0]?.by_origin ?? []).map((o) => o.alias);
+  const sideBest = aliases.map((_, j) => Math.max(...lb.rows.map((r) => r.by_origin?.[j]?.map50 ?? -1)));
+  const sideTh = aliases.map((a) => `<th class="r" title="mAP50 on ${esc(a)}'s images only">mAP50 · ${esc(a)}</th>`).join('');
+  const sideTd = (r: LbRow): string => aliases.map((_, j) => {
+    const v = r.by_origin?.[j]?.map50;
+    return `<td class="r${v != null && lb.rows.length > 1 && v === sideBest[j] ? ' top' : ''}">${v == null ? '–' : pct(v)}</td>`;
+  }).join('');
+  $req('e-lb').innerHTML = `<thead><tr>${LB_COLS.map(([k, l]) => `<th class="${k === 'name' ? '' : 'r'}${E.sortKey === k ? ' sorted' : ''}" data-sort="${k}" role="button" tabindex="0">${l}</th>`).join('')}${sideTh}</tr></thead><tbody>` +
     rows.map((r) => `<tr data-mid="${esc(r.id)}" tabindex="0" role="button" title="explain this model below">` + LB_COLS.map(([k]) => {
       if (k === 'name') {
         return `<td><span class="cname">${r.id === lb.best ? `<span class="tagc ok">${icon('check')}best</span>` : ''}` +
@@ -195,7 +206,7 @@ function renderLeaderboard(): void {
       }
       const best = bestOf[k];
       return `<td class="r${best != null && r[k] === best ? ' top' : ''}">${fmt(k, r[k])}</td>`;
-    }).join('') + '</tr>').join('') + '</tbody>';
+    }).join('') + sideTd(r) + '</tr>').join('') + '</tbody>';
 }
 
 const padRange = (v: number[]): [number, number] => { const lo = Math.min(...v), hi = Math.max(...v), p = Math.max(0.01, (hi - lo) * 0.25); return [lo - p, hi + p]; };
@@ -340,12 +351,18 @@ async function loadCompare(): Promise<void> {
   $req('e-cmp-a').innerHTML = $req('e-cmp-b').innerHTML = opts;
   $req<HTMLSelectElement>('e-cmp-a').value = E.cmpA;
   $req<HTMLSelectElement>('e-cmp-b').value = E.cmpB ?? '';
-  const key = [E.cmpA, E.cmpB, E.split, E.mode, E.conf].join('|');
+  const members = S.meta?.members ?? [];
+  const sideSel = $req<HTMLSelectElement>('e-cmp-side');
+  sideSel.classList.toggle('hidden', members.length < 2);
+  if (!members.some((m) => m.alias === E.cmpSide)) E.cmpSide = '';
+  sideSel.innerHTML = '<option value="">on every dataset</option>' + members.map((m) => `<option value="${esc(m.alias)}">on ${esc(m.alias)} only</option>`).join('');
+  sideSel.value = E.cmpSide;
+  const key = [E.cmpA, E.cmpB, E.split, E.mode, E.conf, E.cmpSide].join('|');
   if (E.cmp && E.cmp.key === key) { d.compare = E.cmp; renderCompare(); return; }
   const seq = ++E.cmpSeq;
   $req('e-cmp-sub').textContent = 'scoring…';
   try {
-    const c = await getJSON<Compare>(`api/eval/compare?a=${encodeURIComponent(E.cmpA)}&b=${encodeURIComponent(E.cmpB ?? '')}&split=${E.split}&conf_mode=${E.mode}&conf=${E.conf}`);
+    const c = await getJSON<Compare>(`api/eval/compare?a=${encodeURIComponent(E.cmpA)}&b=${encodeURIComponent(E.cmpB ?? '')}&split=${E.split}&conf_mode=${E.mode}&conf=${E.conf}${E.cmpSide ? `&origin=${encodeURIComponent(E.cmpSide)}` : ''}`);
     if (seq !== E.cmpSeq) return;
     E.cmp = { key, ...c };
     if (E.data) E.data.compare = c;      // part of the JSON export
@@ -362,6 +379,7 @@ function renderCompare(): void {
   const lostTxt = (l: Record<string, number>): string => Object.entries(l).filter(([, v]) => v).map(([k, v]) => `${v} ${k.replace('_cls', ' class')}`).join(', ');
   $req('e-cmp-sub').textContent = `${c.labels.toLocaleString()} labels · A ${pct(n.tp_a / c.labels)}% found · B ${pct(n.tp_b / c.labels)}% found` +
     (c.conf_mode === 'best' ? ` · each at its best-F1 conf (${c.conf_a.toFixed(2)} / ${c.conf_b.toFixed(2)})` : ` · conf ${c.conf_a.toFixed(2)}`);
+  $req('e-cmp-test').innerHTML = c.test ? statChip(c.test, `Does one model really find more labels? McNemar's test on the labels only one of the two finds (${n.only_a} only ${A} vs ${n.only_b} only ${B}).`) : '';
   const chip = (k: CompareKey, label: string, color: string, title: string): string => `<span class="chip" role="button" tabindex="0" data-cmp="${k}" title="${esc(title)}">` +
     `<span class="dot" style="background:${color}"></span>${esc(label)} <span class="n">${n[k].toLocaleString()}</span></span>`;
   $req('e-cmp-chips').innerHTML =
@@ -456,6 +474,8 @@ function bindEval(): void {
   const cmpA = $req<HTMLSelectElement>('e-cmp-a'), cmpB = $req<HTMLSelectElement>('e-cmp-b');
   cmpA.onchange = () => { if (cmpA.value === E.cmpB) E.cmpB = E.cmpA; E.cmpA = cmpA.value; void loadCompare(); };
   cmpB.onchange = () => { if (cmpB.value === E.cmpA) E.cmpA = E.cmpB; E.cmpB = cmpB.value; void loadCompare(); };
+  const side = $req<HTMLSelectElement>('e-cmp-side');
+  side.onchange = () => { E.cmpSide = side.value; void loadCompare(); };
   $req('e-cmp-chips').onclick = (e) => {
     const ch = closestOf(e, '[data-cmp]');
     const key = ch?.dataset.cmp;

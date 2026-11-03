@@ -11,6 +11,15 @@ summary: run a detector, val / train split, confidence and IoU, leaderboard and 
 - **Evaluation** (`eval`): every model on the same images. Score at best F1 (fairest) or a fixed confidence;
   What matters (findings), Leaderboard (mAP50, mAP50-95, P, R, F1, ms / image, missed, wrong class, FP background),
   Compare model A vs B, Speed vs accuracy; Explain (AI); Export Report / CSV / JSON. `eval_summary` reads it.
+  The model A vs B card shows **McNemar's test** on the labels only one of the two finds (p, odds ratio A:B, verdict):
+  "differs" means one model really finds more labels, not just by chance.
+- **Models in a combined dataset** (2+ sessions joined): a model predicts A's and B's images in one run. The Model
+  tab adds a **per-dataset table** (mAP50, P, R, miss, FP on A's images and on B's apart; click a row for that
+  dataset's mistakes). The Leaderboard adds **mAP50 · A**, **mAP50 · B** columns (the model × dataset matrix; best
+  per dataset highlighted), and the model A vs B card has a dataset picker (every dataset / A only / B only). Colour
+  by `origin_cls` (dataset × class) or, with a model, `origin_pred` (dataset × predicted class): A's and B's
+  classes get different colours and shapes. Image-only members: the Model tab names each image instead (see
+  image-points), its charts split per dataset, colour `origin_ip`.
 - **Compare** (`compare`): only in a combined dataset (2+ sessions joined): pick members A and B, the diff (images:
   only in A / only in B / same / labels changed / pixels changed, matched by content hash then name; boxes: same /
   moved / reclassed / reclassed + moved / unmatched, matched at IoU ≥ 0.5), the shared map, boxes of B unlike anything in A, class

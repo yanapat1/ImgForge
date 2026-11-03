@@ -64,6 +64,9 @@ def leaderboard(svc, state, models, split='val', conf_mode='best', conf=None, ma
             'preds': t['preds'], 'tp': t['tp'], 'labels': t['labels'], 'images': t['images'],
             'missed': t['missed'] + t['loc'], 'wrong_cls': t['wrong_cls'], 'fp_bg': t['fp_bg'], 'fp_dup': t['fp_dup'],
             'unmatched': unmatched,
+            # a combined dataset: the same model per member (A, B, ...), for the model x dataset matrix
+            'by_origin': [{k: o[k] for k in ('alias', 'map50', 'map', 'p', 'r', 'labels', 'images')}
+                          for o in svc.by_origin(state, m, d, out, used_split)],
         })
         ap_rows.append([a if n else None for a, n in zip(ap['ap50'], ap['n_labels'])])
     nc = len(state.classes)
@@ -82,10 +85,12 @@ def leaderboard(svc, state, models, split='val', conf_mode='best', conf=None, ma
             'not_run': not_run, 'split': used_split}
 
 
-def compare(svc, state, ma, mb, split='val', conf_mode='best', conf=None, match_iou=None, limit=MAX_IDS):
+def compare(svc, state, ma, mb, split='val', conf_mode='best', conf=None, match_iou=None, limit=MAX_IDS, origin=None):
     """Model A vs model B, label by label: which labels only one of them finds, which both miss, and the false
     positives each makes per class. Label indices are sample ids in both, so the outcomes line up directly.
-    None when either model has not run on this dataset."""
+    origin: a combined dataset's member alias: only its labels / images. McNemar's test on only-A vs only-B says
+    whether one model really finds more labels. None when either model has not run on this dataset."""
+    from ..ml import stats
     ga = _scored(svc, state, ma, split, conf_mode, conf, match_iou)
     gb = _scored(svc, state, mb, split, conf_mode, conf, match_iou)
     if ga is None or gb is None:
@@ -93,6 +98,14 @@ def compare(svc, state, ma, mb, split='val', conf_mode='best', conf=None, match_
     (_, da, _, split_a, _, ap_a, out_a, summ_a, conf_a, iou), (_, db, _, _, _, ap_b, out_b, _, conf_b, _) = ga, gb
     sa, sb = out_a['status'], out_b['status']
     both = (sa >= 0) & (sb >= 0)          # labels in the split on images both models ran on
+    side = None
+    mem = [mm.get('alias') for mm in (getattr(state, 'members', None) or [])]
+    if origin and origin in mem and getattr(state, 'origin', None) is not None:
+        side = mem.index(origin)
+        both &= np.asarray(state.origin, np.int64)[:len(both)] == side
+        io_a, io_b = svc.image_origin(state, da), svc.image_origin(state, db)
+        ap_a = svc.ap(state, ma, da, split_a, side=side, img_mask=io_a == side)
+        ap_b = svc.ap(state, mb, db, split_a, side=side, img_mask=io_b == side)
     fa, fb = both & (sa == 0), both & (sb == 0)
     only_a, only_b, miss = fa & ~fb, fb & ~fa, both & ~fa & ~fb
     nc = len(state.classes)
@@ -102,7 +115,10 @@ def compare(svc, state, ma, mb, split='val', conf_mode='best', conf=None, match_
         return np.bincount(cls[mask], minlength=nc).tolist()
 
     def fp_cls(d, out):
-        p = np.nonzero(out['p_kind'] >= 3)[0]             # fp_dup + fp_bg, as in the leaderboard
+        keep = out['p_kind'] >= 3                          # fp_dup + fp_bg, as in the leaderboard
+        if side is not None:
+            keep &= svc.image_origin(state, d)[d.p_img] == side
+        p = np.nonzero(keep)[0]
         return np.bincount(d.p_cls[p], minlength=nc).tolist()
 
     def lost(mask, st):
@@ -112,6 +128,8 @@ def compare(svc, state, ma, mb, split='val', conf_mode='best', conf=None, match_
     ap50 = lambda ap: [a if n else None for a, n in zip(ap['ap50'], ap['n_labels'])]
     return {
         'a': svc.reg.public(ma), 'b': svc.reg.public(mb), 'split': split_a, 'conf_mode': conf_mode,
+        'origin': origin if side is not None else None,
+        'test': stats.mcnemar(int(only_a.sum()), int(only_b.sum())),
         'conf_a': conf_a, 'conf_b': conf_b, 'match_iou': iou,
         'labels': int(both.sum()),
         'counts': {'tp_a': int(fa.sum()), 'tp_b': int(fb.sum()), 'only_a': int(only_a.sum()),

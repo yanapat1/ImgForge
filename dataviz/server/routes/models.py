@@ -315,12 +315,12 @@ def router(state, ctx):
 
     @r.get('/api/eval/compare', dependencies=viewer)
     async def eval_compare(a: str, b: str, split: str = 'val', conf_mode: str = 'best', conf: float = 0.25,
-                           iou: float | None = None):
+                           iou: float | None = None, origin: str | None = None):
         """Evaluation tab: model a vs model b, label by label (insights.compare)."""
         need()
         g.need_index()
         ma, mb = model_or_404(a), model_or_404(b)
-        res = await run_io(insights.compare, svc, ctx.current(), ma, mb, split, conf_mode, conf, iou)
+        res = await run_io(insights.compare, svc, ctx.current(), ma, mb, split, conf_mode, conf, iou, insights.MAX_IDS, origin)
         if res is None:
             raise HTTPException(409, f'run predictions with both {ma["name"]} and {mb["name"]} first')
         return json_bytes(orjson.dumps(res, option=orjson.OPT_SERIALIZE_NUMPY))

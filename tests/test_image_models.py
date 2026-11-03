@@ -90,3 +90,44 @@ def test_union_of_image_sessions_splits_by_member(world):
     assert [o['alias'] for o in r['by_origin']] == ['A', 'B']
     assert r['by_origin'][0]['images_per_class'] == [1, 0] and r['by_origin'][0]['no_detection'] == 3
     assert r['by_origin'][1]['images_per_class'] == [0, 2] and r['by_origin'][1]['n_images'] == 2
+
+
+def test_union_box_models_per_member(pg, tmp_path):
+    """A combined labelled dataset: Model tab scores per member (by_origin), the leaderboard's model x dataset
+    numbers, and model A vs B restricted to one member, with McNemar's test."""
+    from dataviz.models.registry import ModelRegistry
+    from dataviz.models.service import ModelService
+    from dataviz.server.app import create_app
+    from vizutil import make_yolo
+    alice = account('alice')
+    a = make_yolo(tmp_path / 'A', classes=('cat', 'dog'), boxes=(('a1', '0 0.5 0.5 0.4 0.4\n'), ('a2', '1 0.5 0.5 0.4 0.4\n')))
+    b = make_yolo(tmp_path / 'B', classes=('cat', 'dog'), boxes=(('b1', '0 0.5 0.5 0.4 0.4\n'),))
+    A, B = viz_session(alice['id'], 'A', a), viz_session(alice['id'], 'B', b)
+    U = union_session(alice['id'], 'A vs B', [(A, 'A'), (B, 'B')])
+    ctx, _ = make_viz_app(tmp_path / 'ws')
+    ctx.models = ModelRegistry(ctx.datasets.root)
+    ctx.model_service = svc = ModelService(ctx.models, ctx.cfg)
+    app = create_app(ctx)
+    c = client(app)
+    assert login(c, 'alice').status_code == 200
+    st = ctx.state_for(U)
+    mk = lambda n: ctx.models.upsert({'name': n, 'family': 'yolo', 'format': 'api', 'api': {'url': 'http://fake'}},  # noqa: E731
+                                     owner_id=alice['id'], admin=True)
+    good, half = mk('good'), mk('half')
+    box = lambda s: list(s['bbox'])  # noqa: E731
+    gt = {s['image']: s for s in st.samples}
+    # good finds every label; half finds only A's (misses B/b1)
+    _fake_preds(st, svc, good, [(n, *box(s), 0.9, s['cls']) for n, s in gt.items()], ['cat', 'dog'])
+    _fake_preds(st, svc, half, [(n, *box(s), 0.9, s['cls']) for n, s in gt.items() if n.startswith('A/')], ['cat', 'dog'])
+    ev = c.get(f'/s/{U}/api/models/{half["id"]}/eval', params={'split': 'all'}).json()
+    side = {o['alias']: o for o in ev['by_origin']}
+    assert side['A']['r'] == 1.0 and side['B']['r'] == 0.0 and side['A']['labels'] == 2 and side['B']['labels'] == 1
+    assert side['A']['map50'] > 0.9 and side['B']['map50'] == 0.0
+    ov = c.get(f'/s/{U}/api/eval/overview', params={'split': 'all'}).json()
+    rows = {r['name']: {o['alias']: o['map50'] for o in r['by_origin']} for r in ov['leaderboard']['rows']}
+    assert rows['good']['B'] > 0.9 and rows['half']['B'] == 0.0
+    cmp_b = c.get(f'/s/{U}/api/eval/compare', params={'a': good['id'], 'b': half['id'], 'split': 'all', 'origin': 'B'}).json()
+    assert cmp_b['origin'] == 'B' and cmp_b['labels'] == 1 and cmp_b['counts']['only_a'] == 1
+    assert cmp_b['map50_b'] == 0.0 and cmp_b['test']['test'] == 'McNemar (exact)' and cmp_b['test']['p'] == 1.0
+    both = c.get(f'/s/{U}/api/eval/compare', params={'a': good['id'], 'b': half['id'], 'split': 'all'}).json()
+    assert both['origin'] is None and both['labels'] == 3
