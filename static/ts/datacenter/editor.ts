@@ -9,7 +9,7 @@
 //   openFile(bid, path)   leaveFile() -> false when the user keeps editing   fileOpen()   peek(bid, path) (details)
 
 import { errText, isStatus } from '../core/api.js';
-import { esc, icon } from '../core/dom.js';
+import { copyText, esc, icon } from '../core/dom.js';
 import { actionToast, toast } from '../core/toast.js';
 import { confirmDialog, openDialog } from '../views/dialog.js';
 import * as api from './api.js';
@@ -482,7 +482,7 @@ function onClick(e: MouseEvent): void {
   if (fx === 'more' && p) { const k = pkey(p); f.more.set(k, (f.more.get(k) ?? PAGE) + PAGE); paint(); return; }
   if (fx === 'copy-path' && p) {
     const s = p.length ? p.map((k, i) => (typeof k === 'number' ? `[${k}]` : /^[A-Za-z_$][\w$]*$/.test(k) ? `${i ? '.' : ''}${k}` : `[${JSON.stringify(k)}]`)).join('') : '(root)';
-    void navigator.clipboard?.writeText(s).then(() => toast(`Copied ${s}`), () => toast(s));
+    void copyText(s).then((ok) => toast(ok ? `Copied ${s}` : s));
     return;
   }
   if (fx === 'del' && p) { void apply({ op: 'delete', path: p }); return; }

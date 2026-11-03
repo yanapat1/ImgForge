@@ -11,7 +11,7 @@
 import type * as PL from 'plotly.js';
 import type { Job, ShiftCurve, ShiftMetric, ShiftModel, ShiftReport, ShiftResult, ShiftSeverity } from '../types.js';
 import { api, errText, getJSON, postJSON } from '../core/api.js';
-import { $, $req, esc, icon } from '../core/dom.js';
+import { $, $req, copyText, esc, icon } from '../core/dom.js';
 import { hideWait, showWait, waitJob } from '../core/jobs.js';
 import { originColor, plotBase, THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
@@ -623,7 +623,7 @@ function onClick(e: Event): void {
   if (d['shfList']) { void openList(d['shfList'], d['side'] === 'a' ? 'a' : 'b'); return; }
   if (d['shfPreview'] !== undefined) { void loadPreview(true); return; }
   if (d['shfCopy'] !== undefined) {
-    void navigator.clipboard?.writeText(r.hyp_yaml).then(() => toast('Copied', 'ok'), () => toast('Copy failed: select the text', 'err'));
+    void copyText(r.hyp_yaml).then((ok) => { if (ok) toast('Copied', 'ok'); else toast('Copy failed: select the text', 'err'); });
     return;
   }
   if (d['shfExport'] === 'json') download(`image-conditions-${r.a}-vs-${r.b}.json`, JSON.stringify(r, null, 1), 'application/json');

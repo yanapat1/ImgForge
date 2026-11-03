@@ -16,7 +16,7 @@ import type {
   AiTurn, Block, ChatCatalog, ChatEffort, ChatEvent, ChatMode, ChatPrefs, ChatRole, ChatSession, SessionDetail, SessionList, SessionRef, ThinkLevel, ToolItem, UiAction, WebLevel,
 } from '../types-chat.js';
 import { errText, getJSON, isStatus, postJSON, sendJSON } from './api.js';
-import { esc, icon } from './dom.js';
+import { copyText, esc, icon } from './dom.js';
 import { LLM } from './llm.js';
 import { md } from './md.js';
 import { arrowNav, floatPopover } from './popover.js';
@@ -547,10 +547,34 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     toBottom();
   }
 
+  // a turn the user is selecting text in is not replaced (that would drop the selection mid-copy): it is held and
+  // drawn once the selection leaves it
+  const held = new Set<number>();
+  const selectedIn = (el: Element): boolean => {
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+    const r = sel.getRangeAt(0);
+    return el.contains(r.startContainer) || el.contains(r.endContainer);
+  };
+  const onSelChange = (): void => {
+    for (const i of held) {
+      const el = logEl.querySelector(`.chat-turn[data-ti="${i}"]`);
+      if (el && selectedIn(el)) continue;
+      held.delete(i);
+      renderTurn(i);
+    }
+    if (!held.size) document.removeEventListener('selectionchange', onSelChange);
+  };
+
   function renderTurn(i: number): void {
     const e = C.turns[i];
     const el = logEl.querySelector(`.chat-turn[data-ti="${i}"]`);
     if (!e || !el) { renderLog(); return; }
+    if (selectedIn(el)) {
+      if (!held.size) document.addEventListener('selectionchange', onSelChange);
+      held.add(i);
+      return;
+    }
     const stick = nearBottom();
     // the open activity list scrolls on its own: keep its place, or follow the newest step when it was at the end
     const list = el.querySelector<HTMLElement>('.ct-act-list');
@@ -1229,7 +1253,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   }
 
   async function copy(text: string, btn: HTMLElement): Promise<void> {
-    try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; } catch (e) { btn.textContent = 'Copy failed'; }
+    btn.textContent = (await copyText(text)) ? 'Copied' : 'Copy failed';
     setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
   }
 

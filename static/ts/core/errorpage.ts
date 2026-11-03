@@ -1,7 +1,7 @@
 // The error page: one full-screen card for anything fatal (session could not open, server gone, uncaught crash).
 // Non-fatal problems use toast() instead.
 
-import { $, $req, esc, icon } from './dom.js';
+import { $, $req, copyText, esc, icon } from './dom.js';
 import { apiFetch, errMessage } from './api.js';
 import { homeUrl } from './nav.js';
 import { toast } from './toast.js';
@@ -45,8 +45,8 @@ export function showError({ kind = 'crash', title, message, detail = '', retry }
   $req('err-retry').onclick = () => (retry ? retry() : location.reload());
   $req('err-home').onclick = () => { location.href = homeUrl(); };
   const copy = $('err-copy');
-  if (copy) copy.onclick = () => navigator.clipboard?.writeText(`${title || t}\n${message || m || ''}\n${detail}`)
-    .then(() => { copy.textContent = 'Copied'; }, () => {});
+  if (copy) copy.onclick = () => void copyText(`${title || t}\n${message || m || ''}\n${detail}`)
+    .then((ok) => { copy.textContent = ok ? 'Copied' : 'Copy failed'; });
   $req('err-retry').focus();
   clearTimeout(retryTimer);
   if (kind === 'network') pingUntilUp(2000);
