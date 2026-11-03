@@ -87,5 +87,10 @@ def capabilities(state):
             'boxes': not emb and not img, 'images': not emb,
             'curation': not emb and not img and (not union or bool(getattr(src, 'label_writable', False))),
             'models': not emb and not img, 'meta': emb, 'unit': 'embeddings' if emb else 'image' if img else 'box',
+            # the Objects | Full images switch: a labelled folder / bucket / combined dataset can also be shown one
+            # point per image (/s/<sid>@images/, State.layer)
+            'points': {'layer': getattr(state, 'layer', None),
+                       'switch': getattr(state, 'layer', None) == 'images'
+                       or (not emb and not img and kind_of(state) in ('local', 's3', 'union'))},
             # an S3 layout needs the bucket listing: read once the index job has made it
             'layout': getattr(state.source, 'layout', None) if not emb and getattr(state, 'ready', False) else None}

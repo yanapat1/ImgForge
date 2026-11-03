@@ -163,7 +163,8 @@ def main():
                                         if ds.get('owner_id') else None)
         state = State(src, cache_dir, reg, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
                       pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh,
-                      unit=ds.get('unit', 'auto'), class_from_folder=ds.get('class_from_folder', False))
+                      unit=ds.get('unit', 'auto'), class_from_folder=ds.get('class_from_folder', False),
+                      layer=ds.get('layer'))
         vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
                                          + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session',
                                             'embeddings': ' · vectors + metadata'}

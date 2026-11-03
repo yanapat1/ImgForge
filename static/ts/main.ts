@@ -4,11 +4,11 @@
 // Entry point: boot (the signed-in user first, then the screen; the startup screen until the session's index is
 // ready), init (first render) and every event binding of the page. Loaded by index.html as <script type="module">.
 
-import type { DatasetInfo, Job, Meta, Points, Status } from './types.js';
+import type { Caps, DatasetInfo, Job, Meta, Points, Status } from './types.js';
 import type { WorkspacePayload } from './types-plot.js';
 import { errText, getJSON, postJSON, waitForServer } from './core/api.js';
 import { loadMe } from './core/auth.js';
-import { dataUrl, homeUrl, sessionIdFromPath } from './core/nav.js';
+import { dataUrl, homeUrl, pointsLayerFromPath, sessionIdFromPath, vizUrl } from './core/nav.js';
 import { $, $req, esc, fmtEta, icon, sleep } from './core/dom.js';
 import { showError, installCrashHandlers } from './core/errorpage.js';
 import { pollJobs, setBar } from './core/jobs.js';
@@ -166,6 +166,7 @@ async function init(st: Status): Promise<void> {
   const imageUnit = caps.unit === 'image';         // one point per image: images, no labels to edit or score
   document.documentElement.classList.toggle('image-unit', imageUnit);
   document.documentElement.classList.toggle('no-boxes', !caps.boxes && !imageUnit);
+  bindPointsLayer(caps);
   if (imageUnit) adaptToImages();
   else if (!caps.boxes) adaptToRows(points);
   loadViewerPrefs();
@@ -243,6 +244,20 @@ async function init(st: Status): Promise<void> {
   if (st.startup && st.startup.cached) await loadView();
   else showIdle();
   startLive();                         // labels edited elsewhere (labeling page, promoted union) patch the map live
+}
+
+// the Objects | Full images switch: each is its own address (s/<id>/, s/<id>@images/) with its own State on the
+// server, so switching is a page load (caps, image-unit adaptions are decided once per load); both stay cached
+function bindPointsLayer(caps: Caps): void {
+  const box = $req('points-layer');
+  if (!caps.points?.switch || !SESSION) return;
+  const layer = pointsLayerFromPath();
+  box.classList.remove('hidden');
+  for (const b of box.querySelectorAll<HTMLButtonElement>('button[data-layer]')) {
+    const mine = (b.dataset['layer'] || null) === layer;
+    b.setAttribute('aria-pressed', String(mine));
+    b.onclick = () => { if (!mine) location.href = vizUrl(SESSION, (b.dataset['layer'] || null) as 'images' | null) + location.search; };
+  }
 }
 
 // an embeddings session: the controls that read box geometry / images go, its metadata columns come in

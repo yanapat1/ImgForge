@@ -74,6 +74,8 @@ export interface Caps {
   union?: boolean;
   /** the session has a live change feed (GET api/live: labeling sessions, promoted unions) */
   live?: boolean;
+  /** the Objects | Full images switch: layer 'images' = this page shows a labelled session one point per image */
+  points?: { layer: 'images' | null; switch: boolean };
 }
 /** Page defaults from config.yaml `ui` (+ analysis.groups / duplicate_threshold). */
 export interface UiDefaults {

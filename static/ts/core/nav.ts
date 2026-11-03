@@ -14,15 +14,26 @@ export function appRoot(): string {
   return p.replace(/[^/]*$/, '');
 }
 
-/** The visualize session id of a s/<id>/ page (null on the other screens). */
-export function sessionIdFromPath(): string | null {
+function vizSegment(): string | null {
   const m = location.pathname.match(VIZ_PATH);
   if (!m || m[1] === undefined) return null;
   try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
 }
 
+/** The visualize session id of a s/<id>/ (or s/<id>@images/) page (null on the other screens). */
+export function sessionIdFromPath(): string | null {
+  const seg = vizSegment();
+  return seg === null ? null : seg.split('@')[0] ?? seg;
+}
+
+/** The point layer of the page: 'images' on s/<id>@images/ (a labelled session shown one point per image). */
+export function pointsLayerFromPath(): 'images' | null {
+  return vizSegment()?.endsWith('@images') ? 'images' : null;
+}
+
 export const homeUrl = (): string => appRoot();
-export const vizUrl = (id: string): string => `${appRoot()}s/${encodeURIComponent(id)}/`;
+export const vizUrl = (id: string, layer?: 'images' | null): string =>
+  `${appRoot()}s/${encodeURIComponent(id)}${layer ? `@${layer}` : ''}/`;
 export const labelUrl = (pid: string): string => `${appRoot()}?label=${encodeURIComponent(pid)}`;
 
 /** The Data Center: all buckets (no bucket), one bucket's root, or a folder inside it. */

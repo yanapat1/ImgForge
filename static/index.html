@@ -396,6 +396,11 @@
               <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg><span id="map-summary" class="bar-t">Projection</span><span id="map-dirty" class="dirty-dot hidden" title="settings changed: Generate to apply"></span><svg class="ico chev" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-d"/></svg></button>
             <div id="map-pop" class="popover panel hidden bar-pop map-pop" role="group" aria-label="Projection">
               <div class="pop-title">Projection</div>
+              <div id="points-layer" class="field stack hidden">Points
+                <div class="fb-seg points-seg" role="group" aria-label="What one dot is">
+                  <button type="button" data-layer="" aria-pressed="true" title="One dot per labelled box (object)">Objects</button>
+                  <button type="button" data-layer="images" aria-pressed="false" title="One dot per whole image, coloured by its most frequent box class">Full images</button>
+                </div></div>
               <label class="field stack" title="What each box is turned into before projecting (your own models: Settings › Models)">Features
                 <select id="feature"></select></label>
               <label class="field stack">Method <select id="method"></select></label>

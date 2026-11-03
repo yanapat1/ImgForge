@@ -33,6 +33,25 @@ from .routes import assets
 _DS_FIELDS = ('path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
 
 
+LAYERS = ('images',)
+
+
+def layer_key(sid, layer=None):
+    """The registry key of a session's State: '<sid>', or '<sid>@images' for its "Full images" points."""
+    return f'{sid}@{layer}' if layer else sid
+
+
+def layers_of(ds):
+    """The extra point layers a saved session offers: ('images',) for a folder / bucket shown one point per box
+    (unit boxes or auto; whether it really has labels is checked when the layer is indexed) and for a combined
+    dataset; () for labeling / embeddings sessions and sessions already set to one point per image."""
+    if ds.get('kind') == 'union':
+        return LAYERS
+    if ds.get('kind') in ('local', 's3') and ds.get('unit', 'auto') != 'images':
+        return LAYERS
+    return ()
+
+
 class Ctx:
     """What the app serves: an LRU of loaded sessions (`states`: session id -> State, shared by every user who
     opens it) plus the services every session shares. A request reaches its State through context.bound()
@@ -97,7 +116,7 @@ class Ctx:
 
         def open_(ds, **kw):
             st = self.build(ds, **kw)
-            self._register(ds['id'], st)
+            self._register(layer_key(ds['id'], ds.get('layer')), st)
             return st
         return open_
 
@@ -124,22 +143,24 @@ class Ctx:
         ds.update({k: r[k] for k in _DS_FIELDS if r[k] is not None})
         return ds
 
-    def state_for(self, sid, user=None):
+    def state_for(self, sid, user=None, layer=None):
         """The loaded State of session `sid`, opening it on first use (blocking: call it off the event loop).
-        Access is the caller's business (server/routing.py checks it first)."""
+        layer 'images': the session's "Full images" points (/s/<sid>@images/), a State of its own kept under
+        '<sid>@images'. Access is the caller's business (server/routing.py checks it first)."""
         if self.fixed is not None:
             return self.fixed
+        key = layer_key(sid, layer)
         with self._lock:
-            st = self.states.get(sid)
+            st = self.states.get(key)
             if st is not None:
-                self.states.move_to_end(sid)
+                self.states.move_to_end(key)
                 return st
-            lock = self._open_locks.setdefault(sid, threading.Lock())
+            lock = self._open_locks.setdefault(key, threading.Lock())
         with lock:
             with self._lock:
-                st = self.states.get(sid)
+                st = self.states.get(key)
                 if st is not None:
-                    self.states.move_to_end(sid)
+                    self.states.move_to_end(key)
                     return st
             if self.build is None:
                 raise HTTPException(501, 'opening sessions is not enabled in this server')
@@ -147,15 +168,19 @@ class Ctx:
                 ds = self.dataset(sid)
             except KeyError as e:
                 raise HTTPException(404, str(e).strip("'\""))
+            if layer:
+                if not layers_of(ds):
+                    raise HTTPException(404, 'this session has no other points to show')
+                ds = {**ds, 'layer': layer}
             st = self.build(ds)
-            self._register(sid, st)
+            self._register(key, st)
         with self._lock:
-            self._open_locks.pop(sid, None)
+            self._open_locks.pop(key, None)
         return st
 
     def loaded(self, sid):
         """True while session `sid` is loaded on the server (the home cards' "open now")."""
-        return sid in self.states
+        return sid in self.states or layer_key(sid, 'images') in self.states
 
     def _register(self, sid, st):
         with self._lock:
@@ -174,8 +199,8 @@ class Ctx:
     def evict(self, sid):
         """Unload session `sid` (deleted, re-indexed): the next request opens it again."""
         with self._lock:
-            st = self.states.pop(sid, None)
-        if st is not None:
+            gone = [self.states.pop(k) for k in (sid, layer_key(sid, 'images')) if k in self.states]
+        for st in gone:
             self.close_state(st)
 
     def close_state(self, st):

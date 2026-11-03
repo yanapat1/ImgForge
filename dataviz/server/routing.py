@@ -3,6 +3,8 @@ The visualizer's URL space: /s/<session_id>/... is one loaded session. A pure AS
 sign-in layer (auth/middleware.py runs first, so context.user() is known here):
 
     /s/<sid>          308 to <sid>/ (relative: a path prefix in front of the app survives)
+    /s/<sid>@images/  the same session's "Full images" points (one point per image of a labelled session): its own
+                      State (Ctx.state_for layer=), the same access as /s/<sid>/
     /s/<sid>/...      no access (or not a visualizer session) -> 404, never 403, so private ids do not leak;
                       else the session's State is resolved once (loaded on first use, off the event loop) and
                       context.BOUND = Bound(sid, role, state) for the whole request; the prefix is stripped
@@ -22,6 +24,8 @@ from starlette.responses import JSONResponse
 
 from ..auth import access, context
 from ..core import logging as vlog
+
+LAYERS = ('images',)
 
 _S = re.compile(r'^/s/([^/]+)(/.*)?$')
 log = vlog.get_logger('sessions')
@@ -76,11 +80,17 @@ class SessionRouting:
         user = context.user()
         if user is None:
             return await self._fail(scope, receive, send, 401, 'sign in first', rest)
+        layer = None
+        if '@' in sid:
+            sid, layer = sid.split('@', 1)
+            if layer not in LAYERS:
+                return await self._fail(scope, receive, send, 404, f'no session {sid!r}', rest)
         role = await to_thread.run_sync(lambda: access.viz_role(user, sid))
         if role is None:
             return await self._fail(scope, receive, send, 404, f'no session {sid!r}', rest)
         try:
-            st = await to_thread.run_sync(self.ctx.state_for, sid, user)
+            st = await to_thread.run_sync(lambda: self.ctx.state_for(sid, user, layer=layer) if layer
+                                          else self.ctx.state_for(sid, user))
         except HTTPException as e:
             return await self._fail(scope, receive, send, e.status_code, e.detail, rest)
         except (ValueError, KeyError, FileNotFoundError, NotADirectoryError, PermissionError) as e:
@@ -100,6 +110,7 @@ class SessionRouting:
         inner['raw_path'] = strip_raw(scope.get('raw_path'))
         inner['dataviz_path'] = path
         inner['dataviz_sid'] = sid
+        inner['dataviz_layer'] = layer
         token = context.BOUND.set(context.Bound(sid, role, st))
         try:
             await self.app(inner, receive, send)

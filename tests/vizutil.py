@@ -87,10 +87,10 @@ def make_viz_app(root, max_loaded=4):
                        dataset_id=ds['id'])
         elif ds.get('kind') == 'union':             # a combined dataset: its members through the registry
             st = State(ctx.datasets.source(ds), None, registry, default_feature='geom', jobs=ctx.jobs, cfg=cfg,
-                       workspace_root=root, dataset_id=ds['id'])
+                       workspace_root=root, dataset_id=ds['id'], layer=ds.get('layer'))
         else:
             st = State(LocalSource(ds['path'], name=ds.get('name')), None, registry, default_feature='geom',
-                       jobs=ctx.jobs, cfg=cfg, workspace_root=root, dataset_id=ds['id'])
+                       jobs=ctx.jobs, cfg=cfg, workspace_root=root, dataset_id=ds['id'], layer=ds.get('layer'))
         st._index_job(_Job())
         ctx.builds.append(ds['id'])
         return st

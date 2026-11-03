@@ -9,7 +9,7 @@ core: true
   datasets, S3, appearance).
 - **Explore** = gallery on the left, map on the right. The bar above the map, left to right:
   **Projection** popover (changing Features, Method or a parameter only marks the map changed (dot on the button);
-  nothing is computed until **Generate** · Features, Method, the method's parameters, **Generate**, map quality line, Saved views,
+  nothing is computed until **Generate** · **Points: Objects | Full images** on labelled data (see image-points) · Features, Method, the method's parameters, **Generate**, map quality line, Saved views,
   Import embeddings…) · **Color** dropdown · **Classes** popover (Show: All classes / One class / Compare 2 classes) ·
   **Describe boxes…** text search (`/` focuses it) · **Find issues** popover · **Display** popover.
 - Under it: the **filter bar** (image name, Image has class, More filters, Images / Boxes scope, Show in gallery,

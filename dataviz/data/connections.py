@@ -582,7 +582,11 @@ class Registry:
                 raise ValueError(f'member {p["alias"]} was deleted') from None
             if m['kind'] in ('union', 'embeddings'):
                 raise ValueError(f'member {p["alias"]} ({m["name"]}) cannot be combined')
-            src = views.view_for(self.source(m, s3cfg, labeling), m.get('unit', 'auto'), m.get('class_from_folder'))
+            if ds.get('layer') == 'images':          # the combined dataset's "Full images" points: every member as images
+                src = views.view_for(self.source(m, s3cfg, labeling), 'images', m.get('class_from_folder'),
+                                     class_from_labels=True)
+            else:
+                src = views.view_for(self.source(m, s3cfg, labeling), m.get('unit', 'auto'), m.get('class_from_folder'))
             members.append(Member(p['alias'], m['id'], m['name'], src, pos))
         if len(members) < 2:
             raise ValueError('a combined dataset needs at least 2 datasets: one of its datasets was deleted, '

@@ -71,7 +71,7 @@ class State:
 
     def __init__(self, source, cache_dir, registry, default_feature=feats.DEFAULT_FEATURE,
                  jobs=None, rebuild=False, log=None, pools=None, cfg=None, workspace_root=None, dataset_id=None,
-                 refresh=False, unit='auto', class_from_folder=False):
+                 refresh=False, unit='auto', class_from_folder=False, layer=None):
         self.log = log or vlog.log_fn('app')
         self.cfg = cfg or vconfig.load_config()
         self.knn_k = int(self.cfg['analysis']['knn_k'])
@@ -95,6 +95,11 @@ class State:
         self.refresh = refresh                          # True: re-index now even if an older cache could be shown
         self.unit_pref = unit if unit in views.UNITS else 'auto'   # what one point is (data/views.py)
         self.class_from_folder = bool(class_from_folder)
+        # 'images': the "Full images" points of a labelled session (/s/<sid>@images/): one point per image, its class
+        # the image's most frequent box class; None: the session as saved
+        self.layer = 'images' if layer == 'images' else None
+        if self.layer:
+            self.unit_pref = 'images'
         self.stale = None                               # set when the dataset changed after the cache shown was built
 
         self.index = None
@@ -223,7 +228,8 @@ class State:
             job.progress(stage='checking the members')
             src.check()
         # images with no labels (or unit 'images'): one point per image, through the same indexer
-        self.source = src = views.view_for(src, self.unit_pref, self.class_from_folder)
+        self.source = src = views.view_for(src, self.unit_pref, self.class_from_folder,
+                                           class_from_labels=self.layer == 'images')
         if getattr(src, 'unit', None) == 'image' and self.default_feature == 'geometry' and 'color-hist' in self.registry:
             self.default_feature = 'color-hist'       # box geometry is the same for every whole-image "box"
         idx = None
