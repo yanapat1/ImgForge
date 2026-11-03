@@ -130,6 +130,18 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
         page.click('#dc-view-thumbs')
         page.wait_for_selector('#dc-grid .dc-th')
         assert page.locator('#dc-grid .dc-lrow').count() == 0
+        # right-click menu: a left click anywhere outside it closes it, even on the tile that opened it or on the
+        # empty folder area (the menu's anchor there is the whole body)
+        tile = page.locator('#dc-grid .dc-th').nth(1)
+        tile.click(button='right')
+        page.wait_for_selector('#dc-menu:not(.hidden)')
+        tile.click()
+        page.wait_for_selector('#dc-menu.hidden', state='attached')
+        box = page.locator('#dc-body').bounding_box()
+        page.mouse.click(box['x'] + box['width'] - 20, box['y'] + box['height'] - 20, button='right')
+        page.wait_for_selector('#dc-menu:not(.hidden)')
+        page.mouse.click(box['x'] + box['width'] - 40, box['y'] + box['height'] - 40)
+        page.wait_for_selector('#dc-menu.hidden', state='attached')
         # the browser's back button returns to All buckets
         page.go_back()
         page.wait_for_selector(f'#dc-body .dc-bcard[data-bid="{bid}"]')

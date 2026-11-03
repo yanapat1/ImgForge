@@ -73,12 +73,14 @@ export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () =
   };
   place();
   if (!at) from.setAttribute('aria-expanded', 'true');
-  const down = (e: MouseEvent): void => {
+  // a context menu (`at`) closes on any press outside it, even on the element that was right-clicked; an anchored
+  // popover ignores presses on its trigger (the trigger toggles it itself)
+  const down = (e: PointerEvent): void => {
     const t = e.target;
-    if (t instanceof Node && !pop.contains(t) && !from.contains(t)) close();
+    if (t instanceof Node && !pop.contains(t) && (at || !from.contains(t))) close();
   };
   const key = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || (!at && !pop.contains(document.activeElement))) return;
     e.stopPropagation();
     close();
     if (document.contains(from)) from.focus();
@@ -86,16 +88,16 @@ export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () =
   const close = (): void => {
     if (floatClose !== close) return;
     floatClose = null;
-    document.removeEventListener('mousedown', down, true);
-    pop.removeEventListener('keydown', key);
+    document.removeEventListener('pointerdown', down, true);
+    document.removeEventListener('keydown', key, true);
     window.removeEventListener('resize', close);
     pop.classList.add('hidden');
     if (!at) from.setAttribute('aria-expanded', 'false');
     if (onClose) onClose();
   };
   floatClose = close;
-  document.addEventListener('mousedown', down, true);
-  pop.addEventListener('keydown', key);
+  document.addEventListener('pointerdown', down, true);
+  document.addEventListener('keydown', key, true);
   window.addEventListener('resize', close);
   return close;
 }
