@@ -4,7 +4,7 @@ token files: a colour changed in tokens.css / palettes.css without index.html fa
 import re
 from pathlib import Path
 
-STATIC = Path(__file__).resolve().parents[1] / 'static'
+STATIC = Path(__file__).resolve().parents[2] / 'static'
 
 
 def _blocks(css):

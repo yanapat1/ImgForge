@@ -45,4 +45,4 @@ regex                # optional: timeout-guarded /regex/ in the label image stri
 #   moto[server]        mock S3 (ThreadedMotoServer)
 #   pyftpdlib           in-process FTP server
 #   playwright          end-to-end page tests (+ `playwright install chromium`)
-#   docker (CLI)        tests/test_db.py starts postgres:16 / mssql/server:2022 containers, else skips
+#   docker (CLI)        tests/storage/test_db.py starts postgres:16 / mssql/server:2022 containers, else skips

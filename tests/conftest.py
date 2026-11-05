@@ -39,6 +39,13 @@ if os.environ.get('PYTEST_XDIST_WORKER_COUNT'):
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))     # makes `dataviz` importable
+# Tests live in feature folders (auth/, compare/, datacenter/, ...) with no __init__.py; the shared helpers (authutil,
+# vizutil, conftest_io) sit here and tests reuse each other's fixtures across folders (from test_page_smoke import
+# server), so this folder and every feature folder go on sys.path. Test file names stay unique across folders.
+_TESTS = Path(__file__).resolve().parent
+for _d in [_TESTS, *sorted(p for p in _TESTS.iterdir() if p.is_dir() and not p.name.startswith(('_', '.')))]:
+    if str(_d) not in sys.path:
+        sys.path.insert(1, str(_d))
 
 
 def pytest_xdist_auto_num_workers(config):

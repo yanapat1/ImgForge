@@ -3,7 +3,7 @@ Bring the database to the newest schema at start-up: `alembic upgrade head`, run
 under a PostgreSQL advisory lock, so two servers starting together never migrate at the same time.
 
 New migration: add a file to db/migrations/versions (copy 0001's header, set down_revision to the previous
-one), change db/schema.py to match, and run the suite (tests/test_db_schema.py compares the two).
+one), change db/schema.py to match, and run the suite (tests/storage/test_db_schema.py compares the two).
 """
 
 from pathlib import Path

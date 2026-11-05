@@ -3,7 +3,7 @@
 // into `root` and talks to POST api/llm/agent/<role>/chat (NDJSON, dataviz/llm/engine/events.py), /confirm, /stop,
 // /catalog and /models, and to the chat sessions (api/llm/sessions*).
 //
-// - reduce(turn, event) is PURE (unit-tested under node, tests/test_chat_js.py): it folds the events of one answer
+// - reduce(turn, event) is PURE (unit-tested under node, tests/llm/test_chat_js.py): it folds the events of one answer
 //   into blocks (thinking, text, tool groups, search, skill, todo, confirm, ask / cannot, plan, UI action, retry,
 //   notice). Page-only events start with `x_` (a confirm was sent, a UI action applied, …).
 // - Rendering is template strings + esc(); one delegated click / change / input / keydown listener per mount on the

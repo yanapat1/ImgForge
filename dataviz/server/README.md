@@ -31,7 +31,7 @@ FastAPI app that serves the page (`static/`) and the JSON API the page uses.
 - **`create_app(State)` / `Ctx(state)`** is test-only: no sign-in, every request bound to that one State.
 - **Guards**: visualizer routers carry `Depends(require_bound('viewer'))`; box tags, curation fix / undo /
   ignore, `/api/edits` and model predict need `labeler`; the rest of `/api/*` at least `current_user`.
-  `tests/test_acl.py::test_every_route_guarded` fails on an `/api` route without one.
+  `tests/auth/test_acl.py::test_every_route_guarded` fails on an `/api` route without one.
 - **Per user**: `/api/settings` = `app.user_session_prefs` (UI + filter); shared by the session: the curation
   ignore list (`app.dataset_state`) and box tags (`app.box_tags`, per dataset fingerprint).
 - **Jobs** record `owner` + `session_id` (defaults: the request's user and bound session); `/api/jobs`

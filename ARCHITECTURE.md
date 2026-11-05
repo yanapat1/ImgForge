@@ -45,5 +45,5 @@ Data flows **Data Center → sessions**. Everything you import lands in a Data C
 - **Dependencies point one way:** `server → (state, models, datacenter, llm) → (data, labeling, ml, core) → db`. Nothing imports `server` or `cli` back.
 - **Frontend:** one module per concern, loaded lazily per screen (`main.ts` imports `label/app.js` / `datacenter/app.js` on demand). One `innerHTML` render per change plus delegated listeners. Colours exist only as CSS tokens.
 - **Slow work is a job** with progress (`core/jobs.py` ↔ `ts/core/jobs.ts`); no request blocks on it.
-- **Tests** live in `tests/`, named after the area (`test_dc_*.py` for the Data Center). Run them with `pytest tests` against PostgreSQL (see `tests/conftest.py`).
+- **Tests** live in `tests/<feature>/` (`auth`, `datacenter`, `labeling`, `models`, `visualizer`, `compare`, `ml`, `llm`, `storage`, `ui`, `bench`; see the README's Testing section); a new test goes in the folder of its feature. Shared fixtures stay in `tests/` (`conftest.py`, `conftest_io.py`, `authutil.py`, `vizutil.py`), and file names stay unique across folders. Run them with `pytest tests` against PostgreSQL (see `tests/conftest.py`).
 - **Design references** live in `design/` (rendered mockups and their sources).

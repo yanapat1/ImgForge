@@ -19,7 +19,7 @@ from test_page_smoke import _browser, _send, server  # noqa: F401 - the app + it
 
 sync_api = pytest.importorskip('playwright.sync_api')
 
-SHOTS = Path(os.environ.get('DATAVIZ_SCREENSHOTS') or Path(__file__).resolve().parents[1] / 'docs/screenshots/2026-10-27-compare')
+SHOTS = Path(os.environ.get('DATAVIZ_SCREENSHOTS') or Path(__file__).resolve().parents[2] / 'docs/screenshots/2026-10-27-compare')
 
 # every dot of the map (not the rings, picks, provisional live dots or the density layer)
 DOTS = """() => (document.getElementById('plot').data || [])

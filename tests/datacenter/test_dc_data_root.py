@@ -5,7 +5,7 @@ from pathlib import Path
 from dataviz.core.config import DEFAULT_CONFIG, load_config
 from dataviz.datacenter import store
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_env_moves_the_data_root(tmp_path, monkeypatch):

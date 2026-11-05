@@ -20,7 +20,7 @@ from test_page_smoke import ADMIN, _HEADERS, _HTTP, _JAR, _browser, _free_port, 
 
 sync_api = pytest.importorskip('playwright.sync_api')
 
-HERE = Path(__file__).resolve().parents[1]
+HERE = Path(__file__).resolve().parents[2]
 
 
 def _upload(url, files):

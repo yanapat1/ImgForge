@@ -1,6 +1,6 @@
 """
 FastAPI dependencies that guard routes. Every one carries `__dataviz_auth__ = True`: the route-guard test
-(tests/test_acl.py) walks each /api route's dependency tree and fails when none of them has it.
+(tests/auth/test_acl.py) walks each /api route's dependency tree and fails when none of them has it.
 
     current_user                   401 unless signed in; -> user dict
     admin_user                     403 'admins only'

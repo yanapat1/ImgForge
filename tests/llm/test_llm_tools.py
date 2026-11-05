@@ -448,7 +448,7 @@ def test_catalog_lists_every_tool():
         assert f'| `{name}` | {t.kind} |' in cat
     assert '| `move` | change | bucket, paths, to |' in cat
     from pathlib import Path
-    skill = Path(__file__).resolve().parents[1] / '.claude' / 'skills' / 'datacenter' / 'SKILL.md'
+    skill = Path(__file__).resolve().parents[2] / '.claude' / 'skills' / 'datacenter' / 'SKILL.md'
     if skill.exists():                                  # the skill shows the same table: regenerate it on a change
         assert cat in skill.read_text(encoding='utf-8')
 

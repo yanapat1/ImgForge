@@ -24,7 +24,7 @@ from dataviz.llm.tools import visual
 from dataviz.ml import analysis
 from dataviz.ml import features as feats
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / 'dataviz' / 'llm' / 'prompts'
 PLANNED_TOOLS = {'web_search', 'fetch_url'}         # tools/web.py (another workstream): named by web-research
 

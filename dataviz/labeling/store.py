@@ -3,7 +3,7 @@ ProjectStore: one labeling project's rows in the shared PostgreSQL schema `lbl` 
 
 Every lbl table holds the rows of every project of every user, each row carrying project_id = the label
 session id. Every query here filters by it (or joins through a row that does): a query without it would read or
-change another project's rows. tests/test_store.py::test_projects_never_see_each_other guards it.
+change another project's rows. tests/labeling/test_store.py::test_projects_never_see_each_other guards it.
 
 Connections come from the process-wide pool (dataviz.db). write() is one transaction holding
 pg_advisory_xact_lock(hashtext(pid)): the writers of one project run one at a time across threads and

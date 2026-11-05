@@ -1,6 +1,6 @@
 // The pure part of the ◆ chat (no DOM, no imports at run time): reduce(turn, event) folds the agent's NDJSON events
 // into the blocks of one answer, plus the small helpers the renderer shares. Unit-tested under node
-// (tests/test_chat_js.py, through core/chat.ts which re-exports it). Split out of core/chat.ts.
+// (tests/llm/test_chat_js.py, through core/chat.ts which re-exports it). Split out of core/chat.ts.
 
 import type {
   AiTurn, Block, ChatEffort, ChatEvent, ChatMode, ConfirmAction, ConfirmResult, ConfirmState, ThinkLevel, ToolItem, UiAction, WebLevel,

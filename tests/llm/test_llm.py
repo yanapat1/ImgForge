@@ -468,7 +468,7 @@ def test_clean_filter_matches_filter_js(tmp_path):
     node = shutil.which('node')
     if node is None:
         pytest.skip('node is not installed')
-    shutil.copy(Path(__file__).resolve().parents[1] / 'static' / 'js' / 'core' / 'filter.js', tmp_path / 'filter.mjs')
+    shutil.copy(Path(__file__).resolve().parents[2] / 'static' / 'js' / 'core' / 'filter.js', tmp_path / 'filter.mjs')
     spec = clean_filter({'scope': 'box', 'cls': {'mode': 'all', 'ids': [1]}, 'nbox': [2, None], 'tags': ['t'],
                          'clip': {'q': 'dog'}, 'outlier_min': 0.5}, ['a', 'b'], ['t'])
     (tmp_path / 't.mjs').write_text(

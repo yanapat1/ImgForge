@@ -58,7 +58,7 @@ class Ctx:
     (set by server/routing.py); `state` / `current()` read that.
 
     Ctx(state) / create_app(State) is the TEST-ONLY single-dataset mode: every request is bound to that State
-    and there is no sign-in layer (tests/test_curation.py, test_edits.py, test_llm.py)."""
+    and there is no sign-in layer (tests/labeling/test_curation.py, labeling/test_edits.py, llm/test_llm.py)."""
 
     def __init__(self, state=None, registry=None, datasets=None, cfg=None, open_dataset=None, models=None,
                  model_service=None, jobs=None, labeling=None, llm=None):

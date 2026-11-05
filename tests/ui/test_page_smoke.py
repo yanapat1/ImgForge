@@ -20,7 +20,7 @@ from conftest import TEST_SECRET_KEY, make_jpeg
 
 sync_api = pytest.importorskip('playwright.sync_api')
 
-HERE = Path(__file__).resolve().parents[1]
+HERE = Path(__file__).resolve().parents[2]
 ADMIN = ('admin', 'smoke-test-password-1')
 _JAR = http.cookiejar.CookieJar()                 # the admin's session cookie, shared by urllib and the browser
 _HTTP = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_JAR))

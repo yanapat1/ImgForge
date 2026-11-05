@@ -13,7 +13,7 @@ so the in-app assistants can still use the feature and explain it correctly. Upd
 - `dataviz/llm/tools/*.py` (descriptions, args, risk), `engine/roles.py`, `tasks.py`
 - `.claude/skills/datacenter/SKILL.md` and `dataviz/llm/prompts/datacenter.md` (the old Data Center agent)
 
-Then run `.venv/bin/python -m pytest -q tests/test_llm*.py`. In the final report, say what was checked and updated, or "no assistant
+Then run `.venv/bin/python -m pytest -q tests/llm`. In the final report, say what was checked and updated, or "no assistant
 impact".
 
 ## Every coding task: efficient, correct, committed

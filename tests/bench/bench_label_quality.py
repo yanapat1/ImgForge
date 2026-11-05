@@ -2,7 +2,7 @@
 Benchmark of the cleanlab label-quality check (dataviz/ml/label_quality.run) on synthetic embeddings (not a test;
 run by hand):
 
-    .venv/bin/python tests/bench_label_quality.py [n ...] [--dim 768] [--classes 20] [--classifier logreg]
+    .venv/bin/python tests/bench/bench_label_quality.py [n ...] [--dim 768] [--classes 20] [--classifier logreg]
     (default n: 50000 150000)
 
 The k-NN the page already computes for every feature space (analysis.knn) is timed apart and handed in, as
@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np  # noqa: E402
 

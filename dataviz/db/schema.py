@@ -7,7 +7,7 @@ Every table the server keeps in PostgreSQL, in three database schemas:
     vec   feature vectors (pgvector): one registry row per (dataset fingerprint, feature) + one table per set
 
 This module is what the code queries. The Alembic migrations (db/migrations/versions) create it; a test
-(tests/test_db_schema.py) checks that `upgrade head` and this metadata agree, so a column added here without a
+(tests/storage/test_db_schema.py) checks that `upgrade head` and this metadata agree, so a column added here without a
 migration fails the suite.
 
 Conventions: ids are text (existing ids are uuid hex of various lengths and must survive the legacy import),

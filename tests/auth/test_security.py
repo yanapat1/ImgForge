@@ -95,7 +95,7 @@ def test_safe_next_rejects_protocol_relative_paths():
     import subprocess
     from pathlib import Path
     node = shutil.which('node')
-    js = Path(__file__).resolve().parents[1] / 'static' / 'js' / 'core' / 'nav.js'
+    js = Path(__file__).resolve().parents[2] / 'static' / 'js' / 'core' / 'nav.js'
     if not node or not js.exists():
         pytest.skip('needs node and a built static/js (npm run build)')
     script = f"""

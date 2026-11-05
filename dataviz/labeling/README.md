@@ -210,7 +210,7 @@ ProjectStore.add_media(rows: list[dict])          # batch insert, skips existing
 - PUT with an unchanged set returns the current version without bumping it (idempotent autosave).
 
 ## Measured
-`tests/bench_labeling.py 10000` (this machine; 10k 64x48 JPEGs in a local folder, 2 tasks). PostgreSQL 17 in docker on
+`tests/bench/bench_labeling.py 10000` (this machine; 10k 64x48 JPEGs in a local folder, 2 tasks). PostgreSQL 17 in docker on
 the same host (2026-10-19); the earlier SQLite numbers in brackets:
 
 | Area | Budget | Measured |
@@ -238,7 +238,7 @@ PostgreSQL 16 runs in docker on the same host.
 | Zip export: 1000 images + 2 tasks × 1000 label files | **2.5 s, 637 MB/s** (3000 entries, 1.57 GB zip) | images `ZIP_STORED` (no re-deflating JPEGs), text `ZIP_DEFLATED`. |
 | Local-folder export, same content | **1.5 s, 1.08 GB/s** | `shutil.copyfile` (kernel copy) + tmp → `os.replace`. |
 | PostgreSQL upsert 100k annotations (+ 5k media, 5k statuses) | **6.5 s first export, 8.5 s re-export** (budget 60 s) | `INSERT … ON CONFLICT DO UPDATE` executemany in 1000-row batches; psycopg 3 sends them in pipeline mode, so the time is mostly server-side. Per-row client work (`_row_converter`) ≈ 1.2 s of it. |
-| MSSQL | not measured | SQL Server 2022 crashes at startup in this host's docker (`RETAIL ASSERT drtl.cpp:1552`, errno 13, even with `--privileged`), so `tests/test_db.py` skips its MSSQL cases with that reason. The MSSQL path (`#stage` + `MERGE`, `N''` literals, DATETIMEOFFSET strings) was checked offline against the compiled SQL only. |
+| MSSQL | not measured | SQL Server 2022 crashes at startup in this host's docker (`RETAIL ASSERT drtl.cpp:1552`, errno 13, even with `--privileged`), so `tests/storage/test_db.py` skips its MSSQL cases with that reason. The MSSQL path (`#stage` + `MERGE`, `N''` literals, DATETIMEOFFSET strings) was checked offline against the compiled SQL only. |
 
 I/O implementation notes:
 - FTP / SFTP use a checkout pool (FTP 4, SFTP 8 connections), not one client per thread: the import and prefetch pools

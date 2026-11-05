@@ -178,8 +178,25 @@ DATAVIZ_TEST_DATABASE_URL=postgresql://dataviz:$POSTGRES_PASSWORD@127.0.0.1:1543
 .venv/bin/python -m pytest -q -n auto tests   # ~75 s on 128 cores; auto = 12 workers (~2.5 GiB each), DATAVIZ_TEST_WORKERS=<n> to change
                                               # workers are CPU only and skip the `gpu` tests (one CUDA context each ran the GPU out of memory)
 scripts/test.sh                               # the full suite: the parallel pass, then `pytest -m gpu` in one process on the GPU
-DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_page_smoke.py   # a browser of your own
+DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/ui/test_page_smoke.py   # a browser of your own
 ```
+
+Tests are grouped by feature in `tests/<folder>/` (run one folder with `pytest -q tests/compare`); the shared
+fixtures and helpers (`conftest.py`, `conftest_io.py`, `authutil.py`, `vizutil.py`) stay in `tests/`.
+
+| Folder | What it tests |
+|---|---|
+| `auth/` | sign-in, accounts, admin, tiers, sharing, route guards, role matrix, open sign-up hardening |
+| `datacenter/` | the Data Center (`test_dc_*`): buckets, formats, uploads, S3 links, web sources, text, video, the page |
+| `labeling/` | the label page: store, routes, import, writers / formats, image-strip filter, curation, the image editor |
+| `models/` | model-assisted labeling, the model hub, label-all process, prediction speed, image models, own-model features |
+| `visualizer/` | visualize sessions: combined datasets, promote, live feed, many sessions, Objects / Full images, image-only and embeddings sessions, reuse, jobs, the DVC1 transport |
+| `compare/` | the Compare tab: routes, diff engine, image conditions (shift, imgstats, stress), statistical tests, compare-core under node, the pages |
+| `ml/` | projections + Generate, pgvector, feature / index speed, GPU vs CPU, cleanlab label quality |
+| `llm/` | the ◆ assistants: providers, prompts & skills, saved chats, streaming, tools, the agent engine, web search, chat reducer under node |
+| `storage/` | databases (export, schema vs migrations, legacy import, repositories) and image I/O sources / sinks |
+| `ui/` | page smoke tests, Sessions home, error pages, pre-paint colours, filter / editor under node |
+| `bench/` | benchmarks, not tests (`bench_labeling.py`, `bench_label_quality.py`) |
 
 | Tests | Cover |
 |---|---|
@@ -198,7 +215,7 @@ DATAVIZ_TEST_CHROMIUM=/path/to/chrome .venv/bin/python -m pytest -q tests/test_p
 | `test_filter_js.py`, `test_strip_filter.py` | `static/ts/core/filter.ts` under node (skips without node); the label page's image-strip filter |
 | `test_page_smoke.py` | the real `app.py` + headless Chromium: open a session, plot, Curation scan finds a seeded leak; the activity bar groups, the image browser, viewer toggles, right-click copy, drawing a box and saving it; the label page's import dialog and model activation; the ◆ AI assistant appearing only once connected and switched on, a streamed answer; skips without `playwright install chromium` (and its system libraries: `playwright install-deps`) |
 
-Upstream deprecation warnings that are not ours are filtered in `tests/conftest.py`. `bench_labeling.py` is a
+Upstream deprecation warnings that are not ours are filtered in `tests/conftest.py`. `tests/bench/bench_labeling.py` is a
 benchmark, not a test. `eslint` (no-undef, no-unused-vars) checks the ES modules:
 
 ```bash

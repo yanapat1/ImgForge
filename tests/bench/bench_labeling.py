@@ -1,7 +1,7 @@
 """
 Benchmark of the labeling backend against the plan's budgets (not a test; run by hand):
 
-    DATAVIZ_TEST_DATABASE_URL=postgresql://user:pw@host:port/postgres .venv/bin/python tests/bench_labeling.py [n]
+    DATAVIZ_TEST_DATABASE_URL=postgresql://user:pw@host:port/postgres .venv/bin/python tests/bench/bench_labeling.py [n]
     (default 10000; a throw-away database is created on that server, migrated, and dropped at the end)
 
 Measures: autosave PUT of 200 shapes (store + HTTP route), a media page of a 10k project (plain and filtered),
@@ -16,8 +16,8 @@ import tracemalloc
 import uuid
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))      # conftest helpers
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # conftest helpers
 
 from PIL import Image  # noqa: E402
 

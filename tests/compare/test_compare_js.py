@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-CORE_TS = Path(__file__).resolve().parents[1] / 'static' / 'ts' / 'core' / 'compare-core.ts'
+CORE_TS = Path(__file__).resolve().parents[2] / 'static' / 'ts' / 'core' / 'compare-core.ts'
 
 SCRIPT = r"""
 import assert from 'node:assert/strict';
@@ -230,7 +230,7 @@ def test_compare_js(tmp_path):
     node = shutil.which('node')
     if node is None:
         pytest.skip('node is not installed')
-    esbuild = Path(__file__).resolve().parents[1] / 'node_modules' / '.bin' / 'esbuild'
+    esbuild = Path(__file__).resolve().parents[2] / 'node_modules' / '.bin' / 'esbuild'
     if not esbuild.exists():
         pytest.skip('run `npm install` to get esbuild')
     b = subprocess.run([str(esbuild), str(CORE_TS), '--format=esm', f'--outfile={tmp_path / "core.mjs"}'],

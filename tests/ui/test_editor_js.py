@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 EDITOR_TS = ROOT / 'static' / 'vendor-src' / 'editor.ts'
 
 SCRIPT = r"""
