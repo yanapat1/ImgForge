@@ -58,6 +58,17 @@ def test_dock_on_home(server):  # noqa: F811 - the fixture
             page.press('#ai-page-q', 'Enter')
             page.wait_for_selector('#ai-page .ai-msg.bot:has-text("fake model")', timeout=20000)
             _shot(page, 'dock-home')
+            # drag-selecting the answer keeps the selection: a click in the dock no longer re-opens it and focuses the
+            # chat box (<html data-dock="open"> matched the dock's [data-dock] click handler)
+            b = page.locator('#ai-page .ai-msg.bot .ct-md').last.bounding_box()
+            page.mouse.move(b['x'] + 2, b['y'] + 8)
+            page.mouse.down()
+            page.mouse.move(b['x'] + b['width'] * 0.7, b['y'] + 8, steps=8)
+            page.mouse.up()
+            page.wait_for_timeout(200)
+            assert 'Hello there' in page.evaluate('getSelection().toString()')
+            assert page.evaluate('document.activeElement.id') != 'ai-page-q'
+            page.evaluate('getSelection().removeAllRanges()')
 
             # collapse to the rail, remembered over a reload; Ctrl+. opens it again
             page.click('#ai-dock [data-dock="rail"]')

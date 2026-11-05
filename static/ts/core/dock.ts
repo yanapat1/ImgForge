@@ -442,7 +442,9 @@ function bindGrip(grip: HTMLElement): void {
 }
 
 function onClick(e: MouseEvent): void {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-dock]');
+  // buttons only: <html data-dock="open|rail|off"> carries the dock's state, and matching it made every click in the
+  // dock (the end of a text drag too) re-open it and focus the chat box, which dropped the selection
+  const b = (e.target as Element).closest<HTMLElement>('button[data-dock]');
   if (!b) return;
   switch (b.dataset['dock']) {
     case 'open': openDock(); break;
