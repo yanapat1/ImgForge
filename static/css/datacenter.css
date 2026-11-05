@@ -214,6 +214,8 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .bc-edit { flex: none; width: 26px; height: 26px; color: var(--text-faint); }
 .bc-edit .ico { width: 14px; height: 14px; }
 .bc-edit:hover:not(:disabled) { color: var(--accent-text); }
+.bc-title .bc-del { margin-left: -5px; }
+.bc-del:hover:not(:disabled) { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-soft); }
 @media (hover: hover) {
   .dc-bcard .bc-edit, .dc-brow .bc-edit { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
   .dc-bcard:hover .bc-edit, .dc-bcard:focus-within .bc-edit, .dc-bcard.sel .bc-edit,
@@ -383,7 +385,26 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .dc-edit-src { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-xs); color: var(--text-muted); }
 .dc-edit-src .ico { flex: none; color: var(--text-faint); }
 .dc-edit-src code { font: var(--fs-xs) var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dc-edit-row, .dc-edit-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dc-edit-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dc-edit-src.box { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); }
+/* Actions: tiles (icon, title, one hint line), then the Delete / Unlink strip apart from them */
+.dc-edit-acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+button.dc-edit-act { height: auto; min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 9px 12px; text-align: left;
+  justify-content: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); font-weight: 400; }
+button.dc-edit-act:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
+.dc-edit-act .ai { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--r); background: var(--surface-2); color: var(--accent-text); }
+.dc-edit-act:hover .ai { background: var(--surface); }
+.dc-edit-act .ai .ico { width: 16px; height: 16px; }
+.dc-edit-act .at, .dc-edit-danger .at { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dc-edit-act .at b, .dc-edit-danger .at b { font-size: var(--fs-sm); font-weight: 650; color: var(--text); }
+.dc-edit-act .at span, .dc-edit-danger .at span { font-size: var(--fs-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-edit-danger { display: flex; align-items: center; gap: 12px; margin-top: 4px; padding: 9px 10px 9px 12px; border: 1px solid var(--danger-border);
+  border-radius: var(--r); background: var(--danger-bg); }
+.dc-edit-danger .at { flex: 1; }
+.dc-edit-danger .at span { white-space: normal; }
+.dc-edit-danger button { flex: none; border-color: var(--danger-border); background: var(--surface); }
+.dc-edit-danger button:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-soft); }
+@media (max-width: 560px) { .dc-edit-acts { grid-template-columns: minmax(0, 1fr); } }
 .dc-edit-row .muted { font-size: var(--fs-sm); }
 .dc-al-classes { max-height: 96px; overflow: auto; }
 .dc-al input[type=range] { width: 100%; }

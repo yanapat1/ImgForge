@@ -149,6 +149,54 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
     assert not errors, '\n'.join(errors)
 
 
+def test_bucket_card_delete_and_edit_actions(server, tmp_path):
+    """A card has ✎ Edit and 🗑 Delete; the Edit dialog's Actions are tiles plus a separate Delete strip; the card's 🗑
+    asks first, then removes the bucket."""
+    bid = _send(f'{server}/api/dc/buckets', {'name': 'card-bucket', 'kind': 'managed'})['id']
+    shots = os.environ.get('DC_SHOTS')              # a folder: also save screenshots of the dialog and card
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1600, 'height': 1000})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?data')
+        card = page.locator(f'#dc-body .dc-bcard[data-bid="{bid}"]')
+        card.wait_for(timeout=30000)
+        card.hover()
+        dele = card.locator('button.bc-del[data-act="delete-bucket"]')
+        assert dele.get_attribute('aria-label') == 'Delete card-bucket'
+        if shots:
+            card.screenshot(path=f'{shots}/card.png')
+        # the Edit dialog: four action tiles, then the Delete strip
+        card.locator('button[data-act="edit-bucket"]').click()
+        dlg = page.locator('.ui-dlg:has(.dc-edit)')
+        dlg.wait_for()
+        assert [t.get_attribute('data-ed') for t in dlg.locator('.dc-edit-acts .dc-edit-act').all()] == \
+            ['export', 'export-to', 'redetect', 'autolabel']
+        assert 'Delete this bucket' in dlg.locator('.dc-edit-danger').inner_text()
+        assert dlg.locator('.dc-edit-act .ico').first.bounding_box()['width'] > 0
+        if shots:
+            dlg.screenshot(path=f'{shots}/edit.png')
+            page.emulate_media(color_scheme='dark')
+            page.evaluate("document.documentElement.dataset.theme = 'dark'")
+            dlg.screenshot(path=f'{shots}/edit-dark.png')
+            page.evaluate("document.documentElement.dataset.theme = 'light'")
+        dlg.locator('[data-dlg="cancel"]').first.click()
+        dlg.wait_for(state='detached')
+        # the card's 🗑: a confirmation first (the card is still there), then it is gone
+        card.hover()
+        dele.click()
+        conf = page.locator('.ui-dlg:has-text("Delete card-bucket?")')
+        conf.wait_for()
+        assert card.count() == 1
+        conf.locator('[data-dlg="ok"]').click()
+        card.wait_for(state='detached', timeout=15000)
+        browser.close()
+    assert all(x['id'] != bid for x in _get(f'{server}/api/dc/buckets'))
+    assert not errors, '\n'.join(errors)
+
+
 def test_data_center_assistant_dock_chat(server):
     """The ◆ assistant in the right-side dock (datacenter/ai.ts on core/dock.ts + core/chat.ts): the answer of a fake
     OpenAI-compatible model streams in, the Tools fold lists the catalogue's tools, Shift+Tab in #dc-ai-q switches

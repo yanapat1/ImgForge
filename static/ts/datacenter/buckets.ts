@@ -90,6 +90,12 @@ function stats(b: Bucket): string {
 const editBtn = (b: Bucket): string =>
   `<button type="button" class="icon-btn ghost sm bc-edit" data-act="edit-bucket" data-bid="${esc(b.id)}" aria-label="Edit ${esc(b.name)}" title="Edit: name, tags${b.kind === 's3' ? ', load mode' : ''}, export…">${icon('edit')}</button>`;
 
+/** 🗑 Delete (managed) / Unlink (linked source): asks first (ops.ts deleteBucket) */
+const delBtn = (b: Bucket): string => {
+  const what = b.kind === 'managed' ? 'Delete' : 'Unlink';
+  return `<button type="button" class="icon-btn ghost sm bc-edit bc-del" data-act="delete-bucket" data-bid="${esc(b.id)}" aria-label="${what} ${esc(b.name)}" title="${what}…">${icon('trash')}</button>`;
+};
+
 /** "S3 link" plus how it is read: streamed, loading, or a local copy. */
 const srcText = (b: Bucket): string =>
   b.kind !== 's3' ? SOURCE[b.kind]?.[1] ?? b.kind : b.mode === 'local' ? (b.local_ready ? 'S3 · local' : 'S3 · loading…')
@@ -100,7 +106,7 @@ function card(b: Bucket): string {
   return `<article class="dc-bcard${D.focus === b.id ? ' sel' : ''}" data-act="focus-bucket" data-bid="${esc(b.id)}" role="button" tabindex="0" aria-pressed="${D.focus === b.id}" aria-label="${esc(b.name)}">` +
     mosaic(b) +
     `<div class="bc-body"><div class="bc-title"><button type="button" class="bc-name" data-act="go" data-bid="${esc(b.id)}" data-path="" title="Open ${esc(b.name)}">${esc(b.name)}</button>` +
-    `<span class="src">${srcIcon(b)}${esc(srcText(b))}</span>${editBtn(b)}</div>` +
+    `<span class="src">${srcIcon(b)}${esc(srcText(b))}</span>${editBtn(b)}${delBtn(b)}</div>` +
     `<div class="bc-row">${fbadge(b.format)}${jobBadge(b.id)}${warnLine(b)}</div>` +
     `<div class="bc-stats num">${stats(b)}</div>` +
     `<div class="bc-tags">${user.map((t) => tagChip(t.tag)).join('') || '<span class="muted">no tags</span>'}</div></div></article>`;
@@ -112,7 +118,7 @@ function listRow(b: Bucket): string {
     `<span class="c-n">${srcIcon(b)}<button type="button" class="bc-name" data-act="go" data-bid="${esc(b.id)}" data-path="">${esc(b.name)}</button></span>` +
     `<span>${fbadge(b.format)}</span><span class="r num">${fmtN(st.images ?? st.vectors ?? null)}</span><span class="r num">${fmtN(st.labels ?? null)}</span>` +
     `<span class="r num">${fmtSize(st.size)}</span><span class="c-t">${b.tags.filter((t) => !t.auto).map((t) => tagChip(t.tag)).join('')}</span>` +
-    `<span class="c-m num">${esc(timeAgo(b.updated_at ?? b.created_at))}${editBtn(b)}</span></div>`;
+    `<span class="c-m num">${esc(timeAgo(b.updated_at ?? b.created_at))}${editBtn(b)}${delBtn(b)}</span></div>`;
 }
 
 function renderBar(): void {

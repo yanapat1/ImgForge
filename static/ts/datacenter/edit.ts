@@ -67,13 +67,28 @@ function body(b: Bucket, name: string, mode: S3Mode): string {
     `<label class="fld"><span>Name</span><input type="text" class="txt" id="dc-ed-name" value="${esc(name)}" autocomplete="off" spellcheck="false"></label>` +
     `<section class="dc-edit-sec"><div class="m-lbl">Tags</div><div class="tags-wrap">${user.map((t) => tagChip(t.tag, false, 'on')).join('') || '<span class="muted">no tags</span>'}` +
     `<button type="button" class="dc-tag add" data-ed="tags">${icon('plus')}${user.length ? 'Edit' : 'Add tag'}</button></div></section>` +
-    (b.kind === 's3' ? s3Sec(b, mode) : `<div class="dc-edit-src">${icon(SOURCE[b.kind]?.[0] ?? 'folder')}<code title="${esc(b.root)}">${esc(b.root)}</code></div>`) +
-    `<section class="dc-edit-sec"><div class="m-lbl">Actions</div><div class="dc-edit-acts">` +
-    `<button type="button" class="ghost sm" data-ed="export">${icon('download')}Export (zip)</button>` +
-    `<button type="button" class="ghost sm" data-ed="export-to">${icon('upload')}Export to…</button>` +
-    `<button type="button" class="ghost sm" data-ed="redetect">${icon('refresh')}Re-detect format</button>` +
-    `<button type="button" class="ghost sm" data-ed="autolabel">${icon('robot')}Label with model…</button>` +
-    `<span class="grow"></span><button type="button" class="ghost sm danger-ghost" data-ed="delete">${icon('trash')}${b.kind === 'managed' ? 'Delete…' : 'Unlink…'}</button></div></section></div>`;
+    (b.kind === 's3' ? s3Sec(b, mode)
+      : `<section class="dc-edit-sec"><div class="m-lbl">Source</div><div class="dc-edit-src box">${icon(SOURCE[b.kind]?.[0] ?? 'folder')}<code title="${esc(b.root)}">${esc(b.root)}</code></div></section>`) +
+    `<section class="dc-edit-sec"><div class="m-lbl">Actions</div><div class="dc-edit-acts">${ACTS.map(actTile).join('')}</div>` +
+    dangerRow(b) + '</section></div>';
+}
+
+/** [data-ed, icon, title, hint] of the Actions tiles */
+const ACTS: Array<[string, string, string, string]> = [
+  ['export', 'download', 'Export (zip)', 'Download every file'],
+  ['export-to', 'upload', 'Export to…', 'S3 · RustFS, FTP, SFTP'],
+  ['redetect', 'refresh', 'Re-detect format', 'Check the layout again'],
+  ['autolabel', 'robot', 'Label with model…', 'Auto-label every image'],
+];
+const actTile = ([ed, ico, title, hint]: [string, string, string, string]): string =>
+  `<button type="button" class="dc-edit-act" data-ed="${ed}"><span class="ai">${icon(ico)}</span><span class="at"><b>${title}</b><span>${hint}</span></span></button>`;
+
+/** Delete (a managed bucket) / Unlink (a linked source): apart from the other actions, in red */
+function dangerRow(b: Bucket): string {
+  const managed = b.kind === 'managed';
+  return `<div class="dc-edit-danger"><span class="at"><b>${managed ? 'Delete this bucket' : 'Unlink this source'}</b>` +
+    `<span>${managed ? 'Removes the bucket and its files from the managed store.' : 'Removes the link only: the source itself is not touched.'}</span></span>` +
+    `<button type="button" class="sm danger-ghost" data-ed="delete">${icon('trash')}${managed ? 'Delete…' : 'Unlink…'}</button></div>`;
 }
 
 export async function openEditBucket(bid: string): Promise<void> {
