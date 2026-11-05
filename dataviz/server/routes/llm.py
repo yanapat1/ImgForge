@@ -244,7 +244,8 @@ def router(state, ctx):
                 msg = str(e) if isinstance(e, LLMError) else f'{type(e).__name__}: {e}'
                 _log.warning(f'chat: {vlog.esc(msg)}')
                 yield json.dumps({'t': 'error', 'error': msg}) + '\n'
-        return StreamingResponse(gen(), media_type='application/x-ndjson', headers={'Cache-Control': 'no-cache'})
+        return StreamingResponse(gen(), media_type='application/x-ndjson',
+                                 headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
     # ------------------------------------------------------------ Data Center agent (NDJSON stream)
     @r.post('/api/llm/dc/chat')
@@ -268,7 +269,8 @@ def router(state, ctx):
                 msg = str(e) if isinstance(e, LLMError) else f'{type(e).__name__}: {e}'
                 _log.warning(f'dc chat: {vlog.esc(msg)}')
                 yield json.dumps({'type': 'error', 'detail': msg}) + '\n'
-        return StreamingResponse(gen(), media_type='application/x-ndjson', headers={'Cache-Control': 'no-cache'})
+        return StreamingResponse(gen(), media_type='application/x-ndjson',
+                                 headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
     @r.post('/api/llm/dc/confirm')
     def dc_confirm(body: dict):

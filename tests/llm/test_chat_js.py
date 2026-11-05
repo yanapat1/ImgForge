@@ -170,3 +170,45 @@ def test_chat_reducer_js(tmp_path):
     (tmp_path / 't.mjs').write_text(SCRIPT)
     r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and r.stdout.strip() == 'ok', r.stderr + r.stdout
+
+
+STREAM_TS = ROOT / 'static' / 'ts' / 'core' / 'stream.ts'
+STREAM_SCRIPT = r"""
+import assert from 'node:assert/strict';
+import { streamNDJSON } from './stream.mjs';
+
+// a body that arrives in two chunks, the first ending mid-line: events are handed on as their lines complete
+let seen = null;
+globalThis.fetch = async (path, init) => {
+  seen = { path, init };
+  const enc = new TextEncoder();
+  const body = new ReadableStream({ start(c) { c.enqueue(enc.encode('{"type":"meta"}\n{"type":"st')); c.enqueue(enc.encode('ep","n":1}\nnot json\n{"type":"done"}')); c.close(); } });
+  return new Response(body, { status: 200 });
+};
+const evs = [];
+await streamNDJSON('api/llm/agent/data/chat', { text: 'hi' }, (v) => evs.push(v.type));
+assert.deepEqual(evs, ['meta', 'step', 'done']);
+const h = seen.init.headers;
+// JupyterHub's jupyter-server-proxy streams only when Accept is exactly text/event-stream (else it buffers it all)
+assert.equal(h.get('Accept'), 'text/event-stream');
+assert.equal(h.get('Content-Type'), 'application/json');
+assert.equal(h.get('X-Requested-With'), 'dataviz');
+assert.equal(seen.init.method, 'POST');
+console.log('ok');
+"""
+
+
+def test_stream_ndjson_js(tmp_path):
+    """streamNDJSON asks the proxy to stream (Accept: text/event-stream) and hands on each line as it completes."""
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('node is not installed')
+    esbuild = ROOT / 'node_modules' / '.bin' / 'esbuild'
+    if not esbuild.exists():
+        pytest.skip('run `npm install` to get esbuild')
+    b = subprocess.run([str(esbuild), str(STREAM_TS), '--bundle', '--format=esm', '--platform=neutral',
+                        f'--outfile={tmp_path / "stream.mjs"}'], capture_output=True, text=True, timeout=60)
+    assert b.returncode == 0, b.stderr
+    (tmp_path / 't.mjs').write_text(STREAM_SCRIPT)
+    r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and r.stdout.strip() == 'ok', r.stderr + r.stdout

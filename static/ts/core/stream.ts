@@ -18,7 +18,9 @@ export function splitLines(buf: string): { lines: string[]; rest: string } {
 /** POST `body` to `path` and stream its NDJSON answer into onEvent (one parsed object per line). Resolves when the
  *  server closes the stream. */
 export async function streamNDJSON(path: string, body: unknown, onEvent: (ev: unknown) => void, signal?: AbortSignal): Promise<void> {
-  const init: RequestInit = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  // Accept: text/event-stream (exactly) puts JupyterHub's jupyter-server-proxy in its progressive mode: without it the
+  // proxy buffers the whole answer and every step shows up at once when the run ends. The server ignores it (NDJSON).
+  const init: RequestInit = { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(body) };
   if (signal) init.signal = signal;
   const r = await apiFetch(path, init);
   if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
