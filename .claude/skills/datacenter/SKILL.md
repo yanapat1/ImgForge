@@ -19,7 +19,7 @@ One tool registry (`dataviz/llm/tools/`, the Data Center's are `tools/datacenter
 CLI and this skill, and every tool goes through `dataviz/datacenter/service.py`. Contract:
 `dataviz/datacenter/API.md`. In the app the ◆ agent lives in the right-side dock of every page; besides these
 tools it has the common `list_sessions` and `navigate` (open the home, the Data Center, a visualize or labeling
-session; the chat continues there with a hand-off summary). It never creates sessions on its own initiative
+session; the same chat continues there, answered by that page's specialist). It never creates sessions on its own initiative
 beyond `send_to_session`, which the user confirms.
 
 ## Tools

@@ -13,8 +13,10 @@ import { openSettings } from '../settings/dialog.js';
 import type { ChatEvent } from '../types-chat.js';
 import type { Retag } from '../types-datacenter.js';
 import type { Action } from './app.js';
+import { closeFile, fileDirty } from './editor.js';
 import { showRetag } from './ops.js';
 import { bucketOf, D, fmtN, hooks } from './state.js';
+import { hasUploads } from './uploads.js';
 
 const A = {
   chat: null as ChatHandle | null,
@@ -112,6 +114,8 @@ export function renderAi(): void {
     mount,
     onShow: () => renderCtx(),
     settings: () => { void openSettings('llm'); },
+    unsaved: () => (fileDirty() ? 'The open file has unsaved changes.' : hasUploads() ? 'Uploads are still running: leaving stops them.' : null),
+    discard: () => closeFile(),
   });
 }
 

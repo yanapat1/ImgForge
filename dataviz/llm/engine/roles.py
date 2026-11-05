@@ -1,8 +1,14 @@
 """
-The two agents. A role fixes which tool domains its agent may call, which feature switch gates it, whether it needs
-the visualizer session, and how "where the user is" is described in its prompt. The Data agent and the Visual agent
-never share data tools: 'data' is not among the visual role's domains, and the route builds the tool set from the
-role on the server.
+The specialists behind the one ◆ chat. The chat follows the user over every page (llm/sessions.py role 'app'); the
+page a message comes from picks the specialist that answers it (the router, no model call): the Data specialist on
+the home page, the Data Center and the labeling page, the Visual specialist in a visualizer session. A role fixes
+which tool domains its specialist may call, which feature switch gates it, whether it needs the visualizer session,
+and how "where the user is" is described in its prompt. The specialists never share page tools: 'data' is not among
+the visual role's domains (and back), the route builds the tool set from the role on the server, and the prompt
+only names what the other pages can do (other_pages), so the model navigates there instead of guessing.
+
+    page_of(role, scope, bound)   where a message was written: {role, screen, label, session_id?, bucket?, ...}
+    other_pages(role)             the short "Other pages" card of a specialist's prompt
 """
 
 from dataclasses import dataclass
@@ -23,11 +29,54 @@ ROLES = {
 }
 
 
+SCREEN_ROLE = {'home': 'data', 'data': 'data', 'label': 'data', 'viz': 'visual'}
+SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling'}
+# what each specialist's pages do, for the other one's prompt (one line: the tools stay with their page)
+CAN = {
+    'data': 'Data Center (screen data; Home lists the sessions): buckets, folders, files, tags, S3, import / export, '
+            'send a folder to the visualizer or labeling',
+    'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
+              'curation, label errors, model runs + evaluation, compare',
+}
+
+
 def get(name):
     r = ROLES.get(str(name or ''))
     if r is None:
         raise KeyError(f'no agent {name!r}: data or visual')
     return r
+
+
+def page_of(role, scope, bound=None):
+    """Where a message was written (llm_messages.page): the router's input and the history's page markers."""
+    scope = scope if isinstance(scope, dict) else {}
+    if role == 'visual':
+        out = {'role': 'visual', 'screen': 'viz', 'label': 'Visualizer'}
+        if bound is not None:
+            out['session_id'] = str(bound.get('dataset_id') or '')
+            if bound.get('name'):
+                out['label'] = f'Visualizer · {bound["name"]}'
+        tab = ((scope.get('view') or {}) if isinstance(scope.get('view'), dict) else {}).get('tab')
+        if isinstance(tab, str) and tab:
+            out['tab'] = tab
+        return out
+    screen = scope.get('page') if scope.get('page') in ('home', 'label') else 'data'
+    out = {'role': 'data', 'screen': screen, 'label': SCREEN_LABEL[screen]}
+    if screen == 'label' and scope.get('label_project'):
+        out['session_id'] = str(scope['label_project'])
+    if screen == 'data' and scope.get('bucket'):
+        out['bucket'] = str(scope['bucket'])
+        if scope.get('path'):
+            out['path'] = str(scope['path'])
+            out['label'] = f'Data Center · {str(scope["path"]).rstrip("/").rsplit("/", 1)[-1]}'
+    return out
+
+
+def other_pages(role):
+    """The "Other pages" card: one chat follows the user, only this page's tools are here."""
+    return ('## Other pages\nThis chat follows the user across the app; you have only this page\'s tools. '
+            + ' '.join(f'Elsewhere: {CAN[k]}.' for k in CAN if k != role)
+            + ' For work there call `navigate` (`list_sessions` finds ids); never call another page\'s tools.')
 
 
 # ---------------------------------------------------------------- "where the user is"

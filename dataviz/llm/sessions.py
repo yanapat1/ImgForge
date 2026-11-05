@@ -2,14 +2,16 @@
 Saved ◆ chats (app.llm_sessions + app.llm_messages): every chat of both assistants lives in PostgreSQL, so history
 survives reloads, other devices and rebuilds.
 
-    create(user, role, scope, title)      a new chat; the 21st of a role first soft-deletes the one not opened longest
+    create(user, role, scope, title)      a new chat; the 21st first soft-deletes the one not opened longest
     list_(user, role, scope, q, cursor)   live chats (pinned first, then last opened), search over titles + messages
     get(user, sid)                        one chat + its messages (touches last_opened_at)
     update(user, sid, title, pinned)      rename / pin
     delete(user, ids | role + scope)      soft delete (delete_reason 'user'); restore(user, ids) undoes it
-    append(user, sid, role, text, ...)    one message (the chat route: the user's at the start, the answer at the end)
-    history(user, sid)                    [{role, text}] for react.history (last HISTORY_TURNS after the summary)
-    context(user, sid)                    {summary, summary_seq, messages after it}: what the model is sent
+    append(user, sid, role, text, ...)    one message (the chat route: the user's at the start, the answer at the end),
+                                          with the page it was written on
+    history(user, sid)                    [{role, text, page}] for react.history (last HISTORY_TURNS after the summary)
+    context(user, sid)                    {summary, summary_seq, plan, messages after it}: what the model is sent
+    set_plan(user, sid, items)            the chat's cross-page checklist (the todo tool)
     for_summary(user, sid, after, upto)   the messages (with traces) a compaction folds into the summary
     save_summary(user, sid, ...)          store a new summary (only over the one it was built from)
     purge(now)                            hard-deletes chats deleted more than llm_chat_retention_days ago
@@ -19,8 +21,13 @@ Deleting only marks a chat deleted: every user-facing query filters `deleted_at 
 answers 404 like another user's. The rows stay until purge() (startup + every 24 h, start_purger()). Deleting the
 account removes them at once (FK CASCADE).
 
-Limits: MAX_SESSIONS (Admin › Settings llm_max_sessions) live chats per user PER ROLE: data and visual never push
-each other out. Pinned chats are never removed automatically; when every chat of the role is pinned, create() is
+One chat, every page: the assistant's chats are role 'app'. The page a message comes from picks the specialist
+that answers it (engine/roles.py), not the chat, so the same chat continues on the home page, in the Data Center
+and in any visualizer session. Each message keeps its page (llm_messages.page); list_(role 'app') lists every live
+chat of the user, the older per-assistant chats ('data', 'visual') too, so they can be continued anywhere.
+
+Limits: MAX_SESSIONS (Admin › Settings llm_max_sessions) live chats per user (role 'app' counts every chat; the
+older roles count their own). Pinned chats are never removed automatically; when every chat is pinned, create() is
 refused (409). create() runs in one transaction holding an advisory lock on (owner, role) plus FOR UPDATE on the
 live rows, so two tabs cannot push the count past the limit. MAX_MESSAGES per chat: the oldest go first.
 """
@@ -44,15 +51,17 @@ TITLE_LEN = 60
 RETENTION_DAYS = 730
 PURGE_BATCH = 1000
 PURGE_EVERY_S = 24 * 3600
-ROLES = ('data', 'visual')
+ROLES = ('app', 'data', 'visual')
+APP = 'app'                     # one chat across every page: lists and limits cover all roles
+MAX_PLAN = 30
 THINKING_MAX = 4000
 PREVIEW_MAX = 1500
 _PURGE_LOCK_KEY = 0x6c6c6d63686174      # any constant: the advisory lock id of "llm chat purge"
 
 _log = vlog.get_logger('llm')
-_J = {k: bindparam(k, type_=JSONB) for k in ('scope', 'trace', 'usage')}
+_J = {k: bindparam(k, type_=JSONB) for k in ('scope', 'trace', 'usage', 'page', 'plan')}
 _COLS = ('id, role, title, scope, provider_id, model, mode, effort, pinned, n_messages, usage, created_at, '
-         'updated_at, last_opened_at, summary_seq, summary_tokens, parent_id')
+         'updated_at, last_opened_at, summary_seq, summary_tokens, last_page')
 
 
 class SessionError(ValueError):
@@ -104,6 +113,10 @@ def _row(r):
             d[k] = _iso(d[k])
     d['scope'] = d.get('scope') or {}
     d['usage'] = d.get('usage') or {}
+    if 'last_page' in d:
+        d['last_page'] = d['last_page'] or {}
+    if 'page' in d:
+        d['page'] = d['page'] or {}
     return d
 
 
@@ -128,12 +141,18 @@ def cut_title(t):
     return t if len(t) <= TITLE_LEN else t[:TITLE_LEN - 1].rstrip() + '…'
 
 
+def _role_sql(role, col='role'):
+    """The WHERE part that picks one role's chats ('' for role app: every chat of the user)."""
+    return '' if role == APP else f' AND {col} = :r'
+
+
 def _lock_role(c, uid, role):
-    """Serialise the writers of one user's chats of one role (the count check, inserts, restores)."""
+    """Serialise the writers of one user's chats of one role (the count check, inserts, restores); role app locks
+    and returns every live chat of the user (it counts them all)."""
     c.execute(text('SELECT pg_advisory_xact_lock(hashtext(:k))'), {'k': f'llm_sessions:{uid}:{role}'})
-    return c.execute(text("""SELECT id, title, pinned, last_opened_at FROM app.llm_sessions
-                             WHERE owner_id = :u AND role = :r AND deleted_at IS NULL
-                             ORDER BY last_opened_at, id FOR UPDATE"""), {'u': uid, 'r': role}).all()
+    return c.execute(text(f"""SELECT id, title, pinned, last_opened_at FROM app.llm_sessions
+                              WHERE owner_id = :u{_role_sql(role)} AND deleted_at IS NULL
+                              ORDER BY last_opened_at, id FOR UPDATE"""), {'u': uid, 'r': role}).all()
 
 
 def _oldest_unpinned(rows):
@@ -179,15 +198,16 @@ def create(user, role, scope=None, title='', meta=None):
 
 
 def list_(user, role, scope=None, q='', cursor=None, limit=50):
-    """Live chats of one role (pinned first, then last opened) -> {sessions, next_cursor, count, max, will_remove,
-    all_pinned}. `scope` filters ({bucket_id} | {dataset_id}); `q` searches titles and message texts (ILIKE)."""
+    """Live chats of one role (role app: every chat of the user; pinned first, then last opened) -> {sessions,
+    next_cursor, count, max, will_remove, all_pinned}. `scope` filters ({bucket_id} | {dataset_id}); `q` searches
+    titles and message texts (ILIKE)."""
     uid, role = _uid(user), _role(role)
     try:
         off = max(0, int(cursor or 0))
     except (TypeError, ValueError):
         raise SessionError('bad cursor', 400) from None
     limit = max(1, min(200, int(limit or 50)))
-    where = ['s.owner_id = :u', 's.role = :r', 's.deleted_at IS NULL']
+    where = ['s.owner_id = :u', 's.deleted_at IS NULL'] + ([] if role == APP else ['s.role = :r'])
     args = {'u': uid, 'r': role, 'lim': limit + 1, 'off': off}
     f = _filter(scope)
     stmt_params = []
@@ -208,9 +228,9 @@ def list_(user, role, scope=None, q='', cursor=None, limit=50):
     mx = max_sessions()
     with db.connect() as c:
         rows = c.execute(sql, args).all()
-        live = c.execute(text("""SELECT id, title, pinned, last_opened_at FROM app.llm_sessions
-                                 WHERE owner_id = :u AND role = :r AND deleted_at IS NULL
-                                 ORDER BY last_opened_at, id"""), {'u': uid, 'r': role}).all()
+        live = c.execute(text(f"""SELECT id, title, pinned, last_opened_at FROM app.llm_sessions
+                                  WHERE owner_id = :u{_role_sql(role)} AND deleted_at IS NULL
+                                  ORDER BY last_opened_at, id"""), {'u': uid, 'r': role}).all()
     full = len(live) >= mx
     old = _oldest_unpinned(live) if full else None
     return {'sessions': [_row(r) for r in rows[:limit]],
@@ -230,10 +250,11 @@ def get(user, sid, touch=True):
                 raise SessionError('no such chat', 404)
         else:
             r = _live(c, uid, sid)
-        msgs = c.execute(text("""SELECT id, seq, role, text, trace, usage, created_at FROM app.llm_messages
+        msgs = c.execute(text("""SELECT id, seq, role, text, trace, usage, page, created_at FROM app.llm_messages
                                  WHERE session_id = :s ORDER BY seq"""), {'s': r.id}).all()
-        summary = c.execute(text('SELECT summary FROM app.llm_sessions WHERE id = :s'), {'s': r.id}).scalar()
-    return {'session': {**_row(r), 'summary': summary}, 'messages': [_row(m) for m in msgs]}
+        extra = c.execute(text('SELECT summary, plan FROM app.llm_sessions WHERE id = :s'), {'s': r.id}).first()
+    return {'session': {**_row(r), 'summary': extra.summary, 'plan': extra.plan or []},
+            'messages': [_row(m) for m in msgs]}
 
 
 def update(user, sid, title=None, pinned=None):
@@ -277,8 +298,9 @@ def delete(user, ids=None, role=None, scope=None, include_pinned=False):
         where.append('id = ANY(:ids)')
         args['ids'] = ids[:1000]
     else:
-        where.append('role = :r')
         args['r'] = _role(role)
+        if role != APP:
+            where.append('role = :r')
         f = _filter(scope)
         if f:
             where.append('scope @> :f')
@@ -314,9 +336,10 @@ def restore(user, ids):
                          {'u': uid, 'ids': ids[:1000]}).all()
         if len(rows) != len(set(ids)):
             raise SessionError('no such deleted chat', 404)
-        for role in sorted({r.role for r in rows}):
-            live = _lock_role(c, uid, role)
-            n = len(live) + sum(1 for r in rows if r.role == role)
+        roles_ = {r.role for r in rows}
+        for role in sorted(roles_ | ({APP} if roles_ - {APP} else set())):
+            live = _lock_role(c, uid, role)             # role app counts every chat: restoring any one adds to it
+            n = len(live) + sum(1 for r in rows if role == APP or r.role == role)
             if n > mx:
                 raise SessionError(f'{len(live)} of {mx} chats are open: delete another chat first', 409)
         out = c.execute(text(f"""UPDATE app.llm_sessions SET deleted_at = NULL, delete_reason = NULL
@@ -326,9 +349,10 @@ def restore(user, ids):
 
 
 # ---------------------------------------------------------------- messages
-def append(user, sid, role, text_, trace=None, usage=None, meta=None):
+def append(user, sid, role, text_, trace=None, usage=None, meta=None, page=None):
     """One message at the end of a live chat -> {id, seq}. Updates n_messages, updated_at, last_opened_at, the
-    usage totals and (for an untitled chat) the title; keeps the newest MAX_MESSAGES."""
+    usage totals, last_page and (for an untitled chat) the title; keeps the newest MAX_MESSAGES. `page`: where it
+    was written ({role, screen, label, ...}, engine/roles.page_of)."""
     uid = _uid(user)
     if role not in ('user', 'assistant'):
         raise SessionError('role must be user or assistant', 400)
@@ -338,10 +362,12 @@ def append(user, sid, role, text_, trace=None, usage=None, meta=None):
         seq = (c.execute(text('SELECT max(seq) FROM app.llm_messages WHERE session_id = :s'), {'s': s.id}).scalar()
                or 0) + 1
         mid = uuid.uuid4().hex
-        c.execute(text("""INSERT INTO app.llm_messages(id, session_id, seq, role, text, trace, usage)
-                          VALUES (:id, :s, :seq, :r, :t, :trace, :usage)""").bindparams(_J['trace'], _J['usage']),
+        page = _page(page)
+        c.execute(text("""INSERT INTO app.llm_messages(id, session_id, seq, role, text, trace, usage, page)
+                          VALUES (:id, :s, :seq, :r, :t, :trace, :usage, :page)""")
+                  .bindparams(_J['trace'], _J['usage'], _J['page']),
                   {'id': mid, 's': s.id, 'seq': seq, 'r': role, 't': str(text_ or ''), 'trace': list(trace or []),
-                   'usage': usage})
+                   'usage': usage, 'page': page})
         c.execute(text('DELETE FROM app.llm_messages WHERE session_id = :s AND seq <= :old'),
                   {'s': s.id, 'old': seq - MAX_MESSAGES})
         tot = dict(s.usage or {})
@@ -353,33 +379,68 @@ def append(user, sid, role, text_, trace=None, usage=None, meta=None):
                                                                     WHERE session_id = :s),
                                  updated_at = now(), last_opened_at = now(), usage = :usage, title = :t,
                                  provider_id = coalesce(:p, provider_id), model = coalesce(:m, model),
-                                 mode = coalesce(:mo, mode), effort = coalesce(:e, effort)
-                          WHERE id = :s""").bindparams(_J['usage']),
-                  {'s': s.id, 'usage': tot, 't': title, 'p': meta.get('provider_id'),
+                                 mode = coalesce(:mo, mode), effort = coalesce(:e, effort),
+                                 last_page = CASE WHEN :page = '{}'::jsonb THEN last_page ELSE :page END
+                          WHERE id = :s""").bindparams(_J['usage'], _J['page']),
+                  {'s': s.id, 'usage': tot, 't': title, 'p': meta.get('provider_id'), 'page': page,
                    'm': (meta.get('model') or None) and str(meta['model'])[:200], 'mo': meta.get('mode'),
                    'e': meta.get('effort')})
     return {'id': mid, 'seq': seq}
 
 
+PAGE_KEYS = ('role', 'screen', 'label', 'session_id', 'bucket', 'path', 'tab', 'continued')
+
+
+def _page(page):
+    """Only the keys a message's page may have, short strings (continued: a bool)."""
+    if not isinstance(page, dict):
+        return {}
+    out = {k: str(page[k])[:200] for k in PAGE_KEYS if k != 'continued' and page.get(k) not in (None, '')}
+    if page.get('continued') is True:
+        out['continued'] = True
+    return out
+
+
 def history(user, sid, turns=HISTORY_TURNS):
-    """[{role, text}] of the last `turns` messages after the summary (react.history's input)."""
-    return [{'role': m['role'], 'text': m['text']} for m in context(user, sid)['messages'][-int(turns):]]
+    """[{role, text, page}] of the last `turns` messages after the summary (react.history's input)."""
+    return [{'role': m['role'], 'text': m['text'], 'page': m['page']}
+            for m in context(user, sid)['messages'][-int(turns):]]
 
 
 def context(user, sid):
-    """What the model is sent of a chat: {summary, summary_seq, summary_tokens, messages: [{seq, role, text}]
-    after summary_seq} (summary None = never compacted). Bounded by MAX_MESSAGES."""
+    """What the model is sent of a chat: {summary, summary_seq, summary_tokens, plan, messages: [{seq, role, text,
+    page}] after summary_seq} (summary None = never compacted). Bounded by MAX_MESSAGES."""
     uid = _uid(user)
     with db.connect() as c:
-        r = c.execute(text("""SELECT id, summary, summary_seq, summary_tokens FROM app.llm_sessions
+        r = c.execute(text("""SELECT id, summary, summary_seq, summary_tokens, plan FROM app.llm_sessions
                               WHERE id = :s AND owner_id = :u AND deleted_at IS NULL"""),
                       {'s': str(sid or ''), 'u': uid}).first()
         if r is None:
             raise SessionError('no such chat', 404)
-        rows = c.execute(text("""SELECT seq, role, text FROM app.llm_messages WHERE session_id = :s AND seq > :a
-                                 ORDER BY seq"""), {'s': r.id, 'a': int(r.summary_seq or 0)}).all()
+        rows = c.execute(text("""SELECT seq, role, text, page FROM app.llm_messages WHERE session_id = :s
+                                 AND seq > :a ORDER BY seq"""), {'s': r.id, 'a': int(r.summary_seq or 0)}).all()
     return {'summary': r.summary, 'summary_seq': r.summary_seq, 'summary_tokens': r.summary_tokens,
-            'messages': [{'seq': m.seq, 'role': m.role, 'text': m.text} for m in rows]}
+            'plan': r.plan or [],
+            'messages': [{'seq': m.seq, 'role': m.role, 'text': m.text, 'page': m.page or {}} for m in rows]}
+
+
+def set_plan(user, sid, items):
+    """Store the chat's checklist (the todo tool's items: {text, state, page?}, at most MAX_PLAN)."""
+    uid = _uid(user)
+    clean = []
+    for x in (items or [])[:MAX_PLAN]:
+        if isinstance(x, dict) and str(x.get('text') or '').strip():
+            it = {'text': str(x['text']).strip()[:200], 'state': str(x.get('state') or 'todo')[:20]}
+            if x.get('page'):
+                it['page'] = str(x['page'])[:20]
+            clean.append(it)
+    with db.begin() as c:
+        n = c.execute(text("""UPDATE app.llm_sessions SET plan = :plan WHERE id = :s AND owner_id = :u
+                              AND deleted_at IS NULL""").bindparams(_J['plan']),
+                      {'plan': clean, 's': str(sid), 'u': uid}).rowcount
+    if not n:
+        raise SessionError('no such chat', 404)
+    return clean
 
 
 def for_summary(user, sid, after_seq, upto_seq):
@@ -391,34 +452,6 @@ def for_summary(user, sid, after_seq, upto_seq):
                                  WHERE session_id = :s AND seq > :a AND seq <= :b ORDER BY seq"""),
                          {'s': str(sid), 'a': int(after_seq or 0), 'b': int(upto_seq)}).all()
     return [{'seq': m.seq, 'role': m.role, 'text': m.text, 'trace': m.trace or []} for m in rows]
-
-
-HANDOFF_MSGS = 8
-HANDOFF_CHARS = 6000
-
-
-def handoff_seed(user, from_sid):
-    """The summary a chat starts with when the assistant moved to another page: the old chat's summary + its last
-    HANDOFF_MSGS messages (cut to HANDOFF_CHARS) as text. No model call: it is ready before the first answer."""
-    cx = context(user, from_sid)
-    msgs = cx['messages'][-HANDOFF_MSGS:]
-    tail = '\n\n'.join(f'{"USER" if m["role"] == "user" else "ASSISTANT"}: {m["text"]}' for m in msgs)
-    if len(tail) > HANDOFF_CHARS:
-        tail = '…' + tail[-HANDOFF_CHARS:]
-    parts = ['The user moved here from another page of the app; this chat continues that one.']
-    if cx['summary']:
-        parts.append(f'Summary of the earlier chat:\n{cx["summary"]}')
-    if tail:
-        parts.append(f'Its last messages:\n{tail}')
-    return '\n\n'.join(parts)
-
-
-def set_parent(user, sid, parent_id):
-    """Remember which chat this one was handed off from."""
-    uid = _uid(user)
-    with db.begin() as c:
-        c.execute(text("""UPDATE app.llm_sessions SET parent_id = :p WHERE id = :s AND owner_id = :u"""),
-                  {'p': str(parent_id)[:36], 's': str(sid), 'u': uid})
 
 
 def save_summary(user, sid, summary, seq, tokens, expect_seq):

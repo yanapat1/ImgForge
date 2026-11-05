@@ -13,11 +13,16 @@
 // Ctrl+. opens / collapses it. Open state and width are a per-browser convenience (localStorage, try/catch).
 // Each screen registers one DockHost (setDockHost); the host mounts its chat on the first open and passes
 // dockHooks() into mountChat so the tasks strip and the ring follow the agent's events, and withNav(page handler)
-// as its onUiAction: the agent's `navigate` opens another page. The turn ends there; the goal, this chat's id and
-// mode go into sessionStorage (HANDOFF), and the dock of the new page opens and sends the goal as its first
-// message with handoff_from (the server seeds the new chat with the old one's summary): the work continues there.
+// as its onUiAction: the agent's `navigate` opens another page.
+//
+// One chat, every page: the dock remembers ONE current chat for the whole app (localStorage CURRENT), so Home,
+// the Data Center, every visualizer session and the labeling page open the same chat; the page only decides which
+// specialist answers (the server's router). When the agent navigates, the turn ends; the goal, the chat id and the
+// mode go into sessionStorage (HANDOFF, with the target page), and the dock of that page opens the same chat and
+// sends the goal as a continued message. A page with unsaved work (an edited file, uploads) asks first. Other tabs
+// showing the same chat reload it when a turn ends (BroadcastChannel), and the server answers one turn at a time.
 
-import type { ChatHandle } from './chat.js';
+import { continuedLabel, type ChatHandle } from './chat.js';
 import { esc, icon } from './dom.js';
 import { LLM } from './llm.js';
 import { dataUrl, homeUrl, labelUrl, vizUrl } from './nav.js';
@@ -38,20 +43,24 @@ export interface DockHost {
   onResize?: () => void;
   /** Settings › AI assistant */
   settings?: () => void;
-  /** which remembered chat reopens here (default: the host id); e.g. one per dataset */
-  sessionKey?: () => string;
   /** the assistant arrived from another page (e.g. open the tab it asked for) */
   onHandoff?: (h: Handoff) => void;
+  /** work on this page that leaving would lose (null = none): the agent's navigate asks the user first */
+  unsaved?: () => string | null;
+  /** the user agreed to leave: drop that work (so the browser does not ask a second time) */
+  discard?: () => void;
 }
 
-/** What the old page left for the new one when the agent navigated. */
-export interface Handoff { from: string | null; goal: string; tab?: string; mode?: string; at: number }
+/** What the old page left for the new one when the agent navigated: the same chat continues there. */
+export interface Handoff { sid: string | null; goal: string; to: string; tab?: string; mode?: string; at: number }
 
 type DockState = 'open' | 'rail';
 interface TaskStep { text: string; state: string }
 
 const KEY = 'dataviz.dock';
+const CURRENT = 'dataviz.chat.current';                  // the one chat every page opens
 const HANDOFF = 'dataviz.dock.handoff', HANDOFF_TTL = 3 * 60 * 1000, NAV_FALLBACK_MS = 5000;
+const CHANNEL = 'dataviz-chat';
 const MIN_W = 320, DEF_W = 400, NARROW = 900, AUTO_COMPACT = 0.8;          // the rail is --dock-rail-w (dock.css)
 
 const D = {
@@ -71,6 +80,10 @@ const D = {
   tasksOpen: true,
   inEst: null as number | null,
   navTo: null as string | null,              // the agent navigated: go there when its turn has ended
+  ready: false,                              // the remembered chat was opened (or there was none): sid changes count
+  sid: null as string | null,                // the chat this dock shows (what CURRENT holds)
+  stale: false,                              // another tab answered in this chat while this one was hidden
+  bc: null as BroadcastChannel | null,
 };
 
 const maxW = (): number => Math.max(MIN_W, Math.min(640, Math.round(window.innerWidth * 0.55)));
@@ -86,14 +99,23 @@ function load(): void {
 function save(): void {
   try { localStorage.setItem(KEY, JSON.stringify({ state: D.state, width: D.width })); } catch (e) { /* ignore */ }
 }
-// the last chat of each host (and dataset): a reload or coming back to the page continues it
-const sidKey = (): string => `${KEY}.sid.${D.host?.sessionKey?.() ?? D.host?.id ?? ''}`;
+// the one current chat of the app: a reload, another page or another session continues it
 function lastSid(): string | null {
-  try { return localStorage.getItem(sidKey()); } catch (e) { return null; }
+  try {
+    const v = localStorage.getItem(CURRENT);
+    if (v !== null) return v || null;                   // '' = the user started a new chat
+    // before one chat followed the user, each page kept its own: continue the newest of them once
+    const old = Object.keys(localStorage).filter((k) => k.startsWith(`${KEY}.sid.`)).map((k) => localStorage.getItem(k)).filter(Boolean);
+    return old.length ? String(old[old.length - 1]) : null;
+  } catch (e) { return null; }
 }
-function rememberSid(): void {
-  const sid = D.chat?.sessionId();
-  try { if (sid) localStorage.setItem(sidKey(), sid); } catch (e) { /* ignore */ }
+/** keep CURRENT in step with the chat on screen (a new chat, one opened from History, the first answer) */
+function syncSid(): void {
+  if (!D.ready || !D.chat) return;
+  const sid = D.chat.sessionId();
+  if (sid === D.sid) return;
+  D.sid = sid;
+  try { localStorage.setItem(CURRENT, sid ?? ''); } catch (e) { /* ignore */ }
 }
 
 // ---------------------------------------------------------------- markup
@@ -147,6 +169,7 @@ function tasksHTML(): string {
 
 function render(): void {
   const r = D.root;
+  syncSid();
   if (!r) return;
   const on = !!D.host && D.host.enabled();
   document.documentElement.dataset['dock'] = on ? D.state : 'off';
@@ -186,25 +209,55 @@ function ensureMounted(): void {
   el.setAttribute('aria-label', 'AI assistant');
   body.append(el);
   D.chat = D.host.mount(el);
+  const chat = D.chat;
   const h = takeHandoff();
-  if (h) {                                     // the agent came from another page: continue its goal in a new chat
-    D.host.onHandoff?.(h);
-    const extra: Record<string, unknown> = {};
-    if (h.from) extra['handoff_from'] = h.from;
-    if (h.mode) extra['mode'] = h.mode;
-    void D.chat.send(h.goal, { label: `↪ ${h.goal}`, extra });
-    return;
-  }
-  const sid = lastSid();
-  if (sid) void D.chat.open(sid).then((ok) => { if (!ok) { try { localStorage.removeItem(sidKey()); } catch (e) { /* ignore */ } } schedule(); });
+  const sid = h ? h.sid : lastSid();
+  void (sid ? chat.open(sid) : Promise.resolve(false)).then((ok) => {
+    D.ready = true;
+    D.sid = ok ? sid : null;
+    if (!ok && sid) { try { localStorage.setItem(CURRENT, ''); } catch (e) { /* ignore */ } }
+    if (h) {                                   // the agent came from another page: the same chat goes on here
+      D.host?.onHandoff?.(h);
+      const extra: Record<string, unknown> = ok ? { continued: true } : {};
+      if (h.mode) extra['mode'] = h.mode;
+      void chat.send(h.goal, { label: continuedLabel(h.goal), extra });
+    }
+    schedule();
+  });
+}
+
+// ---------------------------------------------------------------- other tabs on the same chat
+
+function initChannel(): void {
+  if (D.bc || typeof BroadcastChannel === 'undefined') return;
+  try { D.bc = new BroadcastChannel(CHANNEL); } catch (e) { return; }
+  D.bc.onmessage = (e: MessageEvent) => {
+    const sid = (e.data as { sid?: unknown } | null)?.sid;
+    if (typeof sid !== 'string' || !D.chat || sid !== D.chat.sessionId()) return;
+    if (document.visibilityState === 'visible') reloadChat(); else D.stale = true;
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && D.stale) reloadChat(); });
+}
+
+function reloadChat(): void {
+  D.stale = false;
+  const sid = D.chat?.sessionId();
+  if (sid && D.chat && !D.chat.busy()) void D.chat.open(sid);
 }
 
 // ---------------------------------------------------------------- navigate + hand-off
 
+/** which page a URL is (the path, plus ?data / ?label=<id>): a hand-off is only taken on the page it was for */
+function pageKey(u: URL): string {
+  const q = u.searchParams;
+  return `${u.pathname.replace(/\/?$/, '/')}|${q.has('label') ? `label:${q.get('label') ?? ''}` : q.has('data') ? 'data' : ''}`;
+}
+
 function peekHandoff(): Handoff | null {
   try {
     const h = JSON.parse(sessionStorage.getItem(HANDOFF) || 'null') as Handoff | null;
-    return h && typeof h.goal === 'string' && h.goal && Date.now() - Number(h.at) < HANDOFF_TTL ? h : null;
+    if (!h || typeof h.goal !== 'string' || !h.goal || Date.now() - Number(h.at) >= HANDOFF_TTL) return null;
+    return h.to === pageKey(new URL(location.href)) ? h : null;      // the user stayed (or went elsewhere): not here
   } catch (e) { return null; }
 }
 function takeHandoff(): Handoff | null {
@@ -234,11 +287,19 @@ function go(): void {
 function navigate(a: Record<string, unknown>): UiResult {
   const url = navUrl(a);
   if (!url) return { ok: false, detail: 'that page needs a session_id (list_sessions finds it)' };
-  const h: Handoff = { from: D.chat?.sessionId() ?? null, goal: String(a['goal'] || '').slice(0, 500), at: Date.now() };
+  const why = D.host?.unsaved?.() ?? null;
+  if (why) {
+    if (!window.confirm(`The assistant wants to open another page.\n\nLeave this page? ${why}`)) {
+      return { ok: false, detail: `the user stayed on this page (${why}): do the rest here or ask them to finish first` };
+    }
+    D.host?.discard?.();
+  }
+  const to = pageKey(new URL(url, location.href));
+  const h: Handoff = { sid: D.chat?.sessionId() ?? null, goal: String(a['goal'] || '').slice(0, 500), to, at: Date.now() };
   if (typeof a['tab'] === 'string') h.tab = a['tab'];
   const m = D.chat?.mode();
   if (m) h.mode = m;
-  try { sessionStorage.setItem(HANDOFF, JSON.stringify(h)); } catch (e) { /* the new page starts a fresh chat */ }
+  try { sessionStorage.setItem(HANDOFF, JSON.stringify(h)); } catch (e) { /* the new page opens the current chat */ }
   D.navTo = url;
   drive(`Opening ${String(a['screen'])}`);
   schedule();
@@ -333,7 +394,9 @@ export function dockDone(t: AiTurn): void {
   D.running = false;
   if (t.usage?.in) D.inEst = t.usage.in;
   D.pending = D.chat?.pending() ?? 0;
-  rememberSid();
+  syncSid();
+  const sid = D.chat?.sessionId();
+  if (sid) { try { D.bc?.postMessage({ sid }); } catch (e) { /* ignore */ } }
   if (D.steps.length && D.steps.every((s) => /done|complete/.test(s.state))) D.tasksOpen = false;
   schedule();
   if (D.navTo) window.setTimeout(go, 150);       // the answer is saved: leave for the page the agent opened
@@ -406,6 +469,16 @@ export function setDockHost(host: DockHost): void {
     fab.innerHTML = icon('gem');
     document.body.append(fab);
     D.root = root;
+    initChannel();
+    window.addEventListener('storage', (e) => {             // another tab started / opened a chat: follow it when idle
+      if (e.key !== CURRENT || !D.chat || D.chat.busy() || !D.ready) return;
+      const sid = e.newValue || null;
+      if (sid === D.chat.sessionId()) return;
+      D.sid = sid;
+      if (!sid) { D.chat.newChat(); return; }
+      D.ready = false;                                      // syncSid waits: the old id is still on screen meanwhile
+      void D.chat.open(sid).then(() => { D.ready = true; schedule(); });
+    });
     root.addEventListener('click', onClick);
     fab.addEventListener('click', onClick);
     bindGrip(root.querySelector<HTMLElement>('.dock-grip')!);

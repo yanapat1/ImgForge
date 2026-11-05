@@ -36,6 +36,10 @@ const fmtSince = (ms: number): string => (ms < 60000 ? `${(ms / 1000).toFixed(ms
 /** an onUiAction answer as a result: true / undefined = done, false = could not */
 const asResult = (v: boolean | UiResult | void): UiResult => (typeof v === 'object' && v !== null ? v : { ok: v !== false });
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+/** The chats of every page (one chat follows the user: sessions role 'app' lists them all). */
+const LIST_ROLE = 'app';
+/** A navigate goal the new page sent on in the same chat. */
+export const continuedLabel = (goal: string, page?: string): string => `↪ Continued${page ? ` on ${page}` : ' here'}: ${goal}`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtWhen(iso: string | null | undefined): string {
   const d = iso ? new Date(iso) : null;
@@ -722,7 +726,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   async function peekLimit(): Promise<void> {           // "your first message will remove …"
     if (C.sessionsOK === false) return;
     try {
-      const r = await getJSON<SessionList>(`api/llm/sessions?role=${role}&limit=1`);
+      const r = await getJSON<SessionList>(`api/llm/sessions?role=${LIST_ROLE}&limit=1`);
       C.sessionsOK = true;
       C.willRemove = r.count >= r.max ? r.will_remove : null;
       C.blocked = r.all_pinned ? `All ${r.max} chats are pinned: unpin or delete one to start a new chat.` : null;
@@ -761,7 +765,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (C.busy) stop();
     try {
       const r = await getJSON<SessionDetail>(`api/llm/sessions/${encodeURIComponent(id)}`);
-      C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: null, voice: false } : traceTurn(m)));
+      C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: m.page?.continued ? continuedLabel(m.text, m.page.label) : null, voice: false } : traceTurn(m)));
       // a /compact (not in any trace): its divider goes after the last message it covered
       const cov = r.session.summary_seq ?? null;
       const shown = C.turns.some((e) => e.role === 'ai' && e.blocks.some((x) => x.k === 'compact' && x.covered === cov));
@@ -817,7 +821,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         await sendJSON('DELETE', `api/llm/sessions/${encodeURIComponent(one)}`);
         ids = [one];
       } else {
-        const body: Record<string, unknown> = { role };
+        const body: Record<string, unknown> = { role: LIST_ROLE };
         if ('ids' in what) body['ids'] = what.ids;
         else {
           if (what.scoped) body['scope'] = opts.sessionScope?.() ?? {};
@@ -846,7 +850,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     H.loading = true;
     H.err = null;
     if (!more) renderHistBody();
-    const p = new URLSearchParams({ role });
+    const p = new URLSearchParams({ role: LIST_ROLE });
     const ss = opts.sessionScope?.();
     if (!H.all && ss) for (const [k, v] of Object.entries(ss)) if (v) p.set(k, v);
     if (H.q) p.set('q', H.q);
@@ -901,7 +905,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   function rowHTML(s: ChatSession): string {
     const cur = s.id === C.sid;
-    const meta = [opts.scopeLabel ? opts.scopeLabel(s.scope) : '', s.model ?? '', fmtWhen(s.last_opened_at || s.updated_at), s.n_messages ? `${s.n_messages}` : ''].filter(Boolean);
+    const meta = [s.last_page?.label || (opts.scopeLabel ? opts.scopeLabel(s.scope) : ''), s.model ?? '', fmtWhen(s.last_opened_at || s.updated_at), s.n_messages ? `${s.n_messages}` : ''].filter(Boolean);
     const main = H.renaming === s.id
       ? `<input class="chat-hren" data-ci="h-ren" data-id="${esc(s.id)}" value="${esc(s.title)}" aria-label="New title" maxlength="120">`
       : `<button type="button" class="chat-hopen" data-ca="h-open" data-id="${esc(s.id)}"${cur ? ' aria-current="true"' : ''}>` +

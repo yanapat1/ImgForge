@@ -54,7 +54,12 @@ export interface ChatSession {
   last_opened_at: string | null;
   summary?: string | null;
   summary_seq?: number | null;
+  /** the page of the newest message (one chat follows the user over the pages) */
+  last_page?: ChatPage | null;
+  plan?: Array<{ text: string; state: string; page?: string }>;
 }
+/** Where a message was written (llm_messages.page). */
+export interface ChatPage { role?: string; screen?: string; label?: string; session_id?: string; bucket?: string; path?: string; tab?: string; continued?: boolean }
 export interface SessionRef { id: string; title: string; last_opened_at?: string | null }
 export interface SessionList {
   sessions: ChatSession[];
@@ -64,7 +69,7 @@ export interface SessionList {
   will_remove: SessionRef | null;
   all_pinned?: boolean;
 }
-export interface SessionMessage { seq: number; role: 'user' | 'assistant'; text: string; trace: ChatEvent[] | null; usage: Record<string, unknown> | null; created_at: string }
+export interface SessionMessage { seq: number; role: 'user' | 'assistant'; text: string; trace: ChatEvent[] | null; usage: Record<string, unknown> | null; page?: ChatPage | null; created_at: string }
 export interface SessionDetail { session: ChatSession; messages: SessionMessage[] }
 
 // ------------------------------------------------------------------ the transcript (built by reduce())

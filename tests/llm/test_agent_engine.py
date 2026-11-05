@@ -191,7 +191,7 @@ def test_visual_agent_has_no_data_center_tools(monkeypatch, svc):
     names = {s['name'] for s in seen[0]['specs']}
     assert not names & set(tools.TOOLS) - {'ask_user', 'cannot_do'}
     res = seen[1]['msgs'][-1]['parts'][0]['tool_result']
-    assert res['is_error'] and 'other assistant' in res['content']
+    assert res['is_error'] and 'Data Center tool' in res['content'] and 'navigate' in res['content']
     assert not svc.calls and 'confirm' not in types(evs)
     assert 'Visual assistant' in seen[0]['system']
 

@@ -253,7 +253,6 @@ export function initAssistantDock(): void {
     onShow: () => { renderAll(); syncActIcon(); },
     onResize: () => { resizePlots(); syncActIcon(); },
     settings: () => { void openSettings('llm'); },
-    sessionKey: () => `ai-side.${datasetId()}`,
     onHandoff: (h) => { if (h.tab && TABS.includes(h.tab) && h.tab !== curTab) switchTab(h.tab); },
   });
   const act = $('act-ai');
@@ -335,7 +334,7 @@ function importOld(): void {
   const items = raw.filter(isRec).map((m) => ({ role: m['role'] === 'user' ? 'user' : 'assistant', text: strOr(m['text']) ?? '' })).filter((m) => m.text);
   if (!items.length) { try { localStorage.removeItem(key); } catch (e) { /* ignore */ } return; }
   const first = items.find((m) => m.role === 'user')?.text ?? 'Earlier chat';
-  postJSON('api/llm/sessions', { role: 'visual', scope: datasetId() ? { dataset_id: datasetId() } : {}, title: `${first.slice(0, 48)} (earlier)` })
+  postJSON('api/llm/sessions', { role: 'app', scope: datasetId() ? { dataset_id: datasetId() } : {}, title: `${first.slice(0, 48)} (earlier)` })
     .catch(() => { /* history is best effort */ });
   A.chat?.archive(items);
   try { localStorage.removeItem(key); } catch (e) { /* private window */ }

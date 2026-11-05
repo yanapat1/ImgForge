@@ -192,7 +192,7 @@ llm_sessions = Table(
     'llm_sessions', metadata,
     Column('id', String(36), primary_key=True),
     _user_fk('owner_id'),
-    Column('role', String(10), nullable=False),                  # data | visual
+    Column('role', String(10), nullable=False),                  # app (one chat, every page) | data | visual
     Column('title', String(200), nullable=False, server_default=''),
     Column('scope', JSONB, nullable=False, server_default=text("'{}'::jsonb")),     # {bucket_id} | {dataset_id, name}
     Column('provider_id', String(36)),
@@ -208,8 +208,11 @@ llm_sessions = Table(
     Column('summary', Text),                                     # compacted older messages (llm/engine/summarize.py)
     Column('summary_seq', Integer),                              # the last message seq the summary covers
     Column('summary_tokens', Integer),
-    Column('parent_id', String(36)),                             # handed off from this chat (page change)
+    Column('parent_id', String(36)),                             # unused (was: handed off from this chat)
+    Column('last_page', JSONB, nullable=False, server_default=text("'{}'::jsonb")),  # the newest message's page
+    Column('plan', JSONB, nullable=False, server_default=text("'[]'::jsonb")),       # the cross-page checklist
     Index('ix_llm_sessions_owner_role_last_opened_at', 'owner_id', 'role', 'last_opened_at'),
+    Index('ix_llm_sessions_owner_last_opened_at', 'owner_id', 'last_opened_at'),
     Index('ix_llm_sessions_deleted_at', 'deleted_at', postgresql_where=text('deleted_at IS NOT NULL')),
     schema='app')
 
@@ -222,6 +225,7 @@ llm_messages = Table(
     Column('text', Text, nullable=False, server_default=''),
     Column('trace', JSONB, nullable=False, server_default=text("'[]'::jsonb")),     # the turn's compacted events
     Column('usage', JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column('page', JSONB, nullable=False, server_default=text("'{}'::jsonb")),      # where it was written
     _now('created_at'),
     Index('ux_llm_messages_session_id_seq', 'session_id', 'seq', unique=True),
     schema='app')

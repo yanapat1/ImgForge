@@ -9,6 +9,7 @@ Builds an agent's system prompt from the files in llm/prompts/ (edit the Markdow
 
     build(role, ...) = base + role system + mode + knowledge (index always; `core: true` topics inline from effort
                        medium; `high: true` topics too at effort high) + skills index + tool catalogue + now / scope
+                       + the other pages (one chat follows the user; their tools stay there)
                        + the user's own instructions (appended LAST: they add to the rules, never replace them)
 
 Knowledge and skills are listed by one line each so the prompt stays small; the agent loads the rest with
@@ -102,8 +103,8 @@ def _file(*parts):
 
 
 def build(role, *, tools_catalog, scope_text, mode='ask', effort='medium', profile='large', skill_list=None,
-          user_prompts=(), user_name='', forced_skills=()):
-    """The system prompt of one agent run."""
+          user_prompts=(), user_name='', forced_skills=(), pages_text=''):
+    """The system prompt of one agent run. pages_text: what the other pages can do (engine/roles.other_pages)."""
     know = knowledge(role)
     sk = skill_list if skill_list is not None else skills(role)
     out = [_file('base.md'), _file(role, 'system.md'),
@@ -127,6 +128,7 @@ def build(role, *, tools_catalog, scope_text, mode='ask', effort='medium', profi
         if s:
             out.append(f'## Skill "{n}" (the user asked for it: follow it)\n{s["body"]}')
     out.append('## Tools\n' + tools_catalog)
+    out.append(pages_text)
     out.append('## Now\n' + (template('now', now=time.strftime('%Y-%m-%d %H:%M'), user=user_name or 'the user')
                              or time.strftime('%Y-%m-%d')) + '\n' + scope_text)
     mine = [p for p in user_prompts or () if str(p.get('body') or '').strip()]

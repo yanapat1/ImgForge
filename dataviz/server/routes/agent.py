@@ -8,8 +8,14 @@ the request is bound to (/s/<id>/); the data role needs none: its tools act thro
 caller, which also checks data.manage. Handlers are plain `def` (thread pool); the chat streams NDJSON from a sync
 generator, so a run waiting for a confirmation holds one worker thread (pings keep the connection open).
 
+One chat, every page: the route's role is the specialist of the page the request comes from (the router: data on
+home / Data Center / labeling, visual in a visualizer session); the chat itself is role 'app' and continues on any
+page (body.session_id may be a chat started on another page). Each message is stored with its page
+(roles.page_of), the history marks where the user moved, and only this page's tools are offered. One turn at a
+time per chat: a second request while another tab's run still answers the same chat is refused (409).
+
 Every chat is saved (llm/sessions.py): body.session_id continues a chat (its history comes from the database, the
-page sends only body.text), none starts one (409 before the stream when every chat of the role is pinned). The user
+page sends only body.text), none starts one (409 before the stream when every chat is pinned). The user
 message is stored before the run, the answer (with the compacted trace and usage) when the stream ends, also on
 stop or a closed connection ('(stopped)'). {ephemeral: true, session_id: null} runs on body.messages and stores
 nothing.
@@ -22,9 +28,9 @@ never compacted (nothing to store the summary in).
 
 Page actions: body.ui_ack = true says the page reports how each page action ended (POST
 /api/llm/agent/ui-result {run_id, action_id, ok, detail, transient?, result?}, engine/uiwait.py); run actions
-(a model run, a map, a scan) wait for it. A page change (the navigate tool) ends the turn; the new page sends
-body.handoff_from = the old chat id with its first message: the new chat starts with the old one's summary and
-last messages (sessions.handoff_seed) and remembers it as its parent.
+(a model run, a map, a scan) wait for it. A page change (the navigate tool) ends the turn; the new page opens the
+same chat and sends the navigate goal with body.continued = true (stored with page.continued: the page shows
+"↪ Continued here").
 """
 
 import json
@@ -39,7 +45,6 @@ from ...auth import context as auth_context
 from ...core import logging as vlog
 from ...llm import prompting, providers, tools
 from ...llm import sessions as chat_sessions
-from ...llm.budget import text_tokens as budget_tokens
 from ...llm.engine import confirm, react, roles, summarize, uiwait
 from ...llm.engine.events import ENDS
 from ...llm.providers import LLMError
@@ -197,21 +202,19 @@ def router(state, ctx):
         if not user_text.strip():
             raise HTTPException(400, 'the message is empty')
         summary, n_saved = None, 0
-        handoff = body.get('handoff_from') if isinstance(body.get('handoff_from'), str) and not sid and not ephemeral \
-            else None
-        if handoff:
-            try:
-                summary = chat_sessions.handoff_seed(user, handoff)
-            except chat_sessions.SessionError:
-                handoff = None                  # the old chat is gone: start fresh
+        scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
+        chat_scope = _chat_scope(role, scope)
+        page = roles.page_of(role.name, scope, chat_scope if role.name == 'visual' else None)
+        if body.get('continued') is True:
+            page['continued'] = True
         if sid:
             try:
                 cx = chat_sessions.context(user, sid)
             except chat_sessions.SessionError as e:
                 raise HTTPException(e.status, str(e))
             summary, n_saved = cx['summary'], len(cx['messages'])
-            msgs_run = [{'role': m['role'], 'text': m['text']} for m in cx['messages']] + \
-                [{'role': 'user', 'text': user_text}]
+            msgs_run = [{'role': m['role'], 'text': m['text'], 'page': m['page']} for m in cx['messages']] + \
+                [{'role': 'user', 'text': user_text, 'page': page}]
         elif msgs_in and isinstance(msgs_in[-1], dict) and msgs_in[-1].get('role') == 'user' \
                 and body.get('text') is None:
             msgs_run = msgs_in                  # a transcript the page still holds (first turn of a new chat)
@@ -227,7 +230,7 @@ def router(state, ctx):
         opts = react.options(opts_in, p)
         a = _assets(user, role.name)
         forced = [str(s) for s in body.get('skills') or [] if isinstance(s, str)][:3]
-        scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
+        roles_on = {k: store().on(v.feature) for k, v in roles.ROLES.items()}
         limit = cfg['budget']['max_input_tokens']
 
         def build(msgs, summary_):
@@ -236,6 +239,7 @@ def router(state, ctx):
                                forced_skills=forced, limit=limit, summary=summary_)
             r_.ctx.web_cfg = web_cfg
             r_.ctx.ui_ack = body.get('ui_ack') is True
+            r_.ctx.roles_on = roles_on
             return r_
         try:
             run = build(msgs_run, summary)
@@ -247,18 +251,19 @@ def router(state, ctx):
         meta = {'provider_id': p.get('id'), 'model': p.get('model'), 'mode': opts.get('mode'),
                 'effort': opts.get('effort')}
         removed, first_turn = None, False
+        if sid and not react.claim_chat(sid, run.cancel):
+            raise HTTPException(409, 'this chat is still answering (in another tab or page): wait for it, or stop it')
         try:
             if sid:
                 title = chat_sessions.get(user, sid, touch=False)['session']['title']
             else:
-                made = chat_sessions.create(user, role.name, _chat_scope(role, scope), user_text, meta=meta)
+                made = chat_sessions.create(user, chat_sessions.APP, chat_scope, user_text, meta=meta)
                 sid, title, removed = made['session']['id'], made['session']['title'], made['removed']
                 first_turn = True
-                if handoff and summary:
-                    chat_sessions.save_summary(user, sid, summary, 0, budget_tokens(summary), None)
-                    chat_sessions.set_parent(user, sid, handoff)
-            chat_sessions.append(user, sid, 'user', user_text, meta=meta)
+                react.claim_chat(sid, run.cancel)
+            chat_sessions.append(user, sid, 'user', user_text, meta=meta, page=page)
         except chat_sessions.SessionError as e:
+            react.release_chat(sid, run.cancel)
             raise HTTPException(e.status, str(e))
         title = title or chat_sessions.cut_title(user_text)
         session_ev = {'type': 'session', 'session_id': sid, 'title': title, 'removed': removed}
@@ -271,7 +276,10 @@ def router(state, ctx):
                 if info is None:
                     return []
                 cx2 = chat_sessions.context(user, sid)
-                run = build([{'role': m['role'], 'text': m['text']} for m in cx2['messages']], info['summary'])
+                old = run
+                run = build([{'role': m['role'], 'text': m['text'], 'page': m['page']} for m in cx2['messages']],
+                            info['summary'])
+                run.cancel = old.cancel         # the chat is claimed with this event (release_chat)
                 return [{'type': 'compact', 'state': 'done', 'auto': True, **info}]
             except Exception as e:  # noqa: BLE001 - the turn goes on without a summary
                 _log.warning(f'agent {role.name}: compaction failed: {type(e).__name__}: {vlog.esc(str(e))}')
@@ -319,9 +327,10 @@ def router(state, ctx):
                 answer = ''.join(texts).strip()
                 if stopped:
                     answer = (answer + '\n\n(stopped)').strip()
+                react.release_chat(sid, run.cancel)
                 try:
                     chat_sessions.append(user, sid, 'assistant', answer, trace=chat_sessions.compact_trace(trace),
-                                         usage=usage)
+                                         usage=usage, page={k: v for k, v in page.items() if k != 'continued'})
                     if first_turn and ended == 'done' and not stopped and answer:
                         chat_sessions.improve_title(user, sid, p, user_text, answer, title)
                 except Exception as e:  # noqa: BLE001 - e.g. the chat was deleted meanwhile

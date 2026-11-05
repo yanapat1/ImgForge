@@ -4,11 +4,11 @@ The app's pages for every ◆ assistant (domain common): find a session, and ope
     list_sessions {q?, kind?}            read: the visualize / labeling sessions the user can open (id, name, kind, tags)
     navigate {screen, goal, session_id?, bucket?, path?, tab?}
                                          ui: open another page (home | data | viz | label). The page reloads, so it
-                                         ends the turn: the chat continues on the new page with `goal` (the dock sends
-                                         it as the first message there, with this chat's summary handed over).
+                                         ends the turn: the SAME chat continues on the new page with `goal` (the dock
+                                         sends it there as a continued message; that page's specialist answers it).
 
-navigate is checked here (the session must exist and be visible to the user, the bucket must resolve) and applied
-by the page (core/dock.ts withNav builds the URL with core/nav.ts). Creating sessions or labeling projects is not
+navigate is checked here (the session must exist and be visible to the user, the bucket must resolve, the target
+page's assistant must be on) and applied by the page (core/dock.ts withNav builds the URL with core/nav.ts). Creating sessions or labeling projects is not
 something the assistant does (Home › New session; the Data Center's Send to…).
 """
 
@@ -42,10 +42,15 @@ def _list_sessions(ctx, a):
 
 
 def _check_nav(ctx, a):
+    from ..engine import roles
     scr = a['screen']
     out = {'screen': scr, 'goal': str(a.get('goal') or '').strip()[:500]}
     if not out['goal']:
-        raise ToolError('goal is required: what to continue doing on that page (it becomes the first message there)')
+        raise ToolError('goal is required: what to continue doing on that page (the chat continues there with it)')
+    role = roles.get(roles.SCREEN_ROLE[scr])
+    if (getattr(ctx, 'roles_on', None) or {}).get(role.name) is False:
+        raise ToolError(f'the assistant of the {SCREEN_LABEL[scr]} is switched off for this user (Settings › AI '
+                        f'assistant › {role.feature}): tell the user, and that they can open the page themselves')
     if scr in ('viz', 'label'):
         sid = str(a.get('session_id') or '').strip()
         if not sid:
@@ -84,7 +89,7 @@ register(Tool('list_sessions', 'Visualize (viz) and labeling (label) sessions th
               _obj({'q': S('words in the name or a tag (default: all)'), 'kind': E('only this kind', ['viz', 'label'])}),
               False, _list_sessions, **_C))
 register(Tool('navigate', 'Open another page (home, data = Data Center, viz / label = a session). Ends the turn: '
-                          'call it last; `goal` is what to do there (the chat continues with it).',
+                          'call it last; `goal` is what to do there (this chat continues there with it).',
               _obj({'screen': E('the page', SCREENS), 'goal': S('the next request there'),
                     'session_id': S('viz / label: from list_sessions'), 'bucket': S('data: bucket'),
                     'path': S('data: folder'), 'tab': E('viz: view', VIZ_TABS)}, ['screen', 'goal']),

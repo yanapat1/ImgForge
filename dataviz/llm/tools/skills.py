@@ -11,8 +11,19 @@ MAX_DOC = 12000
 def _use_skill(ctx, a):
     s = (ctx.skills or {}).get(a['name'])
     if s is None:
-        raise ToolError(f'no skill {a["name"]!r}; the skills are: {", ".join(ctx.skills or {}) or "none"}')
+        raise ToolError(_other_skill(ctx, a['name'])
+                        or f'no skill {a["name"]!r}; the skills are: {", ".join(ctx.skills or {}) or "none"}')
     return {'skill': s['name'], 'steps': s['body'][:MAX_DOC]}, f'→ skill {s["name"]}'
+
+
+def _other_skill(ctx, name):
+    """A skill of the other page's specialist (one chat follows the user): say where it is used."""
+    from ..prompting import skills
+    for role, (where, screen) in (('data', ('Data Center', 'data')), ('visual', ('Visualizer', 'viz'))):
+        if role != ctx.role and name in skills(role):
+            return (f'{name} is a {where} skill and the user is not there: call navigate(screen={screen!r}, '
+                    'goal=<the request>) to continue there')
+    return None
 
 
 def _read_docs(ctx, a):

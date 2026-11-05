@@ -109,8 +109,10 @@ def test_dock_on_home(server):  # noqa: F811 - the fixture
 # ---------------------------------------------------------------- the agent drives the visualizer
 def _tool_model():
     """An OpenAI-compatible model that calls one tool, picked by the user's words, then answers with the tool's
-    result: 'open the model tab' -> open_tab, 'stats' -> compute_stats."""
+    result: 'open session <id>' -> navigate there (goal: open the model tab), 'open the model tab' -> open_tab,
+    else compute_stats."""
     import json as _json
+    import re as _re
 
     from fastapi import FastAPI, Request
     from fastapi.responses import StreamingResponse
@@ -138,7 +140,11 @@ def _tool_model():
             if last['role'] == 'tool':
                 yield sse({'choices': [{'delta': {'content': f'TOOL SAID: {text}'}}]})
             else:
-                name, args = ('open_tab', {'tab': 'model'}) if 'model tab' in text else ('compute_stats', {})
+                m = _re.search(r'open session (\S+)', text)
+                if m:
+                    name, args = 'navigate', {'screen': 'viz', 'session_id': m.group(1), 'goal': 'open the model tab'}
+                else:
+                    name, args = ('open_tab', {'tab': 'model'}) if 'model tab' in text else ('compute_stats', {})
                 yield sse({'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'c1', 'type': 'function',
                                                                    'function': {'name': name, 'arguments': _json.dumps(args)}}]}}]})
                 yield sse({'choices': [{'delta': {}, 'finish_reason': 'tool_calls'}]})
@@ -191,6 +197,47 @@ def test_agent_drives_the_visualizer(server):  # noqa: F811 - the fixture
             assert page.evaluate("document.querySelector('main').dataset.tab") == 'stats'
             _shot(page, 'drive-done')
             browser.close()
+        assert not errors, '\n'.join(errors)
+    finally:
+        fake.should_exit = True
+
+
+def test_one_chat_across_pages(server):  # noqa: F811 - the fixture
+    """Data Center: "open session X" -> the agent navigates; the visualizer opens the SAME chat (the first message
+    is there), sends the goal as a continued message and its specialist opens the Model tab; Home shows that chat."""
+    from test_models import _serve
+    from test_page_smoke import _get
+    fake, url = _serve(_tool_model())
+    errors = []
+    try:
+        sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+        p = _post(f'{server}/api/llm/providers', {'name': 'one', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
+                                                 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'assistant': True, 'data_center': True}})
+        before = _get(f'{server}/api/llm/sessions?role=app')['count']
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1500, 'height': 950})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+            page.goto(f'{server}/?data')
+            page.wait_for_selector('#ai-dock #dc-ai-q', timeout=30000)
+            page.fill('#dc-ai-q', f'open session {sid} in the visualizer')
+            with page.expect_navigation(url=lambda u: f'/s/{sid}/' in u, timeout=30000):
+                page.press('#dc-ai-q', 'Enter')
+            # the same chat on the visualizer: the Data Center message is there, the goal continues it
+            page.wait_for_selector('#ai-side .chat-turn.user:has-text("open session")', timeout=60000)
+            page.wait_for_selector('#ai-side .chat-turn.user:has-text("Continued")', timeout=20000)
+            page.wait_for_selector('#ai-side .ai-msg.bot:has-text("Model is open")', timeout=30000)
+            assert page.evaluate("document.querySelector('main').dataset.tab") == 'model'
+            _shot(page, 'one-chat-viz')
+            # Home: the same chat again (one current chat for the whole app)
+            page.goto(f'{server}/')
+            page.wait_for_selector('#ai-page .chat-turn.user:has-text("open session")', timeout=30000)
+            assert page.locator('#ai-page .ai-msg.bot:has-text("Model is open")').count() == 1
+            browser.close()
+        assert _get(f'{server}/api/llm/sessions?role=app')['count'] == before + 1, 'one chat, not one per page'
         assert not errors, '\n'.join(errors)
     finally:
         fake.should_exit = True

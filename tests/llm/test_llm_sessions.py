@@ -150,7 +150,7 @@ def test_messages_history_usage_and_cap(pg, monkeypatch):
     assert len(g['session']['title']) <= 60 and g['session']['title'].startswith('hello there')
     assert g['session']['usage'] == {'in': 6, 'out': 3} and g['session']['n_messages'] == 3
     assert [m['seq'] for m in g['messages']] == [1, 2, 3] and g['messages'][1]['trace'] == [{'type': 'meta'}]
-    assert sessions.history(u, sid)[-1] == {'role': 'assistant', 'text': 'again'}
+    assert sessions.history(u, sid)[-1] == {'role': 'assistant', 'text': 'again', 'page': {}}
     monkeypatch.setattr(sessions, 'MAX_MESSAGES', 4)
     for i in range(5):
         sessions.append(u, sid, 'user', f'm{i}')

@@ -3,14 +3,13 @@ tools/visual.py run tools): a run action (map, model run, scan, stats) is confir
 the page reports how it ended and the model reads that (ok, failed, still running), a transient failure is retried
 twice, a hard one tells the model to fix it or say it cannot; page actions wait for the page's answer; open_tab /
 navigate apply in ask mode too; navigate is validated and ends the turn; plan mode offers none of them; the
-ui-result route; the hand-off seed of a chat continued on another page."""
+ui-result route (the one chat across pages: test_one_chat.py)."""
 
 import json
 import threading
 from types import SimpleNamespace
 
 import pytest
-from conftest import make_user
 from test_agent_engine import _connect, script, svc, types  # noqa: F401 - svc is a fixture
 from test_llm_tools import ALICE, OPENAI
 from test_visual_agent import VIEW, session  # noqa: F401 - session is a fixture
@@ -204,31 +203,11 @@ def test_uiwait_owner_and_unknown():
     assert uiwait.wait(uiwait.open_(ALICE, 'r2', 'a1'), cancel, 1) == 'cancelled'
 
 
-def test_ui_result_route_and_handoff(client, monkeypatch, svc):  # noqa: F811
+def test_ui_result_route_and_stream(client, monkeypatch, svc):  # noqa: F811
     _connect(client, ['data_center', 'assistant'])
     assert client.post('/api/llm/agent/ui-result', json={}).status_code == 400
     assert client.post('/api/llm/agent/ui-result', json={'run_id': 'x', 'action_id': 'y', 'ok': True}).status_code == 404
-    # an old chat on the Data Center ...
-    old = client.post('/api/llm/sessions', json={'role': 'data'}).json()['session']['id']
-    sessions.append(client.user, old, 'user', 'find the truck folder')
-    sessions.append(client.user, old, 'assistant', 'It is traffic/val (1,204 images).')
-    seed = sessions.handoff_seed(client.user, old)
-    assert 'moved here from another page' in seed and 'traffic/val (1,204 images)' in seed
-    # ... continued on another page: the new chat starts with it
-    seen = script(monkeypatch, ('Continuing.', []))
-    r = client.post('/api/llm/agent/data/chat', json={'text': 'run yolov8s there', 'handoff_from': old, 'ui_ack': True})
-    evs = [json.loads(x) for x in r.text.splitlines() if x]
+    script(monkeypatch, ('Hello.', []))
+    r = client.post('/api/llm/agent/data/chat', json={'text': 'hi', 'ui_ack': True})
+    assert r.status_code == 200 and json.loads(r.text.splitlines()[-1])['type'] == 'done'
     assert r.headers.get('content-encoding') != 'gzip', 'a gzipped stream holds the events back'
-    new = evs[1]['session_id']
-    assert new != old and 'traffic/val (1,204 images)' in seen[0]['system']
-    cx = sessions.context(client.user, new)
-    assert 'traffic/val' in cx['summary'] and cx['summary_seq'] == 0 and len(cx['messages']) == 2
-    g = client.get(f'/api/llm/sessions/{new}').json()['session']
-    assert g['parent_id'] == old
-    # a gone chat: a fresh start, no error
-    script(monkeypatch, ('Fresh.', []))
-    r = client.post('/api/llm/agent/data/chat', json={'text': 'hi', 'handoff_from': 'gone'})
-    assert r.status_code == 200 and [json.loads(x) for x in r.text.splitlines() if x][-1]['type'] == 'done'
-    other = make_user('bob')
-    with pytest.raises(sessions.SessionError):
-        sessions.handoff_seed(other, old)

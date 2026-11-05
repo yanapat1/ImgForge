@@ -356,6 +356,6 @@ def test_prompt_stays_small(role):
     r = roles.get(role)
     tset = tools.for_role(r.domains, 'ask')
     s = prompting.build(role, tools_catalog=tools.catalog(tset), scope_text=roles.SCOPES[role](None, {'view': VIEW}),
-                        mode='ask', effort='medium')
+                        mode='ask', effort='medium', pages_text=roles.other_pages(role))
     assert budget.text_tokens(s) < 6000, budget.text_tokens(s)
     assert '## What you know' in s and '## More you can read' in s and '## Skills' in s

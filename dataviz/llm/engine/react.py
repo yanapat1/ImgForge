@@ -55,6 +55,27 @@ VERIFY = ('(check) Before you finish: verify with read-only tools that the chang
 
 _runs = {}                      # run_id -> {user_id, cancel}: POST /api/llm/agent/stop
 _runs_lock = threading.Lock()
+_chats = {}                     # chat id -> (cancel event, time) of the run answering it: one turn at a time per chat
+CHAT_CLAIM_S = 3600             # a claim whose stream never started (or never ended) frees itself after this
+
+
+def claim_chat(sid, cancel):
+    """Reserve a saved chat for one run (the same chat is open in several tabs / pages) -> False when another run
+    is still answering it. release_chat frees it when the stream ends (also on stop or a closed connection)."""
+    now = time.time()
+    with _runs_lock:
+        cur = _chats.get(sid)
+        if cur is not None and cur[0] is not cancel and not cur[0].is_set() and now - cur[1] < CHAT_CLAIM_S:
+            return False
+        _chats[sid] = (cancel, now)
+        return True
+
+
+def release_chat(sid, cancel):
+    with _runs_lock:
+        cur = _chats.get(sid)
+        if cur is not None and cur[0] is cancel:
+            del _chats[sid]
 
 
 def _sleep(cancel, s):
@@ -77,6 +98,7 @@ class Ctx:
     web_blocked: int = 0            # web queries the guard blocked this turn (3 = no more web this turn)
     events: list = field(default_factory=list)  # events a tool adds for the page ('search'), sent after its tool_end
     ui_ack: bool = False            # the page reports how its page actions ended (POST /api/llm/agent/ui-result)
+    roles_on: dict = None           # {role: its assistant is switched on for this user} (navigate refuses an off page)
 
 
 @dataclass
@@ -133,10 +155,22 @@ SUMMARY_HEAD = '## Earlier in this chat (summary)'
 
 
 def history(messages):
-    """[{role, text}] from the page -> provider messages (text only, starting with the user's)."""
+    """[{role, text, page?}] -> provider messages (text only, starting with the user's). One chat follows the user
+    over the pages: a user message written on another page than the one before it starts with a short marker
+    ("[on Data Center]"), and the newest one says the tools changed with the page, so the model never mixes up
+    which page's tools it has."""
     out = []
-    for m in (messages or [])[-MAX_TURNS:]:
+    msgs = (messages or [])[-MAX_TURNS:]
+    prev = None
+    for i, m in enumerate(msgs):
         t = str((m or {}).get('text') or '').strip()
+        page = (m or {}).get('page') if isinstance((m or {}).get('page'), dict) else {}
+        lab = page.get('label')
+        if t and lab and prev and lab != prev and m.get('role') != 'assistant':
+            t = (f'[the user moved to {lab}: earlier turns ran on other pages; you now have this page\'s tools] {t}'
+                 if i == len(msgs) - 1 else f'[on {lab}] {t}')
+        if lab:
+            prev = lab
         if t:
             out.append({'role': 'assistant' if m.get('role') == 'assistant' else 'user', 'parts': [{'text': t}]})
     while out and out[0]['role'] != 'user':
@@ -185,7 +219,7 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
                              effort=opts['effort'], profile=opts['profile'], skill_list=sk,
                              user_prompts=[p for p in user_prompts if p.get('role') in (None, 'all', role.name)],
                              user_name=(user or {}).get('display_name') or (user or {}).get('username') or '',
-                             forced_skills=forced_skills)
+                             forced_skills=forced_skills, pages_text=roles.other_pages(role.name))
     if summary:
         system += (f'\n\n{SUMMARY_HEAD}\nThe earlier part of this chat was compacted. This summary replaces those '
                    f'messages: trust its numbers, ids and decisions, and continue from its open tasks.\n\n{summary}')
@@ -238,6 +272,23 @@ def _error_text(e):
         return str(e)
     _log.warning(f'agent tool: {type(e).__name__}: {vlog.esc(str(e))}')
     return f'{type(e).__name__}: {e}'
+
+
+PAGE_OF_DOMAIN = {'data': ('Data Center', 'data'), 'visual': ('Visualizer', 'viz')}
+
+
+def _missing_tool(run, name):
+    """Why a call names a tool this run does not have: another page's (navigate there), not in this mode, unknown."""
+    t = tools.REGISTRY.get(name)
+    here = (run.ctx.scope or {}).get('page') or ('viz' if run.role.name == 'visual' else 'data')
+    if t is not None and t.domain in PAGE_OF_DOMAIN and t.domain not in run.role.domains:
+        where, screen = PAGE_OF_DOMAIN[t.domain]
+        return (f'{name} is a {where} tool and the user is on {roles.SCREEN_LABEL.get(here, here)}: call '
+                f'navigate(screen={screen!r}, goal=<the request>) to continue there (it ends this turn), or answer '
+                'with the tools you have')
+    if t is not None and t.domain in run.role.domains:
+        return f'{name} is not available in mode {run.mode}; your tools are: {", ".join(run.tools)}'
+    return f'unknown tool {name!r}; your tools are: {", ".join(run.tools)}'
 
 
 def _sig(c):
@@ -442,9 +493,7 @@ def events(run):
             t = run.tools.get(name)
             res = {'id': c['id'], 'name': name or '?'}
             if t is None:
-                why = ('that tool belongs to the other assistant: you cannot use it here'
-                       if name in tools.REGISTRY else f'unknown tool {name!r}')
-                results.append({**res, 'content': f'{why}; your tools are: {", ".join(run.tools)}', 'is_error': True})
+                results.append({**res, 'content': _missing_tool(run, name), 'is_error': True})
                 continue
             if args is None:
                 results.append({**res, 'content': 'the arguments were not a JSON object: call it again', 'is_error': True})
