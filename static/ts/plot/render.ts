@@ -7,7 +7,8 @@ import { pts, S } from '../core/state.js';
 import { clsColor, clsName, CONTINUOUS, densityScale, DIFF_STYLE, diffColor, diffKey, ERR, errColor, isContinuous, originColor, plotBase, SCALE, THEME } from '../core/theme.js';
 import { densityDiff, KEY_NONE, KEY_SAME, originOrder } from '../core/compare-core.js';
 import { cmpKeys } from '../core/cmp-keys.js';
-import { curGroups, groupList, plotDiv, restyle, viewPos, xyOf } from './access.js';
+import { curGroups, groupList, is3d, plotDiv, restyle, viewPos, xyOf } from './access.js';
+import { renderPlot3d, updateHighlight3d, updateGrid3d } from './render3d.js';
 import { isOutlier } from './groups.js';
 import { fitToVisible, redrawLasso } from './interactions.js';
 import { pcaLabels, updateMarks } from './marks.js';
@@ -41,7 +42,7 @@ export function visibleIndices(): number[] {
 }
 
 /** Colouring by a categorical key: key per box, legend label and colour per key (class is the default). */
-interface Categorical {
+export interface Categorical {
   key: (id: number) => number;
   label: (k: number) => string | undefined;
   color: (k: number) => string;
@@ -75,6 +76,7 @@ let catTraces: CatTraces | null = null;
 export function applyFilterMask(): void {
   const gd = plotDiv();
   if (!S.view || !gd.data) return;
+  if (is3d()) { scheduleRender(); return; }      // 3D: one full (coalesced) render
   const view = S.view;
   const ct = catTraces;
   if (!ct || ct.colorBy !== $req<HTMLSelectElement>('color-by').value || ct.view !== S.view || S.dimSet ||
@@ -213,7 +215,7 @@ function liveNewTrace(dot: number): Trace {
 /** The live feed placed / dropped new boxes: restyle only the 'live-new' trace. */
 export function updateLiveNew(): void {
   const gd = plotDiv();
-  if (!S.view || !gd.data) return;
+  if (!S.view || !gd.data || is3d()) return;          // new boxes are placed on 2D maps only
   const idx = gd.data.findIndex((t) => typeof t.name === 'string' && t.name.startsWith('new boxes ('));
   if (idx < 0) { scheduleRender(); return; }
   const t = liveNewTrace(+$req<HTMLInputElement>('dot-size').value);
@@ -241,6 +243,7 @@ export function scheduleRender(): void {
 export function updateHighlight(): void {
   const gd = plotDiv();
   if (!S.view || !gd.data) return;
+  if (is3d()) { updateHighlight3d(); return; }
   const idx = gd.data.findIndex((t) => t.name === 'highlight');
   if (idx < 0) { scheduleRender(); return; }
   const pos = viewPos();
@@ -273,7 +276,7 @@ export function bubbleAt(clientX: number, clientY: number): number | null {
 }
 
 // embeddings sessions: colour by a metadata column ('meta:<name>'); numbers go on a scale, categories get a legend
-function metaColumn(colorBy: string): { name: string; type: string; values: Array<number | string | null> } | null {
+export function metaColumn(colorBy: string): { name: string; type: string; values: Array<number | string | null> } | null {
   if (!colorBy.startsWith('meta:')) return null;
   const Pt = pts(), name = colorBy.slice(5);
   const values = Pt.meta?.[name], type = Pt.meta_types?.[name];
@@ -281,7 +284,7 @@ function metaColumn(colorBy: string): { name: string; type: string; values: Arra
 }
 
 // categorical colourings: key per box, legend label and colour per key (class is the default)
-function categorical(colorBy: string): Categorical {
+export function categorical(colorBy: string): Categorical {
   const Pt: Points = pts();
   const at = (a: ArrayLike<number>, id: number): number => a[id] ?? -1;
   const mc = metaColumn(colorBy);
@@ -357,6 +360,7 @@ function gridAxis(): Partial<P.LayoutAxis> {
 /** The gridlines toggle changed: one relayout, no re-render of the dots. */
 export function updateGrid(): void {
   if (!S.view || !plotDiv().data) return;
+  if (is3d()) { updateGrid3d(); return; }
   const g = gridAxis();
   const upd: Record<string, unknown> = { 'xaxis.showgrid': g.showgrid, 'xaxis.gridcolor': g.gridcolor, 'yaxis.showgrid': g.showgrid, 'yaxis.gridcolor': g.gridcolor };
   void Plotly.relayout('plot', upd as Partial<P.Layout>);
@@ -374,6 +378,8 @@ export function renderPlot(): void {
     lastViewKey = view.key;
     window.dispatchEvent(new CustomEvent('view-changed'));
   }
+  document.body.classList.toggle('plot-3d', is3d());     // hides the 2D-only controls (css/plot.css)
+  if (is3d()) { catTraces = null; renderPlot3d(); return; }
   let colorBy = $req<HTMLSelectElement>('color-by').value;
   if (isContinuous(colorBy) && !pts()[colorBy]) colorBy = 'class';      // e.g. model colours before a model is scored
   if (colorBy.startsWith('meta:') && !metaColumn(colorBy)) colorBy = 'class';

@@ -92,6 +92,7 @@ function viewScope(): Record<string, unknown> {
   const sel = liveSel();
   const view: Record<string, unknown> = {
     tab: curTab, dataset: S.meta?.dataset ?? S.status?.dataset?.name ?? null, feature: selVal('feature'), method, params,
+    dims: S.view?.z ? 3 : 2,
     color_by: selVal('color-by'), classes, filter: filterSpec(), issue: S.activeView ?? null,
     selection: { count: sel.length, ids: selOn() ? sample(sel, SEL_SEND_MAX) : [], title: S.selTitle },
   };
@@ -128,6 +129,8 @@ async function applyUi(a: UiAction): Promise<boolean> {
       if (f) { fEl.value = f; updateTextSearch(); }
       mEl.value = m;
       if (isRec(g['params'])) for (const [k, v] of Object.entries(g['params'])) { const inp = $<HTMLInputElement>(`p-${m}-${k}`); if (inp && v != null) inp.value = String(v); }
+      const dims = g['dims'], dEl = $<HTMLSelectElement>('proj-dims');
+      if ((dims === 2 || dims === 3) && dEl) dEl.value = String(dims);
       updateMethodControls();
       saveSettings();
       if (curTab !== 'explore' && curTab !== 'ai') switchTab('explore');

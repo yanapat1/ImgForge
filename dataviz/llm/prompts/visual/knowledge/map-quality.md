@@ -1,5 +1,5 @@
 ---
-title: Map quality (how far to trust the 2D map)
+title: Map quality (how far to trust the 2D map or 3D cloud)
 summary: trustworthiness, continuity, neighbours kept: what they mean, good values, what to do when they are low
 ---
 Every new projection is scored against its feature space (`projection_quality`; the Projection popover shows the
@@ -16,5 +16,7 @@ subset of ≤ 2000 boxes, k = 10 neighbours.
 - Typical: `umap` and `tsne` score high on trustworthiness (local), `pca` high on continuity but crowded;
   `pacmap` balances both.
 - Low numbers? Raise `n_neighbors` (UMAP / PaCMAP), try `pacmap`, or check a cluster on `pca`. Explained variance
-  (PCA only) under ~20 % for the 2 axes means a linear 2D view hides most of the structure.
+  (PCA only) under ~20 % for the 2 axes means a linear 2D view hides most of the structure. Or switch to the
+  **3D cloud** (`set_projection {dims: 3}`): one more axis keeps more neighbours, so the numbers usually rise; `projection_quality`
+  reports dims, and a 2D and a 3D map of the same settings are scored separately.
 - Whatever the numbers: the checks never use map distances (except Far from class (on the map)).

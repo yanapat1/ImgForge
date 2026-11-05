@@ -16,6 +16,8 @@ when: "which features / method should I use", the map looks like one blob or con
    - tight local clusters (duplicates, sub-types): `tsne` (`perplexity` 30; 10-20 on small classes) or `umap` with
      `min_dist` 0.0-0.05.
    - is this structure real? `pca` (honest, linear; read its explained variance).
-4. Propose it with `set_projection` (feature, method, params) and one line of why; add `set_color_by` if colour helps
+   - classes pile on top of each other on the 2D map (low trustworthiness / continuity, or PCA's 2 axes explain
+     little): the same method with `set_projection {dims: 3}` (a 3D cloud: they often separate in depth; the user rotates it).
+4. Propose it with `set_projection` (feature, method, params, dims) and one line of why; add `set_color_by` if colour helps
    (e.g. `suggested` for confusion).
 5. After it is applied, `projection_quality`: below ~0.9 trustworthiness / continuity, suggest the next variant.

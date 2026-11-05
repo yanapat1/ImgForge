@@ -13,7 +13,14 @@ export interface PlotAxis {
 /** The `#plot` div once Plotly drew it (`data` / `_fullLayout` are absent before the first draw). */
 export interface PlotDiv extends Omit<P.PlotlyHTMLElement, 'data'> {
   data?: P.Data[];
-  _fullLayout?: { xaxis?: PlotAxis; yaxis?: PlotAxis };
+  _fullLayout?: { xaxis?: PlotAxis; yaxis?: PlotAxis; scene?: Scene3dLayout; _size?: { l: number; t: number; w: number; h: number } };
+}
+
+/** Plotly's private 3D scene (`gd._fullLayout.scene`): its domain and the gl-plot3d camera matrices
+ *  (4 x 4, column-major). A point (x, y, z) is drawn at projection · view · model · (x, y, z) · dataScale. */
+export interface Scene3dLayout {
+  domain: { x: [number, number]; y: [number, number] };
+  _scene?: { dataScale: [number, number, number]; glplot?: { cameraParams: { projection: ArrayLike<number>; view: ArrayLike<number>; model: ArrayLike<number> } } };
 }
 
 /** Axes + client rect of the drawn plot (plotAxes()). */

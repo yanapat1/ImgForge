@@ -7,6 +7,7 @@ import { hideWait, showWait, waitJob } from '../core/jobs.js';
 import { toast } from '../core/toast.js';
 import { featureLabel, S, status, UI } from '../core/state.js';
 import { refreshGroups } from '../plot/groups.js';
+import { clearLasso } from '../plot/interactions.js';
 import { invalidateHover, renderPlot, visibleIndices } from '../plot/render.js';
 import type { LabelQualityReady, LabelQualityResult, PointsColumn, ProjectionRequest, ProjectionResult, SavedView, ScoresResult, Status, Tags, UiDefaults } from '../types.js';
 import type { ProjectionsPayload, SettingHook } from '../types-views.js';
@@ -34,12 +35,13 @@ export function buildParamInputs(): void {
     }).join('') + '</span>').join('');
 }
 
-export const SETTING_IDS: string[] = ['feature', 'method', 'mode', 'class-a', 'class-b',
-  'color-by', 'dot-size', 'g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min', 'sort', 'thumb-size', 'show-dist', 'show-grid', 'auto-fit', 'show-centres'];
+export const SETTING_IDS: string[] = ['feature', 'method', 'proj-dims', 'mode', 'class-a', 'class-b',
+  'color-by', 'dot-size', 'g-bubbles', 'g-outliers', 'g-dim', 'g-mode', 'g-min', 'sort', 'thumb-size', 'show-dist', 'show-grid', 'auto-fit', 'show-centres',
+  'd3-shadows', 'd3-fog', 'd3-drop', 'd3-walls', 'd3-ortho', 'd3-speed'];
 
 // these pick WHICH projection is shown: not restored at page load, which always opens the startup view
 // (an uncomputed saved choice used to start a long job on every load); earlier views are in "Saved views"
-const VIEW_IDS = new Set(['feature', 'method', 'mode', 'class-a', 'class-b']);
+const VIEW_IDS = new Set(['feature', 'method', 'proj-dims', 'mode', 'class-a', 'class-b']);
 
 // views with their own remembered state (the filter bar, curation) plug in here: collect(out) adds keys to the
 // saved settings, apply(st) restores them. Every key must come back through collect, or the next save drops it.
@@ -110,7 +112,7 @@ export async function refreshSavedViews(): Promise<void> {
     const { views } = await getJSON<ProjectionsPayload>('api/projections');
     S.views = views;
     $req('saved-views').innerHTML = `<option value="">Saved views (${views.length})…</option>` +
-      views.map((v, i) => `<option value="${i}" title="computed ${esc(v.created || '')}${v['compute_s'] ? ` in ${v['compute_s']}s` : ''}">✓ ${esc(v.label)}</option>`).join('');
+      views.map((v, i) => `<option value="${i}" data-dims="${v.dims ?? 2}" title="computed ${esc(v.created || '')}${v['compute_s'] ? ` in ${v['compute_s']}s` : ''}">✓ ${esc(v.label)}</option>`).join('');
     markMethods();
   } catch (e) { /* index not ready */ }
 }
@@ -122,7 +124,8 @@ export function markMethods(): void {
     const m = opt.value;
     const params: Record<string, number> = {};
     for (const k of Object.keys(S.status.methods[m]?.params ?? {})) params[k] = +$req<HTMLInputElement>(`p-${m}-${k}`).value;
-    const saved = S.views.some((v) => v.feature === req.feature && v.method === m && sameClasses(v.classes, req.classes) && sameParams(v.params, params));
+    const saved = S.views.some((v) => v.feature === req.feature && v.method === m && (v.dims ?? 2) === (req.dims ?? 2) &&
+      sameClasses(v.classes, req.classes) && sameParams(v.params, params));
     opt.textContent = `${saved ? '✓ ' : ''}${S.status.methods[m]?.label}`;
   }
 }
@@ -131,6 +134,7 @@ export function applyView(v: SavedView): void {
   $req<HTMLSelectElement>('feature').value = v.feature;
   updateTextSearch();
   $req<HTMLSelectElement>('method').value = v.method;
+  $req<HTMLSelectElement>('proj-dims').value = String(v.dims ?? 2);
   for (const [k, val] of Object.entries(v.params)) {
     const inp = $<HTMLInputElement>(`p-${v.method}-${k}`);
     if (inp) inp.value = String(val);
@@ -155,7 +159,8 @@ function currentRequest(): ProjectionRequest {
   const method = $req<HTMLSelectElement>('method').value;
   const params: Record<string, number> = {};
   for (const k of Object.keys(status().methods[method]?.params ?? {})) params[k] = +$req<HTMLInputElement>(`p-${method}-${k}`).value;
-  return { feature: $req<HTMLSelectElement>('feature').value, method, params, classes: null };   // always all classes; display filter is client-side
+  const dims = $req<HTMLSelectElement>('proj-dims').value === '3' ? 3 : 2;
+  return { feature: $req<HTMLSelectElement>('feature').value, method, params, classes: null, dims };   // always all classes; display filter is client-side
 }
 
 export async function loadView(): Promise<void> {
@@ -174,6 +179,8 @@ export async function loadView(): Promise<void> {
     await loadLabelQuality(req.feature);
     if (seq !== viewSeq) return;
     hideWait();
+    const was3d = !!S.view?.z;
+    if (was3d !== !!r.z) clearLasso();          // a 2D lasso means nothing in a 3D cloud (and back)
     S.view = r;
     S.viewPos = new Map(r.id.map((id, i): [number, number] => [id, i]));
     S.viewReq = req;
@@ -184,12 +191,12 @@ export async function loadView(): Promise<void> {
     const ev = r.info?.explained_variance, q = r.info?.quality;
     const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
     $req('pca-info').textContent = [
-      ev ? `explained variance: PC1 ${pct(ev[0] ?? 0)}, PC2 ${pct(ev[1] ?? 0)}` : '',
+      ev ? `explained variance: PC1 ${pct(ev[0] ?? 0)}, PC2 ${pct(ev[1] ?? 0)}` + (ev.length > 2 ? `, PC3 ${pct(ev[2] ?? 0)}` : '') : '',
       q ? `map quality (${q.n.toLocaleString()} pts, k=${q.k}): trustworthiness ${q.trustworthiness.toFixed(3)} · ` +
         `continuity ${q.continuity.toFixed(3)} · neighbours kept ${pct(q.knn_preserved)}` : '',
     ].filter(Boolean).join('  ·  ');
     $req('pca-info').title = q ? 'trustworthiness: no false neighbours in 2D (1 = best) · continuity: true neighbours ' +
-      'not torn apart (1 = best) · neighbours kept: share of each point\'s k nearest that stay its k nearest in 2D' : '';
+      `not torn apart (1 = best) · neighbours kept: share of each point's k nearest that stay its k nearest in ${r.z ? '3D' : '2D'}` : '';
     await refreshGroups();
     renderPlot();
     renderGallery();
@@ -299,7 +306,7 @@ export function updateMapDirty(): void {
   const r = S.viewReq;
   if (!r) { setMapDirty(false); return; }
   const cur = currentRequest();
-  setMapDirty(cur.method !== r.method || cur.feature !== r.feature || !sameParams(cur.params, r.params));
+  setMapDirty(cur.method !== r.method || cur.feature !== r.feature || (cur.dims ?? 2) !== (r.dims ?? 2) || !sameParams(cur.params, r.params));
 }
 
 // ---- cleanlab label quality: k-fold out-of-fold class probabilities of the current feature, then cleanlab

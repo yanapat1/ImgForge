@@ -34,6 +34,8 @@ def router(state, ctx):
         changed = {k: v for k, v in e['params'].items() if m['params'].get(k) != v}
         if changed:
             parts.append(', '.join(f'{k}={v}' for k, v in changed.items()))
+        if e.get('dims', 2) == 3:
+            parts.append('3D')
         return ' · '.join(parts)
 
     @r.get('/api/projections')
@@ -126,14 +128,20 @@ def router(state, ctx):
         if req.classes is not None and any(c < 0 or (state.ready and c >= len(state.classes)) for c in req.classes):
             raise HTTPException(400, f'invalid classes: {req.classes}')
         try:
-            proj, key, job = state.request_projection(req.feature, req.method, req.params, req.classes or None)
+            proj, key, job = state.request_projection(req.feature, req.method, req.params, req.classes or None,
+                                                      req.dims)
         except ValueError as e:
             raise HTTPException(400, str(e))
         if proj is None:
             return {'ready': False, 'key': key, 'job_id': job.id}
-        return json_bytes(state.payload(f'proj|{key}', lambda: {
-            'ready': True, 'key': key, 'id': proj['id'], 'x': np.round(proj['xy'][:, 0], 4),
-            'y': np.round(proj['xy'][:, 1], 4), 'info': proj['info']}))
+        def build():
+            xy = proj['xy']
+            out = {'ready': True, 'key': key, 'id': proj['id'], 'x': np.round(xy[:, 0], 4),
+                   'y': np.round(xy[:, 1], 4), 'info': proj['info']}
+            if xy.shape[1] == 3:                     # a 3D cloud: the client draws scatter3d
+                out['z'] = np.round(xy[:, 2], 4)
+            return out
+        return json_bytes(state.payload(f'proj|{key}', build))
 
     @r.post('/api/groups')
     async def groups(req: GroupsRequest):
@@ -141,6 +149,8 @@ def router(state, ctx):
             params = normalize_params(req.method, req.params)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        if req.dims != 2:
+            raise HTTPException(409, 'density groups are drawn on 2D maps only')
         key = projection_key(req.feature, req.method, params, req.classes or None)
         res = await state.groups_async(key, req.min_cluster_size, req.per_class)
         if res is None:

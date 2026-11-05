@@ -154,11 +154,11 @@ def configure(projections=None):
         TSNE_THREADS = max(1, min(int(projections['tsne_threads']), os.cpu_count() or 1))
 
 
-def _pca_fallback(emb):
+def _pca_fallback(emb, nc=2):
     centred = emb - emb.mean(0)
     _, _, vt = np.linalg.svd(centred, full_matrices=False)
-    out = centred @ vt[:2].T
-    return np.pad(out, ((0, 0), (0, 2 - out.shape[1]))).astype(np.float32)
+    out = centred @ vt[:nc].T
+    return np.pad(out, ((0, 0), (0, nc - out.shape[1]))).astype(np.float32)
 
 
 def _epoch_reporter(progress, stage):
@@ -172,20 +172,20 @@ def _epoch_reporter(progress, stage):
     return tq
 
 
-def run_umap(emb, n_neighbors=15, min_dist=0.1, seed=None, metric='cosine', progress=_noop):
-    """Project embeddings to 2D with UMAP. Handles tiny inputs."""
+def run_umap(emb, n_neighbors=15, min_dist=0.1, seed=None, metric='cosine', progress=_noop, n_components=2):
+    """Project embeddings to 2D (or 3D) with UMAP. Handles tiny inputs."""
     n = len(emb)
     if n == 0:
-        return np.zeros((0, 2), np.float32)
+        return np.zeros((0, n_components), np.float32)
     if n < 5:
-        # UMAP needs a handful of points; fall back to a spread on the first 2 PCs.
-        return _pca_fallback(emb)
+        # UMAP needs a handful of points; fall back to a spread on the first PCs.
+        return _pca_fallback(emb, n_components)
 
     cu = _cuml('manifold') if n >= 10000 else None
     if cu is not None:                                  # RAPIDS UMAP (same seed semantics: random_state=seed)
         try:
             progress(stage='UMAP (cuML GPU)')
-            return np.asarray(cu.UMAP(n_components=2, n_neighbors=max(2, min(int(n_neighbors), n - 1)),
+            return np.asarray(cu.UMAP(n_components=n_components, n_neighbors=max(2, min(int(n_neighbors), n - 1)),
                                       min_dist=float(min_dist), metric=metric, random_state=seed,
                                       init='spectral' if n > 50 else 'random').fit_transform(
                 np.ascontiguousarray(emb, np.float32)), np.float32)
@@ -193,7 +193,7 @@ def run_umap(emb, n_neighbors=15, min_dist=0.1, seed=None, metric='cosine', prog
             pass
     import umap
     reducer = umap.UMAP(
-        n_components=2,
+        n_components=n_components,
         n_neighbors=max(2, min(int(n_neighbors), n - 1)),
         min_dist=float(min_dist),
         metric=metric,
@@ -220,7 +220,7 @@ FIT_MAX = {'kpca': 3000, 'isomap': 3000, 'lle': 3000, 'spectral': 5000, 'mds': 1
 def _place_by_neighbours(x, fit_idx, fit_xy, k=5):
     """Out-of-sample positions for methods without transform(): inverse-distance mean of the k nearest fitted points."""
     from sklearn.neighbors import NearestNeighbors
-    out = np.empty((len(x), 2), np.float32)
+    out = np.empty((len(x), fit_xy.shape[1]), np.float32)
     nn = NearestNeighbors(n_neighbors=min(k, len(fit_idx))).fit(x[fit_idx])
     dist, idx = nn.kneighbors(x)
     w = 1.0 / np.maximum(dist, 1e-9)
@@ -229,35 +229,35 @@ def _place_by_neighbours(x, fit_idx, fit_xy, k=5):
     return out
 
 
-def _sklearn_estimator(method, params, n):
-    """Unfitted estimator producing 2 components for one of the scikit-learn methods."""
+def _sklearn_estimator(method, params, n, nc=2):
+    """Unfitted estimator producing `nc` (2 or 3) components for one of the scikit-learn methods."""
     from sklearn import decomposition, manifold, random_projection
     nn = max(2, min(int(params.get('n_neighbors', 10)), n - 2))
     if method == 'svd':
-        return decomposition.TruncatedSVD(n_components=2, random_state=0)
+        return decomposition.TruncatedSVD(n_components=nc, random_state=0)
     if method == 'ica':
-        return decomposition.FastICA(n_components=2, whiten='unit-variance', max_iter=400, random_state=0)
+        return decomposition.FastICA(n_components=nc, whiten='unit-variance', max_iter=400, random_state=0)
     if method == 'fa':
-        return decomposition.FactorAnalysis(n_components=2, random_state=0)
+        return decomposition.FactorAnalysis(n_components=nc, random_state=0)
     if method == 'kpca':
-        return decomposition.KernelPCA(n_components=2, kernel='rbf', gamma=float(params.get('gamma') or 0) or None,
+        return decomposition.KernelPCA(n_components=nc, kernel='rbf', gamma=float(params.get('gamma') or 0) or None,
                                        eigen_solver='randomized', random_state=0)
     if method == 'isomap':
-        return manifold.Isomap(n_components=2, n_neighbors=nn)
+        return manifold.Isomap(n_components=nc, n_neighbors=nn)
     if method == 'lle':
-        return manifold.LocallyLinearEmbedding(n_components=2, n_neighbors=max(nn, 3), eigen_solver='dense',
+        return manifold.LocallyLinearEmbedding(n_components=nc, n_neighbors=max(nn, 3), eigen_solver='dense',
                                                random_state=0)
     if method == 'spectral':
-        return manifold.SpectralEmbedding(n_components=2, affinity='nearest_neighbors', n_neighbors=nn,
+        return manifold.SpectralEmbedding(n_components=nc, affinity='nearest_neighbors', n_neighbors=nn,
                                           random_state=0)
     if method == 'mds':
-        return manifold.MDS(n_components=2, n_init=1, init='random', max_iter=300, random_state=0)
+        return manifold.MDS(n_components=nc, n_init=1, init='random', max_iter=300, random_state=0)
     if method == 'random':
-        return random_projection.GaussianRandomProjection(n_components=2, random_state=0)
+        return random_projection.GaussianRandomProjection(n_components=nc, random_state=0)
     raise ValueError(f'unknown projection method {method!r}')
 
 
-def _project_sklearn(emb, method, params, progress):
+def _project_sklearn(emb, method, params, progress, nc=2):
     label = METHODS[method]['label']
     n = len(emb)
     x = np.asarray(emb, np.float32)
@@ -271,8 +271,8 @@ def _project_sklearn(emb, method, params, progress):
         trees = RandomTreesEmbedding(n_estimators=100, max_depth=5, random_state=0, n_jobs=TSNE_THREADS)
         leaves = trees.fit_transform(x)
         progress(stage=f'{label}: SVD of the leaf codes')
-        return TruncatedSVD(n_components=2, random_state=0).fit_transform(leaves).astype(np.float32)
-    est = _sklearn_estimator(method, params, min(n, FIT_MAX.get(method, n)))
+        return TruncatedSVD(n_components=nc, random_state=0).fit_transform(leaves).astype(np.float32)
+    est = _sklearn_estimator(method, params, min(n, FIT_MAX.get(method, n)), nc)
     fit_max = FIT_MAX.get(method)
     if not fit_max or n <= fit_max:
         progress(stage=f'{label} on {n} points')
@@ -289,18 +289,29 @@ def _project_sklearn(emb, method, params, progress):
     return _place_by_neighbours(x, fit_idx, fit_xy)
 
 
-def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
-    """2D projection. Returns (xy, info) where info holds e.g. PCA explained variance."""
+def project(emb, method='umap', params=None, metric='cosine', progress=_noop, n_components=2):
+    """2D (n_components=2) or 3D (3) projection. Returns (xy, info) where info holds e.g. PCA explained variance;
+    xy has one column per component."""
+    nc = int(n_components)
+    if nc not in (2, 3):
+        raise ValueError(f'n_components must be 2 or 3, not {n_components!r}')
+    if method not in METHODS:
+        raise ValueError(f'unknown projection method {method!r}')
     params = {**METHODS[method]['params'], **(params or {})}
     n = len(emb)
     if n < 5:
-        return (_pca_fallback(emb) if n else np.zeros((0, 2), np.float32)), {}
+        return (_pca_fallback(emb, nc) if n else np.zeros((0, nc), np.float32)), {}
+    d3 = ' (3D)' if nc == 3 else ''
     if method == 'umap':
-        progress(stage=f'UMAP on {n} points (n_neighbors={params["n_neighbors"]}, min_dist={params["min_dist"]})')
-        return run_umap(emb, params['n_neighbors'], params['min_dist'], metric=metric, progress=progress), {}
+        progress(stage=f'UMAP{d3} on {n} points (n_neighbors={params["n_neighbors"]}, min_dist={params["min_dist"]})')
+        return run_umap(emb, params['n_neighbors'], params['min_dist'], metric=metric, progress=progress,
+                        n_components=nc), {}
     if method == 'pca':
-        progress(stage=f'PCA on {n} points')
-        xy, ratio = pca_reduce(emb, 2)
+        progress(stage=f'PCA{d3} on {n} points')
+        xy, ratio = pca_reduce(emb, min(nc, emb.shape[1], n))
+        if xy.shape[1] < nc:                       # fewer feature dims than components: pad with zeros
+            xy = np.pad(xy, ((0, 0), (0, nc - xy.shape[1])))
+            ratio = np.pad(np.asarray(ratio), (0, nc - len(ratio)))
         return xy.astype(np.float32), {'explained_variance': [round(float(v), 4) for v in ratio]}
     if method in ('pacmap', 'localmap'):
         import pacmap
@@ -309,7 +320,7 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
         progress(stage=f'{label} on {n} points (n_neighbors={nn})')
         x = np.ascontiguousarray(emb, dtype=np.float32)
         cls = pacmap.LocalMAP if method == 'localmap' else pacmap.PaCMAP
-        reducer = cls(n_components=2, n_neighbors=nn, random_state=0, apply_pca=x.shape[1] > 100, verbose=True)
+        reducer = cls(n_components=nc, n_neighbors=nn, random_state=0, apply_pca=x.shape[1] > 100, verbose=True)
         total = int(sum(reducer.num_iters))
         import re
         import io
@@ -342,7 +353,7 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
         if cu is not None:
             try:
                 progress(stage='t-SNE (cuML GPU)')
-                xy = np.asarray(cu.TSNE(n_components=2, perplexity=perplexity, random_state=0).fit_transform(
+                xy = np.asarray(cu.TSNE(n_components=nc, perplexity=perplexity, random_state=0).fit_transform(
                     np.ascontiguousarray(x, np.float32)))
                 return xy.astype(np.float32), {}
             except Exception:  # noqa: BLE001 - fall back to openTSNE / sklearn
@@ -350,8 +361,10 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
         try:
             from openTSNE import TSNE as OpenTSNE   # FFT-accelerated, several times faster than sklearn
             progress(stage=f't-SNE: finding neighbours (perplexity={perplexity:g})')
-            est = OpenTSNE(n_components=2, perplexity=perplexity, initialization='pca', random_state=0,
-                           n_jobs=TSNE_THREADS, neighbors='exact' if n < 1000 else 'auto')
+            # openTSNE's default FFT gradient handles 1-2 dims only; 3D uses Barnes-Hut
+            est = OpenTSNE(n_components=nc, perplexity=perplexity, initialization='pca', random_state=0,
+                           n_jobs=TSNE_THREADS, neighbors='exact' if n < 1000 else 'auto',
+                           **({'negative_gradient_method': 'bh'} if nc == 3 else {}))
             total = est.early_exaggeration_iter + est.n_iter
             done = [0]
 
@@ -363,11 +376,11 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop):
         except ImportError:
             from sklearn.manifold import TSNE
             progress(stage=f't-SNE on {n} points (perplexity={perplexity:g}, ~1 min for 10k)')
-            xy = TSNE(n_components=2, perplexity=perplexity, init='pca', random_state=0,
+            xy = TSNE(n_components=nc, perplexity=perplexity, init='pca', random_state=0,
                       n_jobs=TSNE_THREADS).fit_transform(x)
         return xy.astype(np.float32), {}
     if method in METHODS:
-        return _project_sklearn(emb, method, params, progress), {}
+        return _project_sklearn(emb, method, params, progress, nc), {}
     raise ValueError(f'unknown projection method {method!r}')
 
 

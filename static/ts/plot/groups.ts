@@ -15,6 +15,7 @@ function groupsWanted(): boolean {
 }
 
 export async function refreshGroups(): Promise<void> {
+  if (S.view?.z) { S.groups = null; $req('g-info').textContent = ''; return; }    // density groups: 2D maps only
   if (!groupsWanted() || !S.viewReq) { $req('g-info').textContent = ''; return; }
   const body: ProjectionRequest & { min_cluster_size: number; per_class: boolean } = { ...S.viewReq,
     min_cluster_size: Math.max(3, +$req<HTMLInputElement>('g-min').value || 15), per_class: $req<HTMLSelectElement>('g-mode').value === 'class' };

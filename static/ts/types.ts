@@ -207,17 +207,19 @@ export type ScoresResult = ScoresReady | NotReady;
 /** POST api/projection body (dataviz/server/models.py ProjectionRequest). */
 export interface ProjectionRequest {
   feature: string; method: string; params: Record<string, number>; classes: number[] | null;
+  /** 2 = flat map (default), 3 = 3D cloud */
+  dims?: 2 | 3;
 }
 /** `quality`: see dataviz/ml/analysis.py `projection_quality` (absent on projections saved before it existed). */
 export interface ProjectionQuality { trustworthiness: number; continuity: number; knn_preserved: number; k: number; n: number }
 export interface ProjectionInfo { explained_variance?: number[]; quality?: ProjectionQuality; [k: string]: unknown }
-/** POST api/projection (ready): a 2D layout of the boxes `id`. */
-export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; info: ProjectionInfo | null }
+/** POST api/projection (ready): a 2D layout of the boxes `id` (a 3D cloud also has `z`). */
+export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; z?: number[]; info: ProjectionInfo | null }
 export type ProjectionResult = ProjectionReady | NotReady;
 /** GET api/projections → views[] (saved projections). */
 export interface SavedView {
   key?: string; feature: string; method: string; params: Record<string, number>; classes?: number[] | null;
-  label: string; created?: string; last_used?: string; [k: string]: unknown;
+  label: string; created?: string; last_used?: string; dims?: 2 | 3; [k: string]: unknown;
 }
 
 /** POST api/groups response. */

@@ -293,7 +293,8 @@ class CompareService:
             entries = json.loads((ws / 'projections' / 'index.json').read_text())
         except (OSError, ValueError):
             entries = {}
-        cands = sorted((e for e in entries.values() if e.get('feature') == feature and not e.get('classes')),
+        cands = sorted((e for e in entries.values() if e.get('feature') == feature and not e.get('classes')
+                        and e.get('dims', 2) == 2),
                        key=lambda e: e.get('last_used') or e.get('created') or '', reverse=True)
         proj = None
         for e in cands:

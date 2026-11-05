@@ -61,6 +61,11 @@ cannot handle every point (`FIT_MAX`) are fitted on a fixed random subset (seed 
 `transform`ed when the estimator supports it, else placed at the inverse-distance mean of their 5 nearest
 fitted points (`_place_by_neighbours`). Timings for 6000 points × 512 dims on CPU: under 5 s each.
 
+**3D clouds**: `project(..., n_components=3)` runs any method with 3 components (openTSNE switches to Barnes-Hut,
+its FFT gradient is 2D only). The state keys a 3D projection as `<2D key>|3d` (`state.projection_key(..., dims=3)`),
+so 2D keys and saved maps are unchanged; its `xy` array has 3 columns. Density groups and the live feed use 2D maps
+only (`state.projection_dims`).
+
 Every new projection also gets **map-quality numbers** (`projection_quality()`, run in `core/workers.py
 do_project` and saved in the projection's `info`), shown under the Projection controls. They are measured on
 a fixed 2000-point subset with k = 10:

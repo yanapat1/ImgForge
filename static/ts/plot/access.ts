@@ -30,6 +30,15 @@ export function updateTraces(gd: PlotDiv, traceUpdate: TraceUpdate, layout: Part
   return Plotly.update(gd, traceUpdate as P.Data, layout, traces);
 }
 
+/** The projection on screen is a 3D cloud (scatter3d), not a 2D map. */
+export const is3d = (): boolean => !!S.view?.z;
+
+/** 3D coordinates of point `id` (z NaN on a 2D map / an id not in the projection). */
+export function xyzOf(id: number): [number, number, number] {
+  const v = curView(), i = viewPos().get(id);
+  return i === undefined ? [NaN, NaN, NaN] : [v.x[i] ?? NaN, v.y[i] ?? NaN, v.z?.[i] ?? NaN];
+}
+
 /** Data coordinates of point `id` in the current projection (NaN for an id that is not in it: Plotly skips those). */
 export function xyOf(id: number): [number, number] {
   const v = curView(), i = viewPos().get(id);

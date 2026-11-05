@@ -37,8 +37,8 @@ def _noop(*_, **__):
 
 # ---------------------------------------------------------------- pure functions (run in a worker)
 
-def do_project(emb, method, params, metric, progress=_noop):
-    xy, info = analysis.project(emb, method, params, metric, progress)
+def do_project(emb, method, params, metric, n_components=2, progress=_noop):
+    xy, info = analysis.project(emb, method, params, metric, progress, n_components=n_components)
     progress(stage='measuring how well the map keeps neighbours')
     try:
         info = {**info, 'quality': analysis.projection_quality(emb, xy)}

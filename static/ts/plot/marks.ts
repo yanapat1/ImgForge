@@ -7,7 +7,8 @@ import { postJSON } from '../core/api.js';
 import { $req, rgba } from '../core/dom.js';
 import { pts, S } from '../core/state.js';
 import { clsColor, THEME } from '../core/theme.js';
-import { plotDiv, restyle, updateTraces, viewPos, xyOf } from './access.js';
+import { is3d, plotDiv, restyle, updateTraces, viewPos, xyOf } from './access.js';
+import { updateMarks3d } from './render3d.js';
 import { explainDot, explainMarks } from './explain.js';
 
 declare const Plotly: typeof import('plotly.js');
@@ -18,7 +19,8 @@ export let hoverDotId: number | null = null, hoverAnim: number | null = null;
 
 const MAX_CROSSHAIRS = 8;
 
-export const OVERLAY = new Set(['highlight', 'picked', 'hover-dot', 'bubbles', 'centres']);   // never part of a selection
+export const OVERLAY = new Set(['highlight', 'picked', 'hover-dot', 'bubbles', 'centres',      // never part of a selection
+  'expl-lines', 'pick-lines', 'drop-lines', 'labels-3d']);                                        // + the 3D overlays (render3d.ts)
 
 interface DotMarker {
   x: number[]; y: number[];
@@ -52,6 +54,7 @@ function crosshairs(ids: number[]): Array<Partial<P.Shape>> {                  /
 export function updateMarks(animate = false): void {
   const gd: PlotDiv = plotDiv();
   if (!S.view || !gd.data) return;
+  if (is3d()) { updateMarks3d(); return; }
   const hi = gd.data.findIndex((t) => t.name === 'hover-dot');
   const pi = gd.data.findIndex((t) => t.name === 'picked');
   if (hi < 0 || pi < 0) return;
@@ -94,22 +97,28 @@ export const MAX_DIST_PICKS = 8;
 
 interface DistanceMarks { shapes: Array<Partial<P.Shape>>; annotations: Array<Partial<P.Annotations>> }
 
+/** Feature-space distances between the picked boxes (2..MAX_DIST_PICKS, Display › Distances on), or null while
+ *  they are fetched (once per pick set; updateMarks runs again when they land) or not wanted. 2D and 3D share it. */
+export function pickDistances(picked: number[]): { d: number[][]; metric: string } | null {
+  // a drag-select of many cards: lines among the first few would only be noise
+  if (picked.length < 2 || picked.length > MAX_DIST_PICKS || !$req<HTMLInputElement>('show-dist').checked || !S.scoresFeature) return null;
+  const key = `${S.scoresFeature}|${picked.join(',')}`;
+  const dist = S.dist;
+  if (dist && dist.key === key && 'd' in dist) return { d: dist.d, metric: dist.metric };
+  if (!dist || dist.pending !== key) {
+    S.dist = { key: null, pending: key };
+    postJSON<DistancesPayload>('api/distances', { ids: picked, feature: S.scoresFeature }).then((r) => {
+      if (S.dist && S.dist.pending === key) { S.dist = { key, d: r.d, metric: r.metric }; updateMarks(); }
+    }).catch(() => { if (S.dist && S.dist.pending === key) S.dist = null; });
+  }
+  return null;
+}
+
 function distanceMarks(picked: number[]): DistanceMarks {
   const out: DistanceMarks = { shapes: [], annotations: [] };
-  // a drag-select of many cards: lines among the first few would only be noise
-  if (picked.length < 2 || picked.length > MAX_DIST_PICKS || !$req<HTMLInputElement>('show-dist').checked || !S.scoresFeature) return out;
+  const dist = pickDistances(picked);
+  if (!dist) return out;
   const ids = picked;
-  const key = `${S.scoresFeature}|${ids.join(',')}`;
-  const dist = S.dist;
-  if (!dist || dist.key !== key || !('d' in dist)) {
-    if (!dist || dist.pending !== key) {
-      S.dist = { key: null, pending: key };
-      postJSON<DistancesPayload>('api/distances', { ids, feature: S.scoresFeature }).then((r) => {
-        if (S.dist && S.dist.pending === key) { S.dist = { key, d: r.d, metric: r.metric }; updateMarks(); }
-      }).catch(() => { if (S.dist && S.dist.pending === key) S.dist = null; });
-    }
-    return out;
-  }
   const pos = ids.map(xyOf);
   const line: Partial<P.ShapeLine> = { color: rgba(THEME.highlight, 0.85), width: 1.5, dash: 'dot' };
   const font: Partial<P.Font> = { family: THEME.mono, size: 11, color: THEME.text };

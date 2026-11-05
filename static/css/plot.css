@@ -307,3 +307,13 @@
 
 /* box details: cleanlab's top out-of-fold probabilities */
 .lq-p { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; white-space: nowrap; }
+/* 2D map vs 3D cloud (body.plot-3d, plot/render.ts): each shows only its own controls */
+body:not(.plot-3d) .d3-only, body.plot-3d .d2-only, body.plot-3d #offscreen { display: none !important; }
+.d3-only.pop-sep, .groups-2d { display: flex; flex-direction: column; gap: var(--s2); }
+/* 3D camera presets + turntable: next to Fit */
+.d3-tools { position: absolute; top: 8px; left: 140px; z-index: 3; box-shadow: var(--shadow-2); }
+.d3-tools > button { background: var(--surface); min-width: 34px; padding: 0 8px; font: 600 var(--fs-xs)/1 var(--mono); }
+.d3-tools > button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+body.plot-3d #plot { cursor: grab; }
+body.plot-3d #plot:active { cursor: grabbing; }
+@media (max-width: 520px) { .d3-tools { top: 48px; left: 8px; } }

@@ -5,8 +5,9 @@ import type { PlotDiv, PlotGeom } from '../types-plot.js';
 import { $req } from '../core/dom.js';
 import { bindTouch, classifyWheel, isGesturing } from '../core/gesture.js';
 import { S } from '../core/state.js';
-import { plotDiv, svgReq } from './access.js';
+import { is3d, plotDiv, svgReq } from './access.js';
 import { pointInPoly, scheduleRender, visibleIndices } from './render.js';
+import { fit3d, screenPoints } from './render3d.js';
 import { setSelection } from '../views/gallery.js';
 
 // Plotly's hover reset is not in its typings
@@ -24,6 +25,7 @@ const hoverTip = (): HTMLElement => $req('hover-tip');
 const hit = (e: Event, sel: string): boolean => e.target instanceof Element && !!e.target.closest(sel);
 
 export function plotAxes(): PlotGeom | null {
+  if (is3d()) return null;                     // a 3D cloud: Plotly's own orbit / pan / zoom, no 2D gestures
   const gd = plotDiv();
   const fl = gd._fullLayout;
   if (!fl || !fl.xaxis || !fl.xaxis._length || !fl.yaxis) return null;
@@ -386,7 +388,7 @@ export function enableMiddleDrag(gd: PlotDiv): void {
 // Appearance can make every scroll zoom or pan). Two-finger touch and Safari's gesture events pan / pinch too.
 export function enableWheelZoom(gd: PlotDiv): void {
   let acc = 0, at: { x: number; y: number } | null = null, zf: number | null = null;
-  const ready = (): boolean => !!(gd._fullLayout && gd._fullLayout.xaxis && S.view);
+  const ready = (): boolean => !!(gd._fullLayout && gd._fullLayout.xaxis && S.view) && !is3d();   // 3D: Plotly's scrollZoom
   gd.addEventListener('wheel', (e) => {
     if (!ready()) return;
     e.preventDefault();
@@ -418,6 +420,7 @@ export function enableWheelZoom(gd: PlotDiv): void {
 // ---- zoom to the shown dots: the bbox of every visible dot (+6 %), so a far dot is never off screen. Switching the
 // shown classes calls it (render.ts requestFit, Display › Zoom to shown classes), and so does the Fit button.
 export function fitToVisible(): void {
+  if (is3d()) { fit3d(); return; }
   const view = S.view, gd = plotDiv();
   if (!view || !plotAxes()) return;
   if (busy) { void busy.then(fitToVisible); return; }
@@ -461,6 +464,73 @@ export function updateOffscreen(): void {
       b.setAttribute('aria-label', b.title);
     }
   }
+}
+
+// ---- 3D cloud: Shift + left drag selects what is under the drawn lasso / box / circle on screen, through the depth.
+// Plain drag stays Plotly's orbit. Every shown dot goes through the scene camera once, on release
+// (render3d.ts screenPoints), then the 2D point-in-polygon test runs in screen pixels.
+export function enableLasso3d(gd: PlotDiv): void {
+  const path = lassoPath();
+  gd.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !e.shiftKey || !is3d() || hit(e, '.modebar, .legend, .colorbar, #select-tools, #d3-tools, #btn-fit')) return;
+    e.preventDefault();
+    e.stopPropagation();                       // Plotly does not rotate under the lasso
+    const r = gd.getBoundingClientRect();
+    const p0: Pt = [e.clientX - r.left, e.clientY - r.top];
+    const kind = shape;
+    let poly: Pt[] = [p0], frame: number | null = null, drawing = false;
+    lassoLayer().style.transform = '';
+    const draw = (close: boolean): void => { if (frame === null) frame = requestAnimationFrame(() => { frame = null; path.setAttribute('d', lassoPathD(poly, close)); }); };
+    const move = (ev: MouseEvent): void => {
+      ev.stopPropagation();
+      const x = ev.clientX - r.left, y = ev.clientY - r.top;
+      if (!drawing) {
+        if (Math.hypot(x - p0[0], y - p0[1]) < 5) return;
+        drawing = true;
+        gd.classList.add('lassoing');
+        path.classList.add('drawing');
+        hoverTip().classList.add('hidden');
+      }
+      if (kind !== 'lasso') { poly = shapePts(kind, p0, [x, y], ev.altKey); draw(true); return; }
+      const last = poly[poly.length - 1] ?? p0;
+      if (Math.hypot(x - last[0], y - last[1]) < 2) return;
+      poly.push([x, y]);
+      draw(false);
+    };
+    // Plotly's 3D camera (mouse-change) also turns on mouseover / mouseenter with a button held: crossing the
+    // legend or a toolbar and coming back onto the canvas would rotate the cloud under the outline
+    const swallow = (ev: Event): void => ev.stopPropagation();
+    const CROSS = ['mouseover', 'mouseout', 'mouseenter', 'mouseleave'] as const;
+    const up = (ev: MouseEvent): void => {
+      ev.stopPropagation();
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      for (const t of CROSS) window.removeEventListener(t, swallow, true);
+      if (frame !== null) cancelAnimationFrame(frame);
+      gd.classList.remove('lassoing');
+      path.classList.remove('drawing');
+      path.setAttribute('d', '');              // the outline is only true for this camera: it goes once used
+      if (!drawing || poly.length < 3) return;
+      lassoEndedAt = Date.now();
+      const view = S.view, vis = visibleIndices(), sp = screenPoints(vis);
+      if (!view || !sp) return;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const [px, py] of poly) { x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py); }
+      const xs = poly.map((p) => p[0]), ys = poly.map((p) => p[1]), ids: number[] = [];
+      for (let n = 0; n < vis.length; n++) {
+        const x = sp[2 * n] ?? NaN, y = sp[2 * n + 1] ?? NaN;
+        if (!(x >= x0 && x <= x1 && y >= y0 && y <= y1)) continue;   // bbox first (NaN: behind the camera)
+        if (pointInPoly(x, y, xs, ys)) ids.push(view.id[vis[n] ?? -1] ?? -1);
+      }
+      const inspect = S.inspect;
+      setSelection(ids, inspect ? `3D selection · in ${inspect.title}` : '3D selection', { highlight: null, keepLasso: true, view: inspect?.view ?? null });
+      S.dimSet = new Set(ids);                 // the dots outside fade (render3d.ts), like a 2D lasso
+      scheduleRender();
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+    for (const t of CROSS) window.addEventListener(t, swallow, true);
+  }, true);
 }
 
 export function enableFit(): void {

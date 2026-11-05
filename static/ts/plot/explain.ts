@@ -12,13 +12,13 @@ import { getJSON } from '../core/api.js';
 import { $, esc, rgba } from '../core/dom.js';
 import { pts, S } from '../core/state.js';
 import { clsColor, clsName, THEME } from '../core/theme.js';
-import { plotDiv, xyOf } from './access.js';
+import { plotDiv, xyOf, xyzOf } from './access.js';
 import { updateMarks } from './marks.js';
 import { visibleIndices } from './render.js';
 
 type Mode = 'feat' | 'map';
 /** Class -> its centre on the map (and the box it sits on, for 'feat'). */
-type Centres = Map<number, { x: number; y: number; id: number | null }>;
+type Centres = Map<number, { x: number; y: number; z: number; id: number | null }>;   // z: NaN on a 2D map
 
 // the checks that explain themselves; Display › Class centres shows the stars on any view
 const EXPLAINED: Record<string, Mode> = { far: 'feat', suspicious: 'feat', far2d: 'map' };
@@ -31,6 +31,8 @@ export function centreMode(): Mode | null {
 }
 
 let cache: { key: string; view: unknown; mask: unknown; outlier: unknown; c: Centres } | null = null;
+
+export type { Centres };
 
 export function classCentres(mode: Mode): Centres {
   const view = S.view, P = pts();
@@ -46,16 +48,18 @@ export function classCentres(mode: Mode): Centres {
       const id = view.id[i] ?? -1, c = P.cls[id] ?? -1, b = best.get(c);
       if (b === undefined || (o[id] ?? Infinity) < (o[b] ?? Infinity)) best.set(c, id);
     }
-    for (const [c, id] of best) { const [x, y] = xyOf(id); out.set(c, { x, y, id }); }
+    for (const [c, id] of best) { const [x, y, z] = xyzOf(id); out.set(c, { x, y, z, id }); }
   } else {
-    const xs = new Map<number, number[]>(), ys = new Map<number, number[]>();
+    // per class: the median on each axis (a 3D cloud: z too)
+    const Z = view.z, xs = new Map<number, number[][]>();
     for (const i of vis) {
       const c = P.cls[view.id[i] ?? -1] ?? -1;
-      let a = xs.get(c), b = ys.get(c);
-      if (!a || !b) { a = []; b = []; xs.set(c, a); ys.set(c, b); }
-      a.push(view.x[i] ?? NaN); b.push(view.y[i] ?? NaN);
+      let a = xs.get(c);
+      if (!a) { a = [[], [], []]; xs.set(c, a); }
+      a[0]?.push(view.x[i] ?? NaN); a[1]?.push(view.y[i] ?? NaN);
+      if (Z) a[2]?.push(Z[i] ?? NaN);
     }
-    for (const [c, a] of xs) out.set(c, { x: median(a), y: median(ys.get(c) ?? []), id: null });
+    for (const [c, a] of xs) out.set(c, { x: median(a[0] ?? []), y: median(a[1] ?? []), z: Z ? median(a[2] ?? []) : NaN, id: null });
   }
   cache = { key, view, mask: S.filterMask, outlier: P.outlier, c: out };
   return out;
@@ -95,7 +99,9 @@ export function far2dIds(): number[] {
   for (const i of visibleIndices()) {
     const id = view.id[i] ?? -1, k = P.cls[id] ?? -1, ce = c.get(k);
     if (!ce) continue;
-    const dist = Math.hypot((view.x[i] ?? NaN) - ce.x, (view.y[i] ?? NaN) - ce.y);
+    // a 3D cloud: the distance in 3D (what the eye sees there)
+    const dz = view.z ? (view.z[i] ?? NaN) - ce.z : 0;
+    const dist = Math.hypot((view.x[i] ?? NaN) - ce.x, (view.y[i] ?? NaN) - ce.y, dz);
     let a = d.get(k);
     if (!a) { a = []; d.set(k, a); }
     a.push(dist);
@@ -173,6 +179,42 @@ export function explainMarks(ids: number[]): Marks {
         : `distance to class centre ${(P.outlier?.[id] ?? NaN).toFixed(3)} (in the features)`;
       out.annotations.push(label(x, y, text, clsColor(c)));
     }
+  }
+  return out;
+}
+
+// ---- the same explanations in a 3D cloud: segments in data space (drawn as one scatter3d line trace by
+// render3d.ts) + a label at each explained dot. With Display › Class centres on and no check, the hovered /
+// picked dots get a spoke to their class centre, so their place in the cloud reads against it.
+type Xyz = [number, number, number];
+export interface Lines3d { segs: Array<{ p: Xyz; q: Xyz; color: string }>; labels: Array<{ p: Xyz; text: string }> }
+
+export function explainLines3d(ids: number[]): Lines3d {
+  const out: Lines3d = { segs: [], labels: [] };
+  if (!S.view?.z) return out;
+  const check = S.activeView ?? '', mode = EXPLAINED[check] ?? centreMode();
+  if (!mode) return out;
+  const P = pts(), centres = classCentres(mode);
+  for (const id of [...new Set(ids)].slice(0, check === 'suspicious' ? 3 : 8)) {
+    const p = xyzOf(id), c = P.cls[id] ?? -1;
+    if (!Number.isFinite(p[0])) continue;
+    if (check === 'suspicious') {
+      const nb = neighbours(id);
+      if (!nb) continue;
+      let other = 0;
+      for (const n of nb) {
+        const q = xyzOf(n), nc = P.cls[n] ?? -1;
+        if (nc !== c) other++;
+        if (Number.isFinite(q[0])) out.segs.push({ p, q, color: clsColor(nc) });
+      }
+      out.labels.push({ p, text: `${other}/${nb.length} nearest are not ${clsName(c)}` });
+      continue;
+    }
+    const ce = centres.get(c);
+    if (!ce || !Number.isFinite(ce.z)) continue;
+    out.segs.push({ p, q: [ce.x, ce.y, ce.z], color: clsColor(c) });
+    if (check === 'far2d') out.labels.push({ p, text: `${(far2dScore.get(id) ?? NaN).toFixed(1)}× median distance (in 3D)` });
+    else if (check === 'far') out.labels.push({ p, text: `distance to centre ${(P.outlier?.[id] ?? NaN).toFixed(3)} (features)` });
   }
   return out;
 }

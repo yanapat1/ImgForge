@@ -203,7 +203,8 @@ class LiveFeed:
             return 0
         feature = key.split('|', 1)[0]
         proj = st.get_projection(key)
-        if proj is None or feature not in st.registry or not (feature in st.features or st.feature_cached(feature)):
+        # new boxes are placed on 2D maps only (a 3D view shows no provisional dots)
+        if proj is None or np.asarray(proj['xy']).shape[1] != 2 or feature not in st.registry or not (feature in st.features or st.feature_cached(feature)):
             return 0
         X = feats.l2_normalize(np.asarray(st.get_features(feature), np.float32))
         ids = np.asarray(proj['id'])

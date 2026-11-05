@@ -416,6 +416,11 @@
               <label class="field stack" title="What each box is turned into before projecting (your own models: Settings › Models)">Features
                 <select id="feature"></select></label>
               <label class="field stack">Method <select id="method"></select></label>
+              <label class="field stack" title="2D: a flat map (lasso, density groups). 3D: a cloud you can rotate — clusters that overlap on a flat map often separate in depth">Dimensions
+                <select id="proj-dims">
+                  <option value="2">2D map</option>
+                  <option value="3">3D cloud</option>
+                </select></label>
               <span id="params"></span>
               <span id="pca-info" class="muted num hint"></span>
               <button id="btn-apply" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Generate</button>
@@ -551,9 +556,21 @@
               <label class="check dist-toggle" title="Pick 2+ thumbnails (ctrl+click): lines between their dots show the feature-space distance">
                 <input type="checkbox" id="show-dist" checked> Distances between picked boxes</label>
               <label class="check" title="A star on each shown class's centre (always on with Far from class / Suspicious labels)"><input type="checkbox" id="show-centres"> Class centres</label>
-              <label class="check" title="Draw gridlines behind the dots"><input type="checkbox" id="show-grid"> Gridlines</label>
-              <label class="check" title="Switching the shown classes zooms so all their dots fit (far dots are never off screen)"><input type="checkbox" id="auto-fit" checked> Zoom to shown classes</label>
-              <div class="pop-title pop-sep">Density groups</div>
+              <label class="check d2-only" title="Draw gridlines behind the dots"><input type="checkbox" id="show-grid"> Gridlines</label>
+              <label class="check d2-only" title="Switching the shown classes zooms so all their dots fit (far dots are never off screen)"><input type="checkbox" id="auto-fit" checked> Zoom to shown classes</label>
+              <div class="d3-only pop-sep">
+                <div class="pop-title">3D cloud</div>
+                <label class="check" title="Each wall shows the cloud's shadow: three flat views of the same dots next to the 3D one"><input type="checkbox" id="d3-shadows"> Shadows on the walls</label>
+                <label class="check" title="Dots far from the camera fade into the background, so depth reads at a glance (follows every rotation)"><input type="checkbox" id="d3-fog"> Depth fog</label>
+                <label class="check" title="Lines from the hovered / picked dots down to the floor, so their height reads"><input type="checkbox" id="d3-drop" checked> Drop lines to the floor</label>
+                <label class="check" title="The box walls and their grid behind the cloud"><input type="checkbox" id="d3-walls" checked> Walls and grid</label>
+                <label class="check" title="No perspective: parallel lines stay parallel, so the XY / XZ / YZ views are exact flat maps"><input type="checkbox" id="d3-ortho"> Orthographic</label>
+                <label class="field" title="Turntable speed (the ⟳ button over the plot)">Spin <input id="d3-speed" type="range" min="2" max="60" value="15"></label>
+                <span class="muted hint">Drag: rotate · Shift+drag: select (lasso / box / circle) · right-drag: pan · wheel: zoom · double-click: reset</span>
+              </div>
+              <div class="pop-title pop-sep d2-only">Density groups</div>
+              <span class="d3-only muted hint">Density groups are found on 2D maps only.</span>
+              <div class="d2-only groups-2d">
               <label class="check" title="Draw a bubble around every group of dots"><input type="checkbox" id="g-bubbles"> Draw bubbles</label>
               <label class="check" title="Mark dots that belong to no group with a red cross"><input type="checkbox" id="g-outliers"> Mark outliers</label>
               <label class="check" title="Fade dots that are inside a group, so outliers stand out"><input type="checkbox" id="g-dim"> Dim grouped dots</label>
@@ -569,6 +586,7 @@
               <button id="btn-sel-outliers" class="view-btn block" data-view="sel-outliers" aria-pressed="false" title="Show every outlier dot in the gallery">
                 <svg class="ico on-only" aria-hidden="true"><use href="static/assets/icons.svg#i-check"/></svg>Select all outliers</button>
               <span id="g-info" class="muted num hint"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -658,6 +676,14 @@
           <button class="view-btn icon-btn active" data-shape="lasso" aria-pressed="true" aria-label="Freehand lasso" title="Freehand lasso — draw around the dots"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-polygon"/></svg></button>
           <button class="view-btn icon-btn" data-shape="box" aria-pressed="false" aria-label="Box" title="Box — drag corner to corner"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-box"/></svg></button>
           <button class="view-btn icon-btn" data-shape="circle" aria-pressed="false" aria-label="Circle" title="Circle — drag corner to corner (Shift: round)"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-circle"/></svg></button>
+        </div>
+        <!-- 3D cloud only (plot/render3d.ts): camera presets and the turntable -->
+        <div id="d3-tools" class="segmented d3-tools d3-only" role="group" aria-label="3D camera">
+          <button class="view-btn" data-cam="iso" title="Isometric view">3D</button>
+          <button class="view-btn" data-cam="top" title="Look down the 3rd axis: the 1–2 plane (like a flat map)">XY</button>
+          <button class="view-btn" data-cam="front" title="Look along the 2nd axis: the 1–3 plane">XZ</button>
+          <button class="view-btn" data-cam="side" title="Look along the 1st axis: the 2–3 plane">YZ</button>
+          <button id="d3-rotate" class="view-btn" aria-pressed="false" aria-label="Spin" title="Spin the cloud (turntable); speed in Display › 3D cloud">⟳</button>
         </div>
         <div id="plot-idle" class="plot-wait plot-idle hidden">
           <div class="wait-box panel">

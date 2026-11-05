@@ -52,9 +52,16 @@ def normalize_params(method, params):
     return {k: PARAM_TYPES.get(k, float)(v) for k, v in out.items()}   # same key whether value came as 30 or 30.0
 
 
-def projection_key(feature, method, params, classes):
+def projection_key(feature, method, params, classes, dims=2):
+    """Cache key of a projection. 2D keys keep their old form (saved maps stay valid); 3D adds a '|3d' suffix."""
     cls = 'all' if not classes else ','.join(str(c) for c in sorted(set(classes)))
-    return f'{feature}|{method}|{json.dumps(params, sort_keys=True)}|{cls}'
+    key = f'{feature}|{method}|{json.dumps(params, sort_keys=True)}|{cls}'
+    return key + '|3d' if int(dims) == 3 else key
+
+
+def projection_dims(key):
+    """2 or 3: the number of components of the projection `key` names."""
+    return 3 if key.endswith('|3d') else 2
 
 
 
@@ -631,10 +638,11 @@ class State:
             idx = self.saved_projections()
             entry = idx.get(key)
             if entry is None:
-                feature, method, params, cls = key.split('|', 3)
+                dims = projection_dims(key)
+                feature, method, params, cls = (key[:-3] if dims == 3 else key).split('|', 3)
                 entry = {'key': key, 'feature': feature, 'method': method, 'params': json.loads(params),
                          'classes': None if cls == 'all' else [int(c) for c in cls.split(',')],
-                         'created': _now()}
+                         'dims': dims, 'created': _now()}
             entry.update(fields)
             idx[key] = entry
             self.proj_dir.mkdir(exist_ok=True)
@@ -671,12 +679,15 @@ class State:
         while len(self.projections) > 48:
             self.projections.popitem(last=False)
 
-    def request_projection(self, feature, method, params, classes):
-        """Returns (projection, None) if cached, else (None, job)."""
+    def request_projection(self, feature, method, params, classes, dims=2):
+        """Returns (projection, key, None) if cached, else (None, key, job). dims: 2 or 3 components."""
         if feature not in self.registry:
             raise KeyError(feature)
+        dims = int(dims)
+        if dims not in (2, 3):
+            raise ValueError(f'dims must be 2 or 3, not {dims}')
         params = normalize_params(method, params)
-        key = projection_key(feature, method, params, classes)
+        key = projection_key(feature, method, params, classes, dims)
         proj = self.get_projection(key) if self.ready else None
         if proj is not None and (feature in self.scores or self._scores_file(feature).exists()):
             self.get_scores(feature)
@@ -685,6 +696,8 @@ class State:
         label = f'{analysis.METHODS[method]["label"]} · {self.registry[feature].label}'
         if classes:
             label += f' · {len(set(classes))} class(es)'
+        if dims == 3:
+            label += ' · 3D'
 
         def run(job):
             self.wait_index(job)
@@ -695,7 +708,7 @@ class State:
             ids = np.arange(len(self.samples)) if not classes else np.nonzero(np.isin(self.labels, list(classes)))[0]
             t0 = time.time()
             xy, info = self.pools.run('heavy', compute.do_project, emb[ids], method, params, self.registry[feature].metric,
-                                      progress=job.progress)
+                                      dims, progress=job.progress)
             proj = {'id': ids, 'xy': xy, 'info': info}
             self._store_projection(key, proj)
             self._rebuilt.add(key)
@@ -761,7 +774,7 @@ class State:
 
     def groups(self, key, min_cluster_size, per_class):
         proj = self.get_projection(key)
-        if proj is None:
+        if proj is None or projection_dims(key) != 2:     # density groups (bubbles) are drawn on 2D maps only
             return None
         gkey = (key, int(min_cluster_size), bool(per_class), self.edit_seq)
         if gkey in self.groups_cache:
@@ -774,7 +787,7 @@ class State:
     async def groups_async(self, key, min_cluster_size, per_class):
         """Same as groups(), but awaits the worker process so the event loop stays free."""
         proj = self.get_projection(key)
-        if proj is None:
+        if proj is None or projection_dims(key) != 2:
             return None
         gkey = (key, int(min_cluster_size), bool(per_class), self.edit_seq)
         if gkey in self.groups_cache:

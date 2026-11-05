@@ -28,6 +28,35 @@ def test_project_shape(method, n):
     assert isinstance(info, dict)
 
 
+@pytest.mark.parametrize('method', sorted(analysis.METHODS))
+@pytest.mark.parametrize('n', [3, 60])
+def test_project_shape_3d(method, n):
+    # the 3D cloud (Projection › Dimensions): every method gives one column per component
+    if method in NEEDS_PACKAGE:
+        pytest.importorskip(NEEDS_PACKAGE[method])
+    xyz, info = analysis.project(_data(n), method, n_components=3)
+    assert xyz.shape == (n, 3) and xyz.dtype == np.float32 and np.isfinite(xyz).all()
+    if method == 'pca' and n > 3:
+        assert len(info['explained_variance']) == 3
+
+
+def test_project_3d_rejects_other_dims():
+    with pytest.raises(ValueError):
+        analysis.project(_data(20), 'pca', n_components=4)
+
+
+def test_subset_fit_covers_every_point_3d(monkeypatch):
+    monkeypatch.setitem(analysis.FIT_MAX, 'spectral', 50)
+    xyz, _ = analysis.project(_data(200, spread=2.0), 'spectral', n_components=3)
+    assert xyz.shape == (200, 3) and np.isfinite(xyz).all()
+
+
+def test_projection_quality_3d():
+    x = _data(400)
+    q = analysis.projection_quality(x, analysis.project(x, 'pca', n_components=3)[0])
+    assert 0 <= q['trustworthiness'] <= 1
+
+
 def test_subset_fit_covers_every_point(monkeypatch):
     # isomap has transform(), spectral does not (placed by neighbours): both must place all points
     monkeypatch.setitem(analysis.FIT_MAX, 'isomap', 50)

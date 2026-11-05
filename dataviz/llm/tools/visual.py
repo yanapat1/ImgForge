@@ -26,13 +26,14 @@ UI ACTION CONTRACT (risk 'ui'; the engine emits {type: 'ui_action', id, action, 
 views/assistant.ts, applies `args` through its existing controls). Names, args and values are fixed:
 
     set_projection {feature?: str, method?: str, params?: {n_neighbors?: int, min_dist?: float,
-                                                           perplexity?: float, gamma?: float}}
+                                                           perplexity?: float, gamma?: float}, dims?: 2 | 3}
         feature: a key of list_features (e.g. 'openclip-h14', 'dinov2-base', 'hog', 'yolo:<run>')  -> #feature
         method:  pca | svd | ica | fa | umap | pacmap | localmap | tsne | kpca | isomap | lle | spectral | mds |
                  random | trees                                                                      -> #method
         params:  only the method's own (umap: n_neighbors, min_dist · pacmap / localmap / isomap / lle / spectral:
                  n_neighbors · tsne: perplexity · kpca: gamma)           -> #p-<method>-<param>, then Generate
-        At least one of feature / method / params. Omitted keys keep the page's current value.
+        dims:    2 = flat map, 3 = 3D cloud (every method)                       -> #proj-dims
+        At least one of feature / method / params / dims. Omitted keys keep the page's current value.
     set_color_by {by: str}                                                                       -> #color-by
         class | group | suggested | session | suspicion | outlier | area | aspect | brightness | blur |
         cl_issue | cl_quality | cl_suggested | cl_given_prob | cl_ood_feat | cl_ood_prob   (after the cleanlab check)
@@ -437,7 +438,8 @@ def _list_methods(ctx, a):
                     'params': {p: {'default': v, 'label': PARAM_INFO.get(p, (p, ''))[0],
                                    'hint': PARAM_INFO.get(p, ('', ''))[1]} for p, v in m['params'].items()},
                     **({'note': m['note']} if m.get('note') else {})})
-    return {'methods': out}, f'→ {len(out)} methods'
+    return {'methods': out, 'dims': 'every method runs in 2D (map) or 3D (cloud): the 2D | 3D switch, '
+                                    'set_projection dims'}, f'→ {len(out)} methods'
 
 
 def _projection_quality(ctx, a):
@@ -450,10 +452,12 @@ def _projection_quality(ctx, a):
     params = a.get('params') if isinstance(a.get('params'), dict) else \
         (v.get('params') if isinstance(v.get('params'), dict) and not a.get('method') else {})
     classes = _class_ids(st, a.get('classes')) if a.get('classes') else None
-    pk = projection_key(key, method, normalize_params(method, params), classes)
+    dims = a.get('dims') if a.get('dims') in (2, 3) else (v.get('dims') if v.get('dims') in (2, 3) else 2)
+    pk = projection_key(key, method, normalize_params(method, params), classes, dims)
     proj = st.get_projection(pk)
     if proj is None:
-        saved = [e for e in st.saved_projections().values() if e.get('feature') == key and e.get('method') == method]
+        saved = [e for e in st.saved_projections().values() if e.get('feature') == key and e.get('method') == method
+                 and e.get('dims', 2) == dims]
         if saved:
             proj = st.get_projection(saved[0]['key'])
             pk = saved[0]['key']
@@ -462,7 +466,7 @@ def _projection_quality(ctx, a):
         raise ToolError(f'{method} on {key} is not computed yet (set it in the Projection popover and press Generate first)'
                         + (f'; computed maps: {", ".join(done)}' if done else ''))
     q = (proj.get('info') or {}).get('quality') or {}
-    out = {'map': pk, 'points': int(len(proj['id'])), **q}
+    out = {'map': pk, 'points': int(len(proj['id'])), 'dims': int(proj['xy'].shape[1]), **q}
     if not q:
         out['note'] = 'this map was saved without quality numbers (computed by an older version): press Generate'
     else:
@@ -593,8 +597,8 @@ def _method_id(m):
 
 
 def _check_projection(ctx, a):
-    if not any(k in a for k in ('feature', 'method', 'params')):
-        raise ToolError('give at least one of feature, method, params')
+    if not any(k in a for k in ('feature', 'method', 'params', 'dims')):
+        raise ToolError('give at least one of feature, method, params, dims')
     v = _view(ctx)
     st = getattr(ctx, 'state', None)
     out = {}
@@ -622,6 +626,10 @@ def _check_projection(ctx, a):
                 raise ToolError(f'{k} must be between {lo} and {hi}')
             clean[k] = int(val) if k == 'n_neighbors' else float(val)
         out['params'] = clean
+    if 'dims' in a:
+        if isinstance(a['dims'], bool) or a['dims'] not in (2, 3):
+            raise ToolError('dims must be 2 (flat map) or 3 (3D cloud)')
+        out['dims'] = int(a['dims'])
     return out, None
 
 
@@ -661,6 +669,8 @@ def _proj_label(b, a):
         parts.append(m['label'] if m else str(a['method']))
     if a.get('params'):
         parts.append(', '.join(f'{k}={v}' for k, v in a['params'].items()))
+    if a.get('dims') in (2, 3):
+        parts.append(f'{a["dims"]}D')
     return 'Projection: ' + ' · '.join(parts) if parts else 'Generate projection'
 
 
@@ -723,11 +733,12 @@ register(Tool('list_features', 'The feature spaces of the Features dropdown: id,
               _obj({}), False, _list_features, **_R))
 register(Tool('list_methods', 'The projection methods of the Method dropdown with their parameters (defaults, what '
                               'each does).', _obj({}), False, _list_methods, **_R))
-register(Tool('projection_quality', 'How faithful a computed 2D map is: trustworthiness, continuity, k-NN kept '
-                                    '(default: the map on screen).',
+register(Tool('projection_quality', 'How faithful a computed 2D map or 3D cloud is: trustworthiness, continuity, '
+                                    'k-NN kept (default: the map on screen).',
               _obj({'feature': S('feature id (default: the current one)'), 'method': S('method id (default: current)'),
                     'params': {**PARAMS_SCHEMA, 'description': 'the parameters of that map (default: the current)'},
-                    'classes': A('the classes of a one-class / two-class map (default: all)')}),
+                    'classes': A('the classes of a one-class / two-class map (default: all)'),
+                    'dims': {'type': 'integer', 'enum': [2, 3], 'description': '2 = the 2D map, 3 = the 3D cloud (default: the one on screen)'}}),
               False, _projection_quality, **_R))
 register(Tool('issue_summary', 'Problem counts: the curation scan (per issue type), k-NN suspicion / outliers and the '
                                'cleanlab label-quality result of a feature.',
@@ -744,10 +755,12 @@ register(Tool('search_boxes_by_text', 'Boxes whose crops best match a text (e.g.
                     'k': I('how many boxes (default 50)', 1, 500)}, ['query']), False, _search_boxes_by_text, **_R))
 
 _U = dict(domain='visual', ctx=True, risk='ui')
-register(Tool('set_projection', 'Page action: switch the Features / Method / parameters and generate the projection '
-                                'at once (the user changes them in the Projection popover and presses Generate).',
+register(Tool('set_projection', 'Page action: switch the Features / Method / parameters / 2D-3D and generate the '
+                                'projection at once (the user changes them in the Projection popover and presses '
+                                'Generate).',
               _obj({'feature': S('a feature id from list_features'),
-                    'method': E('a method id from list_methods', list(_methods())), 'params': PARAMS_SCHEMA}),
+                    'method': E('a method id from list_methods', list(_methods())), 'params': PARAMS_SCHEMA,
+                    'dims': {'type': 'integer', 'enum': [2, 3], 'description': '2 = flat map, 3 = 3D cloud (rotate, camera presets, wall shadows)'}}),
               False, _ui_run(_check_projection), _proj_label, check=_check_projection, **_U))
 register(Tool('set_color_by', 'Page action: colour the dots by something else (Color dropdown).',
               _obj({'by': E('what colours the dots', COLOR_BY)}, ['by']), False, _ui_run(_ok),

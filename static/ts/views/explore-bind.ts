@@ -11,7 +11,8 @@ import { featureLabel, pts, S, UI } from '../core/state.js';
 import { clsName, plotBase, THEME } from '../core/theme.js';
 import { plotDiv } from '../plot/access.js';
 import { isOutlier, selectGroup, selectGroupOf } from '../plot/groups.js';
-import { clickOutsideLasso, enableLasso, enableMiddleDrag, enableSelectTools, enableRightPan, enableWheelZoom, enableFit, lassoEndedAt, redrawLasso, touchGestureRecent, updateOffscreen } from '../plot/interactions.js';
+import { bind3dControls } from '../plot/render3d.js';
+import { clickOutsideLasso, enableLasso, enableLasso3d, enableMiddleDrag, enableSelectTools, enableRightPan, enableWheelZoom, enableFit, lassoEndedAt, redrawLasso, touchGestureRecent, updateOffscreen } from '../plot/interactions.js';
 import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks } from '../plot/marks.js';
 import { bubbleAt, hoverOf, requestFit, scheduleRender, updateGrid } from '../plot/render.js';
 import { far2dIds, setExplainDot } from '../plot/explain.js';
@@ -79,16 +80,20 @@ export function bindEvents(): void {
     const media = tip.querySelector('.tip-media'), label = tip.querySelector('.tip-label');
     if (media) media.innerHTML = tipMedia(id);
     if (label) label.innerHTML = hoverOf(id);
-    const e = ev.event;
+    const e = (ev.event as MouseEvent | undefined) ?? lastPointer;      // a 3D hover event carries no mouse event
     tip.style.left = `${Math.min(e.clientX + 16, window.innerWidth - 180)}px`;
     tip.style.top = `${Math.min(e.clientY + 16, window.innerHeight - 220)}px`;
     tip.classList.remove('hidden');
   });
   plot.on('plotly_unhover', () => tip.classList.add('hidden'));
+  let lastPointer = { clientX: 0, clientY: 0 };
+  plot.addEventListener('mousemove', (e) => { lastPointer = { clientX: e.clientX, clientY: e.clientY }; }, { passive: true });
   plot.addEventListener('mouseleave', () => tip.classList.add('hidden'));
 
   enableRightPan(plot);
   enableLasso(plot);
+  enableLasso3d(plot);
+  bind3dControls();
   enableSelectTools();
   enableMiddleDrag(plot);
   enableWheelZoom(plot);
@@ -126,6 +131,7 @@ export function bindEvents(): void {
     } catch (err) { toast(errText(err), 'err'); } finally { updateTextSearch(); }
   };
   $req<HTMLSelectElement>('method').onchange = () => { updateMethodControls(); updateMapDirty(); };
+  $req<HTMLSelectElement>('proj-dims').onchange = () => { updateMapDirty(); };
   $req('btn-apply').onclick = () => { void loadView(); };
   $req<HTMLSelectElement>('mode').onchange = () => { updateModeControls(); requestFit(); scheduleRender(); reapplyInspect(); };
   $req<HTMLSelectElement>('class-a').onchange = () => { if ($req<HTMLSelectElement>('mode').value !== 'all') { requestFit(); scheduleRender(); reapplyInspect(); } };

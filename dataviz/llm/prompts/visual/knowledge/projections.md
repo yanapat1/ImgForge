@@ -1,6 +1,6 @@
 ---
-title: Projection methods (feature space → 2D map)
-summary: each method of the Method dropdown, what it preserves, its parameters and their effect, speed, when to use
+title: Projection methods (feature space → 2D map or 3D cloud)
+summary: each method of the Method dropdown, what it preserves, its parameters and their effect, speed, when to use; 2D map vs 3D cloud
 core: true
 ---
 | id | keeps | parameters (default) | speed / notes |
@@ -25,3 +25,10 @@ core: true
   button shows unapplied changes), so several settings can be changed before one projection job.
 - Checks (Suspicious labels, Far from class, duplicates, cleanlab) are computed in the full feature space, never
   on the map: a dot can look fine on the map and still be flagged.
+- **Dimensions** (Projection popover, under Method): **2D map** (default) or **3D cloud**. Every method runs in both;
+  3D keeps one more axis, so clusters that overlap on a flat map often separate in depth, and the map-quality numbers
+  are usually a little higher. A 3D map is its own saved view ("· 3D" in Saved views); 2D maps are unchanged.
+  3D costs about the same (t-SNE uses Barnes-Hut, a bit slower). PCA shows PC1-PC3 explained variance.
+  Assistant: `set_projection {dims: 3}` (or 2). Density groups (bubbles, outliers) and the live feed's new-box
+  dots are 2D only; everything else (colouring, filter, checks, picks, selection) works in 3D.
+  How to use the 3D view: see "Display options" (3D cloud).

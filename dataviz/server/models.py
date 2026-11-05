@@ -1,5 +1,7 @@
 """Request bodies of the JSON API (pydantic validates and documents them at /docs)."""
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from ..ml import features as feats
@@ -10,6 +12,7 @@ class ProjectionRequest(BaseModel):
     method: str = 'umap'
     params: dict = {}
     classes: list[int] | None = None
+    dims: Literal[2, 3] = 2               # 2D map or 3D cloud
 
 
 class LabelQualityRequest(BaseModel):
