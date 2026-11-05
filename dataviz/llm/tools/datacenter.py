@@ -444,7 +444,8 @@ _add(Tool('send_to_session', 'Open folders / files in the visualizer (target vis
                ['bucket', 'paths', 'target']),
           True, _send, lambda b, a: f'Send {_items(a["paths"])} from {_bname(b, a)} to '
                                     f'{"the visualizer" if a["target"] == "visualize" else "a labeling project"}'
-                                    + (f' as {a["name"]!r}' if a.get('name') else ''), s3_ok=True))
+                                    + (f' as {a["name"]!r}' if a.get('name') else ''), s3_ok=True,
+          danger_if=lambda a: a.get('target') == 'label'))       # a labeling project: always confirmed
 
 _add(Tool('set_s3_mode', 'Choose how a WHOLE S3 bucket is read: stream (from S3 on every request) or local '
                         '(every object downloaded into an editable local folder that can be re-synced and exported). '

@@ -1,7 +1,7 @@
 ---
 name: curate-a-class
 description: clean one class (or two that get mixed up): browse, find wrong / odd boxes, relabel or remove them
-when: the user wants to check, clean or fix one class, or two classes are confused
+when: check / clean one class, or two classes are confused
 ---
 1. `class_stats` for the class: boxes, images, size / light quantiles, how many look mislabelled and the class it is
    confused with.

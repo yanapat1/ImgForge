@@ -17,7 +17,10 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   session and labeling; the page decides which specialist answers and which tools it has (visualizer: maps,
   stats, models; elsewhere: data). Asked for something on another page, the assistant navigates there and the
   chat goes on ("↪ Continued"). One answer at a time per chat: another tab waits. A page with unsaved work asks
-  before it is left.
+  before it is left. A task over several pages keeps its checklist with the chat (Tasks strip, each step with
+  its page). From the Data Center a folder with no visualize session is sent there first (approved in ask; a
+  labeling project is always confirmed); from the visualizer the assistant finds the dataset's folder in the
+  Data Center (and the folders above it) and opens it there.
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve).
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).

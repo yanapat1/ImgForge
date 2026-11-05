@@ -152,6 +152,20 @@ def options(body, provider):
 
 
 SUMMARY_HEAD = '## Earlier in this chat (summary)'
+PLAN_MAX = 12
+PLAN_MARK = {'done': '✓', 'skipped': '–', 'active': '▶'}
+
+
+def plan_section(items):
+    """The chat's checklist for the prompt (only while a step is still open): one line per step, its page."""
+    items = [x for x in (items or []) if isinstance(x, dict) and x.get('text')]
+    if not items or all(x.get('state') in ('done', 'skipped') for x in items):
+        return ''
+    rows = [f'{PLAN_MARK.get(x.get("state"), "·")} {x["text"]}' + (f' ({roles.SCREEN_LABEL.get(x["page"], x["page"])})'
+                                                                 if x.get('page') else '')
+            for x in items[:PLAN_MAX]]
+    return ('## Plan of this chat\nContinue the ▶ (or the first ·) step; a step on another page: `navigate` there '
+            'with it as the goal. Keep it up to date with todo.\n' + '\n'.join(rows))
 
 
 def history(messages):
@@ -200,9 +214,10 @@ def pick_tools(all_tools, question, n=SMALL_TOOLS):
 
 
 def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, user_prompts=(), user_skills=(),
-            plugin_tools=(), forced_skills=(), limit=None, summary=None):
+            plugin_tools=(), forced_skills=(), limit=None, summary=None, plan=None):
     """Everything one run needs, checked before the stream starts (LLMError 400 when it cannot fit).
-    summary: the chat's compacted earlier part (engine/summarize.py), read as part of the system prompt."""
+    summary: the chat's compacted earlier part (engine/summarize.py), read as part of the system prompt.
+    plan: the chat's saved checklist (the todo items, over every page), shown while a step is open."""
     role = roles.get(role) if isinstance(role, str) else role
     if not msgs or msgs[-1]['role'] != 'user':
         raise LLMError("the last message must be the user's", 400)
@@ -220,6 +235,9 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
                              user_prompts=[p for p in user_prompts if p.get('role') in (None, 'all', role.name)],
                              user_name=(user or {}).get('display_name') or (user or {}).get('username') or '',
                              forced_skills=forced_skills, pages_text=roles.other_pages(role.name))
+    plan_text = plan_section(plan)
+    if plan_text:
+        system += '\n\n' + plan_text
     if summary:
         system += (f'\n\n{SUMMARY_HEAD}\nThe earlier part of this chat was compacted. This summary replaces those '
                    f'messages: trust its numbers, ids and decisions, and continue from its open tasks.\n\n{summary}')

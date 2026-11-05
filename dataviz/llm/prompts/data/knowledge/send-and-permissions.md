@@ -4,7 +4,9 @@ summary: send_to_session targets and task types, what each permission (data.mana
 ---
 - `send_to_session` opens folders / files as a **visualize** session (formats yolo-detect / seg / pose / obb, images,
   classification, embeddings) or a **label** project (target label; task_type detect (default), segment, pose, obb or
-  classify; classes come from its data.yaml). The result has the new session's url: give it to the user.
+  classify; classes come from its data.yaml). The result has the new session's id and url. Each send makes a NEW
+  session: first look for one with `list_sessions` bucket + path. To work there, `navigate` to it (viz / label,
+  session_id = the id) with the request as goal. A labeling project is always confirmed by the user.
 - Permissions (the user's tier; admins have all):
   - `data.manage`: create buckets, change files (ops, upload, write), tag, send, export to S3 / FTP / SFTP, read `.env`.
   - `dataset.create`: send to the visualizer. `label.create`: send to labeling.

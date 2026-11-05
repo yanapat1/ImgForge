@@ -1,7 +1,7 @@
 ---
 name: read-the-map
 description: explain what the 2D map (or 3D cloud) does and does not show, with its quality numbers
-when: "what does this cluster / gap / distance mean", a flagged dot looks fine on the map, or the map looks wrong
+when: what a cluster / gap / distance means, a flagged dot looks fine, the map looks wrong
 ---
 1. `view_state` and `projection_quality` for the map on screen.
 2. Explain the numbers: trustworthiness (no false neighbours), continuity (no torn-apart neighbours), neighbours kept;

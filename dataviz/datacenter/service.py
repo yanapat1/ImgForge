@@ -2295,6 +2295,57 @@ TASK_TYPES = {'detect': 'object_detection', 'segment': 'segmentation', 'pose': '
 VISUALIZABLE = ('yolo-detect', 'yolo-seg', 'yolo-pose', 'yolo-obb', 'images', 'classification', 'embeddings')
 
 
+def _parents(rel):
+    """'a/b/c' -> ['a/b', 'a', ''] (the folders above, nearest first: "../.." is parents[1])."""
+    parts = [p for p in rel.split('/') if p]
+    return ['/'.join(parts[:k]) for k in range(len(parts) - 1, -1, -1)]
+
+
+def locate(user, path=None, s3_bucket=None, prefix=None):
+    """The Data Center folder that holds a dataset (a visualize session's source) -> {bucket, bucket_name, path,
+    parents} or None when no bucket the user sees contains it. A local `path` matches a bucket whose folder (or
+    the local copy of a downloaded S3 link) contains it; an S3 source (s3_bucket, prefix) an S3 link of that
+    bucket whose prefix contains it. The deepest bucket wins (a bucket inside another bucket's folder)."""
+    with db.connect() as c:
+        rows = _visible_rows(user, c)
+    want = os.path.realpath(path) if path else None
+    best = None
+    for r in rows:
+        rel = None
+        if want:
+            for root in (r._r.root if r._r.kind != 's3' else None, r._r.local_root):
+                if not root:
+                    continue
+                root = os.path.realpath(root)
+                if want == root or want.startswith(root.rstrip(os.sep) + os.sep):
+                    rel = os.path.relpath(want, root).replace(os.sep, '/')
+                    break
+        elif s3_bucket and r._r.kind == 's3' and r._r.s3_bucket == s3_bucket:
+            bp, px = (r._r.prefix or '').strip('/'), (prefix or '').strip('/')
+            if not bp or px == bp or px.startswith(bp + '/'):
+                rel = px[len(bp):].strip('/')
+        if rel is None:
+            continue
+        rel = '' if rel == '.' else rel
+        depth = len([p for p in rel.split('/') if p])
+        if best is None or depth < best[0]:
+            best = (depth, rel, r)
+    if best is None:
+        return None
+    _, rel, r = best
+    return {'bucket': r.id, 'bucket_name': r.name, 'path': rel, 'parents': _parents(rel)}
+
+
+def folder_source(user, bid, rel):
+    """Where a bucket folder lives, in the terms a visualize session's source uses: {path} (local, absolute) or
+    {s3_bucket, prefix} (an S3 link) -> matched against the sessions (send() makes the same source)."""
+    r = _row(user, bid)
+    rel = store.clean_rel(rel or '')
+    if r.kind == 's3':
+        return {'s3_bucket': r.s3_bucket, 'prefix': '/'.join(p for p in (r.prefix.strip('/'), rel) if p)}
+    return {'path': os.path.realpath(_abs(r, rel, must_exist=False))}
+
+
 def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
     """Open one folder of a bucket as a visualize session (a saved dataset) or a labeling project (source
     {kind: local, path} / S3) -> {target, id, url} with the page's URL ('s/<id>/' or '?label=<pid>')."""

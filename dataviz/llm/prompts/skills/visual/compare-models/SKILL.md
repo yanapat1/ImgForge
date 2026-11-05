@@ -1,7 +1,7 @@
 ---
 name: compare-models
 description: compare detectors on this dataset, explain their errors with the data, recommend one
-when: the user asks which model is better, why a model fails, or to explain the Evaluation tab
+when: which model is better, why a model fails, the Evaluation tab
 ---
 1. `eval_summary`: the leaderboard (mAP50, mAP50-95, P, R, F1, ms per image, missed, wrong class, FP background),
    per-class AP of the best model and the findings. Nothing evaluated → `list_models`, then `run_eval_all` (or

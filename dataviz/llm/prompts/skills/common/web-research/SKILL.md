@@ -1,7 +1,7 @@
 ---
 name: web-research
 description: answer a public-knowledge question with web search, citing sources, without leaking internal names
-when: the question needs facts the app does not hold (a model, a paper, a library, a public dataset) and web search is on
+when: facts the app does not hold (a model, paper, library, public dataset) and web search is on
 ---
 1. Check first whether the knowledge topics or your tools already answer it (`read_docs`); the app's own facts beat
    the web.

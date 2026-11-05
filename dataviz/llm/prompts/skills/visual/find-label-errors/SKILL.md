@@ -1,7 +1,7 @@
 ---
 name: find-label-errors
 description: find likely wrong labels with k-NN suspicion, cleanlab and (if any) a model, then guide the fixes
-when: the user wants to find mislabelled boxes, wrong classes, or clean the labels
+when: find mislabelled boxes or wrong classes, clean the labels
 ---
 1. `issue_summary` and `class_stats`: which classes have the most suspicious boxes and with which class they are
    confused; is cleanlab run; is the dataset scanned.

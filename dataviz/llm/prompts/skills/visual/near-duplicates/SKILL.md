@@ -1,7 +1,7 @@
 ---
 name: near-duplicates
 description: find near-identical boxes / images, train-val leakage, and decide what to remove
-when: the user asks about duplicates, copies, leakage between splits, or a suspiciously high val score
+when: duplicates, copies, split leakage, a suspiciously high val score
 ---
 1. `issue_summary`: Curation counts for `dup_image` (same file bytes), `dup_box`, `split_leak` and `near_dup` if
    scanned. Not scanned → `open_tab` `curation` and ask the user to Scan dataset.

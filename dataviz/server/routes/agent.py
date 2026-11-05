@@ -201,7 +201,7 @@ def router(state, ctx):
             user_text = str(msgs_in[-1].get('text') or '')
         if not user_text.strip():
             raise HTTPException(400, 'the message is empty')
-        summary, n_saved = None, 0
+        summary, n_saved, plan = None, 0, None
         scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
         chat_scope = _chat_scope(role, scope)
         page = roles.page_of(role.name, scope, chat_scope if role.name == 'visual' else None)
@@ -212,7 +212,7 @@ def router(state, ctx):
                 cx = chat_sessions.context(user, sid)
             except chat_sessions.SessionError as e:
                 raise HTTPException(e.status, str(e))
-            summary, n_saved = cx['summary'], len(cx['messages'])
+            summary, n_saved, plan = cx['summary'], len(cx['messages']), cx['plan']
             msgs_run = [{'role': m['role'], 'text': m['text'], 'page': m['page']} for m in cx['messages']] + \
                 [{'role': 'user', 'text': user_text, 'page': page}]
         elif msgs_in and isinstance(msgs_in[-1], dict) and msgs_in[-1].get('role') == 'user' \
@@ -236,7 +236,7 @@ def router(state, ctx):
         def build(msgs, summary_):
             r_ = react.prepare(user, role, p, react.history(msgs), scope, opts, state=st, app=ctx,
                                user_prompts=a['prompts'], user_skills=a['skills'], plugin_tools=a['tools'],
-                               forced_skills=forced, limit=limit, summary=summary_)
+                               forced_skills=forced, limit=limit, summary=summary_, plan=plan)
             r_.ctx.web_cfg = web_cfg
             r_.ctx.ui_ack = body.get('ui_ack') is True
             r_.ctx.roles_on = roles_on
@@ -287,7 +287,7 @@ def router(state, ctx):
                          'text': f'Could not compact the chat ({str(e)[:200]}): the oldest messages are left out.'}]
 
         def gen():
-            texts, step_at, trace, ended, stopped, usage = [], 0, [], None, False, None
+            texts, step_at, trace, ended, stopped, usage, todo = [], 0, [], None, False, None, None
             try:
                 if need_compact:
                     yield json.dumps({'type': 'compact', 'state': 'start', 'auto': True}) + '\n'
@@ -306,6 +306,8 @@ def router(state, ctx):
                         stopped = True
                     elif t == 'done':
                         usage = ev.get('usage')
+                    elif t == 'todo':
+                        todo = ev.get('items')
                     trace.append(ev)
                     if t == 'meta':
                         ev = {**ev, 'session_id': sid, 'title': title, 'removed': removed}
@@ -331,6 +333,8 @@ def router(state, ctx):
                 try:
                     chat_sessions.append(user, sid, 'assistant', answer, trace=chat_sessions.compact_trace(trace),
                                          usage=usage, page={k: v for k, v in page.items() if k != 'continued'})
+                    if todo is not None:
+                        chat_sessions.set_plan(user, sid, todo)
                     if first_turn and ended == 'done' and not stopped and answer:
                         chat_sessions.improve_title(user, sid, p, user_text, answer, title)
                 except Exception as e:  # noqa: BLE001 - e.g. the chat was deleted meanwhile

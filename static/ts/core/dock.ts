@@ -55,7 +55,8 @@ export interface DockHost {
 export interface Handoff { sid: string | null; goal: string; to: string; tab?: string; mode?: string; at: number }
 
 type DockState = 'open' | 'rail';
-interface TaskStep { text: string; state: string }
+interface TaskStep { text: string; state: string; page?: string }
+const PAGE_NAME: Record<string, string> = { home: 'Home', data: 'Data Center', viz: 'Visualizer', label: 'Labeling' };
 
 const KEY = 'dataviz.dock';
 const CURRENT = 'dataviz.chat.current';                  // the one chat every page opens
@@ -159,7 +160,9 @@ function tasksHTML(): string {
     `<span class="grow"></span><button type="button" class="ghost sm" data-dock="stop" title="Stop the assistant (Esc in the chat box)">${icon('stop')}Stop</button></div>` : '';
   const steps = D.steps.map((s) => {
     const st = /done|complete/.test(s.state) ? 'done' : /progress|doing|active/.test(s.state) ? 'doing' : 'todo';
-    return `<li class="${st}"><span class="dot" aria-hidden="true">${st === 'done' ? icon('check') : ''}</span><span>${esc(s.text)}</span></li>`;
+    const pg = s.page ? PAGE_NAME[s.page] ?? s.page : '';
+    return `<li class="${st}"><span class="dot" aria-hidden="true">${st === 'done' ? icon('check') : ''}</span><span>${esc(s.text)}</span>` +
+      (pg ? `<span class="grow"></span><span class="dock-page">${esc(pg)}</span>` : '') + '</li>';
   }).join('');
   const jobRows = jobs.map(([, j]) => `<li class="job${j.done ? (j.ok ? ' done' : ' bad') : ''}"><span class="dot" aria-hidden="true">${j.done ? icon(j.ok ? 'check' : 'x') : ''}</span>` +
     `<span>${esc(j.label)}</span><span class="grow"></span><span class="num">${j.done ? '' : j.pct == null ? '…' : `${Math.round(j.pct)}%`}</span>` +
@@ -361,7 +364,8 @@ export function dockEvent(ev: ChatEvent): void {
     case 'todo':
       D.steps = (Array.isArray(ev['items']) ? ev['items'] : []).map((x) => {
         const r = (typeof x === 'object' && x !== null ? x : {}) as Record<string, unknown>;
-        return { text: String(r['text'] ?? ''), state: String(r['state'] ?? 'todo') };
+        const page = typeof r['page'] === 'string' ? r['page'] : '';
+        return { text: String(r['text'] ?? ''), state: String(r['state'] ?? 'todo'), ...(page ? { page } : {}) };
       }).filter((s) => s.text).slice(0, 30);
       break;
     case 'ui_action': drive(String(ev['label'] || ev['action'] || '')); break;

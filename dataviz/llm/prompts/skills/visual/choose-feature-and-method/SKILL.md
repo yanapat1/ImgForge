@@ -1,7 +1,7 @@
 ---
 name: choose-feature-and-method
 description: pick the feature space and projection method (with parameters) for what the user wants to see
-when: "which features / method should I use", the map looks like one blob or confetti, or a new dataset
+when: which features / method, the map is one blob or confetti, a new dataset
 ---
 1. `view_state` (what is on screen) and `list_features` (what exists, computed ✓, text search).
 2. Match the goal to a feature:

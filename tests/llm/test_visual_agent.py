@@ -72,7 +72,7 @@ def test_tools_are_visual_ctx_tools_without_the_data_center():
     assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'compare_shift', 'compare_stress', 'compare_tests', 'list_features', 'list_methods',
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
                      'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view',
-                     'list_models', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats'}
+                     'list_models', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats', 'data_location'}
     assert all(tools.REGISTRY[n].ctx for n in names)
     assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS) - set(visual.RUN_ACTIONS)
     assert {n for n in names if tools.REGISTRY[n].risk == 'run'} == set(visual.RUN_ACTIONS)
