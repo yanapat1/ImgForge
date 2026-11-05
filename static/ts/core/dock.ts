@@ -23,7 +23,7 @@
 // showing the same chat reload it when a turn ends (BroadcastChannel), and the server answers one turn at a time.
 
 import { continuedLabel, type ChatHandle } from './chat.js';
-import { esc, icon } from './dom.js';
+import { esc, icon, morphInner } from './dom.js';
 import { LLM } from './llm.js';
 import { dataUrl, homeUrl, labelUrl, vizUrl } from './nav.js';
 import type { AiTurn, ChatEvent, UiAction, UiResult } from '../types-chat.js';
@@ -178,8 +178,10 @@ function render(): void {
   document.documentElement.dataset['dock'] = on ? D.state : 'off';
   document.documentElement.style.setProperty('--dock-w', `${clampW(D.width)}px`);
   if (!on) return;
-  r.querySelector<HTMLElement>('.dock-head')!.innerHTML = headHTML();
-  r.querySelector<HTMLElement>('.dock-rail')!.innerHTML = railHTML();
+  // morphed, not replaced: this runs on every streamed event, and new nodes would restart the ring / spinners and
+  // make a click on Stop or a task miss
+  morphInner(r.querySelector<HTMLElement>('.dock-head')!, headHTML());
+  morphInner(r.querySelector<HTMLElement>('.dock-rail')!, railHTML());
   renderTasks();
 }
 
@@ -187,7 +189,7 @@ function renderTasks(): void {
   const el = D.root?.querySelector<HTMLElement>('.dock-tasks');
   if (!el) return;
   const html = tasksHTML();
-  el.innerHTML = html;
+  morphInner(el, html);
   el.classList.toggle('hidden', !html);
 }
 

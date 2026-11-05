@@ -133,3 +133,54 @@ export async function copyText(text: string): Promise<boolean> {
   prev?.focus();
   return ok;
 }
+
+// ---------------------------------------------------------------- morph: re-render in place
+/** Make `cur` match `next` (an element of the same tag, e.g. freshly parsed HTML) by editing it in place:
+ *  attributes, text and children by position; a child of another kind or tag is swapped. Elements that did not change
+ *  stay the same nodes, so a click half-way (mousedown → mouseup on the same button), focus, a running CSS animation
+ *  and scroll positions survive a re-render that would otherwise replace them all (outerHTML). `next` is consumed. */
+export function morph(cur: Element, next: Element): void {
+  const a = cur.attributes, b = next.attributes;
+  for (let i = a.length - 1; i >= 0; i--) { const n = a[i]?.name; if (n && !next.hasAttribute(n)) cur.removeAttribute(n); }
+  for (let i = 0; i < b.length; i++) { const at = b[i]; if (at && cur.getAttribute(at.name) !== at.value) cur.setAttribute(at.name, at.value); }
+  if (cur instanceof HTMLInputElement) {            // properties the user may have changed: follow the new markup
+    cur.checked = next.hasAttribute('checked');
+    const v = next.getAttribute('value') ?? '';
+    if (cur.value !== v && document.activeElement !== cur) cur.value = v;
+  }
+  let x = cur.firstChild, y = next.firstChild;
+  while (y) {
+    const ny = y.nextSibling;
+    if (!x) { cur.appendChild(y); y = ny; continue; }
+    const nx = x.nextSibling;
+    if (x.nodeType === y.nodeType && (x.nodeType !== 1 || (x as Element).tagName === (y as Element).tagName)) {
+      if (x.nodeType === 1) morph(x as Element, y as Element);
+      else if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue;
+    } else cur.replaceChild(y, x);
+    x = nx; y = ny;
+  }
+  while (x) { const nx = x.nextSibling; cur.removeChild(x); x = nx; }
+}
+
+const morphTpl = typeof document !== 'undefined' ? document.createElement('template') : null;
+/** morph(el, <the one element of `html`>); swaps `el` when the tag differs. Returns the element now on the page. */
+export function morphHTML(el: Element, html: string): Element {
+  if (!morphTpl) return el;
+  morphTpl.innerHTML = html;
+  const next = morphTpl.content.firstElementChild;
+  if (!next) { el.remove(); return el; }
+  if (next.tagName !== el.tagName) { el.replaceWith(next); return next; }
+  morph(el, next);
+  morphTpl.innerHTML = '';
+  return el;
+}
+
+const lastInner = new WeakMap<Element, string>();
+/** el.innerHTML = html, done by morph (the unchanged nodes stay) and skipped when html is what it was last time. */
+export function morphInner(el: Element, html: string): void {
+  if (lastInner.get(el) === html) return;
+  lastInner.set(el, html);
+  const n = el.cloneNode(false) as Element;
+  n.innerHTML = html;
+  morph(el, n);
+}

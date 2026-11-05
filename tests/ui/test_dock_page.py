@@ -264,3 +264,76 @@ def test_one_chat_across_pages(server):  # noqa: F811 - the fixture
         assert not errors, '\n'.join(errors)
     finally:
         fake.should_exit = True
+
+
+# ---------------------------------------------------------------- a streaming answer stays clickable
+def _slow_thinker():
+    """An OpenAI-compatible model that thinks for ~4 s (a reasoning_content delta every 40 ms), then answers."""
+    import asyncio
+    import json as _json
+
+    from fastapi import FastAPI, Request
+    from fastapi.responses import StreamingResponse
+    app = FastAPI()
+
+    @app.get('/v1/models')
+    def models():
+        return {'data': [{'id': 'gpt-x'}]}
+
+    @app.post('/v1/chat/completions')
+    async def chat(request: Request):
+        body = await request.json()
+        if not body.get('stream'):
+            return {'choices': [{'message': {'role': 'assistant', 'content': 'ok'}}], 'usage': {'prompt_tokens': 1, 'completion_tokens': 1}}
+
+        async def gen():
+            for k in range(100):
+                yield 'data: ' + _json.dumps({'choices': [{'delta': {'reasoning_content': f'step {k} of my thinking. '}}]}) + '\n\n'
+                await asyncio.sleep(0.04)
+            yield 'data: ' + _json.dumps({'choices': [{'delta': {'content': 'Done thinking.'}}]}) + '\n\n'
+            yield 'data: [DONE]\n\n'
+        return StreamingResponse(gen(), media_type='text/event-stream')
+    return app
+
+
+def test_streaming_answer_stays_clickable(server):  # noqa: F811 - the fixture
+    """While the answer streams (an event every 40 ms) the turn is patched in place, not replaced: the activity header
+    opens on a click, the live Thinking row's text shows, and the spinner stays the same element (it does not restart)."""
+    from test_models import _serve
+    fake, url = _serve(_slow_thinker())
+    errors = []
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'slow', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
+                                                 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1400, 'height': 900})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+            page.goto(f'{server}/')
+            page.wait_for_selector('#ai-dock #ai-page #ai-page-q', timeout=15000)
+            page.fill('#ai-page-q', 'Think about it')
+            page.press('#ai-page-q', 'Enter')
+            head = page.locator('#ai-page .ct-act.live > .ct-act-h')
+            page.wait_for_selector('#ai-page .ct-act.live .ct-act-now:has-text("Thinking")', timeout=15000)
+            page.evaluate("document.querySelector('#ai-page .ct-act.live .ct-spin').__mark = 1")
+            # a slow click (mousedown, 150 ms, mouseup) lands although several events arrive in between
+            b = head.bounding_box()
+            page.mouse.move(b['x'] + 40, b['y'] + b['height'] / 2)
+            page.mouse.down()
+            page.wait_for_timeout(150)
+            page.mouse.up()
+            page.wait_for_selector('#ai-page .ct-act.live.open .ct-act-row.k-think .ct-act-text', timeout=3000)
+            assert 'of my thinking' in page.inner_text('#ai-page .ct-act.live .ct-act-text')
+            page.wait_for_timeout(400)
+            assert page.evaluate("document.querySelector('#ai-page .ct-act.live .ct-spin').__mark") == 1, \
+                'the spinner was replaced (its animation restarts)'
+            # it stays open through the end of the answer
+            page.wait_for_selector('#ai-page .ai-msg.bot:has-text("Done thinking.")', timeout=20000)
+            assert page.get_attribute('#ai-page .ct-act > .ct-act-h', 'aria-expanded') == 'true'
+            browser.close()
+        assert not errors, '\n'.join(errors)
+    finally:
+        fake.should_exit = True

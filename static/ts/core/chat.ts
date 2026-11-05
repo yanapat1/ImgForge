@@ -16,7 +16,7 @@ import type {
   AiTurn, Block, ChatCatalog, ChatEffort, ChatEvent, ChatMode, ChatPrefs, ChatRole, ChatSession, SessionDetail, SessionList, SessionRef, ThinkLevel, ToolItem, UiAction, UiResult, WebLevel,
 } from '../types-chat.js';
 import { errText, getJSON, isStatus, postJSON, sendJSON } from './api.js';
-import { copyText, esc, icon } from './dom.js';
+import { copyText, esc, icon, morphHTML } from './dom.js';
 import { LLM } from './llm.js';
 import { md } from './md.js';
 import { arrowNav, floatPopover } from './popover.js';
@@ -611,7 +611,9 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     // the open activity list scrolls on its own: keep its place, or follow the newest step when it was at the end
     const list = el.querySelector<HTMLElement>('.ct-act-list');
     const listTop = list ? list.scrollTop : 0, listEnd = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 24;
-    el.outerHTML = entryHTML(e, i);
+    // patched in place, not replaced: a streaming answer re-renders every frame, and a new element each time made a
+    // click on the activity header / a row miss (mousedown and mouseup on different nodes) and restarted the spinners
+    morphHTML(el, entryHTML(e, i));
     const next = logEl.querySelector<HTMLElement>(`.chat-turn[data-ti="${i}"] .ct-act-list`);
     if (next) next.scrollTop = listEnd ? next.scrollHeight : listTop;
     if (stick) toBottom();
