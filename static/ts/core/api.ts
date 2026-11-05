@@ -34,6 +34,9 @@ export async function api(path: string, opts?: RequestInit): Promise<Response> {
 
 /** True when an error made by api() carries this HTTP status. */
 export const isStatus = (e: unknown, status: number): boolean => new RegExp(`: ${status} `).test(errMessage(e));
+/** A failure worth trying again: no connection, a timeout, busy (409 / 429) or the server's 5xx. */
+export const isTransient = (e: unknown): boolean =>
+  /Failed to fetch|NetworkError|Load failed|timed? ?out/i.test(errMessage(e)) || [409, 425, 429, 500, 502, 503, 504].some((s) => isStatus(e, s));
 
 /** GET path, parse JSON as T (T is the caller's claim about the server payload; types.ts has the shapes). */
 export const getJSON = <T = unknown>(path: string, signal?: AbortSignal): Promise<T> =>

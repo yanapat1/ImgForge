@@ -10,20 +10,23 @@
 // and a Settings change (window event `llm-state`) re-renders live. Chats are saved on the server; an old
 // localStorage `ai-chat:<dataset>:<user id>` history is shown read-only once, then removed.
 
-import { api, errMessage, errText, postJSON } from '../core/api.js';
+import { api, errMessage, errText, isTransient, postJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
 import { mountChat, type ChatHandle } from '../core/chat.js';
-import { dockHooks, dockOpen, openDock, refreshDock, setDockHost, toggleDock } from '../core/dock.js';
+import { dockHooks, dockOpen, openDock, refreshDock, setDockHost, toggleDock, withNav } from '../core/dock.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { applyLLM, llmOn } from '../core/llm.js';
 import { meta, pts, S } from '../core/state.js';
 import type { Job } from '../types.js';
-import type { UiAction } from '../types-chat.js';
+import type { UiAction, UiResult } from '../types-chat.js';
 import { canRecord, cancelRecording, startRecording, stopRecording } from '../core/voice.js';
 import { fitToVisible } from '../plot/interactions.js';
 import { openSettings } from '../settings/dialog.js';
-import { loadView, onGroupControls, refreshTagList, saveSettings, updateMethodControls, updateTextSearch } from './controls.js';
+import { loadView, onGroupControls, refreshTagList, runLabelQuality, saveSettings, takeViewError, updateMethodControls, updateTextSearch } from './controls.js';
+import { scan as curationScan } from './curation.js';
+import { runAllNotRun } from './eval.js';
+import { runModelOnDataset } from './model.js';
 import { applyFilterSpec, filterSpec, runNLFilter, runNow } from './filter-bar.js';
 import { setSelection } from './gallery.js';
 import { curTab, resizePlots, switchTab } from './layout.js';
@@ -120,8 +123,69 @@ const ISSUES: Record<string, { btn: string; view: string }> = {
 
 const hasOption = (sel: HTMLSelectElement | null, v: string): boolean => !!sel && [...sel.options].some((o) => o.value === v);
 
-/** Apply one UI action through the page's own controls; false when it cannot be done here. */
-async function applyUi(a: UiAction): Promise<boolean> {
+/** The touched control pulses once (the user sees what the assistant pressed). */
+function touch(el: Element | null): void {
+  if (!(el instanceof HTMLElement)) return;
+  el.classList.remove('ai-touch');
+  void el.offsetWidth;                           // restart the animation
+  el.classList.add('ai-touch');
+  window.setTimeout(() => el.classList.remove('ai-touch'), 1700);
+}
+const touchTab = (tab: string): void => touch(document.querySelector(`#activity .act[data-tab="${CSS.escape(tab)}"]`));
+
+/** A map is on screen: what it is and how faithful (the agent's result of set_projection). */
+function mapDetail(): string {
+  const r = S.viewReq, q = S.view?.info?.quality;
+  if (!r) return 'the map is on screen';
+  return `map on screen: ${r.feature} · ${r.method} · ${S.view?.z ? '3D' : '2D'}` +
+    (q ? ` · trustworthiness ${q.trustworthiness.toFixed(3)}, continuity ${q.continuity.toFixed(3)}` : '');
+}
+const viewFailed = (): UiResult => { const e = takeViewError(); return { ok: false, detail: e ? errText(e) : 'the map was not generated (a newer request replaced it)', transient: e ? isTransient(e) : false }; };
+
+/** The agent's run actions: the page's own flows (buttons, job polling, refresh), their outcome reported back. */
+async function applyRun(a: UiAction): Promise<UiResult | null> {
+  const g = a.args;
+  const s = (k: string): string => (typeof g[k] === 'string' ? String(g[k]) : '');
+  switch (a.action) {
+    case 'run_model': {
+      touchTab('model');
+      const r = await runModelOnDataset(s('model'), typeof g['conf'] === 'number' ? g['conf'] : null);
+      touch($('m-run'));
+      return r;
+    }
+    case 'run_eval_all': {
+      touchTab('eval');
+      const r = await runAllNotRun();
+      if (!r.ran) return { ok: true, detail: 'every model already ran on this dataset: the leaderboard is on the Evaluation tab' };
+      return r.failed.length ? { ok: r.failed.length < r.ran, detail: `${r.ran - r.failed.length} of ${r.ran} ran; failed: ${r.failed.join(' · ')}` }
+        : { ok: true, detail: `${r.ran} model${r.ran === 1 ? '' : 's'} ran: the leaderboard is on the Evaluation tab` };
+    }
+    case 'run_scan': {
+      if (s('kind') === 'cleanlab') {
+        if (!S.view && !await loadView()) return viewFailed();
+        touch($('issues-btn'));
+        return await runLabelQuality() ? { ok: true, detail: 'label-quality check done: the cleanlab views of Find issues are ready' }
+          : { ok: false, detail: 'the label-quality check did not finish (see the page message)' };
+      }
+      switchTab('curation');
+      touchTab('curation');
+      touch($('cur-scan'));
+      return curationScan(s('model') || null);
+    }
+    case 'compute_stats': {
+      if (!S.view && !await loadView()) return viewFailed();
+      switchTab('stats');
+      touchTab('stats');
+      return { ok: true, detail: 'Class stats is open' };
+    }
+    default: return null;
+  }
+}
+
+/** Apply one page action through the page's own controls; false / {ok: false} when it cannot be done here. */
+async function applyUi(a: UiAction): Promise<boolean | UiResult> {
+  const run = await applyRun(a);
+  if (run) return run;
   const g = a.args;
   const s = (k: string): string => (typeof g[k] === 'string' ? String(g[k]) : '');
   switch (a.action) {
@@ -137,8 +201,8 @@ async function applyUi(a: UiAction): Promise<boolean> {
       updateMethodControls();
       saveSettings();
       if (curTab !== 'explore') switchTab('explore');
-      void loadView();
-      return true;
+      touch($('map-btn'));
+      return await loadView() ? { ok: true, detail: mapDetail() } : viewFailed();
     }
     case 'set_color_by': {
       const el = $<HTMLSelectElement>('color-by'), by = s('by');
@@ -157,7 +221,8 @@ async function applyUi(a: UiAction): Promise<boolean> {
       const btn = document.querySelector<HTMLElement>(`#activity .act[data-tab="${CSS.escape(tab)}"]`);
       if (!TABS.includes(tab) || !btn || btn.classList.contains('hidden')) return false;
       if (tab !== curTab) switchTab(tab);
-      return true;
+      touchTab(tab);
+      return { ok: true, detail: `${TAB_NAMES[tab] ?? tab} is open` };
     }
     case 'show_issue': {
       const it = ISSUES[s('issue').toLowerCase().replace(/_/g, '-')];
@@ -189,6 +254,7 @@ export function initAssistantDock(): void {
     onResize: () => { resizePlots(); syncActIcon(); },
     settings: () => { void openSettings('llm'); },
     sessionKey: () => `ai-side.${datasetId()}`,
+    onHandoff: (h) => { if (h.tab && TABS.includes(h.tab) && h.tab !== curTab) switchTab(h.tab); },
   });
   const act = $('act-ai');
   if (act) act.onclick = () => toggleDock();
@@ -243,7 +309,7 @@ function build(root: HTMLElement): void {
       sessionScope: () => (datasetId() ? { dataset_id: datasetId() } : null),
       scopeName: 'dataset',
       scopeLabel: (sc) => { const n = sc?.['name']; return typeof n === 'string' && n ? n : sc?.['dataset_id'] === datasetId() ? 'this dataset' : 'dataset'; },
-      onUiAction: applyUi,
+      onUiAction: withNav(applyUi),
       onEvent: dockHooks().onEvent,
       onDone: (t) => { if (t.usage) A.last = { in: t.usage.in, out: t.usage.out, ms: t.ms }; dockHooks().onDone(t); renderHead(); },
       onUpdate: () => refreshDock(),

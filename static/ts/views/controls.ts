@@ -163,7 +163,8 @@ function currentRequest(): ProjectionRequest {
   return { feature: $req<HTMLSelectElement>('feature').value, method, params, classes: null, dims };   // always all classes; display filter is client-side
 }
 
-export async function loadView(): Promise<void> {
+/** Generate the map the controls ask for -> true when it is on screen (false: failed, or a newer request won). */
+export async function loadView(): Promise<boolean> {
   const req = currentRequest();
   const seq = ++viewSeq;
   $req('plot-idle').classList.add('hidden');
@@ -171,13 +172,13 @@ export async function loadView(): Promise<void> {
     let r = await postJSON<ProjectionResult>('api/projection', req);
     while (!r.ready) {
       await waitJob(r.job_id, (j) => { if (seq === viewSeq) showWait(j); });
-      if (seq !== viewSeq) return;
+      if (seq !== viewSeq) return false;
       r = await postJSON<ProjectionResult>('api/projection', req);
     }
     await ensureScores(req.feature, seq);
-    if (seq !== viewSeq) return;
+    if (seq !== viewSeq) return false;
     await loadLabelQuality(req.feature);
-    if (seq !== viewSeq) return;
+    if (seq !== viewSeq) return false;
     hideWait();
     const was3d = !!S.view?.z;
     if (was3d !== !!r.z) clearLasso();          // a 2D lasso means nothing in a 3D cloud (and back)
@@ -202,12 +203,19 @@ export async function loadView(): Promise<void> {
     renderGallery();
     void refreshStatus();
     void refreshSavedViews();
+    return true;
   } catch (e) {
-    if (seq !== viewSeq) return;
+    if (seq !== viewSeq) return false;
     hideWait();
+    lastViewError = e;
     toast(errMessage(e), 'err');
+    return false;
   }
 }
+
+let lastViewError: unknown = null;
+/** The error of the last failed loadView (the assistant reports it), cleared on read. */
+export function takeViewError(): unknown { const e = lastViewError; lastViewError = null; return e; }
 
 async function ensureScores(feature: string, seq: number): Promise<void> {
   if (S.scoresFeature === feature) return;

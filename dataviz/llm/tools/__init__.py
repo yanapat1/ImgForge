@@ -30,7 +30,10 @@ from dataclasses import dataclass, field
 
 MAX_LIST = 50                   # entries / files / buckets per result
 MAX_TEXT = 8000                 # characters of a text file per result
-RISKS = ('read', 'change', 'danger', 'ui', 'control')
+# read runs at once · change: confirmed in ask, runs in auto · danger: always confirmed · ui: a page action (Apply
+# button in ask, applied in auto) · run: a page action that starts work (a model run, a map, a scan): confirmed in
+# ask, runs in auto, the page reports its result (engine/uiwait.py) · control: handled by the engine
+RISKS = ('read', 'change', 'danger', 'ui', 'run', 'control')
 
 
 class ToolError(ValueError):
@@ -156,12 +159,12 @@ CONTROL_ONLY_ENGINE = {'todo', 'submit_plan'}     # the engine's planner tools: 
 
 def for_role(domains, mode='ask', extra=()):
     """The tools of these domains (+ extra Tool objects, e.g. a user's plugin tools), as {name: Tool}.
-    Mode plan offers no change / danger / ui tool: the agent researches and submits a plan instead."""
+    Mode plan offers no change / danger / ui / run tool: the agent researches and submits a plan instead."""
     out = {}
     for t in [*REGISTRY.values(), *extra]:
         if t.domain not in domains:
             continue
-        if mode == 'plan' and t.risk in ('change', 'danger', 'ui'):
+        if mode == 'plan' and t.risk in ('change', 'danger', 'ui', 'run'):
             continue
         if mode != 'plan' and t.name == 'submit_plan':
             continue

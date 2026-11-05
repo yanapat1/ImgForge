@@ -68,7 +68,7 @@ async function refresh(): Promise<void> {
   }
 }
 
-async function runModels(ids: string[]): Promise<void> {
+async function runModels(ids: string[]): Promise<string[]> {
   const failed: string[] = [];                         // one toast at the end, not a blocking alert per model
   for (const id of ids) {
     if (E.running.has(id)) continue;
@@ -92,6 +92,16 @@ async function runModels(ids: string[]): Promise<void> {
   if (failed.length) toast(failed.length === 1 ? `Prediction failed. ${failed[0]}` : `${failed.length} models failed. ${failed.join(' · ')}`, 'err');
   void modelsChanged();
   await refresh();
+  return failed;
+}
+
+/** The assistant's run_eval_all: Evaluation › Run N not run. */
+export async function runAllNotRun(): Promise<{ ran: number; failed: string[] }> {
+  switchTab('eval');
+  await refresh();
+  const done = new Set((E.data?.leaderboard.rows ?? []).map((r) => r.id));
+  const ids = E.models.filter((m) => !done.has(m.id)).map((m) => m.id);
+  return { ran: ids.length, failed: ids.length ? await runModels(ids) : [] };
 }
 
 // ---------------------------------------------------------------- left panel

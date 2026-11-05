@@ -12,12 +12,16 @@
 // the page, opened from a floating ◆ button. The left edge drags the width (320 – min(640, 55% of the window)).
 // Ctrl+. opens / collapses it. Open state and width are a per-browser convenience (localStorage, try/catch).
 // Each screen registers one DockHost (setDockHost); the host mounts its chat on the first open and passes
-// dockHooks() into mountChat so the tasks strip and the ring follow the agent's events.
+// dockHooks() into mountChat so the tasks strip and the ring follow the agent's events, and withNav(page handler)
+// as its onUiAction: the agent's `navigate` opens another page. The turn ends there; the goal, this chat's id and
+// mode go into sessionStorage (HANDOFF), and the dock of the new page opens and sends the goal as its first
+// message with handoff_from (the server seeds the new chat with the old one's summary): the work continues there.
 
 import type { ChatHandle } from './chat.js';
 import { esc, icon } from './dom.js';
 import { LLM } from './llm.js';
-import type { AiTurn, ChatEvent } from '../types-chat.js';
+import { dataUrl, homeUrl, labelUrl, vizUrl } from './nav.js';
+import type { AiTurn, ChatEvent, UiAction, UiResult } from '../types-chat.js';
 
 export interface DockHost {
   /** the host section's id (tests and other modules find it by id) */
@@ -36,12 +40,18 @@ export interface DockHost {
   settings?: () => void;
   /** which remembered chat reopens here (default: the host id); e.g. one per dataset */
   sessionKey?: () => string;
+  /** the assistant arrived from another page (e.g. open the tab it asked for) */
+  onHandoff?: (h: Handoff) => void;
 }
+
+/** What the old page left for the new one when the agent navigated. */
+export interface Handoff { from: string | null; goal: string; tab?: string; mode?: string; at: number }
 
 type DockState = 'open' | 'rail';
 interface TaskStep { text: string; state: string }
 
 const KEY = 'dataviz.dock';
+const HANDOFF = 'dataviz.dock.handoff', HANDOFF_TTL = 3 * 60 * 1000, NAV_FALLBACK_MS = 5000;
 const MIN_W = 320, DEF_W = 400, NARROW = 900, AUTO_COMPACT = 0.8;          // the rail is --dock-rail-w (dock.css)
 
 const D = {
@@ -60,6 +70,7 @@ const D = {
   pending: 0,
   tasksOpen: true,
   inEst: null as number | null,
+  navTo: null as string | null,              // the agent navigated: go there when its turn has ended
 };
 
 const maxW = (): number => Math.max(MIN_W, Math.min(640, Math.round(window.innerWidth * 0.55)));
@@ -175,8 +186,74 @@ function ensureMounted(): void {
   el.setAttribute('aria-label', 'AI assistant');
   body.append(el);
   D.chat = D.host.mount(el);
+  const h = takeHandoff();
+  if (h) {                                     // the agent came from another page: continue its goal in a new chat
+    D.host.onHandoff?.(h);
+    const extra: Record<string, unknown> = {};
+    if (h.from) extra['handoff_from'] = h.from;
+    if (h.mode) extra['mode'] = h.mode;
+    void D.chat.send(h.goal, { label: `↪ ${h.goal}`, extra });
+    return;
+  }
   const sid = lastSid();
   if (sid) void D.chat.open(sid).then((ok) => { if (!ok) { try { localStorage.removeItem(sidKey()); } catch (e) { /* ignore */ } } schedule(); });
+}
+
+// ---------------------------------------------------------------- navigate + hand-off
+
+function peekHandoff(): Handoff | null {
+  try {
+    const h = JSON.parse(sessionStorage.getItem(HANDOFF) || 'null') as Handoff | null;
+    return h && typeof h.goal === 'string' && h.goal && Date.now() - Number(h.at) < HANDOFF_TTL ? h : null;
+  } catch (e) { return null; }
+}
+function takeHandoff(): Handoff | null {
+  const h = peekHandoff();
+  try { sessionStorage.removeItem(HANDOFF); } catch (e) { /* ignore */ }
+  return h;
+}
+
+function navUrl(a: Record<string, unknown>): string | null {
+  const s = (k: string): string => (typeof a[k] === 'string' ? String(a[k]) : '');
+  switch (s('screen')) {
+    case 'home': return homeUrl();
+    case 'data': return dataUrl(s('bucket') || null, s('path') || null);
+    case 'viz': return s('session_id') ? vizUrl(s('session_id')) : null;
+    case 'label': return s('session_id') ? labelUrl(s('session_id')) : null;
+    default: return null;
+  }
+}
+
+function go(): void {
+  const url = D.navTo;
+  if (!url) return;
+  D.navTo = null;
+  location.assign(url);
+}
+
+function navigate(a: Record<string, unknown>): UiResult {
+  const url = navUrl(a);
+  if (!url) return { ok: false, detail: 'that page needs a session_id (list_sessions finds it)' };
+  const h: Handoff = { from: D.chat?.sessionId() ?? null, goal: String(a['goal'] || '').slice(0, 500), at: Date.now() };
+  if (typeof a['tab'] === 'string') h.tab = a['tab'];
+  const m = D.chat?.mode();
+  if (m) h.mode = m;
+  try { sessionStorage.setItem(HANDOFF, JSON.stringify(h)); } catch (e) { /* the new page starts a fresh chat */ }
+  D.navTo = url;
+  drive(`Opening ${String(a['screen'])}`);
+  schedule();
+  window.setTimeout(go, NAV_FALLBACK_MS);        // the turn normally ends first (dockDone goes there)
+  return { ok: true, detail: `opening ${url}` };
+}
+
+/** A host's onUiAction with the agent's navigate added (other actions go to the page's own handler). */
+export function withNav(page?: (a: UiAction) => boolean | UiResult | Promise<boolean | UiResult>):
+  (a: UiAction) => boolean | UiResult | Promise<boolean | UiResult> {
+  return (a) => {
+    if (a.action === 'navigate') return navigate(a.args);
+    if (page) return page(a);
+    return { ok: false, detail: `${a.action} is not available on this page` };
+  };
 }
 
 export function openDock(focus = true): void {
@@ -259,6 +336,7 @@ export function dockDone(t: AiTurn): void {
   rememberSid();
   if (D.steps.length && D.steps.every((s) => /done|complete/.test(s.state))) D.tasksOpen = false;
   schedule();
+  if (D.navTo) window.setTimeout(go, 150);       // the answer is saved: leave for the page the agent opened
 }
 
 // ---------------------------------------------------------------- setup
@@ -344,8 +422,13 @@ export function setDockHost(host: DockHost): void {
     document.addEventListener('keydown', (e) => {
       if (e.key === '.' && (e.ctrlKey || e.metaKey) && !e.altKey && D.host?.enabled()) { e.preventDefault(); toggleDock(); }
     });
-    window.addEventListener('llm-state', () => { if (dockOpen()) ensureMounted(); render(); resized(); });
+    window.addEventListener('llm-state', () => {
+      if (peekHandoff() && D.host?.enabled()) D.state = 'open';     // the agent arrived from another page
+      if (dockOpen()) ensureMounted();
+      render(); resized();
+    });
   }
+  if (peekHandoff() && host.enabled()) D.state = 'open';
   if (D.state === 'open' && host.enabled()) ensureMounted();
   render();
 }

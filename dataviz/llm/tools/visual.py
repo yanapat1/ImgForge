@@ -1,7 +1,9 @@
 """
 The Visual agent's tools (domain 'visual'): they read the open visualizer session (`ctx.state`, a State) and the
 server context (`ctx.app`: curation, models). None of them reaches the Data Center (no datacenter.service import),
-and none changes data: page changes are UI actions the page applies through its own controls.
+and none changes data: page changes are UI actions the page applies through its own controls. Work the page
+starts (a map, a model run, a scan) is risk 'run': confirmed in ask mode, run in auto, and the page reports how it
+ended (engine/uiwait.py), so the agent reads the outcome instead of assuming it.
 
 Read tools (risk read, run at once):
     view_state            what the page reported (ctx.scope['view']) + session facts (dataset, computed features)
@@ -21,8 +23,19 @@ Read tools (risk read, run at once):
     issue_summary         curation scan counts + k-NN / cleanlab counts of a feature
     selection_view        a legend of selected boxes (id, class, image, size) + class counts
     search_boxes_by_text  boxes closest to a text, CLIP / SigLIP features only (the page's "Describe boxes…")
+    list_models           the user's models (id, name, family): what run_model / the Model tab can use
 
-UI ACTION CONTRACT (risk 'ui'; the engine emits {type: 'ui_action', id, action, args, label, applied}; the page,
+RUN ACTIONS (risk 'run'; the same ui_action event with wait: true, the page answers POST /api/llm/agent/ui-result
+{ok, detail, transient?}; a transient failure is retried twice, a long job reports "still running"):
+    set_projection {...}                  (below) generate the map / 3D cloud: computes features when needed
+    run_model {model, conf?}              Model tab › Run on this dataset for that model, then its scores
+    run_eval_all {}                       Evaluation › Run N not run (every model not run on this dataset yet)
+    run_scan {kind: curation | cleanlab, model?}
+                                          Curation › Scan dataset (with a model's predictions when given) |
+                                          the cleanlab label-quality check (Find issues › Run label-quality check)
+    compute_stats {}                      Class stats (the map's features are computed first when missing)
+
+UI ACTION CONTRACT (risk 'ui', set_projection 'run'; the engine emits {type: 'ui_action', id, action, args, label, applied}; the page,
 views/assistant.ts, applies `args` through its existing controls). Names, args and values are fixed:
 
     set_projection {feature?: str, method?: str, params?: {n_neighbors?: int, min_dist?: float,
@@ -72,6 +85,8 @@ PARAM_INFO = {
 PARAM_RANGE = {'n_neighbors': (2, 200), 'min_dist': (0.0, 1.0), 'perplexity': (2.0, 100.0), 'gamma': (0.0, 100.0)}
 
 UI_ACTIONS = ('set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view')
+RUN_ACTIONS = ('set_projection', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats')
+SCAN_KINDS = ('curation', 'cleanlab')
 COLOR_BY = ('class', 'group', 'suggested', 'session', 'suspicion', 'outlier', 'area', 'aspect', 'brightness', 'blur',
             'cl_issue', 'cl_quality', 'cl_suggested', 'cl_given_prob', 'cl_ood_feat', 'cl_ood_prob',
             'origin', 'diff', 'origin_cls',
@@ -291,8 +306,9 @@ def _eval_summary(ctx, a):
     _state(ctx)
     ev = context.eval_summary(getattr(ctx, 'app', None)) if getattr(ctx, 'app', None) is not None else None
     if not ev:
-        return {'evaluation': None, 'note': 'no model has been evaluated on this dataset yet (Model tab: pick a '
-                                            'model and Run on this dataset; Settings › Models adds one)'}, '→ no models'
+        return {'evaluation': None, 'note': 'no model has been evaluated on this dataset yet: run_model (or '
+                                            'run_eval_all) runs one; list_models lists them (Settings › Models adds '
+                                            'one)'}, '→ no models'
     return {'evaluation': ev}, '→ evaluation'
 
 
@@ -710,23 +726,16 @@ register(Tool('class_stats', 'Per class: boxes, share, images, box area % / aspe
               False, _class_stats, **_R))
 register(Tool('eval_summary', 'The Evaluation tab: models evaluated on this dataset (mAP, P, R, F1, misses), per-class '
                               'AP of the best one and the findings.', _obj({}), False, _eval_summary, **_R))
-register(Tool('compare_shift', 'Compare › Image conditions of a combined dataset: does B (new camera / lighting) look '
-                               'like A (the training data)? Verdict, light / blur / noise / colour / capture metrics '
-                               'that moved (A and B medians, KS, PSI, share of B outside A), shift-detector AUC, new '
-                               'cameras, model confidence / mAP on A vs B, recommendations + augmentation hyp. Reads '
-                               'the report the page computed (Analyse conditions).',
+register(Tool('compare_shift', 'Compare › Image conditions report (Analyse conditions): does B look like A? Verdict, '
+                               'metrics that moved (KS, PSI), shift AUC, model fit A vs B, recommendations.',
               _obj({'a': S('member alias of A (default: the newest report)'), 'b': S('member alias of B')}),
               False, _compare_shift, **_R))
-register(Tool('compare_tests', 'Compare tab statistical tests of the newest A vs B run: chi-square on the class mix '
-                               "(Cramér's V; the classes whose share changed, BH q < 0.05), Bowker symmetry of the class "
-                               "changes, KS + Mann-Whitney per box statistic (Cliff's delta), and the MMD feature-space "
-                               'test when the user ran it. Reads what the page computed.',
+register(Tool('compare_tests', 'Compare tab tests of the newest A vs B run: class mix chi-square, Bowker class '
+                               'changes, KS + Mann-Whitney per box statistic, MMD feature space (when run).',
               _obj({}), False, _compare_tests, **_R))
-register(Tool('compare_stress', 'Compare › Image conditions › Stress test: how a model scores on A\'s images made '
-                                'darker / brighter, lower contrast, blurred, motion-blurred, noisier, warmer / cooler, '
-                                'desaturated, JPEG-compressed or lower resolution, step by step; the safe window per '
-                                'axis (>= 95 % of the clean score) and, with an Image conditions report, where B sits '
-                                'and the score expected there. Reads the run the page made (Run stress test).',
+register(Tool('compare_stress', 'Compare › Stress test (Run stress test): a model\'s score per corruption step '
+                                '(light, contrast, blur, noise, colour, JPEG, resolution), the safe window per axis, '
+                                'the score expected at B\'s conditions.',
               _obj({'model': S('model name or id (default: the newest run)'), 'member': S('member alias the model ran on')}),
               False, _compare_stress, **_R))
 register(Tool('list_features', 'The feature spaces of the Features dropdown: id, label, kind (clip / siglip / dinov2 / '
@@ -756,13 +765,12 @@ register(Tool('search_boxes_by_text', 'Boxes whose crops best match a text (e.g.
                     'k': I('how many boxes (default 50)', 1, 500)}, ['query']), False, _search_boxes_by_text, **_R))
 
 _U = dict(domain='visual', ctx=True, risk='ui')
-register(Tool('set_projection', 'Page action: switch the Features / Method / parameters / 2D-3D and generate the '
-                                'projection at once (the user changes them in the Projection popover and presses '
-                                'Generate).',
+_RUN = dict(domain='visual', ctx=True, risk='run')
+register(Tool('set_projection', 'Run: generate the map / 3D cloud with these features, method and parameters.',
               _obj({'feature': S('a feature id from list_features'),
                     'method': E('a method id from list_methods', list(_methods())), 'params': PARAMS_SCHEMA,
                     'dims': {'type': 'integer', 'enum': [2, 3], 'description': '2 = flat map, 3 = 3D cloud (rotate, camera presets, wall shadows)'}}),
-              False, _ui_run(_check_projection), _proj_label, check=_check_projection, **_U))
+              False, _ui_run(_check_projection), _proj_label, check=_check_projection, **_RUN))
 register(Tool('set_color_by', 'Page action: colour the dots by something else (Color dropdown).',
               _obj({'by': E('what colours the dots', COLOR_BY)}, ['by']), False, _ui_run(_ok),
               lambda b, a: f'Colour by {COLOR_LABEL.get(a.get("by"), a.get("by"))}', check=_ok, **_U))
@@ -779,3 +787,86 @@ register(Tool('show_issue', 'Page action: turn on a Find issues view (loads thos
               lambda b, a: f'Show {ISSUE_LABEL.get(a.get("issue"), a.get("issue"))}', check=_ok, **_U))
 register(Tool('fit_view', 'Page action: zoom the map so every shown dot is in view (the Fit button).',
               _obj({}), False, _ui_run(_ok), lambda b, a: 'Fit the map', check=_ok, **_U))
+
+
+# ---------------------------------------------------------------- run actions (risk run)
+def _user_models(ctx):
+    app = getattr(ctx, 'app', None)
+    reg = getattr(app, 'models', None)
+    if reg is None:
+        return []
+    try:
+        return [m for m in reg.models(owner_id=(ctx.user or {}).get('id')) if m.get('family') != 'hf']
+    except Exception:  # noqa: BLE001 - no model registry here
+        return []
+
+
+def _list_models(ctx, a):
+    ms = [{'id': m['id'], 'name': m.get('name'), 'family': m.get('family'), 'format': m.get('format')}
+          for m in _user_models(ctx)]
+    note = None if ms else 'no models yet: the user adds one in Settings › Models (you cannot add models)'
+    return {'models': ms, **({'note': note} if note else {})}, f'→ {len(ms)} model{"" if len(ms) == 1 else "s"}'
+
+
+def _resolve_model(ctx, ref):
+    ms = _user_models(ctx)
+    r = str(ref or '').strip()
+    hit = next((m for m in ms if m['id'] == r), None) or next((m for m in ms if (m.get('name') or '').lower() == r.lower()), None)
+    if hit is None:
+        names = ', '.join(f"{m.get('name')} ({m['id']})" for m in ms[:20]) or 'none (Settings › Models adds one)'
+        raise ToolError(f'no model {r!r}; your models: {names}')
+    return hit
+
+
+def _check_run_model(ctx, a):
+    _state(ctx)
+    m = _resolve_model(ctx, a.get('model'))
+    out = {'model': m['id'], 'name': m.get('name') or m['id']}
+    if a.get('conf') is not None:
+        out['conf'] = float(a['conf'])
+    return out, None
+
+
+def _check_eval_all(ctx, a):
+    _state(ctx)
+    if not _user_models(ctx):
+        raise ToolError('no models yet: the user adds one in Settings › Models')
+    return {}, None
+
+
+def _check_scan(ctx, a):
+    _state(ctx)
+    out = {'kind': a['kind']}
+    if a.get('model'):
+        if a['kind'] != 'curation':
+            raise ToolError('model only applies to kind curation (the scan then uses its predictions)')
+        m = _resolve_model(ctx, a['model'])
+        out.update(model=m['id'], name=m.get('name') or m['id'])
+    return out, None
+
+
+def _check_stats(ctx, a):
+    _state(ctx)
+    return {}, None
+
+
+register(Tool('list_models', "The user's models (id, name, family) for run_model.",
+              _obj({}), False, _list_models, **_R))
+register(Tool('run_model', 'Run a model on this dataset (Model tab), then read eval_summary.',
+              _obj({'model': S('id or name (list_models)'),
+                    'conf': {'type': 'number', 'minimum': 0.01, 'maximum': 0.99, 'description': 'confidence'}},
+                   ['model']),
+              False, _ui_run(_check_run_model), lambda b, a: f'Run {a.get("name") or a.get("model")} on this dataset',
+              check=_check_run_model, **_RUN))
+register(Tool('run_eval_all', 'Run every model not run here yet (Evaluation), then read eval_summary.',
+              _obj({}), False, _ui_run(_check_eval_all), lambda b, a: 'Run every model not run yet (Evaluation)',
+              check=_check_eval_all, **_RUN))
+register(Tool('run_scan', 'Run curation (Scan dataset; with model: its misses too) or cleanlab (label quality), '
+                          'then read issue_summary.',
+              _obj({'kind': E('which scan', SCAN_KINDS), 'model': S('curation: model id / name')},
+                   ['kind']),
+              False, _ui_run(_check_scan),
+              lambda b, a: 'Scan the dataset' + (f' with {a.get("name")}' if a.get('name') else '') if a.get('kind') == 'curation'
+              else 'Run the label-quality check (cleanlab)', check=_check_scan, **_RUN))
+register(Tool('compute_stats', 'Open Class stats (computes the features first if needed).',
+              _obj({}), False, _ui_run(_check_stats), lambda b, a: 'Compute class stats', check=_check_stats, **_RUN))

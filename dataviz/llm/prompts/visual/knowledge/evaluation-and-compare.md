@@ -2,7 +2,7 @@
 title: Model, Evaluation and Compare views
 summary: run a detector, val / train split, confidence and IoU, leaderboard and findings, Compare A vs B, combined datasets, Image conditions
 ---
-- Detectors are added in Settings › Models. **Model** (`model`): pick a model, Run on this dataset, Images val /
+- Detectors are added in Settings › Models. **Model** (`model`): pick a model, Run on this dataset (you: `run_model`), Images val /
   train / all (val is honest; train looks too good), Confidence (best = the best F1), Match IoU 0.5 / 0.75 / 0.3.
   It shows KPIs, a per-class table (AP50, P, R, miss, FP; click a class to load its mistakes), Likely label errors
   (a confident model disagreeing with the label), confusion matrix, precision-recall, F1 vs confidence, confidence

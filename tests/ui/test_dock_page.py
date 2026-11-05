@@ -5,10 +5,10 @@ width, a streamed answer shows in it and the chat reopens after a reload, the ta
 opened from a floating ◆ button. Off (no feature): no dock at all. Skips like test_page_smoke without a browser.
 DATAVIZ_TEST_SHOTS=<folder> saves screenshots."""
 
+import json
 import os
 
 import pytest
-
 from test_page_smoke import _browser, _post, _put, server  # noqa: F401 - the app + its database
 
 sync_api = pytest.importorskip('playwright.sync_api')
@@ -100,6 +100,96 @@ def test_dock_on_home(server):  # noqa: F811 - the fixture
             sheet = page.locator('#ai-dock').bounding_box()
             assert sheet['x'] <= 1 and sheet['width'] >= 598
             _shot(page, 'dock-narrow')
+            browser.close()
+        assert not errors, '\n'.join(errors)
+    finally:
+        fake.should_exit = True
+
+
+# ---------------------------------------------------------------- the agent drives the visualizer
+def _tool_model():
+    """An OpenAI-compatible model that calls one tool, picked by the user's words, then answers with the tool's
+    result: 'open the model tab' -> open_tab, 'stats' -> compute_stats."""
+    import json as _json
+
+    from fastapi import FastAPI, Request
+    from fastapi.responses import StreamingResponse
+    app = FastAPI()
+
+    @app.get('/v1/models')
+    def models():
+        return {'data': [{'id': 'gpt-x'}]}
+
+    @app.post('/v1/chat/completions')
+    async def chat(request: Request):
+        body = await request.json()
+        msgs = body['messages']
+        last = msgs[-1]
+        text = last['content'] if isinstance(last['content'], str) else ' '.join(c.get('text', '') for c in last['content'] or [])
+
+        if not body.get('stream'):                 # the connection test, chat titles
+            return {'choices': [{'message': {'role': 'assistant', 'content': 'ok'}}],
+                    'usage': {'prompt_tokens': 5, 'completion_tokens': 1}}
+
+        def sse(d):
+            return 'data: ' + _json.dumps(d) + '\n\n'
+
+        def gen():
+            if last['role'] == 'tool':
+                yield sse({'choices': [{'delta': {'content': f'TOOL SAID: {text}'}}]})
+            else:
+                name, args = ('open_tab', {'tab': 'model'}) if 'model tab' in text else ('compute_stats', {})
+                yield sse({'choices': [{'delta': {'tool_calls': [{'index': 0, 'id': 'c1', 'type': 'function',
+                                                                   'function': {'name': name, 'arguments': _json.dumps(args)}}]}}]})
+                yield sse({'choices': [{'delta': {}, 'finish_reason': 'tool_calls'}]})
+            yield 'data: [DONE]\n\n'
+        return StreamingResponse(gen(), media_type='text/event-stream')
+    return app
+
+
+def test_agent_drives_the_visualizer(server):  # noqa: F811 - the fixture
+    from test_models import _serve
+    from test_page_smoke import _get
+    fake, url = _serve(_tool_model())
+    errors = []
+    try:
+        sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+        p = _post(f'{server}/api/llm/providers', {'name': 'tools', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
+                                                 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'assistant': True, 'dataset_qa': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1500, 'height': 950})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+            page.goto(f'{server}/?session={sid}')
+            page.wait_for_selector('#ai-dock #ai-q', timeout=60000)
+            # auto: the tab opens at once, the page reports it, the model reads it
+            page.focus('#ai-q')
+            page.keyboard.press('Shift+Tab')
+            assert page.inner_text('#ai-side .chat-chip.mode').strip() == 'auto'
+            with page.expect_request(lambda r: '/api/llm/agent/ui-result' in r.url) as req:
+                page.fill('#ai-q', 'open the model tab')
+                page.press('#ai-q', 'Enter')
+            sent = json.loads(req.value.post_data)
+            assert sent['ok'] is True and req.value.response().status == 200
+            # the page's answer reached the model in time (not "no answer yet")
+            page.wait_for_selector('#ai-side .ai-msg.bot:has-text("Model is open")', timeout=15000)
+            assert page.evaluate("document.querySelector('main').dataset.tab") == 'model'
+            # ask: a run waits for Approve, then the page computes and opens Class stats
+            page.keyboard.press('Shift+Tab')
+            page.keyboard.press('Shift+Tab')            # auto -> plan -> ask
+            assert page.inner_text('#ai-side .chat-chip.mode').strip() == 'ask'
+            page.fill('#ai-q', 'show the class stats')
+            page.press('#ai-q', 'Enter')
+            page.wait_for_selector('#ai-side .ct-confirm [data-ca="approve"]', timeout=20000)
+            assert page.evaluate("document.querySelector('main').dataset.tab") == 'model', 'nothing ran before Approve'
+            _shot(page, 'drive-approve')
+            page.click('#ai-side .ct-confirm [data-ca="approve"]')
+            page.wait_for_selector('#ai-side .ai-msg.bot:has-text("Class stats is open")', timeout=90000)
+            assert page.evaluate("document.querySelector('main').dataset.tab") == 'stats'
+            _shot(page, 'drive-done')
             browser.close()
         assert not errors, '\n'.join(errors)
     finally:

@@ -71,9 +71,11 @@ def test_tools_are_visual_ctx_tools_without_the_data_center():
     names = {t.name for t in tools.REGISTRY.values() if t.domain == 'visual'}
     assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'compare_shift', 'compare_stress', 'compare_tests', 'list_features', 'list_methods',
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
-                     'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view'}
+                     'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view',
+                     'list_models', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats'}
     assert all(tools.REGISTRY[n].ctx for n in names)
-    assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS)
+    assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS) - set(visual.RUN_ACTIONS)
+    assert {n for n in names if tools.REGISTRY[n].risk == 'run'} == set(visual.RUN_ACTIONS)
     src = Path(visual.__file__).read_text()
     assert 'datacenter' not in re.sub(r'""".*?"""', '', src, flags=re.S) and '_svc' not in src
     assert not set(tools.for_role(roles.get('visual').domains)) & {t for t in tools.TOOLS if tools.TOOLS[t].domain == 'data'}
@@ -116,7 +118,7 @@ def test_dataset_summary_and_class_stats(session):
 def test_eval_features_methods(session):
     ctx = ctx_of(session, VIEW)
     out, _ = run(ctx, 'eval_summary')
-    assert out['evaluation'] is None and 'Run on this dataset' in out['note']
+    assert out['evaluation'] is None and 'run_model' in out['note']
     out, _ = run(ctx, 'compare_shift')
     assert out['report'] is None and 'combined' in out['note']
     out, _ = run(ctx, 'compare_stress')
@@ -234,13 +236,13 @@ def _visual_run(session, text, mode, **kw):
 
 @pytest.mark.parametrize('mode,applied', [('ask', False), ('auto', True)])
 def test_engine_emits_ui_actions(monkeypatch, session, mode, applied):
-    seen = script(monkeypatch, ('', [('list_methods', {}), ('set_projection', {'method': 'umap',
-                                                                              'params': {'n_neighbors': 30}}),
+    # (set_projection starts work: a run action, tests/llm/test_ui_control.py)
+    seen = script(monkeypatch, ('', [('list_methods', {}), ('set_color_by', {'by': 'suspicion'}),
                                      ('show_issue', {'issue': 'nope'})]), ('Try UMAP.', []))
     evs = drain(_visual_run(session, 'better map?', mode))
     ui = [e for e in evs if e['type'] == 'ui_action']
-    assert len(ui) == 1 and ui[0]['action'] == 'set_projection' and ui[0]['applied'] is applied
-    assert ui[0]['label'] == 'Projection: UMAP · n_neighbors=30' and ui[0]['args']['params'] == {'n_neighbors': 30}
+    assert len(ui) == 1 and ui[0]['action'] == 'set_color_by' and ui[0]['applied'] is applied
+    assert ui[0]['label'] == 'Colour by label suspicion' and ui[0]['args'] == {'by': 'suspicion'}
     assert 'confirm' not in types(evs) and evs[-1]['type'] == 'done'
     res = [p['tool_result'] for p in seen[1]['msgs'][-1]['parts']]
     assert '"methods"' in res[0]['content']
@@ -325,7 +327,7 @@ def test_skills_name_only_real_tools():
     vocab = _vocab() | set(prompting.skills('data')) | args         # a tool's own argument names are fine too
     call = re.compile(r'^([a-z_][a-z0-9_]*)(\(.*\))?$')
     files = sorted((PROMPTS / 'skills').glob('*/*/SKILL.md'))
-    assert len(files) == 16
+    assert len(files) == 17
     for f in files:
         meta, body = prompting.front(f.read_text())
         assert meta['name'] == f.parent.name and meta['description'] and meta['when'], f

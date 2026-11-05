@@ -3,7 +3,8 @@
 // undo (toast + history), ignore. Fixes come back with a patch of the in-memory points (class changes,
 // deleted boxes), applied to S.P so the plot, gallery and filter update without a reload.
 
-import { errMessage, errText, getJSON, postJSON } from '../core/api.js';
+import { errMessage, errText, getJSON, isTransient, postJSON } from '../core/api.js';
+import type { UiResult } from '../types-chat.js';
 import { $req, esc, icon } from '../core/dom.js';
 import { actionToast, toast as appToast } from '../core/toast.js';
 import { setBar, waitJob } from '../core/jobs.js';
@@ -272,9 +273,11 @@ function setActive(i: number, scroll = true): void {
 
 // ---------------------------------------------------------------- actions
 
-async function scan(): Promise<void> {
-  const useModel = $req<HTMLInputElement>('cur-use-model').checked && S.model && S.model.id;
-  const body = { force: true, feature: S.scoresFeature, model: useModel ? S.model.id : null,
+/** Curation › Scan dataset (model: use that model's predictions; default: the checkbox + the Model tab's model). */
+export async function scan(model: string | null = null): Promise<UiResult> {
+  const useModel = model ?? ($req<HTMLInputElement>('cur-use-model').checked && S.model && S.model.id ? S.model.id : null);
+  let res: UiResult = { ok: true, detail: 'scan done: the counts are in the Curation tab' };
+  const body = { force: true, feature: S.scoresFeature, model: useModel,
     conf: S.model && S.model.conf, iou: S.model && S.model.iou };
   $req<HTMLButtonElement>('cur-scan').disabled = true;
   const prog = $req('cur-prog');
@@ -289,10 +292,11 @@ async function scan(): Promise<void> {
         if (label) label.textContent = j.total ? `${j.stage} · ${j.done.toLocaleString()} / ${j.total.toLocaleString()}` : j.stage;
       });
     }
-  } catch (e) { toast(`Scan failed: ${errText(e)}`, null, 'err'); }
+  } catch (e) { toast(`Scan failed: ${errText(e)}`, null, 'err'); res = { ok: false, detail: errText(e), transient: isTransient(e) }; }
   prog.classList.add('hidden');
   await loadSummary();
   await resetList();
+  return res;
 }
 
 const errList = (errs: Array<{ file: string; error: string }>): string => errs.slice(0, 3).map((e) => `${e.file} (${e.error})`).join(', ') + (errs.length > 3 ? ', …' : '');

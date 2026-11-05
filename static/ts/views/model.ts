@@ -3,7 +3,8 @@
 // matrix, errors per class, PR + F1 curves, confidence histogram, recall by box property, false positives.
 // The per-label outcome is copied into S.P.m_status / m_pred / m_score so Explore can colour and sort by it.
 
-import { errMessage, errText, getJSON, postJSON } from '../core/api.js';
+import { errMessage, errText, getJSON, isTransient, postJSON } from '../core/api.js';
+import type { UiResult } from '../types-chat.js';
 import { userKey } from '../core/auth.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
@@ -164,9 +165,9 @@ export async function refreshEval(): Promise<void> {
   }
 }
 
-async function runPredictions(): Promise<void> {
+async function runPredictions(): Promise<UiResult> {
   const m = current();
-  if (!m) return;
+  if (!m) return { ok: false, detail: 'no model is selected in the Model tab' };
   const btn = $req<HTMLButtonElement>('m-run'), prog = $req('m-run-prog');
   btn.disabled = true;
   prog.classList.remove('hidden');
@@ -184,9 +185,11 @@ async function runPredictions(): Promise<void> {
     m.predicted = true;
     await loadModels();
     await refreshEval();
+    return { ok: true, detail: `${m.name} ran on this dataset; its scores are on the Model tab` };
   } catch (e) {
     const num = numEl();
     if (num) num.textContent = errText(e);
+    return { ok: false, detail: errText(e), transient: isTransient(e) };
   } finally {
     btn.disabled = false;
     const cur = current();
@@ -594,6 +597,15 @@ export async function useModel(mid: string, conf: number | null = null): Promise
     $req<HTMLSelectElement>('m-model').value = mid;
   }
   if (!M.ev) await refreshEval();
+}
+
+/** The assistant's run_model: pick the model, open the Model tab, run it unless it already ran here. */
+export async function runModelOnDataset(mid: string, conf: number | null = null): Promise<UiResult> {
+  await useModel(mid, conf);
+  if (current()?.id !== mid) return { ok: false, detail: `the model ${mid} is not in the Model tab's list` };
+  switchTab('model');
+  if (current()?.predicted) return { ok: true, detail: 'it already ran on this dataset: its scores are on the Model tab' };
+  return runPredictions();
 }
 
 export async function openModelClass(mid: string, cls: number | null = null, conf: number | null = null): Promise<void> {

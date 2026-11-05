@@ -393,6 +393,34 @@ def for_summary(user, sid, after_seq, upto_seq):
     return [{'seq': m.seq, 'role': m.role, 'text': m.text, 'trace': m.trace or []} for m in rows]
 
 
+HANDOFF_MSGS = 8
+HANDOFF_CHARS = 6000
+
+
+def handoff_seed(user, from_sid):
+    """The summary a chat starts with when the assistant moved to another page: the old chat's summary + its last
+    HANDOFF_MSGS messages (cut to HANDOFF_CHARS) as text. No model call: it is ready before the first answer."""
+    cx = context(user, from_sid)
+    msgs = cx['messages'][-HANDOFF_MSGS:]
+    tail = '\n\n'.join(f'{"USER" if m["role"] == "user" else "ASSISTANT"}: {m["text"]}' for m in msgs)
+    if len(tail) > HANDOFF_CHARS:
+        tail = '…' + tail[-HANDOFF_CHARS:]
+    parts = ['The user moved here from another page of the app; this chat continues that one.']
+    if cx['summary']:
+        parts.append(f'Summary of the earlier chat:\n{cx["summary"]}')
+    if tail:
+        parts.append(f'Its last messages:\n{tail}')
+    return '\n\n'.join(parts)
+
+
+def set_parent(user, sid, parent_id):
+    """Remember which chat this one was handed off from."""
+    uid = _uid(user)
+    with db.begin() as c:
+        c.execute(text("""UPDATE app.llm_sessions SET parent_id = :p WHERE id = :s AND owner_id = :u"""),
+                  {'p': str(parent_id)[:36], 's': str(sid), 'u': uid})
+
+
 def save_summary(user, sid, summary, seq, tokens, expect_seq):
     """Store a summary of every message up to `seq`, only when the chat still has the summary it was built from
     (summary_seq = expect_seq: two tabs compacting at once never step back) -> True when stored."""

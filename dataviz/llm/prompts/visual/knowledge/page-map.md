@@ -3,11 +3,7 @@ title: Where things are on the visualizer page
 summary: activity bar views, the bar above the map (Projection, Color, Classes, Describe boxes, Find issues, Display), filter bar, gallery
 core: true
 ---
-- **◆ AI assistant** (you): the dock on the RIGHT side of every page (home, Data Center, visualizer, labeling).
-  The ◆ icon at the top of the activity bar or Ctrl+. opens / collapses it to a thin rail; its left edge drags the
-  width; on a phone it is a sheet opened from a floating ◆ button. Its head shows the page, the model and a ring of
-  how much of the context budget is used. A Tasks strip under the head shows what you are doing (your checklist,
-  "◆ is driving › …", Stop).
+- **◆ AI assistant** (you): the dock on the right of every page (◆ icon or Ctrl+. collapses it; see assistant).
 - **Activity bar** (left icons; the active one collapses the left panel): Explore (`explore`),
   Class stats (`stats`), Curation (`curation`), then the model views Model (`model`) and Evaluation (`eval`), and
   Compare (`compare`, only for a combined dataset: label diff A vs B, shared map, Image conditions with its Stress test). Settings is the gear at the bottom (Models, AI assistant,

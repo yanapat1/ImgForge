@@ -4,7 +4,7 @@
 // (label/assist.ts) for boxes: this dock answers questions about the data around it.
 
 import { mountChat } from '../core/chat.js';
-import { dockHooks, refreshDock, setDockHost } from '../core/dock.js';
+import { dockHooks, refreshDock, setDockHost, withNav } from '../core/dock.js';
 import { esc, icon } from '../core/dom.js';
 import { llmOn } from '../core/llm.js';
 import { openSettings } from '../settings/dialog.js';
@@ -32,6 +32,7 @@ export function initPageDock(page: Page, project: string | null = null): void {
         inputId: 'ai-page-q',
         placeholder: 'Ask or tell the assistant…  / for commands',
         scope: () => ({ page, ...(project ? { label_project: project } : {}) }),
+        onUiAction: withNav(),
         onEvent: hk.onEvent,
         onDone: hk.onDone,
         onUpdate: () => refreshDock(),

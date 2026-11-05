@@ -1,7 +1,7 @@
 ---
 name: check-camera-shift
 description: tell whether a model trained on one dataset will fit new data from another camera / lighting, and what to do
-when: the user changed camera, vendor, lens or lighting, asks if the old model still fits new data, asks about light / dark / blur / noise / colour differences between datasets, or wants to stress-test a model against lighting / camera changes
+when: new camera / lens / lighting, will the old model fit new data, light / blur / noise / colour differences, or a stress test
 ---
 1. It needs a combined dataset of the old (A, training) and new (B) data: if this session is not one, say how
    (home page: pick both datasets, Combine) and stop.

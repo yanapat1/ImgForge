@@ -19,6 +19,12 @@ unsummarised messages than sessions.HISTORY_TURNS) folds its older messages into
 (events `compact` start / done, or a notice when the summary call fails: then budget.fit drops the oldest turns as
 before). POST /api/llm/agent/<role>/compact {session_id, focus?} does it on demand (/compact). Ephemeral chats are
 never compacted (nothing to store the summary in).
+
+Page actions: body.ui_ack = true says the page reports how each page action ended (POST
+/api/llm/agent/ui-result {run_id, action_id, ok, detail, transient?, result?}, engine/uiwait.py); run actions
+(a model run, a map, a scan) wait for it. A page change (the navigate tool) ends the turn; the new page sends
+body.handoff_from = the old chat id with its first message: the new chat starts with the old one's summary and
+last messages (sessions.handoff_seed) and remembers it as its parent.
 """
 
 import json
@@ -33,7 +39,8 @@ from ...auth import context as auth_context
 from ...core import logging as vlog
 from ...llm import prompting, providers, tools
 from ...llm import sessions as chat_sessions
-from ...llm.engine import confirm, react, roles, summarize
+from ...llm.budget import text_tokens as budget_tokens
+from ...llm.engine import confirm, react, roles, summarize, uiwait
 from ...llm.engine.events import ENDS
 from ...llm.providers import LLMError
 
@@ -190,6 +197,13 @@ def router(state, ctx):
         if not user_text.strip():
             raise HTTPException(400, 'the message is empty')
         summary, n_saved = None, 0
+        handoff = body.get('handoff_from') if isinstance(body.get('handoff_from'), str) and not sid and not ephemeral \
+            else None
+        if handoff:
+            try:
+                summary = chat_sessions.handoff_seed(user, handoff)
+            except chat_sessions.SessionError:
+                handoff = None                  # the old chat is gone: start fresh
         if sid:
             try:
                 cx = chat_sessions.context(user, sid)
@@ -221,6 +235,7 @@ def router(state, ctx):
                                user_prompts=a['prompts'], user_skills=a['skills'], plugin_tools=a['tools'],
                                forced_skills=forced, limit=limit, summary=summary_)
             r_.ctx.web_cfg = web_cfg
+            r_.ctx.ui_ack = body.get('ui_ack') is True
             return r_
         try:
             run = build(msgs_run, summary)
@@ -239,6 +254,9 @@ def router(state, ctx):
                 made = chat_sessions.create(user, role.name, _chat_scope(role, scope), user_text, meta=meta)
                 sid, title, removed = made['session']['id'], made['session']['title'], made['removed']
                 first_turn = True
+                if handoff and summary:
+                    chat_sessions.save_summary(user, sid, summary, 0, budget_tokens(summary), None)
+                    chat_sessions.set_parent(user, sid, handoff)
             chat_sessions.append(user, sid, 'user', user_text, meta=meta)
         except chat_sessions.SessionError as e:
             raise HTTPException(e.status, str(e))
@@ -330,6 +348,19 @@ def router(state, ctx):
         except LLMError as e:
             raise HTTPException(e.status if 400 <= (e.status or 0) < 500 else 502, f'the summary failed: {e}')
         return {'compacted': info is not None, **(info or {})}
+
+    @r.post('/api/llm/agent/ui-result')
+    def agent_ui_result(body: dict):
+        """The page's answer to a page action the agent waits for: {run_id, action_id, ok, detail, transient?}."""
+        user = auth_context.user()
+        tiers.check(user, 'llm.use')
+        rid, aid = body.get('run_id'), body.get('action_id')
+        if not isinstance(rid, str) or not isinstance(aid, str):
+            raise HTTPException(400, 'run_id and action_id are required')
+        try:
+            return uiwait.deliver(user, rid, aid, body)
+        except confirm.AgentError as e:
+            raise HTTPException(e.status, str(e))
 
     @r.post('/api/llm/agent/confirm')
     def agent_confirm(body: dict):

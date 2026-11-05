@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from ...core import logging as vlog
 from .. import budget, prompting, providers, tools
 from ..providers import LLMError
-from . import compact, confirm, roles
+from . import compact, confirm, roles, uiwait
 
 _log = vlog.get_logger('llm')
 
@@ -36,6 +36,10 @@ MAX_TURNS = 40
 MAX_RESULT = 6000               # characters of one tool result fed back to the model
 CONFIRM_TIMEOUT = 600
 PING_S = 15
+UI_ACK_S = 20                   # a page action (open a tab, colour, filter) reports back within this, or is assumed done
+RUN_WAIT_S = 600                # a run action (model run, map, scan) waits this long for the page, then "still running"
+RUN_RETRIES = 2                 # a run the page reports as a transient failure (busy, 5xx, timeout) is retried
+ALWAYS_APPLY = ('open_tab', 'fit_view', 'navigate')     # harmless and undone in a click: applied in ask mode too
 REPEAT_NUDGE, REPEAT_STOP = 3, 5
 SMALL_STEPS = 20
 SMALL_TOOLS = 8
@@ -72,6 +76,7 @@ class Ctx:
     web_cfg: dict = None            # store.clean_web of the user's settings (the route sets it)
     web_blocked: int = 0            # web queries the guard blocked this turn (3 = no more web this turn)
     events: list = field(default_factory=list)  # events a tool adds for the page ('search'), sent after its tool_end
+    ui_ack: bool = False            # the page reports how its page actions ended (POST /api/llm/agent/ui-result)
 
 
 @dataclass
@@ -431,6 +436,7 @@ def events(run):
         results = []
         pending = []            # changes in model order: (call, tool, clean, summary, risk)
         bad_change = False
+        navigating = False      # a navigate was applied: the page reloads, the turn ends after this step
         for c in calls:
             name, args = c.get('name'), c.get('args')
             t = run.tools.get(name)
@@ -442,7 +448,7 @@ def events(run):
                 continue
             if args is None:
                 results.append({**res, 'content': 'the arguments were not a JSON object: call it again', 'is_error': True})
-                bad_change |= t.risk in ('change', 'danger')
+                bad_change |= t.risk in ('change', 'danger', 'run')
                 continue
             sig = _sig(c)
             repeats[sig] = repeats.get(sig, 0) + 1
@@ -471,14 +477,27 @@ def events(run):
                 except Exception as e:  # noqa: BLE001 - the model fixes it on the next step
                     results.append({**res, 'content': _error_text(e), 'is_error': True})
                     continue
-                applied = run.mode == 'auto'
+                applied = run.mode == 'auto' or name in ALWAYS_APPLY
                 label = t.preview(None, clean) if t.preview else name
+                if not applied:
+                    yield {'type': 'ui_action', 'id': c['id'], 'action': name, 'args': clean, 'label': label,
+                           'applied': False}
+                    results.append({**res, 'content': 'shown to the user as an Apply button: do not assume it was '
+                                                      'applied'})
+                    continue
+                if name == 'navigate' or not run.ctx.ui_ack:
+                    yield {'type': 'ui_action', 'id': c['id'], 'action': name, 'args': clean, 'label': label,
+                           'applied': True}
+                    results.append({**res, 'content': 'applied on the page'})
+                    navigating = navigating or name == 'navigate'
+                    continue
+                key = uiwait.open_(run.user, run.run_id, c['id'])
                 yield {'type': 'ui_action', 'id': c['id'], 'action': name, 'args': clean, 'label': label,
-                       'applied': applied}
-                results.append({**res, 'content': 'applied on the page' if applied else
-                                'shown to the user as an Apply button: do not assume it was applied'})
+                       'applied': True, 'wait': True}
+                r = yield from _await_page(run, key, UI_ACK_S)
+                results.append({**res, **_page_content(r, label)})
                 continue
-            if t.risk in ('change', 'danger'):
+            if t.risk in ('change', 'danger', 'run'):
                 try:
                     clean, summary = tools.prepare(run.ctx, name, args, run.tools)
                 except Exception as e:  # noqa: BLE001 - the model fixes it on the next step
@@ -524,7 +543,7 @@ def events(run):
                                                                'all changes again, fixed'}
         for pc in [] if bad_change else pending:
             c, t, clean, summary, risk = pc
-            if not need and run.mode == 'auto' and risk == 'change':
+            if not need and run.mode == 'auto' and risk in ('change', 'run'):
                 outcome[c['id']] = yield from _run_change(run, c, t, clean, summary, risk)
                 changed = True
             else:
@@ -583,6 +602,9 @@ def events(run):
                 results[i] = {'id': c['id'], 'name': c['name'], 'content': o['content'],
                               **({} if o.get('ok') or o.get('declined') else {'is_error': True})}
         run.msgs.append({'role': 'tool', 'parts': [{'tool_result': r} for r in results]})
+        if navigating:                  # the page is leaving: the chat continues there (core/dock.ts hand-off)
+            yield done(step)
+            return
     yield {'type': 'error', 'detail': f'stopped after {run.max_steps} steps without an answer: try a narrower '
                                       'request' + (' or a higher effort' if run.max_steps < MAX_STEPS else '')}
 
@@ -594,14 +616,94 @@ def _edited(run, pc, edit):
     if t.risk in ('change', 'danger'):
         clean, summary = tools.prepare(run.ctx, t.name, args, run.tools)
         return c, t, clean, summary, max(risk, t.risk_of(clean), key=('change', 'danger').index)
+    if t.risk == 'run':
+        clean, summary = tools.prepare(run.ctx, t.name, args, run.tools)
+        return c, t, clean, summary, 'run'
     clean, err = tools.validate(t, args)
     if err:
         raise tools.ToolError(err)
     return c, t, clean, t.preview(None, clean) if t.preview else summary, risk
 
 
+def _await_page(run, key, timeout):
+    """Wait for the page's result of a page action (pings keep the stream open) -> the result dict, 'pending'
+    (no answer within `timeout`) or 'cancelled'."""
+    waited = 0.0
+    while True:
+        step = min(PING_S, timeout - waited)
+        r = uiwait.wait(key, run.cancel, step)
+        if r != 'pending':
+            return r
+        waited += step
+        if waited >= timeout:
+            uiwait.close(key)
+            return 'pending'
+        yield {'type': 'ping'}
+
+
+def _page_content(r, label):
+    """A page result -> the tool result the model reads."""
+    if r == 'cancelled':
+        return {'content': 'stopped by the user before the page answered', 'is_error': True}
+    if r == 'pending':
+        return {'content': f'{label}: sent to the page, no answer yet (assume it is applied; check with view_state)'}
+    if r.get('ok'):
+        return {'content': _dump({'done': True, 'detail': r.get('detail'), **({'result': r['result']} if 'result' in r else {})})}
+    return {'content': f'the page could not do it: {r.get("detail") or "no reason given"}', 'is_error': True}
+
+
+def _run_page(run, c, t, clean, summary):
+    """An approved / auto run action: the page does the work (its own buttons and job polling) and reports how it
+    ended. Transient failures are retried RUN_RETRIES times; a job longer than RUN_WAIT_S reports "still running"."""
+    yield {'type': 'tool_start', 'id': c['id'], 'name': t.name, 'args': clean, 'risk': 'run', 'summary': summary}
+    t1 = time.perf_counter()
+    attempt = 0
+    while True:
+        aid = c['id'] if not attempt else f'{c["id"]}.r{attempt}'
+        ev = {'type': 'ui_action', 'id': aid, 'action': t.name, 'args': clean, 'label': summary, 'applied': True}
+        if not run.ctx.ui_ack:                  # a page that cannot answer: started, outcome unknown
+            yield ev
+            ok, content, done_summary = True, 'started on the page (it does not report results: check the page state)', '→ started'
+            break
+        key = uiwait.open_(run.user, run.run_id, aid)
+        yield {**ev, 'wait': True}
+        r = yield from _await_page(run, key, RUN_WAIT_S)
+        if r == 'cancelled':
+            ok, content, done_summary = False, 'stopped by the user', '→ stopped'
+            break
+        if r == 'pending':
+            ok, done_summary = True, f'→ still running after {RUN_WAIT_S // 60} min'
+            content = (f'still running on the page after {RUN_WAIT_S // 60} minutes: tell the user it continues (the '
+                       'progress shows on the page) and read the result later (eval_summary / issue_summary)')
+            break
+        if r.get('ok'):
+            ok, done_summary = True, '→ ' + (r.get('detail') or 'done')[:200]
+            content = _dump({'done': True, 'detail': r.get('detail'), **({'result': r['result']} if 'result' in r else {})})
+            break
+        why = r.get('detail') or 'no reason given'
+        if r.get('transient') and attempt < RUN_RETRIES:
+            attempt += 1
+            wait = 2 ** attempt
+            yield {'type': 'retry', 'attempt': attempt, 'max': RUN_RETRIES, 'reason': f'{t.name}: {why}'[:300],
+                   'wait_s': wait, 'discard': False, 'step': None}
+            if _sleep(run.cancel, wait):
+                ok, content, done_summary = False, 'stopped by the user', '→ stopped'
+                break
+            continue
+        tries = f' (after {attempt + 1} tries)' if attempt else ''
+        ok, done_summary = False, '→ ' + why[:200]
+        content = (f'the page could not do it{tries}: {why}. Do not repeat the same call: fix the arguments, or call '
+                   'cannot_do with this reason and what the user can do instead.')
+        break
+    yield {'type': 'tool_end', 'id': c['id'], 'name': t.name, 'ok': ok, 'summary': done_summary,
+           'ms': round((time.perf_counter() - t1) * 1000), 'risk': 'run'}
+    return {'ok': ok, 'content': content, 'summary': done_summary, 'extras': {}}
+
+
 def _run_change(run, c, t, clean, summary, risk):
     """Runs one approved / auto change -> {ok, content, summary, extras}; yields its tool events."""
+    if risk == 'run':
+        return (yield from _run_page(run, c, t, clean, summary))
     yield {'type': 'tool_start', 'id': c['id'], 'name': t.name, 'args': clean, 'risk': risk, 'summary': summary}
     t1 = time.perf_counter()
     try:

@@ -6,7 +6,7 @@
 // change gets its toast.
 
 import { mountChat, type ChatHandle } from '../core/chat.js';
-import { dockHooks, openDock, refreshDock, setDockHost, toggleDock } from '../core/dock.js';
+import { dockHooks, openDock, refreshDock, setDockHost, toggleDock, withNav } from '../core/dock.js';
 import { esc, icon } from '../core/dom.js';
 import { llmOn } from '../core/llm.js';
 import { openSettings } from '../settings/dialog.js';
@@ -58,6 +58,7 @@ function mount(el: HTMLElement): ChatHandle {
     scopeName: 'bucket',
     scopeLabel: (s) => { const id = typeof s?.['bucket_id'] === 'string' ? s['bucket_id'] : null; const n = s?.['name']; return typeof n === 'string' && n ? n : id ? bucketOf(id)?.name ?? 'bucket' : 'all buckets'; },
     onChange,
+    onUiAction: withNav(),
     onEvent: hk.onEvent,
     onDone: hk.onDone,
     onUpdate: () => { renderCtx(); refreshDock(); },

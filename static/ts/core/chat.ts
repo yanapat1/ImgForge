@@ -13,7 +13,7 @@
 // - Classes are scoped under `.chat` (static/css/chat.css). The answer container also carries `ai-msg bot`.
 
 import type {
-  AiTurn, Block, ChatCatalog, ChatEffort, ChatEvent, ChatMode, ChatPrefs, ChatRole, ChatSession, SessionDetail, SessionList, SessionRef, ThinkLevel, ToolItem, UiAction, WebLevel,
+  AiTurn, Block, ChatCatalog, ChatEffort, ChatEvent, ChatMode, ChatPrefs, ChatRole, ChatSession, SessionDetail, SessionList, SessionRef, ThinkLevel, ToolItem, UiAction, UiResult, WebLevel,
 } from '../types-chat.js';
 import { errText, getJSON, isStatus, postJSON, sendJSON } from './api.js';
 import { copyText, esc, icon } from './dom.js';
@@ -33,6 +33,8 @@ export { approvedMessage, dateGroup, EFFORTS, MODES, newTurn, nextMode, parseCom
 const fmtK = (n: number | null | undefined): string => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
 const fmtMs = (ms: number | null | undefined): string => (ms == null ? '' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);
 const fmtSince = (ms: number): string => (ms < 60000 ? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s` : `${Math.floor(ms / 60000)} min ${Math.floor((ms % 60000) / 1000)} s`);
+/** an onUiAction answer as a result: true / undefined = done, false = could not */
+const asResult = (v: boolean | UiResult | void): UiResult => (typeof v === 'object' && v !== null ? v : { ok: v !== false });
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtWhen(iso: string | null | undefined): string {
@@ -104,8 +106,9 @@ export interface ChatOptions {
   scopeName?: string;
   /** a short label for a session's scope chip in History */
   scopeLabel?: (scope: Record<string, unknown> | null) => string;
-  /** a visualizer action (applied=true: apply it now; else the user clicked Apply). false = could not apply. */
-  onUiAction?: (a: UiAction) => boolean | Promise<boolean>;
+  /** a page action (applied=true: apply it now; else the user clicked Apply). false / {ok: false} = could not.
+   *  When the agent waits for it (event `wait`), the outcome is posted to api/llm/agent/ui-result. */
+  onUiAction?: (a: UiAction) => boolean | UiResult | Promise<boolean | UiResult>;
   /** a change ran (tool_end of a change / danger tool, an Undo): reload what the page shows */
   onChange?: (ev: ChatEvent) => void;
   /** an answer finished (meter, side panels) */
@@ -131,7 +134,7 @@ export interface ChatOptions {
 
 export interface ChatHandle {
   root: HTMLElement;
-  send: (text: string, o?: { label?: string; kind?: string }) => Promise<void>;
+  send: (text: string, o?: { label?: string; kind?: string; extra?: Record<string, unknown> }) => Promise<void>;
   busy: () => boolean;
   stop: () => void;
   newChat: () => void;
@@ -469,12 +472,19 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
           `<button type="button" class="ghost" data-ca="plan-edit" data-ti="${ti}" data-bi="${bi}">${icon('edit')}Edit</button>` +
           `<button type="button" data-ca="plan-run" data-mode="ask" data-ti="${ti}" data-bi="${bi}" title="Run it; every change asks first">Approve · ask</button>` +
           `<button type="button" class="primary" data-ca="plan-run" data-mode="auto" data-ti="${ti}" data-bi="${bi}" title="Run it; changes run, dangerous ones still ask">${icon('play')}Approve · auto</button></div>` : '') + '</div>';
-      case 'ui': return `<div class="ct-ui${b.applied ? ' applied' : ''}">${icon('scatter')}<span class="ct-ui-l">${esc(b.label)}</span><code class="ct-dim">${esc(b.action)}</code><span class="grow"></span>` +
+      case 'ui': if (b.applied && runCardOf(t, b.id)) return '';      // a run action: its tool card says it all
+        return `<div class="ct-ui${b.applied ? ' applied' : ''}">${icon('scatter')}<span class="ct-ui-l">${esc(b.label)}</span><code class="ct-dim">${esc(b.action)}</code><span class="grow"></span>` +
         (b.applied ? `<span class="ct-okc">${icon('check')}applied</span>` : `<button type="button" class="primary" data-ca="ui-apply" data-ti="${ti}" data-bi="${bi}">Apply</button>`) + '</div>';
       case 'retry': return `<div class="ct-retry">${icon('refresh')}<span class="num">retry ${b.attempt}/${b.max}</span><span class="ct-rr">${esc(b.reason.slice(0, 140))}</span><span class="num">${esc(String(b.waitS))} s</span></div>`;
       case 'notice': return `<div class="ct-notice ${esc(b.level)}">${icon(b.level === 'warn' || b.level === 'error' ? 'alert' : 'circle')}<span>${md(b.text)}</span></div>`;
       case 'compact': return compactHTML(b, keyOf(ti, bi));
     }
+  }
+
+  /** the run card of a page action (id, or id.rN of a retry) */
+  function runCardOf(t: AiTurn, id: string): boolean {
+    const base = id.replace(/\.r\d+$/, '');
+    return t.blocks.some((x) => x.k === 'tools' && x.items.some((i) => i.id === base && i.risk === 'run'));
   }
 
   /** the divider where older messages were folded into the chat's summary; the summary opens under it */
@@ -956,7 +966,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (rm && typeof rm['id'] === 'string') removedToast({ id: rm['id'], title: str(rm['title']) });
   }
 
-  async function send(text0: string, o: { label?: string; kind?: string; raw?: boolean } = {}): Promise<void> {
+  async function send(text0: string, o: { label?: string; kind?: string; raw?: boolean; extra?: Record<string, unknown> } = {}): Promise<void> {
     const text = text0.trim();
     if (!text || C.busy) return;
     if (!o.raw) {
@@ -985,6 +995,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (think()) body['think'] = think();
     if (C.prefs.provider_id) body['model'] = { provider_id: C.prefs.provider_id, model: C.prefs.model ?? '' };
     if (C.forced.length) body['skills'] = C.forced;
+    if (opts.onUiAction) body['ui_ack'] = true;     // the page reports how its page actions ended
+    if (o.extra) Object.assign(body, o.extra);
     C.forced = [];
     renderForced();
     const apply = (ev: ChatEvent): void => { const t = aiAt(idx); if (t) C.turns[idx] = reduce(t, ev); };
@@ -1022,7 +1034,9 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (ev.type === 'ui_action' && ev['applied'] && opts.onUiAction) {
       const t = aiAt(idx);
       const b = t?.blocks.find((x): x is Extract<Block, { k: 'ui' }> => x.k === 'ui' && x.id === str(ev['id']));
-      if (b) void Promise.resolve(opts.onUiAction(b)).catch(() => {});
+      const runId = C.runId;
+      if (b) void Promise.resolve().then(() => opts.onUiAction?.(b)).then(asResult, (e: unknown) => ({ ok: false, detail: errText(e) }))
+        .then((r) => { if (ev['wait'] && runId) void postJSON('api/llm/agent/ui-result', { run_id: runId, action_id: b.id, ...r }).catch(() => {}); });
     }
   }
 
@@ -1288,9 +1302,9 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   async function applyUi(ti: number, bi: number): Promise<void> {
     const t = aiAt(ti), b = t?.blocks[bi];
     if (!t || b?.k !== 'ui' || b.applied || !opts.onUiAction) return;
-    let ok = false;
-    try { ok = (await opts.onUiAction(b)) !== false; } catch (e) { toast(`Could not apply: ${errText(e)}`, 'err'); }
-    if (!ok) { toast('That change cannot be applied on this page', 'err'); return; }
+    let r: UiResult = { ok: false };
+    try { r = asResult(await opts.onUiAction(b)); } catch (e) { toast(`Could not apply: ${errText(e)}`, 'err'); return; }
+    if (!r.ok) { toast(r.detail ? `Could not apply: ${r.detail}` : 'That change cannot be applied on this page', 'err'); return; }
     const cur = aiAt(ti);
     if (cur) C.turns[ti] = reduce(cur, { type: 'x_ui_applied', id: b.id });
     renderTurn(ti);

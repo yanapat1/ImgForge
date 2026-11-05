@@ -4,8 +4,8 @@ description: compare detectors on this dataset, explain their errors with the da
 when: the user asks which model is better, why a model fails, or to explain the Evaluation tab
 ---
 1. `eval_summary`: the leaderboard (mAP50, mAP50-95, P, R, F1, ms per image, missed, wrong class, FP background),
-   per-class AP of the best model and the findings. Nothing evaluated → `open_tab` `model` and explain Run on this
-   dataset (Settings › Models adds a model).
+   per-class AP of the best model and the findings. Nothing evaluated → `list_models`, then `run_eval_all` (or
+   `run_model` for one; the user approves in ask mode). No models at all → Settings › Models adds one (`cannot_do`).
 2. Compare on val images (train scores look too good), each at its best F1 (the fairest), then mAP50-95 for box
    precision and ms / image for speed.
 3. Explain the gaps with the data: `class_stats` (small / dark / blurry / rare classes vs per-class AP), the Model

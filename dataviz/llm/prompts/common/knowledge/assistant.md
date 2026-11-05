@@ -6,17 +6,13 @@ summary: chat commands (/model, /mode, /effort, /web, /compact ...), modes, sess
   `/effort low|medium|high`, `/think off|low|medium|high`, `/web off|public|technical|full`, `/skills`,
   `/skill <name>`, `/sessions`, `/new`, `/rename`, `/delete`, `/cost`, `/compact [focus]`, `/export`, `/prompts`,
   `/plugins`, `/help`.
-- **Context compaction**: when a chat's request passes 80% of the input token budget (Settings › AI assistant), or
-  it has more than 40 messages, the older messages are folded into one summary (goal, preferences, app state, what
-  was done with exact numbers and ids, findings, declined actions, open tasks). The model reads the summary plus
-  the last 3 exchanges. A dashed "Context compacted · view summary" line marks the place. `/compact` does it now and
-  keeps the last exchange; `/compact <focus>` says what the summary must keep. The page still shows every message.
-  If the summary call fails, the chat goes on and the oldest messages are left out instead.
-- **Where it is**: a dock on the right of every page (home, Data Center, visualizer, labeling). Ctrl+. or the ◆
-  icon opens / collapses it; drag its left edge to resize; on a phone a floating ◆ opens it as a sheet. The ring in
-  its head is how much of the input budget the chat uses (compaction at 80%). The Tasks strip shows the agent's
-  checklist, what it is driving and a Stop button. Visualizer and Data Center have their own chats (the Visual
-  and the Data assistant); home and labeling use the Data assistant.
+- **Context compaction**: past 80% of the input budget (Settings › AI assistant) or 40 messages, older messages
+  fold into one summary (goal, preferences, app state, work done with numbers and ids, open tasks); the model reads
+  it + the last 3 exchanges ("Context compacted · view summary" line). `/compact [focus]` does it now. The page
+  keeps every message; if the summary fails, the oldest messages are left out instead.
+- **Where it is**: a dock on the right of every page; Ctrl+. or the ◆ icon collapses it, its left edge resizes
+  it, a floating ◆ opens it on a phone. Head ring = context used (compaction at 80%); Tasks strip = the checklist,
+  "is driving …" and Stop. The visualizer has the Visual assistant; Data Center, home and labeling the Data one.
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve).
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).

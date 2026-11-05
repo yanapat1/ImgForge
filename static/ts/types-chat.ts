@@ -85,6 +85,8 @@ export interface ConfirmAction { id: string; tool: string; args: Record<string, 
 export interface ConfirmResult { id: string; ok: boolean; summary: string; declined: boolean; undoId: string | null; undone: boolean }
 export type ConfirmState = 'pending' | 'sent' | 'decided' | 'stopped' | 'timed out' | 'expired';
 export interface UiAction { id: string; action: string; args: Record<string, unknown>; label: string; applied: boolean }
+/** How a page action ended (POST api/llm/agent/ui-result): transient = worth retrying (busy, 5xx, network) */
+export interface UiResult { ok: boolean; detail?: string; transient?: boolean; result?: unknown }
 
 export type Block =
   | { k: 'think'; text: string; t0: number; ms: number | null }

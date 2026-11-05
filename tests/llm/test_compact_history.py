@@ -7,12 +7,12 @@ system prompt plus only the newer messages, and POST /api/llm/agent/<role>/compa
 import json
 
 import pytest
-
 from conftest import make_user
+from test_agent_engine import _connect, script, svc  # noqa: F401 - svc is a fixture
+
 from dataviz.llm import providers, sessions
 from dataviz.llm.engine import react, summarize
 from dataviz.llm.providers import LLMError
-from test_agent_engine import _connect, script, svc  # noqa: F401 - svc is a fixture
 
 
 def _events(r):

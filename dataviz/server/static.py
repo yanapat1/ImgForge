@@ -23,6 +23,10 @@ class JsonGZip:
         path = scope.get('path', '') if scope['type'] == 'http' else ''
         if path.startswith(('/api/crop/', '/api/image/', '/api/cover/')):
             return await self.app(scope, receive, send)
+        # the ◆ chat streams (NDJSON): gzip would hold each small event back until enough data piles up, so the page
+        # would see a page action or a confirmation only at the next ping
+        if path.endswith('/chat') and '/api/llm/' in path:
+            return await self.app(scope, receive, send)
         return await self.gzip(scope, receive, send)
 
 
