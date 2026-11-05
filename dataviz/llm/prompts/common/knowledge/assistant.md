@@ -20,7 +20,9 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   before it is left. A task over several pages keeps its checklist with the chat (Tasks strip, each step with
   its page). From the Data Center a folder with no visualize session is sent there first (approved in ask; a
   labeling project is always confirmed); from the visualizer the assistant finds the dataset's folder in the
-  Data Center (and the folders above it) and opens it there.
+  Data Center (and the folders above it) and opens it there. A plain question about another page ("mAP of
+  yolov8s in a1?" from the Data Center) is answered without leaving: the other page's specialist looks it up
+  read-only ("Asking the Visualizer" in the Tasks strip).
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve).
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).

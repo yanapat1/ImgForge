@@ -99,6 +99,11 @@ class Ctx:
     events: list = field(default_factory=list)  # events a tool adds for the page ('search'), sent after its tool_end
     ui_ack: bool = False            # the page reports how its page actions ended (POST /api/llm/agent/ui-result)
     roles_on: dict = None           # {role: its assistant is switched on for this user} (navigate refuses an off page)
+    provider: dict = None           # the run's provider (a consult runs the other specialist on it)
+    limit: int = None               # the run's input budget
+    cancel: object = None           # the run's stop event (a consult stops with it)
+    depth: int = 0                  # 1 inside a consult: no consult of a consult
+    sub_usage: dict = field(default_factory=lambda: {'in': 0, 'out': 0})   # tokens of consults, added to the turn
 
 
 @dataclass
@@ -247,14 +252,16 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     fitted, est = budget.fit(provider['kind'], sys_all, [], msgs, lim)
     run_id = uuid.uuid4().hex[:12]
     ctx = Ctx(user=user, role=role.name, scope=scope if isinstance(scope, dict) else {}, skills=sk, state=state,
-              app=app, web_level=opts['web'], run_id=run_id)
+              app=app, web_level=opts['web'], run_id=run_id, provider=provider, limit=lim)
     p = dict(provider)
     if opts['profile'] == 'small':
         p['temperature'] = min(float(p.get('temperature') or 0.1), 0.1)
-    return Run(run_id=run_id, user=user, role=role, provider=p, system=system, msgs=list(fitted), tools=tset, ctx=ctx,
+    run = Run(run_id=run_id, user=user, role=role, provider=p, system=system, msgs=list(fitted), tools=tset, ctx=ctx,
                mode=opts['mode'], effort=opts['effort'], think=opts['think'], web=opts['web'],
                native_web=_native_ok(p, opts['web']), profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est,
                raw_est=raw_est)
+    ctx.cancel = run.cancel
+    return run
 
 
 # ---------------------------------------------------------------- helpers
@@ -441,6 +448,9 @@ def events(run):
     def done(steps):
         if not usage['in']:
             usage['in'] = run.est
+        for k in ('in', 'out'):                 # what the consults of this turn used
+            usage[k] += run.ctx.sub_usage.get(k, 0)
+            run.ctx.sub_usage[k] = 0
         return {'type': 'done', 'usage': dict(usage), 'ms': round((time.perf_counter() - t0) * 1000), 'steps': steps}
 
     for step in range(1, run.max_steps + 1):

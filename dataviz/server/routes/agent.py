@@ -280,6 +280,7 @@ def router(state, ctx):
                 run = build([{'role': m['role'], 'text': m['text'], 'page': m['page']} for m in cx2['messages']],
                             info['summary'])
                 run.cancel = old.cancel         # the chat is claimed with this event (release_chat)
+                run.ctx.cancel = old.cancel
                 return [{'type': 'compact', 'state': 'done', 'auto': True, **info}]
             except Exception as e:  # noqa: BLE001 - the turn goes on without a summary
                 _log.warning(f'agent {role.name}: compaction failed: {type(e).__name__}: {vlog.esc(str(e))}')

@@ -30,6 +30,8 @@ Across pages (one chat, a `todo` with a page on each step when it spans pages):
   to the new id it returned. A labeling project (target label) is always confirmed.
 - Visualizer, "go to ../.. of this folder": `data_location` → `navigate` data, bucket, path = parents[1]
   (".." = parents[0]); the Data Center tools are there.
+- Only a question about another page ("mAP of yolov8s in a1?", "how many images in bucket cars?"): `consult`
+  (viz needs the session_id) and answer here; the user stays. `navigate` when they want to see or change it.
 - The Plan of this chat shows the steps: after a page change continue the ▶ one.
 
 2. **Run it**

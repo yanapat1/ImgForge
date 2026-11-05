@@ -141,7 +141,14 @@ def _tool_model():
                 yield sse({'choices': [{'delta': {'content': f'TOOL SAID: {text}'}}]})
             else:
                 m = _re.search(r'open session (\S+)', text)
-                if m:
+                c = _re.search(r'consult (\S+)', text)
+                if 'Asked by the assistant' in text:          # a consult: the other specialist answers at once
+                    yield sse({'choices': [{'delta': {'content': 'VIZ SAYS 13 boxes'}}]})
+                    yield 'data: [DONE]\n\n'
+                    return
+                if c:
+                    name, args = 'consult', {'page': 'viz', 'session_id': c.group(1), 'question': 'How many boxes?'}
+                elif m:
                     name, args = 'navigate', {'screen': 'viz', 'session_id': m.group(1), 'goal': 'open the model tab'}
                 else:
                     name, args = ('open_tab', {'tab': 'model'}) if 'model tab' in text else ('compute_stats', {})
@@ -236,6 +243,11 @@ def test_one_chat_across_pages(server):  # noqa: F811 - the fixture
             page.goto(f'{server}/')
             page.wait_for_selector('#ai-page .chat-turn.user:has-text("open session")', timeout=30000)
             assert page.locator('#ai-page .ai-msg.bot:has-text("Model is open")').count() == 1
+            # a question about the visualizer from Home: consult answers it here, the page stays
+            page.fill('#ai-page-q', f'consult {sid} about boxes')
+            page.press('#ai-page-q', 'Enter')
+            page.wait_for_selector('#ai-page .ai-msg.bot:has-text("VIZ SAYS 13 boxes")', timeout=60000)
+            assert '/s/' not in page.url
             browser.close()
         assert _get(f'{server}/api/llm/sessions?role=app')['count'] == before + 1, 'one chat, not one per page'
         assert not errors, '\n'.join(errors)

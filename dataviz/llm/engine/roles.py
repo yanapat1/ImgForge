@@ -76,7 +76,8 @@ def other_pages(role):
     """The "Other pages" card: one chat follows the user, only this page's tools are here."""
     return ('## Other pages\nThis chat follows the user across the app; you have only this page\'s tools. '
             + ' '.join(f'Elsewhere: {CAN[k]}.' for k in CAN if k != role)
-            + ' For work there call `navigate` (`list_sessions` finds ids); never call another page\'s tools.')
+            + ' A question about it: `consult`; to see or change it: `navigate` (`list_sessions` finds ids). Never '
+              'call another page\'s tools.')
 
 
 # ---------------------------------------------------------------- "where the user is"

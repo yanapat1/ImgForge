@@ -9,6 +9,10 @@ The app's pages for every ◆ assistant (domain common): find a session, and ope
                                          ends the turn: the SAME chat continues on the new page with `goal` (the dock
                                          sends it there as a continued message; that page's specialist answers it).
 
+    consult {page, question, session_id?}
+                                         read: the other page's specialist answers one question on the server
+                                         (read-only tools, <= 6 steps, its answer cut to 1500 characters; its tokens
+                                         count for this turn): no page change, no extra tools in this prompt
     data_location {}                     read, Visualizer only: the Data Center bucket + folder of the open dataset
                                          (datacenter/service.locate) and the folders above it, for navigate
 
@@ -149,6 +153,81 @@ def _data_location(ctx, a):
     return loc, f'→ {loc["bucket_name"]}/{loc["path"] or "(root)"}'
 
 
+CONSULT_STEPS = 6
+CONSULT_CHARS = 1500
+CONSULT_NOTE = ('(Asked by the assistant on the {here} page, for the user. Answer it with your read-only tools: short, '
+                'with the exact names and numbers. You cannot change anything or open pages here.)')
+
+
+def _consult(ctx, a):
+    """Another page's specialist answers one question, read-only, on the server: its tools and steps stay in its
+    own run, only the answer comes back (no page change, no extra tools in this prompt)."""
+    from ..engine import react, roles
+    from ..providers import LLMError
+    target = 'visual' if a['page'] == 'viz' else 'data'
+    if getattr(ctx, 'depth', 0):
+        raise ToolError('a consult cannot consult again: answer with your tools')
+    if target == ctx.role:
+        raise ToolError('the user is on that page already: answer with your own tools')
+    if (getattr(ctx, 'roles_on', None) or {}).get(target) is False:
+        raise ToolError(f'the {SCREEN_LABEL[a["page"]]} assistant is switched off for this user (Settings › AI '
+                        'assistant): tell the user')
+    if not getattr(ctx, 'provider', None):
+        raise ToolError('no model to ask here')
+    state = None
+    if target == 'visual':
+        sid = str(a.get('session_id') or '').strip()
+        if not sid:
+            raise ToolError('session_id is required for viz: find it with list_sessions')
+        if not _sessions(ctx.user, 'viz', ids=[sid]):
+            raise ToolError(f'no visualize session {sid!r} you can open: list_sessions shows them')
+        try:
+            state = ctx.app.state_for(sid, ctx.user)
+        except Exception as e:  # noqa: BLE001 - a session that cannot open (folder gone ...): say why
+            raise ToolError(f'session {sid!r} cannot be opened: {str(e)[:200]}') from None
+        if getattr(state, 'index', True) is None:
+            raise ToolError(f'session {sid!r} is still being indexed: try again in a moment, or navigate there')
+    here = roles.SCREEN_LABEL.get((ctx.scope or {}).get('page') or ('viz' if ctx.role == 'visual' else 'data'), 'other')
+    q = f'{a["question"].strip()[:1500]}\n\n{CONSULT_NOTE.format(here=here)}'
+    opts = react.options({'mode': 'ask', 'effort': 'low', 'web': 0}, ctx.provider)
+    opts['max_steps'] = min(opts['max_steps'], CONSULT_STEPS)
+    sub = react.prepare(ctx.user, target, ctx.provider, react.history([{'role': 'user', 'text': q}]), {}, opts,
+                        state=state, app=ctx.app, limit=ctx.limit)
+    sub.tools = {k: t for k, t in sub.tools.items() if (t.risk == 'read' and k != 'consult') or k == 'cannot_do'}
+    sub.ctx.depth = 1
+    if getattr(ctx, 'cancel', None) is not None:
+        sub.cancel = ctx.cancel
+        sub.ctx.cancel = ctx.cancel
+    texts, used, steps, cannot = [], [], 0, None
+    try:
+        evs = list(react.events(sub))
+    except LLMError as e:
+        raise ToolError(f'the {SCREEN_LABEL[a["page"]]} assistant failed: {str(e)[:300]}') from None
+    for ev in evs:
+        t = ev.get('type')
+        if t == 'step':
+            steps, texts = ev.get('n', steps), []
+        elif t == 'text':
+            texts.append(str(ev.get('text') or ''))
+        elif t == 'tool_start':
+            used.append(ev.get('name'))
+        elif t == 'cannot':
+            cannot = ev.get('reason')
+        elif t == 'error':
+            raise ToolError(f'the {SCREEN_LABEL[a["page"]]} assistant failed: {str(ev.get("detail"))[:300]}')
+        elif t == 'done':
+            u = ev.get('usage') or {}
+            for k in ('in', 'out'):
+                ctx.sub_usage[k] = ctx.sub_usage.get(k, 0) + int(u.get(k) or 0)
+    answer = ''.join(texts).strip() or (f'cannot: {cannot}' if cannot else '(no answer)')
+    if len(answer) > CONSULT_CHARS:
+        answer = answer[:CONSULT_CHARS] + '…'
+    tools_used = sorted({n for n in used if n})
+    ctx.events.append({'type': 'consult', 'page': a['page'], 'steps': steps, 'tools': tools_used, 'ok': not cannot})
+    return ({'page': a['page'], 'answer': answer, 'tools_used': tools_used},
+            f'→ {SCREEN_LABEL[a["page"]]} answered ({steps} step{"" if steps == 1 else "s"})')
+
+
 _C = dict(domain='common', ctx=True)
 register(Tool('list_sessions', 'Sessions the user can open (viz, label), for navigate; bucket + path: the ones '
                                'of that folder.',
@@ -161,6 +240,11 @@ register(Tool('navigate', 'Open another page (home, data = Data Center, viz / la
                     'session_id': S('viz / label: from list_sessions'), 'bucket': S('data: bucket'),
                     'path': S('data: folder'), 'tab': E('viz: view', VIZ_TABS)}, ['screen', 'goal']),
               False, _nav_run, _nav_label, check=_check_nav, risk='ui', **_C))
+register(Tool('consult', "Ask another page's specialist one question, read-only, without leaving (viz needs "
+                         'session_id). To show or change something there: navigate.',
+              _obj({'page': E('whose specialist', ['data', 'viz']), 'question': S('the full question, with names'),
+                    'session_id': S('viz: from list_sessions')}, ['page', 'question']),
+              False, _consult, **_C))
 # the visualizer's way back to its folder (domain visual: only the Visual specialist has it; it only reads)
 register(Tool('data_location', 'The Data Center bucket + folder of this dataset; parents[0] = "..", '
                                'parents[1] = "../..".',
