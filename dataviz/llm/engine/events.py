@@ -23,6 +23,8 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
     cannot        {reason, alternative}                      ends the turn
     plan_proposal {summary, steps}                           mode plan: ends the turn, the page offers Approve
     retry         {attempt, max, reason, wait_s, discard, step}   discard: drop this step's streamed text
+    compact       {state: start|done, auto, summary?, covered?, before?, after?, turns?}   the older messages were
+                                                             folded into the chat's summary (engine/summarize.py)
     notice        {level, text}
     ping          {}                                         keep-alive while waiting for a confirmation
     error         {detail}                                   ends the turn
@@ -31,5 +33,5 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
 
 ENDS = ('done', 'error')
 TYPES = ('meta', 'session', 'step', 'thinking', 'thinking_end', 'text', 'tool_start', 'tool_end', 'skill', 'search', 'todo',
-         'ui_action', 'confirm', 'confirmed', 'ask', 'cannot', 'plan_proposal', 'retry', 'notice', 'ping', 'error',
+         'ui_action', 'confirm', 'confirmed', 'ask', 'cannot', 'plan_proposal', 'retry', 'compact', 'notice', 'ping', 'error',
          'done')

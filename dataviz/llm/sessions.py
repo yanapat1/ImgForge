@@ -8,7 +8,10 @@ survives reloads, other devices and rebuilds.
     update(user, sid, title, pinned)      rename / pin
     delete(user, ids | role + scope)      soft delete (delete_reason 'user'); restore(user, ids) undoes it
     append(user, sid, role, text, ...)    one message (the chat route: the user's at the start, the answer at the end)
-    history(user, sid)                    [{role, text}] for react.history (last HISTORY_TURNS)
+    history(user, sid)                    [{role, text}] for react.history (last HISTORY_TURNS after the summary)
+    context(user, sid)                    {summary, summary_seq, messages after it}: what the model is sent
+    for_summary(user, sid, after, upto)   the messages (with traces) a compaction folds into the summary
+    save_summary(user, sid, ...)          store a new summary (only over the one it was built from)
     purge(now)                            hard-deletes chats deleted more than llm_chat_retention_days ago
     compact_trace(events)                 the NDJSON events of one turn -> the trace kept with the answer
 
@@ -49,7 +52,7 @@ _PURGE_LOCK_KEY = 0x6c6c6d63686174      # any constant: the advisory lock id of 
 _log = vlog.get_logger('llm')
 _J = {k: bindparam(k, type_=JSONB) for k in ('scope', 'trace', 'usage')}
 _COLS = ('id, role, title, scope, provider_id, model, mode, effort, pinned, n_messages, usage, created_at, '
-         'updated_at, last_opened_at')
+         'updated_at, last_opened_at, summary_seq, summary_tokens, parent_id')
 
 
 class SessionError(ValueError):
@@ -229,7 +232,8 @@ def get(user, sid, touch=True):
             r = _live(c, uid, sid)
         msgs = c.execute(text("""SELECT id, seq, role, text, trace, usage, created_at FROM app.llm_messages
                                  WHERE session_id = :s ORDER BY seq"""), {'s': r.id}).all()
-    return {'session': _row(r), 'messages': [_row(m) for m in msgs]}
+        summary = c.execute(text('SELECT summary FROM app.llm_sessions WHERE id = :s'), {'s': r.id}).scalar()
+    return {'session': {**_row(r), 'summary': summary}, 'messages': [_row(m) for m in msgs]}
 
 
 def update(user, sid, title=None, pinned=None):
@@ -358,14 +362,48 @@ def append(user, sid, role, text_, trace=None, usage=None, meta=None):
 
 
 def history(user, sid, turns=HISTORY_TURNS):
-    """[{role, text}] of the last `turns` messages (react.history's input)."""
+    """[{role, text}] of the last `turns` messages after the summary (react.history's input)."""
+    return [{'role': m['role'], 'text': m['text']} for m in context(user, sid)['messages'][-int(turns):]]
+
+
+def context(user, sid):
+    """What the model is sent of a chat: {summary, summary_seq, summary_tokens, messages: [{seq, role, text}]
+    after summary_seq} (summary None = never compacted). Bounded by MAX_MESSAGES."""
+    uid = _uid(user)
+    with db.connect() as c:
+        r = c.execute(text("""SELECT id, summary, summary_seq, summary_tokens FROM app.llm_sessions
+                              WHERE id = :s AND owner_id = :u AND deleted_at IS NULL"""),
+                      {'s': str(sid or ''), 'u': uid}).first()
+        if r is None:
+            raise SessionError('no such chat', 404)
+        rows = c.execute(text("""SELECT seq, role, text FROM app.llm_messages WHERE session_id = :s AND seq > :a
+                                 ORDER BY seq"""), {'s': r.id, 'a': int(r.summary_seq or 0)}).all()
+    return {'summary': r.summary, 'summary_seq': r.summary_seq, 'summary_tokens': r.summary_tokens,
+            'messages': [{'seq': m.seq, 'role': m.role, 'text': m.text} for m in rows]}
+
+
+def for_summary(user, sid, after_seq, upto_seq):
+    """[{seq, role, text, trace}] with after_seq < seq <= upto_seq: what a compaction folds into the summary."""
     uid = _uid(user)
     with db.connect() as c:
         _live(c, uid, sid)
-        rows = c.execute(text("""SELECT role, text FROM (SELECT seq, role, text FROM app.llm_messages
-                                 WHERE session_id = :s ORDER BY seq DESC LIMIT :n) x ORDER BY seq"""),
-                         {'s': str(sid), 'n': int(turns)}).all()
-    return [{'role': r.role, 'text': r.text} for r in rows]
+        rows = c.execute(text("""SELECT seq, role, text, trace FROM app.llm_messages
+                                 WHERE session_id = :s AND seq > :a AND seq <= :b ORDER BY seq"""),
+                         {'s': str(sid), 'a': int(after_seq or 0), 'b': int(upto_seq)}).all()
+    return [{'seq': m.seq, 'role': m.role, 'text': m.text, 'trace': m.trace or []} for m in rows]
+
+
+def save_summary(user, sid, summary, seq, tokens, expect_seq):
+    """Store a summary of every message up to `seq`, only when the chat still has the summary it was built from
+    (summary_seq = expect_seq: two tabs compacting at once never step back) -> True when stored."""
+    uid = _uid(user)
+    with db.begin() as c:
+        n = c.execute(text("""UPDATE app.llm_sessions SET summary = :t, summary_seq = :q, summary_tokens = :k
+                              WHERE id = :s AND owner_id = :u AND deleted_at IS NULL
+                              AND summary_seq IS NOT DISTINCT FROM :e"""),
+                      {'t': str(summary), 'q': int(seq), 'k': int(tokens), 's': str(sid), 'u': uid,
+                       'e': None if expect_seq is None else int(expect_seq)}).rowcount
+    return bool(n)
 
 
 def improve_title(user, sid, provider, question, answer, expect_title):

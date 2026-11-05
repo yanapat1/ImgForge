@@ -205,6 +205,10 @@ llm_sessions = Table(
     _now('created_at'), _now('updated_at'), _now('last_opened_at'),
     Column('deleted_at', DateTime(timezone=True)),
     Column('delete_reason', String(10)),                         # user | limit
+    Column('summary', Text),                                     # compacted older messages (llm/engine/summarize.py)
+    Column('summary_seq', Integer),                              # the last message seq the summary covers
+    Column('summary_tokens', Integer),
+    Column('parent_id', String(36)),                             # handed off from this chat (page change)
     Index('ix_llm_sessions_owner_role_last_opened_at', 'owner_id', 'role', 'last_opened_at'),
     Index('ix_llm_sessions_deleted_at', 'deleted_at', postgresql_where=text('deleted_at IS NOT NULL')),
     schema='app')

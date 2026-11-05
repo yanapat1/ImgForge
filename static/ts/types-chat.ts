@@ -52,6 +52,8 @@ export interface ChatSession {
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
+  summary?: string | null;
+  summary_seq?: number | null;
 }
 export interface SessionRef { id: string; title: string; last_opened_at?: string | null }
 export interface SessionList {
@@ -97,7 +99,8 @@ export type Block =
   | { k: 'plan'; summary: string; steps: string[]; state: 'pending' | 'approved' }
   | ({ k: 'ui' } & UiAction)
   | { k: 'retry'; attempt: number; max: number; reason: string; waitS: number; t0: number }
-  | { k: 'notice'; level: string; text: string };
+  | { k: 'notice'; level: string; text: string }
+  | { k: 'compact'; state: 'start' | 'done' | 'failed'; auto: boolean; summary: string; before: number; after: number; turns: number; covered: number | null };
 
 export interface TurnMeta {
   runId: string | null; model: string | null; provider: string | null; mode: string | null; effort: string | null; maxSteps: number | null;

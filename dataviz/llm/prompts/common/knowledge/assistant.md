@@ -1,10 +1,17 @@
 ---
 title: The ◆ assistant itself
-summary: chat commands (/model, /mode, /effort, /web ...), modes, sessions, limits, the user's own prompts and skills; app-wide ? shortcut sheet, Undo after removing a session / model / connection
+summary: chat commands (/model, /mode, /effort, /web, /compact ...), modes, sessions, context compaction, limits, the user's own prompts and skills; app-wide ? shortcut sheet, Undo after removing a session / model / connection
 ---
 - **Slash commands** in the chat box: `/model` (pick a provider and model), `/mode ask|auto|plan` (or Shift+Tab),
   `/effort low|medium|high`, `/think off|low|medium|high`, `/web off|public|technical|full`, `/skills`,
-  `/skill <name>`, `/sessions`, `/new`, `/rename`, `/delete`, `/cost`, `/export`, `/prompts`, `/plugins`, `/help`.
+  `/skill <name>`, `/sessions`, `/new`, `/rename`, `/delete`, `/cost`, `/compact [focus]`, `/export`, `/prompts`,
+  `/plugins`, `/help`.
+- **Context compaction**: when a chat's request passes 80% of the input token budget (Settings › AI assistant), or
+  it has more than 40 messages, the older messages are folded into one summary (goal, preferences, app state, what
+  was done with exact numbers and ids, findings, declined actions, open tasks). The model reads the summary plus
+  the last 3 exchanges. A dashed "Context compacted · view summary" line marks the place. `/compact` does it now and
+  keeps the last exchange; `/compact <focus>` says what the summary must keep. The page still shows every message.
+  If the summary call fails, the chat goes on and the oldest messages are left out instead.
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve).
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).

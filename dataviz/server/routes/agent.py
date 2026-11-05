@@ -13,6 +13,12 @@ page sends only body.text), none starts one (409 before the stream when every ch
 message is stored before the run, the answer (with the compacted trace and usage) when the stream ends, also on
 stop or a closed connection ('(stopped)'). {ephemeral: true, session_id: null} runs on body.messages and stores
 nothing.
+
+Compaction (llm/engine/summarize.py): a saved chat whose request passes 80% of the input budget (or has more
+unsummarised messages than sessions.HISTORY_TURNS) folds its older messages into the chat's summary before the run
+(events `compact` start / done, or a notice when the summary call fails: then budget.fit drops the oldest turns as
+before). POST /api/llm/agent/<role>/compact {session_id, focus?} does it on demand (/compact). Ephemeral chats are
+never compacted (nothing to store the summary in).
 """
 
 import json
@@ -27,7 +33,7 @@ from ...auth import context as auth_context
 from ...core import logging as vlog
 from ...llm import prompting, providers, tools
 from ...llm import sessions as chat_sessions
-from ...llm.engine import confirm, react, roles
+from ...llm.engine import confirm, react, roles, summarize
 from ...llm.engine.events import ENDS
 from ...llm.providers import LLMError
 
@@ -50,6 +56,7 @@ COMMANDS = [
     ('rename', '<title>', 'rename this chat', None),
     ('delete', '', 'delete this chat', None),
     ('cost', '', 'tokens used by this chat', None),
+    ('compact', '[focus]', 'summarise the older messages to free context (it also happens on its own at 80%)', None),
     ('export', '', 'download this chat as Markdown', None),
     ('prompts', '', 'your own instructions and skills (Settings)', None),
     ('plugins', '', 'installed plugins (Settings)', None),
@@ -182,11 +189,15 @@ def router(state, ctx):
             user_text = str(msgs_in[-1].get('text') or '')
         if not user_text.strip():
             raise HTTPException(400, 'the message is empty')
+        summary, n_saved = None, 0
         if sid:
             try:
-                msgs_run = chat_sessions.history(user, sid) + [{'role': 'user', 'text': user_text}]
+                cx = chat_sessions.context(user, sid)
             except chat_sessions.SessionError as e:
                 raise HTTPException(e.status, str(e))
+            summary, n_saved = cx['summary'], len(cx['messages'])
+            msgs_run = [{'role': m['role'], 'text': m['text']} for m in cx['messages']] + \
+                [{'role': 'user', 'text': user_text}]
         elif msgs_in and isinstance(msgs_in[-1], dict) and msgs_in[-1].get('role') == 'user' \
                 and body.get('text') is None:
             msgs_run = msgs_in                  # a transcript the page still holds (first turn of a new chat)
@@ -203,13 +214,19 @@ def router(state, ctx):
         a = _assets(user, role.name)
         forced = [str(s) for s in body.get('skills') or [] if isinstance(s, str)][:3]
         scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
+        limit = cfg['budget']['max_input_tokens']
+
+        def build(msgs, summary_):
+            r_ = react.prepare(user, role, p, react.history(msgs), scope, opts, state=st, app=ctx,
+                               user_prompts=a['prompts'], user_skills=a['skills'], plugin_tools=a['tools'],
+                               forced_skills=forced, limit=limit, summary=summary_)
+            r_.ctx.web_cfg = web_cfg
+            return r_
         try:
-            run = react.prepare(user, role, p, react.history(msgs_run), scope, opts, state=st, app=ctx,
-                                user_prompts=a['prompts'], user_skills=a['skills'], plugin_tools=a['tools'],
-                                forced_skills=forced, limit=cfg['budget']['max_input_tokens'])
+            run = build(msgs_run, summary)
         except LLMError as e:
             raise HTTPException(e.status, str(e))
-        run.ctx.web_cfg = web_cfg
+        need_compact = bool(sid) and summarize.needs(run.raw_est, limit, n_saved + 1)
         if ephemeral:
             return _stream(_lines(run, role))
         meta = {'provider_id': p.get('id'), 'model': p.get('model'), 'mode': opts.get('mode'),
@@ -228,9 +245,29 @@ def router(state, ctx):
         title = title or chat_sessions.cut_title(user_text)
         session_ev = {'type': 'session', 'session_id': sid, 'title': title, 'removed': removed}
 
+        def compacted():
+            """Auto-compaction before the run -> the events to send (the run is rebuilt on the summary)."""
+            nonlocal run
+            try:
+                info = summarize.compact(user, sid, p, limit)
+                if info is None:
+                    return []
+                cx2 = chat_sessions.context(user, sid)
+                run = build([{'role': m['role'], 'text': m['text']} for m in cx2['messages']], info['summary'])
+                return [{'type': 'compact', 'state': 'done', 'auto': True, **info}]
+            except Exception as e:  # noqa: BLE001 - the turn goes on without a summary
+                _log.warning(f'agent {role.name}: compaction failed: {type(e).__name__}: {vlog.esc(str(e))}')
+                return [{'type': 'notice', 'level': 'warn',
+                         'text': f'Could not compact the chat ({str(e)[:200]}): the oldest messages are left out.'}]
+
         def gen():
             texts, step_at, trace, ended, stopped, usage = [], 0, [], None, False, None
             try:
+                if need_compact:
+                    yield json.dumps({'type': 'compact', 'state': 'start', 'auto': True}) + '\n'
+                    for ev in compacted():
+                        trace.append(ev)
+                        yield json.dumps(ev, default=str, ensure_ascii=False) + '\n'
                 for ev in react.events(run):
                     t = ev.get('type')
                     if t == 'text':
@@ -272,6 +309,27 @@ def router(state, ctx):
                 except Exception as e:  # noqa: BLE001 - e.g. the chat was deleted meanwhile
                     _log.debug(f'agent {role.name}: answer not saved: {type(e).__name__}: {vlog.esc(str(e))}')
         return _stream(gen())
+
+    @r.post('/api/llm/agent/{role_name}/compact')
+    def agent_compact(role_name: str, body: dict):
+        """/compact [focus]: fold a saved chat's older messages (all but the last exchange) into its summary."""
+        role = role_of(role_name)
+        active = gate(role)
+        user = auth_context.user()
+        sid = body.get('session_id')
+        if not isinstance(sid, str) or not sid:
+            raise HTTPException(400, 'session_id is required: only a saved chat can be compacted')
+        focus = body.get('focus') if isinstance(body.get('focus'), str) else None
+        cfg = store().load()
+        p = pick_provider(active, body, (cfg.get('chat') or {}).get(role.name) or {})
+        try:
+            info = summarize.compact(user, sid, p, cfg['budget']['max_input_tokens'], keep=summarize.KEEP_MANUAL,
+                                     focus=focus)
+        except (chat_sessions.SessionError, summarize.CompactError) as e:
+            raise HTTPException(e.status, str(e))
+        except LLMError as e:
+            raise HTTPException(e.status if 400 <= (e.status or 0) < 500 else 502, f'the summary failed: {e}')
+        return {'compacted': info is not None, **(info or {})}
 
     @r.post('/api/llm/agent/confirm')
     def agent_confirm(body: dict):

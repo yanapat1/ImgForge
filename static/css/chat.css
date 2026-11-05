@@ -359,3 +359,16 @@
 @media (prefers-reduced-motion: reduce) {
   .ct-spin, .ct-md.streaming > :last-child::after, .ct-wait i, .ct-act-row.live .ct-act-l, .ct-act.live .ct-act-now, .chat-hist, .chat-hint.flash { animation: none !important; }
 }
+
+/* ---- compaction divider (older messages folded into the chat's summary: engine/summarize.py) */
+.chat .ct-compact { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-2xs); color: var(--text-faint); }
+.chat .ct-compact.live, .chat .ct-compact.bad { flex-direction: row; align-items: center; gap: 6px; }
+.chat .ct-compact.bad { color: var(--danger-text); }
+.chat .ct-compact-h { display: flex; align-items: center; gap: 8px; width: 100%; height: auto; padding: 2px 0; background: none; border: 0;
+  color: var(--text-faint); font-size: var(--fs-2xs); cursor: pointer; }
+.chat .ct-compact-h::before, .chat .ct-compact-h::after { content: ""; flex: 1; height: 1px;
+  background: repeating-linear-gradient(90deg, var(--border-strong) 0 4px, transparent 4px 8px); }
+.chat .ct-compact-h:hover:not(:disabled) { background: none; color: var(--text-muted); }
+.chat .ct-compact-l { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.chat .ct-compact-b { padding: var(--s2) var(--s3); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r);
+  font-size: var(--fs-xs); color: var(--text-muted); max-height: 360px; overflow-y: auto; }

@@ -187,6 +187,12 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
       const kept = b.filter((x) => x.k !== 'retry' && !(ev['discard'] && x.k === 'text' && x.step === step));
       return { ...t, blocks: [...kept, { k: 'retry', attempt: num(ev['attempt'], 1), max: num(ev['max'], 50), reason: str(ev['reason']), waitS: num(ev['wait_s']), t0: at }] };
     }
+    case 'compact': {             // the older messages were folded into the chat's summary (start, then done)
+      const kept = b.filter((x) => !(x.k === 'compact' && x.state === 'start'));
+      const state = ev['state'] === 'start' ? 'start' : ev['state'] === 'failed' ? 'failed' : 'done';
+      return { ...t, blocks: [...kept, { k: 'compact', state, auto: ev['auto'] !== false, summary: str(ev['summary']), before: num(ev['before']),
+        after: num(ev['after']), turns: num(ev['turns']), covered: numOrNull(ev['covered']) }] };
+    }
     case 'notice': {
       const text = str(ev['text']);
       return text ? { ...t, blocks: [...b, { k: 'notice', level: str(ev['level'], 'info'), text }] } : t;

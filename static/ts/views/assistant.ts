@@ -213,7 +213,7 @@ function build(): void {
     built = true;
     root.innerHTML =
       `<div class="side-head ai-head">${mark()}<h2>AI assistant</h2><span id="ai-model" class="ai-model muted"></span>` +
-      '<span class="grow"></span><span id="ai-meter" class="ai-meter num" title="tokens of the last answer: sent · received / input budget"></span>' +
+      '<span class="grow"></span><span id="ai-meter" class="ai-meter num" title="tokens of the last answer: sent · received / input budget (older messages are compacted at 80%, or type /compact)"></span>' +
       `<button type="button" class="icon-btn ghost" data-aact="settings" aria-label="AI settings" title="Settings › AI assistant">${icon('gear')}</button></div>` +
       '<div id="ai-chips" class="ai-chips" role="group" aria-label="What the assistant can see"></div>' +
       '<div id="ai-chat"></div>';

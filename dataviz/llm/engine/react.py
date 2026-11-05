@@ -93,6 +93,7 @@ class Run:
     max_steps: int = 30
     limit: int = budget.MAX_BUDGET
     est: int = 0
+    raw_est: int = 0                # the estimate before budget.fit cut anything (auto-compaction looks at it)
     cancel: threading.Event = field(default_factory=threading.Event)
     temperature: float = None
 
@@ -121,6 +122,9 @@ def options(body, provider):
     profile = profile_of(provider)
     steps = min(MAX_STEPS, e['steps'], SMALL_STEPS if profile == 'small' else MAX_STEPS)
     return {'mode': mode, 'effort': effort, 'think': think, 'web': web, 'profile': profile, 'max_steps': steps}
+
+
+SUMMARY_HEAD = '## Earlier in this chat (summary)'
 
 
 def history(messages):
@@ -157,8 +161,9 @@ def pick_tools(all_tools, question, n=SMALL_TOOLS):
 
 
 def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, user_prompts=(), user_skills=(),
-            plugin_tools=(), forced_skills=(), limit=None):
-    """Everything one run needs, checked before the stream starts (LLMError 400 when it cannot fit)."""
+            plugin_tools=(), forced_skills=(), limit=None, summary=None):
+    """Everything one run needs, checked before the stream starts (LLMError 400 when it cannot fit).
+    summary: the chat's compacted earlier part (engine/summarize.py), read as part of the system prompt."""
     role = roles.get(role) if isinstance(role, str) else role
     if not msgs or msgs[-1]['role'] != 'user':
         raise LLMError("the last message must be the user's", 400)
@@ -176,8 +181,13 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
                              user_prompts=[p for p in user_prompts if p.get('role') in (None, 'all', role.name)],
                              user_name=(user or {}).get('display_name') or (user or {}).get('username') or '',
                              forced_skills=forced_skills)
+    if summary:
+        system += (f'\n\n{SUMMARY_HEAD}\nThe earlier part of this chat was compacted. This summary replaces those '
+                   f'messages: trust its numbers, ids and decisions, and continue from its open tasks.\n\n{summary}')
     lim = limit or budget.MAX_BUDGET
-    fitted, est = budget.fit(provider['kind'], system + json.dumps([t.spec() for t in tset.values()]), [], msgs, lim)
+    sys_all = system + json.dumps([t.spec() for t in tset.values()])
+    raw_est = budget.estimate(provider['kind'], sys_all, msgs)
+    fitted, est = budget.fit(provider['kind'], sys_all, [], msgs, lim)
     run_id = uuid.uuid4().hex[:12]
     ctx = Ctx(user=user, role=role.name, scope=scope if isinstance(scope, dict) else {}, skills=sk, state=state,
               app=app, web_level=opts['web'], run_id=run_id)
@@ -186,7 +196,8 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
         p['temperature'] = min(float(p.get('temperature') or 0.1), 0.1)
     return Run(run_id=run_id, user=user, role=role, provider=p, system=system, msgs=list(fitted), tools=tset, ctx=ctx,
                mode=opts['mode'], effort=opts['effort'], think=opts['think'], web=opts['web'],
-               native_web=_native_ok(p, opts['web']), profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est)
+               native_web=_native_ok(p, opts['web']), profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est,
+               raw_est=raw_est)
 
 
 # ---------------------------------------------------------------- helpers

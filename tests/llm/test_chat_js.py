@@ -133,6 +133,17 @@ assert.equal(approvedMessage('Tidy val', ['make folder night', 'move 3 images'])
 assert.match(approvedMessage('s', ['a'], 'skip b'), /\nChange to the plan: skip b$/);
 assert.deepEqual(parseCommand('/mode auto'), { name: 'mode', arg: 'auto' });
 assert.deepEqual(parseCommand('/Model'), { name: 'model', arg: '' });
+assert.deepEqual(parseCommand('/compact the model results'), { name: 'compact', arg: 'the model results' });
+
+// compaction: the start block is replaced by the done one (with the summary), never duplicated
+let ct = run([{ type: 'compact', state: 'start', auto: true }]);
+assert.equal(ct.blocks.length, 1);
+assert.equal(ct.blocks[0].state, 'start');
+ct = run([{ type: 'compact', state: 'done', auto: true, summary: '## Goal\n- find bad trucks', before: 9000, after: 700, turns: 36, covered: 36 }], ct);
+assert.equal(ct.blocks.length, 1);
+assert.deepEqual([ct.blocks[0].state, ct.blocks[0].turns, ct.blocks[0].after, ct.blocks[0].covered], ['done', 36, 700, 36]);
+assert.match(ct.blocks[0].summary, /bad trucks/);
+assert.equal(turnText(ct), '', 'the summary is not part of the answer text');
 assert.equal(parseCommand('hello /mode'), null);
 assert.deepEqual(['ask', 'auto', 'plan'].map(nextMode), ['auto', 'plan', 'ask']);
 const now = new Date(2026, 9, 29, 12);

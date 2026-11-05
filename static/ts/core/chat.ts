@@ -82,7 +82,7 @@ const DEFAULT_COMMANDS = [
   ['web', 'off|public|technical|full', 'web search level'], ['skills', '', 'list the skills'], ['skill', '<name>', 'use a skill for the next message'],
   ['sessions', '', 'open the chat history'], ['new', '', 'start a new chat'], ['clear', '', 'start a new chat'],
   ['resume', '<search>', 'open an earlier chat'], ['rename', '<title>', 'rename this chat'], ['delete', '', 'delete this chat'],
-  ['cost', '', 'tokens used by this chat'], ['export', '', 'download this chat as Markdown'],
+  ['cost', '', 'tokens used by this chat'], ['compact', '[focus]', 'summarise older messages to free context'], ['export', '', 'download this chat as Markdown'],
   ['prompts', '', 'your own instructions and skills (Settings)'], ['plugins', '', 'installed plugins (Settings)'], ['help', '', 'list the commands'],
 ].map(([name, args, description]) => ({ name: name ?? '', args: args ?? '', description: description ?? '' }));
 
@@ -467,7 +467,19 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         (b.applied ? `<span class="ct-okc">${icon('check')}applied</span>` : `<button type="button" class="primary" data-ca="ui-apply" data-ti="${ti}" data-bi="${bi}">Apply</button>`) + '</div>';
       case 'retry': return `<div class="ct-retry">${icon('refresh')}<span class="num">retry ${b.attempt}/${b.max}</span><span class="ct-rr">${esc(b.reason.slice(0, 140))}</span><span class="num">${esc(String(b.waitS))} s</span></div>`;
       case 'notice': return `<div class="ct-notice ${esc(b.level)}">${icon(b.level === 'warn' || b.level === 'error' ? 'alert' : 'circle')}<span>${md(b.text)}</span></div>`;
+      case 'compact': return compactHTML(b, keyOf(ti, bi));
     }
+  }
+
+  /** the divider where older messages were folded into the chat's summary; the summary opens under it */
+  function compactHTML(b: Extract<Block, { k: 'compact' }>, key: string): string {
+    if (b.state === 'start') return `<div class="ct-compact live"><span class="ct-spin"></span><span>Compacting older messages…</span></div>`;
+    if (b.state === 'failed') return `<div class="ct-compact bad">${icon('alert')}<span>${esc(b.summary || 'Could not compact the chat.')}</span></div>`;
+    const open = isOpen(key, false);
+    const what = `${b.auto ? 'Context compacted' : 'Compacted'} · ${esc(plural(b.turns, 'message'))}${b.before ? ` · ${fmtK(b.before)} → ${fmtK(b.after)} tokens` : ''}`;
+    return `<div class="ct-compact${open ? ' open' : ''}"><button type="button" class="ct-compact-h" data-ca="fold" data-key="${key}" aria-expanded="${open}">` +
+      `${icon('layers')}<span>${what}</span><span class="ct-compact-l">${open ? 'hide' : 'view'} summary</span></button>` +
+      (open ? `<div class="ct-compact-b ct-md">${md(b.summary)}</div>` : '') + '</div>';
   }
 
   function aiHTML(t: AiTurn, ti: number): string {
@@ -734,6 +746,13 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     try {
       const r = await getJSON<SessionDetail>(`api/llm/sessions/${encodeURIComponent(id)}`);
       C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: null, voice: false } : traceTurn(m)));
+      // a /compact (not in any trace): its divider goes after the last message it covered
+      const cov = r.session.summary_seq ?? null;
+      const shown = C.turns.some((e) => e.role === 'ai' && e.blocks.some((x) => x.k === 'compact' && x.covered === cov));
+      if (cov != null && r.session.summary && !shown) {
+        const at = r.messages.findIndex((m) => m.seq > cov);
+        C.turns.splice(at < 0 ? C.turns.length : at, 0, compactTurn({ type: 'compact', state: 'done', auto: false, summary: r.session.summary, covered: cov }));
+      }
       C.sid = r.session.id;
       C.title = r.session.title;
       C.pinned = !!r.session.pinned;
@@ -1040,6 +1059,29 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     saveFile(text, `${stem}${suffix}.md`, 'text/markdown');
   }
 
+  function compactTurn(ev: ChatEvent): AiTurn { return { ...reduce(newTurn(0), ev), status: 'done' }; }
+
+  /** /compact [focus]: fold this chat's older messages into its summary now */
+  async function compactNow(focus: string): Promise<void> {
+    if (C.busy) { note('Wait for the answer to finish, then compact.'); return; }
+    if (!C.sid) { note('Nothing to compact yet: this chat has no saved messages.'); return; }
+    C.turns.push(compactTurn({ type: 'compact', state: 'start', auto: false }));
+    const idx = C.turns.length - 1;
+    appendLog(idx);
+    const body: Record<string, unknown> = { session_id: C.sid };
+    if (focus) body['focus'] = focus;
+    if (C.prefs.provider_id) body['model'] = { provider_id: C.prefs.provider_id, model: C.prefs.model ?? '' };
+    try {
+      const r = await postJSON<Record<string, unknown>>(`api/llm/agent/${role}/compact`, body);
+      C.turns[idx] = r['compacted'] ? compactTurn({ ...r, type: 'compact', state: 'done', auto: false })
+        : { role: 'note', md: 'Nothing to compact yet: the chat is still short.', level: 'info' };
+    } catch (e) {
+      C.turns[idx] = compactTurn({ type: 'compact', state: 'failed', auto: false, summary: `Could not compact: ${errText(e)}` });
+    }
+    renderTurn(idx);
+    opts.onUpdate?.();
+  }
+
   function costText(): string {
     let i = 0, o = 0, ms = 0, n = 0;
     for (const e of C.turns) if (e.role === 'ai' && e.usage) { i += e.usage.in; o += e.usage.out; ms += e.ms ?? 0; n++; }
@@ -1088,6 +1130,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         if (C.sid) void deleteSessions({ ids: [C.sid] }); else newChat();
         break;
       case 'cost': note(costText()); break;
+      case 'compact': void compactNow(arg); break;
       case 'export':
         if (!C.turns.some((e) => e.role === 'user' || e.role === 'ai')) { note('Nothing to export yet.'); break; }
         download(exportMd(), '');
