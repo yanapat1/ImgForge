@@ -9,7 +9,7 @@
      (data-screen = login on /login, viz on /s/<id>/, label with ?label=, data with ?data, else home; on viz it also starts the Plotly download) -->
 <script src="static/js/theme-boot.js?v=17"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='9' fill='%23458'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12.5' cy='13.5' r='2.4'/%3E%3Ccircle cx='18.5' cy='11.8' r='2.4'/%3E%3Ccircle cx='17' cy='17.6' r='2.4'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="stylesheet" href="static/css/tokens.css?v=23">
+<link rel="stylesheet" href="static/css/tokens.css?v=24">
 <link rel="stylesheet" href="static/css/base.css?v=18">
 <link rel="stylesheet" href="static/css/layout.css?v=15">
 <link rel="stylesheet" href="static/css/components.css?v=21">
@@ -19,8 +19,9 @@
 <link rel="stylesheet" href="static/css/datacenter.css?v=12">
 <link rel="stylesheet" href="static/css/label.css?v=18">
 <link rel="stylesheet" href="static/css/curation.css?v=17">
-<link rel="stylesheet" href="static/css/assistant.css?v=17">
-<link rel="stylesheet" href="static/css/chat.css?v=4">
+<link rel="stylesheet" href="static/css/assistant.css?v=18">
+<link rel="stylesheet" href="static/css/chat.css?v=5">
+<link rel="stylesheet" href="static/css/dock.css?v=1">
 <link rel="stylesheet" href="static/css/compare.css?v=1">
 <link rel="stylesheet" href="static/css/compare-shift.css?v=2">
 <link rel="stylesheet" href="static/css/states.css?v=17">
@@ -147,8 +148,9 @@
 <main class="viz-only">
   <!-- activity bar (VS Code style): each icon switches the left panel AND the right panel; the active icon collapses the left panel -->
   <nav id="activity" class="activity-bar" role="tablist" aria-orientation="vertical" aria-label="Views">
-    <!-- ◆ AI assistant: hidden until an LLM is connected and the assistant is switched on (core/llm.js) -->
-    <button id="act-ai" class="act act-gem hidden" data-tab="ai" data-llm="assistant" role="tab" aria-selected="false" aria-label="AI assistant: ask about the dataset, the selection, the evaluation" title="AI assistant — ask about the dataset, the selection, the evaluation">
+    <!-- ◆ AI assistant: opens / collapses the right-side dock (core/dock.ts); hidden until an LLM is connected and the
+         assistant is switched on (core/llm.js) -->
+    <button id="act-ai" class="act act-gem hidden" data-llm="assistant" aria-pressed="false" aria-label="AI assistant (Ctrl+.): ask about the dataset, the selection, the evaluation" title="AI assistant (Ctrl+.) — opens on the right">
       <svg class="ico gem-ico" viewBox="0 0 24 24" aria-hidden="true">
         <defs><linearGradient id="gem-grad" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" style="stop-color:var(--gem-1)"/><stop offset=".55" style="stop-color:var(--gem-2)"/><stop offset="1" style="stop-color:var(--gem-3)"/></linearGradient></defs>
@@ -177,9 +179,6 @@
             aria-haspopup="dialog">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg></button>
   </nav>
-
-  <!-- LEFT (AI): the assistant chat, next to the plot (views/assistant.js renders it) -->
-  <section id="ai-side" class="left-panel hidden" aria-label="AI assistant" data-llm="assistant"></section>
 
   <!-- LEFT (Compare): two members of a combined dataset (views/compare.ts renders it; the map stays on the right) -->
   <section id="cmp-side" class="left-panel hidden" aria-label="Compare datasets">

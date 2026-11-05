@@ -110,6 +110,8 @@ export interface ChatOptions {
   onChange?: (ev: ChatEvent) => void;
   /** an answer finished (meter, side panels) */
   onDone?: (t: AiTurn) => void;
+  /** every event of the agent's stream, after the transcript took it (the dock's tasks strip and context ring) */
+  onEvent?: (ev: ChatEvent) => void;
   /** the catalogue loaded / something the page shows next to the chat changed (pending confirms, mode) */
   onUpdate?: () => void;
   /** open a Settings section ('prompts', 'plugins', 'llm') */
@@ -150,6 +152,10 @@ export interface ChatHandle {
   modelLabel: () => string;
   /** the last finished answer's usage */
   lastUsage: () => { in: number; out: number; ms: number | null } | null;
+  /** the saved chat on screen (null before the first message) */
+  sessionId: () => string | null;
+  /** open a saved chat (quiet: no toast / focus; false when it is gone) */
+  open: (id: string, quiet?: boolean) => Promise<boolean>;
 }
 
 let uidSeq = 0;
@@ -741,7 +747,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     return reduce(t, { type: 'x_expire' });
   }
 
-  async function openSession(id: string): Promise<void> {
+  async function openSession(id: string, quiet = false): Promise<boolean> {
     if (C.busy) stop();
     try {
       const r = await getJSON<SessionDetail>(`api/llm/sessions/${encodeURIComponent(id)}`);
@@ -762,9 +768,11 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       C.open.clear();
       closeHist();
       renderAll();
-      ta.focus();
+      if (!quiet) ta.focus();
+      return true;
     } catch (e) {
-      toast(`Could not open the chat: ${errText(e)}`, 'err');
+      if (!quiet) toast(`Could not open the chat: ${errText(e)}`, 'err');
+      return false;
     }
   }
 
@@ -989,6 +997,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         if (ev.type === 'meta') C.runId = strOrNull(ev['run_id']);
         apply(ev);
         sideEffects(idx, ev);
+        opts.onEvent?.(ev);
         if (ev.type === 'confirm' || ev.type === 'confirmed' || ev.type === 'plan_proposal' || ev.type === 'ask') { renderTurn(idx); opts.onUpdate?.(); } else scheduleTurn(idx);
       }, ac.signal);
       apply({ type: 'x_empty' });
@@ -1517,5 +1526,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       for (let i = C.turns.length - 1; i >= 0; i--) { const t = C.turns[i]; if (t && t.role === 'ai' && t.usage) return { ...t.usage, ms: t.ms }; }
       return null;
     },
+    sessionId: () => C.sid,
+    open: (id: string, quiet = true) => openSession(id, quiet),
   };
 }

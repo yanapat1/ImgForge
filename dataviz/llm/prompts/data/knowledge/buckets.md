@@ -17,4 +17,5 @@ core: true
   cache and its undo history go). delete_files=true deletes a managed bucket's folder (or an S3 link's local copy)
   **permanently, no trash**. A linked local folder or S3 prefix is never deleted.
 - The page: All buckets overview (cards, filter, Tags), a folder view (Thumbnails / Names only, sort, New folder,
-  Upload, Send to…), the details pane (format, checks, Re-detect, tags, split counts, sessions), the ◆ drawer.
+  Upload, Send to…), the details pane (format, checks, Re-detect, tags, split counts, sessions), and the ◆ assistant dock on the right
+  (shows what it sees: bucket, folder, selection; "Tools" lists which tools run on their own / need an OK).

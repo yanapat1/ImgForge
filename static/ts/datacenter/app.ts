@@ -76,9 +76,7 @@ const SKELETON = (): string => `
     <div id="dc-drop" class="dc-drop hidden" aria-hidden="true">${icon('upload')}<b>Drop files to upload here</b><span id="dc-drop-to"></span></div>
   </section>
   <aside id="dc-details" class="dc-details" aria-label="Details"></aside>
-  <section id="dc-ai" class="dc-drawer hidden" data-llm="data_center" aria-label="Data Center assistant"></section>
   <div id="dc-split-tree" class="dc-split v" role="separator" aria-orientation="vertical" aria-controls="dc-tree" aria-label="Resize the bucket tree (double-click: default)" title="Drag to resize · double-click: default" tabindex="0"></div>
-  <div id="dc-split-ai" class="dc-split h" role="separator" aria-orientation="horizontal" aria-controls="dc-ai" aria-label="Resize the assistant (double-click: default)" title="Drag to resize · double-click: default" tabindex="0"></div>
   <div id="dc-scrim" class="dc-scrim" data-act="close-overlays"></div>
 </div>
 <div id="dc-menu" class="dc-pop dc-menu hidden" role="menu"></div>

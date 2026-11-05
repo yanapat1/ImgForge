@@ -43,7 +43,8 @@ views/assistant.ts, applies `args` through its existing controls). Names, args a
         ip_cls | ip_score | origin_ip           (one point per image: a model's top class per image, Model tab)
     apply_filter {spec: object}           the filter bar (core/filter.ts emptyFilter() shape, see tasks.FILTER_SYSTEM;
                                           cleaned by tasks.clean_filter: known class ids / tags / issue types only)
-    open_tab {tab: str}                   explore | stats | curation | model | eval | compare | ai  (activity bar)
+    open_tab {tab: str}                   explore | stats | curation | model | eval | compare  (activity bar);
+                                          ai opens the right-side assistant dock
     show_issue {issue: str}               a Find issues view (its data-view):
         suspicious | far | far2d | dups | cl-issues | cl-low | cl-ood | cl-swap | cl-badloc | sel-outliers
     fit_view {}                           the plot's Fit button (#btn-fit)

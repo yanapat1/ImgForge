@@ -1,28 +1,25 @@
-// The Data Center assistant: a drawer docked under the centre and right panes (collapsed: a one-line prompt bar;
-// expanded: the chat + a side column with the scope and which tools run on their own / need your OK, read from the
-// agent's catalogue). Shown only while an LLM is connected and the 'data_center' feature is on (data-llm,
-// core/llm.ts). The transcript, composer, History and the trace are the shared ◆ chat (core/chat.ts, role 'data'),
-// mounted once and kept across re-renders: only the bar and the side column are redrawn. The scope sent with
-// every message is the open bucket, folder and selection. A change the agent ran (a change / danger tool_end, an
-// Undo) reloads the folder view, and a format change gets its toast.
+// The Data Center assistant, in the right-side dock (core/dock.ts: #dc-ai is its host section). On top: what the
+// assistant sees (bucket, folder, selection) and, folded, which tools run on their own / need your OK (read from
+// the agent's catalogue); below it the shared ◆ chat (core/chat.ts, role 'data'). Shown only while an LLM is
+// connected and the 'data_center' feature is on. The scope sent with every message is the open bucket, folder and
+// selection. A change the agent ran (a change / danger tool_end, an Undo) reloads the folder view, and a format
+// change gets its toast.
 
-import { pref, rememberPref } from '../core/auth.js';
 import { mountChat, type ChatHandle } from '../core/chat.js';
-import { $, esc, icon } from '../core/dom.js';
-import { applyLLM, llmOn } from '../core/llm.js';
+import { dockHooks, openDock, refreshDock, setDockHost, toggleDock } from '../core/dock.js';
+import { esc, icon } from '../core/dom.js';
+import { llmOn } from '../core/llm.js';
 import { openSettings } from '../settings/dialog.js';
 import type { ChatEvent } from '../types-chat.js';
 import type { Retag } from '../types-datacenter.js';
 import type { Action } from './app.js';
 import { showRetag } from './ops.js';
-import { bucketOf, D, fmtN, hooks, PREF } from './state.js';
+import { bucketOf, D, fmtN, hooks } from './state.js';
 
 const A = {
-  open: false,
-  draft: '',
   chat: null as ChatHandle | null,
-  node: null as HTMLElement | null,
-  built: '' as '' | 'bar' | 'open',
+  ctx: null as HTMLElement | null,
+  toolsOpen: false,
   reloadTimer: 0,
 };
 const enabled = (): boolean => llmOn('data_center');
@@ -48,12 +45,11 @@ function onChange(ev: ChatEvent): void {
   A.reloadTimer = window.setTimeout(() => { void hooks.reload(); }, 250);
 }
 
-function chat(): ChatHandle {
-  if (A.chat) return A.chat;
-  const node = document.createElement('div');
-  node.className = 'dc-chat';
-  A.node = node;
-  A.chat = mountChat(node, {
+function mount(el: HTMLElement): ChatHandle {
+  el.innerHTML = '<div class="dc-ai-ctx"></div><div class="dc-chat"></div>';
+  A.ctx = el.querySelector<HTMLElement>('.dc-ai-ctx');
+  const hk = dockHooks();
+  A.chat = mountChat(el.querySelector<HTMLElement>('.dc-chat')!, {
     role: 'data',
     inputId: 'dc-ai-q',
     placeholder: 'Ask or tell the assistant…  / for commands',
@@ -62,11 +58,17 @@ function chat(): ChatHandle {
     scopeName: 'bucket',
     scopeLabel: (s) => { const id = typeof s?.['bucket_id'] === 'string' ? s['bucket_id'] : null; const n = s?.['name']; return typeof n === 'string' && n ? n : id ? bucketOf(id)?.name ?? 'bucket' : 'all buckets'; },
     onChange,
-    onUpdate: () => renderSide(),
+    onEvent: hk.onEvent,
+    onDone: hk.onDone,
+    onUpdate: () => { renderCtx(); refreshDock(); },
     settings: (sec) => { void openSettings(sec === 'llm' ? 'llm' : 'prompts').then(() => { if (sec === 'plugins') document.querySelector<HTMLElement>('[data-act="pr-tab"][data-v="plugins"]')?.click(); }); },
     emptyHTML,
     exportName: () => `data-center-${bucketOf(D.bid)?.name ?? 'chat'}`,
   });
+  el.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('[data-dcai="tools"]')) { A.toolsOpen = !A.toolsOpen; renderCtx(); }
+  });
+  renderCtx();
   return A.chat;
 }
 
@@ -75,9 +77,9 @@ function chat(): ChatHandle {
 function scopeHtml(): string {
   const b = bucketOf(D.bid);
   const n = D.listing?.total;
-  return `<div class="scope">${b ? `<div class="s">${icon('db')}<span>${esc(b.name)}</span><span class="num">bucket</span></div>` : `<div class="s">${icon('grid')}<span>All buckets</span></div>`}` +
-    (b && D.path ? `<div class="s">${icon('folder')}<span>${esc(D.path)}</span><span class="num">${n != null ? fmtN(n) : ''}</span></div>` : '') +
-    (D.sel.size ? `<div class="s">${icon('check')}<span>${fmtN(D.sel.size)} selected</span></div>` : '') + '</div>';
+  return (b ? `<span class="chip">${icon('db')}<b>${esc(b.name)}</b></span>` : `<span class="chip">${icon('grid')}<b>All buckets</b></span>`) +
+    (b && D.path ? `<span class="chip">${icon('folder')}<b>${esc(D.path)}</b>${n != null ? `<span class="num faint">${fmtN(n)}</span>` : ''}</span>` : '') +
+    (D.sel.size ? `<span class="chip">${icon('check')}<b>${fmtN(D.sel.size)} selected</b></span>` : '');
 }
 
 function toolsHtml(): string {
@@ -88,94 +90,38 @@ function toolsHtml(): string {
   const own = tools.filter((t) => t.risk === 'read' || (auto && t.risk === 'change'));
   const ask = tools.filter((t) => !own.includes(t) && (t.risk === 'change' || t.risk === 'danger'));
   const chipT = (t: { name: string; risk: string; description: string }, cls = ''): string => `<span class="tchip${cls}" title="${esc(t.description)}">${esc(t.name)}</span>`;
-  return `<h4 class="d-h">Tools · run on their own</h4><div class="toolcat">${own.map((t) => chipT(t)).join('') || '<span class="faint">none</span>'}</div>` +
-    `<h4 class="d-h">Tools · need your OK${auto ? ' (auto: only dangerous ones)' : ''}</h4><div class="toolcat">${ask.map((t) => chipT(t, t.risk === 'danger' ? ' danger' : ' mut')).join('') || '<span class="faint">none</span>'}</div>`;
+  return `<h4 class="d-h">Run on their own</h4><div class="toolcat">${own.map((t) => chipT(t)).join('') || '<span class="faint">none</span>'}</div>` +
+    `<h4 class="d-h">Need your OK${auto ? ' (auto: only dangerous ones)' : ''}</h4><div class="toolcat">${ask.map((t) => chipT(t, t.risk === 'danger' ? ' danger' : ' mut')).join('') || '<span class="faint">none</span>'}</div>` +
+    `<div class="note info">${icon('alert')}<span>The assistant sees file names, folder stats and tags, never pixels.</span></div>`;
 }
 
-function renderSide(): void {
-  const side = $('dc-ai')?.querySelector('.dr-side');
-  if (!side || !A.chat) return;
-  const n = A.chat.pending();
-  side.innerHTML = `<h4 class="d-h">Scope</h4>${scopeHtml()}${toolsHtml()}` +
-    `<div class="note info">${icon('alert')}<span>The assistant sees file names, folder stats and tags, never pixels.</span></div>` +
-    (n ? `<h4 class="d-h">Pending</h4><div class="ai-pend">${n} confirmation${n === 1 ? '' : 's'}<span class="faint">waiting for you</span></div>` : '');
-  renderBar();
+function renderCtx(): void {
+  if (!A.ctx) return;
+  A.ctx.innerHTML = `<div class="dc-ai-scope"><span class="faint">Sees</span>${scopeHtml()}<span class="grow"></span>` +
+    `<button type="button" class="ghost sm" data-dcai="tools" aria-expanded="${A.toolsOpen}">${icon('list')}Tools${icon(A.toolsOpen ? 'chev-u' : 'chev-d')}</button></div>` +
+    (A.toolsOpen ? `<div class="dc-ai-tools">${toolsHtml()}</div>` : '');
 }
 
-function modelPill(): string {
-  const m = A.chat?.modelLabel();
-  return m && m !== 'model' ? `<span class="model"><i class="ok-dot"></i>${esc(m)}</span>` : '';
-}
-
-function renderBar(): void {
-  const bar = $('dc-ai')?.querySelector('.dr-bar');
-  if (!bar || !A.open) return;
-  const mode = A.chat?.mode() ?? 'ask';
-  const hint = mode === 'auto' ? 'auto: changes run · dangerous ones wait for your OK' : mode === 'plan' ? 'plan: read-only, then a plan to approve' : 'Read-only tools run automatically · anything that changes data waits for your OK';
-  bar.innerHTML = `<span class="ai-mark" aria-hidden="true">${icon('gem')}</span><b>Assistant</b>${modelPill()}` +
-    `<span class="hintline dc-wide">${icon('lock')}${esc(hint)}</span><span class="grow"></span>` +
-    `<button type="button" class="icon-btn ghost sm" data-act="ai-toggle" aria-expanded="true" aria-label="Collapse the assistant" title="Collapse">${icon('chev-d')}</button>`;
-}
-
+/** The Data Center's dock host (the chat is built on the dock's first open). */
 export function renderAi(): void {
-  const el = $('dc-ai');
-  if (!el) return;
-  applyLLM(el.parentElement ?? document);
-  const on = enabled();
-  $('dc-app')?.classList.toggle('ai-open', on && A.open);
-  if (!on) { if (A.built) { A.node?.remove(); el.innerHTML = ''; A.built = ''; } return; }
-  el.classList.toggle('open', A.open);
-  if (!A.open) {
-    if (A.built !== 'bar') {
-      A.node?.remove();
-      el.innerHTML = `<div class="dr-bar"><span class="ai-mark" aria-hidden="true">${icon('gem')}</span><b>Assistant</b>${modelPill()}` +
-        `<input id="dc-ai-q" class="ask" type="text" placeholder="Ask or tell… e.g. “find images without labels in val/”" aria-label="Ask the Data Center assistant" value="${esc(A.draft)}" data-input="ai-draft" autocomplete="off">` +
-        `<span class="hintline dc-wide">${icon('lock')}reads freely · changes need your OK</span>` +
-        `<button type="button" class="icon-btn ghost sm" data-act="ai-toggle" aria-expanded="false" aria-label="Open the assistant" title="Open the assistant">${icon('chev-u')}</button></div>`;
-      A.built = 'bar';
-    }
-    return;
-  }
-  if (A.built !== 'open') {
-    const c = chat();
-    el.innerHTML = '<div class="dr-bar"></div><div class="dr-body"><div class="dr-main"></div><aside class="dr-side"></aside></div>';
-    if (A.node) el.querySelector('.dr-main')?.append(A.node);
-    A.built = 'open';
-    if (A.draft) { c.setDraft(A.draft); A.draft = ''; }
-  }
-  renderSide();
-}
-
-function openDrawer(focus = true): void {
-  A.open = true;
-  rememberPref(PREF.ai, true);
-  renderAi();
-  if (focus) A.chat?.focus();
-}
-
-export const AI_ACTIONS: Record<string, Action> = {
-  'ai-toggle': () => {
-    if (A.open) { A.open = false; rememberPref(PREF.ai, false); renderAi(); return; }
-    openDrawer();
-  },
-  'ai-draft': (el) => { A.draft = (el as HTMLInputElement).value; },
-};
-
-export function bindAi(): void {
-  A.open = pref(PREF.ai) === true;
-  window.addEventListener('llm-state', () => renderAi());
-  // the collapsed bar: Enter opens the drawer and sends
-  $('dc-ai')?.addEventListener('keydown', (e) => {
-    const t = e.target;
-    if (!(t instanceof HTMLInputElement) || t.id !== 'dc-ai-q' || t.closest('.chat')) return;
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-    const text = t.value.trim();
-    A.draft = '';
-    openDrawer(!text);
-    if (text) void chat().send(text);
+  setDockHost({
+    id: 'dc-ai',
+    label: () => { const b = bucketOf(D.bid); return b ? `Data Center · ${b.name}` : 'Data Center'; },
+    enabled,
+    mount,
+    onShow: () => renderCtx(),
+    settings: () => { void openSettings('llm'); },
   });
 }
 
-/** The scope changed (another folder, a new selection): repaint the scope column of an open drawer. */
-export function aiScopeChanged(): void { if (A.open && enabled()) renderSide(); }
+export const AI_ACTIONS: Record<string, Action> = {
+  'ai-toggle': () => toggleDock(),
+  'ai-open': () => openDock(),
+};
+
+export function bindAi(): void {
+  window.addEventListener('llm-state', () => { renderCtx(); refreshDock(); });
+}
+
+/** The scope changed (another folder, a new selection): repaint what the assistant sees. */
+export function aiScopeChanged(): void { if (enabled()) { renderCtx(); refreshDock(); } }

@@ -1,0 +1,111 @@
+/* The ◆ assistant dock (ts/core/dock.ts): a fixed right column on every screen. html[data-dock] = open | rail |
+   off; <body> gets padding-right of the dock's width so the screens reflow without knowing about it. Below 900 px
+   the dock is a full-screen sheet over the page and a floating ◆ button opens it. Tokens only: the looks restyle
+   it through them. */
+
+html[data-dock="open"] body { padding-right: var(--dock-w); }
+html[data-dock="rail"] body { padding-right: var(--dock-rail-w); }
+html[data-dock="off"] .ai-dock, html:not([data-dock]) .ai-dock, html[data-dock="off"] .ai-fab, html:not([data-dock]) .ai-fab { display: none; }
+html.dock-dragging, html.dock-dragging * { cursor: col-resize !important; user-select: none; }
+html[data-screen="login"] .ai-dock, html[data-screen="login"] .ai-fab { display: none; }
+html[data-screen="login"] body { padding-right: 0; }
+/* the bottom toast stays centred on the page, not under the dock */
+html[data-dock="open"] .app-toast { left: calc((100% - var(--dock-w)) / 2); }
+html[data-dock="rail"] .app-toast { left: calc((100% - var(--dock-rail-w)) / 2); }
+
+.ai-dock { position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--z-dock); display: flex; width: var(--dock-w);
+  background: var(--surface); border-left: 1px solid var(--border); color: var(--text); }
+html[data-dock="rail"] .ai-dock { width: var(--dock-rail-w); }
+.dock-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+html[data-dock="rail"] .dock-panel, html[data-dock="rail"] .dock-grip { display: none; }
+html[data-dock="open"] .dock-rail { display: none; }
+
+/* the left edge drags the width */
+.dock-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 1; touch-action: none; }
+.dock-grip::after { content: ""; position: absolute; left: 3px; top: 50%; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px;
+  background: var(--border-strong); opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.dock-grip:hover::after, .dock-grip:focus-visible::after, html.dock-dragging .dock-grip::after { opacity: 1; background: var(--accent); }
+
+/* head: ◆ Assistant · page · model ……… ring · settings · collapse */
+.dock-head { flex: none; display: flex; align-items: center; gap: 4px; height: var(--header-h); padding: 0 var(--s2) 0 var(--s3);
+  border-bottom: 1px solid var(--border); }
+.dock-gem { flex: none; width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--gem-1), var(--gem-2) 55%, var(--gem-3)); }
+.dock-gem .ico { width: 15px; height: 15px; color: var(--lb-tag-light); }
+.dock-gem.sm { width: 18px; height: 18px; border-radius: 5px; }
+.dock-gem.sm .ico { width: 11px; height: 11px; }
+.dock-t { display: flex; flex-direction: column; min-width: 0; margin-left: 6px; line-height: 1.2; }
+.dock-t b { font-size: var(--fs-sm); font-weight: 650; }
+.dock-sub { font-size: var(--fs-2xs); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-head .grow { flex: 1; }
+
+/* context ring: share of the input budget, a tick at the 80% auto-compaction */
+.dock-ring { position: relative; flex: none; width: 28px; height: 28px; margin-right: 2px; }
+.dock-ring svg { width: 28px; height: 28px; transform: rotate(-90deg); }
+.dock-ring circle { fill: none; stroke-width: 4; }
+.dock-ring .tr { stroke: var(--prog-track); }
+.dock-ring .tick { stroke: var(--warn); stroke-width: 6; }
+.dock-ring .v { stroke: var(--gem-2); stroke-linecap: round; transition: stroke-dasharray var(--t) var(--ease); }
+.dock-ring.hot .v { stroke: var(--warn); }
+.dock-ring b { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 650; color: var(--text-muted); }
+
+/* tasks: is driving › …, the checklist, jobs, confirmations waiting */
+.dock-tasks { flex: none; display: flex; flex-direction: column; gap: 6px; padding: var(--s2) var(--s3); background: var(--surface-2);
+  border-bottom: 1px solid var(--border); font-size: var(--fs-xs); max-height: 40%; overflow-y: auto; }
+.dock-tasks-h { display: flex; align-items: center; gap: var(--s2); width: 100%; height: 22px; padding: 0; background: none; border: 0;
+  color: var(--text-faint); font-size: var(--fs-2xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
+.dock-tasks-h:hover:not(:disabled) { background: none; color: var(--text-muted); }
+.dock-tasks-h .ico { width: 13px; height: 13px; }
+.dock-wait { text-transform: none; letter-spacing: 0; color: var(--warn-text); font-weight: 600; }
+.dock-drive { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 8px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--gem-2) 14%, transparent); border: 1px solid color-mix(in srgb, var(--gem-2) 45%, transparent); }
+.dock-drive .sep { color: var(--text-faint); }
+.dock-drive .d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dock-drive button { height: 22px; padding: 0 8px; flex: none; }
+.dock-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dock-steps li { display: flex; align-items: center; gap: var(--s2); min-width: 0; flex-wrap: wrap; }
+.dock-steps .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; }
+.dock-steps .dot .ico { width: 9px; height: 9px; stroke-width: 3; }
+.dock-steps li.done .dot { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+.dock-steps li.done > span:not(.dot) { color: var(--text-muted); }
+.dock-steps li.doing .dot { border-color: var(--gem-2); box-shadow: 0 0 0 3px var(--gem-glow); }
+.dock-steps li.bad .dot { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
+.dock-steps .grow { flex: 1; }
+.dock-bar { flex-basis: 100%; height: 4px; margin-left: 22px; border-radius: 2px; background: var(--prog-track); overflow: hidden; }
+.dock-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--gem-1), var(--gem-2)); transition: width var(--t) var(--ease); }
+
+/* body: the page's host section with the shared chat */
+.dock-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dock-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dock-host > .chat { flex: 1; min-height: 0; }
+
+/* rail: ◆ to open, a pending badge, the ring */
+.dock-rail { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 10px; }
+.dock-rail-btn { position: relative; width: 34px; height: 34px; padding: 0; justify-content: center; background: none; border-color: transparent; }
+.dock-rail-btn:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; }
+.dock-badge { position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--warn); color: var(--bg); font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
+/* the floating ◆ (narrow screens) */
+.ai-fab { display: none; position: fixed; right: var(--s4); bottom: var(--s4); z-index: var(--z-dock); width: 48px; height: 48px; padding: 0;
+  justify-content: center; border: 0; border-radius: 50%; box-shadow: var(--shadow-3);
+  background: linear-gradient(135deg, var(--gem-1), var(--gem-2) 55%, var(--gem-3)); }
+.ai-fab .ico { width: 22px; height: 22px; color: var(--lb-tag-light); }
+
+/* "◆ touched this": the tab or button the agent used pulses once (views/assistant.ts) */
+.ai-touch { animation: ai-touch 1.6s var(--ease) 1; }
+@keyframes ai-touch { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 25%, 60% { box-shadow: 0 0 0 2px var(--gem-2), 0 0 0 7px var(--gem-glow); } }
+
+@media (max-width: 899px) {
+  html[data-dock] body { padding-right: 0; }
+  html[data-dock] .app-toast { left: 50%; }
+  html[data-dock="rail"] .ai-dock { display: none; }
+  html[data-dock="rail"] .ai-fab { display: inline-flex; }
+  html[data-dock="open"] .ai-dock { left: 0; width: auto; top: var(--s6); border-left: 0; border-top: 1px solid var(--border-strong);
+    border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: var(--shadow-3); }
+  .dock-grip { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-touch { animation: none; outline: 2px solid var(--gem-2); outline-offset: 2px; }
+  .dock-ring .v, .dock-bar i { transition: none; }
+}

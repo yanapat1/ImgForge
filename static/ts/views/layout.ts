@@ -6,7 +6,7 @@ import { meta, S } from '../core/state.js';
 import { clsColor } from '../core/theme.js';
 import { renderPlot, requestFit, scheduleRender } from '../plot/render.js';
 import { reapplyInspect, saveSettings } from './controls.js';
-import { showAiTab } from './assistant.js';
+import { refreshDock } from '../core/dock.js';
 import { EVAL_PLOTS, showEvalTab } from './eval.js';
 import { closestOf } from './ev-util.js';
 import { CMP_PLOTS, showCompareTab } from './compare.js';
@@ -92,8 +92,8 @@ export function syncClassFilter(): void {
 
 // activity bar: each view has a left panel and a right panel
 // (curation.js also syncs its two panels from the act-curation aria-selected attribute: same ids, same result)
-// (ai: the ◆ assistant chat on the left, the plot stays on the right so you can lasso and ask)
-const VIEWS: Record<string, string[]> = { ai: ['ai-side', 'tab-embed'], explore: ['gallery-panel', 'tab-embed'], compare: ['cmp-side', 'tab-embed'], stats: ['stats-side', 'tab-stats'], model: ['model-side', 'tab-model'], eval: ['eval-side', 'tab-eval'], curation: ['cur-side', 'tab-curation'] };
+// (the ◆ assistant is not a view: it is the right-side dock, core/dock.ts)
+const VIEWS: Record<string, string[]> = { explore: ['gallery-panel', 'tab-embed'], compare: ['cmp-side', 'tab-embed'], stats: ['stats-side', 'tab-stats'], model: ['model-side', 'tab-model'], eval: ['eval-side', 'tab-eval'], curation: ['cur-side', 'tab-curation'] };
 
 export let curTab = 'explore';
 
@@ -112,12 +112,12 @@ export function switchTab(tab: string): void {
   // a panel shared by two views (the plot) stays shown when either is active
   const shown = new Set(VIEWS[tab] || []);
   for (const ids of Object.values(VIEWS)) ids.forEach((id) => { const el = $(id); if (el) el.classList.toggle('hidden', !shown.has(id)); });
-  mainEl().dataset.tab = tab;   // css: #ai-side only on the ai tab (core/llm.js also toggles it)
+  mainEl().dataset.tab = tab;
   if (tab === 'stats') { renderClassTable(); renderStats(); }
   if (tab === 'model') void showModelTab();
   if (tab === 'eval') void showEvalTab();
-  if (tab === 'ai') showAiTab();
   if (tab === 'compare') void showCompareTab();
+  refreshDock();                                // its head names the view
   resizePlots();
 }
 

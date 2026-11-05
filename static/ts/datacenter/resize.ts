@@ -9,7 +9,6 @@ import { $ } from '../core/dom.js';
 import { PREF } from './state.js';
 
 const TREE = { min: 180, max: 560 };
-const AI = { min: 160, gap: 150 };       // the drawer leaves at least `gap` px to the folder above it
 
 interface Split {
   handle: HTMLElement;
@@ -73,9 +72,9 @@ function bind(s: Split): void {
 
 /** Bind both splitters (once, after the page skeleton is in place). */
 export function bindResize(): void {
-  const app = $('dc-app'), tree = $('dc-tree'), ai = $('dc-ai');
-  const th = $('dc-split-tree'), ah = $('dc-split-ai');
-  if (!app || !tree || !ai || !th || !ah) return;
+  const app = $('dc-app'), tree = $('dc-tree');
+  const th = $('dc-split-tree');
+  if (!app || !tree || !th) return;
   const treeMax = (): number => Math.max(TREE.min, Math.min(TREE.max, app.clientWidth - 480));
   bind({
     handle: th, sign: 1, axis: 'x', save: PREF.treeW,
@@ -83,14 +82,6 @@ export function bindResize(): void {
     clamp: (px) => Math.round(Math.max(TREE.min, Math.min(treeMax(), px))),
     apply: (px) => { if (px == null) app.style.removeProperty('--dc-tree-w'); else app.style.setProperty('--dc-tree-w', `${px}px`); },
   });
-  bind({
-    handle: ah, sign: -1, axis: 'y', save: PREF.aiH,
-    now: () => ai.getBoundingClientRect().height,
-    clamp: (px) => Math.round(Math.max(AI.min, Math.min(Math.max(AI.min, app.clientHeight - AI.gap), px))),
-    // the CSS keeps the gap too when the window gets smaller later
-    apply: (px) => { if (px == null) app.style.removeProperty('--dc-ai-rows'); else app.style.setProperty('--dc-ai-rows', `min(${px}px, calc(100% - ${AI.gap}px))`); },
-  });
   th.setAttribute('aria-valuemin', String(TREE.min));
   th.setAttribute('aria-valuemax', String(TREE.max));
-  ah.setAttribute('aria-valuemin', String(AI.min));
 }

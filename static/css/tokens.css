@@ -93,6 +93,7 @@
      it, toasts above every dialog (an Undo stays reachable), the hover tip above all, the error page over everything */
   --z-overlay: 5; --z-startup: 30; --z-popover: 40; --z-modal: 100; --z-menu: 101; --z-dialog: 110; --z-dialog-pop: 115;
   --z-toast: 120; --z-tip: 130; --z-error: 200;
+  --z-dock: 35;                 /* the ◆ assistant dock (core/dock.ts): over the page, under every popover and dialog */
   /* motion */
   --t-fast: 120ms; --t: 180ms; --ease: cubic-bezier(.2, .7, .2, 1);
   /* layout */
@@ -101,6 +102,8 @@
   --activity-w: 52px;
   --left-w: clamp(320px, 36%, 640px);   /* the splitter sets this in px */
   --splitter-w: 7px;
+  --dock-w: 400px;              /* the ◆ assistant dock; core/dock.ts sets it in px (drag its left edge) */
+  --dock-rail-w: 44px;
   /* inline icons for form controls (stroke colour = --text-muted) */
   --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aab4c2' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
   --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314233a' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17l9-10'/%3E%3C/svg%3E");

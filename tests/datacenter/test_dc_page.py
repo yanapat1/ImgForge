@@ -149,10 +149,10 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
     assert not errors, '\n'.join(errors)
 
 
-def test_data_center_assistant_drawer_chat(server):
-    """The ◆ drawer (datacenter/ai.ts on core/chat.ts): the collapsed bar sends and opens the drawer, the answer of a
-    fake OpenAI-compatible model streams in, the side column lists the catalogue's tools, Shift+Tab in #dc-ai-q
-    switches the mode chip (and the mode sent), and the chat is saved (History)."""
+def test_data_center_assistant_dock_chat(server):
+    """The ◆ assistant in the right-side dock (datacenter/ai.ts on core/dock.ts + core/chat.ts): the answer of a fake
+    OpenAI-compatible model streams in, the Tools fold lists the catalogue's tools, Shift+Tab in #dc-ai-q switches
+    the mode chip (and the mode sent), and the chat is saved (History)."""
     from test_llm import REPLY, fake_app
     from test_models import _serve
     REPLY['text'] = 'Hello there, this is the fake model.'
@@ -169,11 +169,12 @@ def test_data_center_assistant_drawer_chat(server):
             page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
             page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
             page.goto(f'{server}/?data')
-            page.wait_for_selector('#dc-ai:not(.hidden) #dc-ai-q', timeout=30000)
+            page.wait_for_selector('#ai-dock #dc-ai #dc-ai-q', timeout=30000)
             page.fill('#dc-ai-q', 'Which buckets are there?')
             page.press('#dc-ai-q', 'Enter')
-            page.wait_for_selector('#dc-ai.open .chat .ai-msg.bot:has-text("fake model")', timeout=20000)
-            page.wait_for_selector('#dc-ai .dr-side .tchip', timeout=10000)
+            page.wait_for_selector('#dc-ai .chat .ai-msg.bot:has-text("fake model")', timeout=20000)
+            page.click('#dc-ai [data-dcai="tools"]')
+            page.wait_for_selector('#dc-ai .dc-ai-tools .tchip', timeout=10000)
             assert page.inner_text('#dc-ai .chat-chip.mode').strip() == 'ask'
             page.focus('#dc-ai-q')
             page.keyboard.press('Shift+Tab')

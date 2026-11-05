@@ -1,20 +1,22 @@
-// The ◆ AI assistant tab (left panel #ai-side; the plot stays on the right so you can lasso and ask).
-// Header (model, token meter, settings) · context chips (Dataset / Evaluation / Selection · n) · the shared ◆ chat
+// The visualizer's ◆ AI assistant, in the right-side dock (core/dock.ts: #ai-side is its host section; the dock's
+// head shows the page, the model, the context ring and settings; the ◆ activity icon and Ctrl+. open / collapse it).
+// Context chips (Dataset / Evaluation / Selection · n) · the shared ◆ chat
 // (core/chat.ts, role 'visual': session header + History, the agent's trace, the composer with model / mode /
 // effort / think / web chips and slash commands, hold-to-talk mic). The page's own turns go into the same
 // transcript: label-check verdict cards, auto-tag job progress, voice notes. The visual agent's UI actions
 // (set_projection, set_color_by, apply_filter, open_tab, show_issue, fit_view) run through the page's own controls
 // (applyUi). The scope sent with every message is the page state (viewScope).
-// Nothing here runs until the tab is first shown; every piece is drawn only when its feature is on (core/llm.js),
+// Nothing here runs until the dock is first opened; every piece is drawn only when its feature is on (core/llm.js),
 // and a Settings change (window event `llm-state`) re-renders live. Chats are saved on the server; an old
 // localStorage `ai-chat:<dataset>:<user id>` history is shown read-only once, then removed.
 
 import { api, errMessage, errText, postJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
 import { mountChat, type ChatHandle } from '../core/chat.js';
+import { dockHooks, dockOpen, openDock, refreshDock, setDockHost, toggleDock } from '../core/dock.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
-import { applyLLM, LLM, llmOn } from '../core/llm.js';
+import { applyLLM, llmOn } from '../core/llm.js';
 import { meta, pts, S } from '../core/state.js';
 import type { Job } from '../types.js';
 import type { UiAction } from '../types-chat.js';
@@ -24,12 +26,13 @@ import { openSettings } from '../settings/dialog.js';
 import { loadView, onGroupControls, refreshTagList, saveSettings, updateMethodControls, updateTextSearch } from './controls.js';
 import { applyFilterSpec, filterSpec, runNLFilter, runNow } from './filter-bar.js';
 import { setSelection } from './gallery.js';
-import { curTab, switchTab } from './layout.js';
+import { curTab, resizePlots, switchTab } from './layout.js';
 import { openModal } from './modal.js';
 
 const CHECK_MAX = 96, SEL_SEND_MAX = 500;
 const EXPLAIN_EVAL = 'Explain this evaluation: what is good, what is wrong, and the 3 most useful next steps.';
-const TABS = ['explore', 'stats', 'curation', 'model', 'eval', 'ai', 'compare'];
+const TABS = ['explore', 'stats', 'curation', 'model', 'eval', 'compare'];
+const TAB_NAMES: Record<string, string> = { explore: 'Explore', stats: 'Class stats', curation: 'Curation', model: 'Model', eval: 'Evaluation', compare: 'Compare' };
 
 /** One verdict card of a label check. `id` is a box id. */
 interface CheckItem { id: number; verdict: string; suggest?: string | undefined; why?: string | undefined }
@@ -39,6 +42,7 @@ interface Usage { in?: number | null | undefined; out?: number | null | undefine
 
 const A = {
   chat: null as ChatHandle | null,
+  root: null as HTMLElement | null,
   chips: { dataset: true, eval: false, sel: null as boolean | null },   // sel: null = automatic (on when there is a selection)
   busy: null as AbortController | null,                                 // a label check (the chat has its own)
   last: null as Usage | null,
@@ -61,7 +65,6 @@ function toCheckItem(x: unknown): CheckItem | null {
 
 // ---------------------------------------------------------------- helpers
 
-const fmtK = (n: number | null | undefined): string => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
 const clsOf = (id: number): string => { const c = S.P && S.P.cls[id]; return c === undefined || c === null ? '?' : (meta().classes[c] ?? String(c)); };
 
 function sample(ids: number[], n: number): number[] {               // evenly spread, keeps order
@@ -133,7 +136,7 @@ async function applyUi(a: UiAction): Promise<boolean> {
       if ((dims === 2 || dims === 3) && dEl) dEl.value = String(dims);
       updateMethodControls();
       saveSettings();
-      if (curTab !== 'explore' && curTab !== 'ai') switchTab('explore');
+      if (curTab !== 'explore') switchTab('explore');
       void loadView();
       return true;
     }
@@ -150,6 +153,7 @@ async function applyUi(a: UiAction): Promise<boolean> {
       return true;
     case 'open_tab': {
       const tab = s('tab');
+      if (tab === 'ai') { openDock(false); return true; }           // the assistant itself: the dock
       const btn = document.querySelector<HTMLElement>(`#activity .act[data-tab="${CSS.escape(tab)}"]`);
       if (!TABS.includes(tab) || !btn || btn.classList.contains('hidden')) return false;
       if (tab !== curTab) switchTab(tab);
@@ -174,13 +178,30 @@ async function applyUi(a: UiAction): Promise<boolean> {
 
 // ---------------------------------------------------------------- entry points
 
-export function showAiTab(): void {
-  build();
-  if (!$req<HTMLTextAreaElement>('ai-q').value) requestAnimationFrame(() => { if (curTab === 'ai') A.chat?.focus(); });
+/** The visualizer's dock host: the ◆ activity icon and Ctrl+. open / collapse it; plots resize with it. */
+export function initAssistantDock(): void {
+  setDockHost({
+    id: 'ai-side',
+    label: () => `Visualizer · ${TAB_NAMES[curTab] ?? curTab}`,
+    enabled: () => llmOn('assistant'),
+    mount: (el) => { build(el); return A.chat as ChatHandle; },
+    onShow: () => { renderAll(); syncActIcon(); },
+    onResize: () => { resizePlots(); syncActIcon(); },
+    settings: () => { void openSettings('llm'); },
+    sessionKey: () => `ai-side.${datasetId()}`,
+  });
+  const act = $('act-ai');
+  if (act) act.onclick = () => toggleDock();
+  syncActIcon();
+}
+
+function syncActIcon(): void {
+  const act = $('act-ai');
+  if (act) { act.classList.toggle('active', dockOpen()); act.setAttribute('aria-pressed', String(dockOpen())); }
 }
 
 function openAi(): void {
-  if (curTab !== 'ai') switchTab('ai'); else build();
+  openDock(false);
 }
 
 // from other views (Evaluation ◆ Explain): open the tab and ask
@@ -205,16 +226,12 @@ const GEM_PATHS = '<path class="gem-body" d="M6.5 4h10l4.5 5.5L11.5 21 2 9.5z"/>
 const heroGem = (): string => '<svg class="ai-hero-gem" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ai-gem-g" x1="0" y1="0" x2="1" y2="1">' +
   '<stop offset="0" style="stop-color:var(--gem-1)"/><stop offset=".55" style="stop-color:var(--gem-2)"/><stop offset="1" style="stop-color:var(--gem-3)"/></linearGradient></defs>' +
   GEM_PATHS + '</svg>';
-const mark = (cls = 'ai-mark'): string => `<span class="${cls}" aria-hidden="true">${icon('gem')}</span>`;
 
-function build(): void {
-  const root = $req('ai-side');
+function build(root: HTMLElement): void {
+  A.root = root;
   if (!built) {
     built = true;
     root.innerHTML =
-      `<div class="side-head ai-head">${mark()}<h2>AI assistant</h2><span id="ai-model" class="ai-model muted"></span>` +
-      '<span class="grow"></span><span id="ai-meter" class="ai-meter num" title="tokens of the last answer: sent · received / input budget (older messages are compacted at 80%, or type /compact)"></span>' +
-      `<button type="button" class="icon-btn ghost" data-aact="settings" aria-label="AI settings" title="Settings › AI assistant">${icon('gear')}</button></div>` +
       '<div id="ai-chips" class="ai-chips" role="group" aria-label="What the assistant can see"></div>' +
       '<div id="ai-chat"></div>';
     A.chat = mountChat($req('ai-chat'), {
@@ -227,7 +244,9 @@ function build(): void {
       scopeName: 'dataset',
       scopeLabel: (sc) => { const n = sc?.['name']; return typeof n === 'string' && n ? n : sc?.['dataset_id'] === datasetId() ? 'this dataset' : 'dataset'; },
       onUiAction: applyUi,
-      onDone: (t) => { if (t.usage) { A.last = { in: t.usage.in, out: t.usage.out, ms: t.ms }; renderHead(); } },
+      onEvent: dockHooks().onEvent,
+      onDone: (t) => { if (t.usage) A.last = { in: t.usage.in, out: t.usage.out, ms: t.ms }; dockHooks().onDone(t); renderHead(); },
+      onUpdate: () => refreshDock(),
       settings: (sec) => { void openSettings(sec === 'llm' ? 'llm' : 'prompts').then(() => { if (sec === 'plugins') document.querySelector<HTMLElement>('[data-act="pr-tab"][data-v="plugins"]')?.click(); }); },
       emptyHTML,
       exportName: () => String((S.meta && S.meta.dataset) || 'dataset'),
@@ -260,17 +279,13 @@ function renderAll(): void {
   renderHead();
   renderChips();
   A.chat?.refresh();
-  applyLLM($req('ai-side'));
+  if (A.root) applyLLM(A.root);
   if (!canRecord()) $req('ai-mic').classList.add('hidden');
 }
 
+/** the dock's head shows the model and the context ring */
 function renderHead(): void {
-  const p = LLM.provider;
-  const m = A.chat?.modelLabel();
-  $req('ai-model').textContent = m && m !== 'model' ? m : p ? (p.model || p.name || '') : '';
-  $req('ai-model').title = p ? `${p.name || ''} · ${p.kind || ''}` : '';
-  const L = A.last, budget = (LLM.budget && LLM.budget.max_input_tokens) || 100000;
-  $req('ai-meter').textContent = L ? `in ${fmtK(L.in)} · out ${fmtK(L.out)} / ${fmtK(budget)}` : '';
+  refreshDock();
 }
 
 function renderChips(): void {
@@ -536,7 +551,7 @@ function onClick(e: MouseEvent): void {
 }
 
 function bind(): void {
-  const root = $req('ai-side'), mic = $req('ai-mic');
+  const root = A.root ?? $req('ai-side'), mic = $req('ai-mic');
   root.addEventListener('click', onClick);
   root.addEventListener('keydown', (e) => {          // the verdict cards are role=button
     const t = e.target;
@@ -565,7 +580,8 @@ function bind(): void {
       if (A.chat?.busy()) A.chat.stop();
       A.busy?.abort();
       if (A.rec !== 'idle') { cancelRecording(); A.rec = 'idle'; renderMic(); }
-      if (curTab === 'ai') switchTab('explore');
+      refreshDock();
+      syncActIcon();
       return;
     }
     renderAll();

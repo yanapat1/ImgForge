@@ -266,7 +266,8 @@ def test_ui_contract_matches_the_page():
     issues = set(re.findall(r'data-view="([^"]+)"', html))
     assert set(visual.ISSUES) == issues
     tabs = set(re.findall(r'class="act[^"]*" data-tab="([a-z]+)"', html)) | set(re.findall(r'data-tab="([a-z]+)" role="tab"', html))
-    assert set(visual.TABS) <= tabs
+    assert set(visual.TABS) - {'ai'} <= tabs and 'ai' not in tabs     # ai: the right-side dock, not a view
+    assert 'id="act-ai"' in html                                         # (the ◆ icon still opens it)
     ctl = (ROOT / 'static' / 'ts' / 'views' / 'controls.ts').read_text()
     for k, (label, hint) in visual.PARAM_INFO.items():
         assert f"{k}: ['{label}', '{hint}'" in ctl

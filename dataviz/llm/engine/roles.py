@@ -38,6 +38,13 @@ def data_scope(user, scope):
     scope = scope if isinstance(scope, dict) else {}
     bid, path = scope.get('bucket'), str(scope.get('path') or '')
     sel = [str(x) for x in scope.get('selection') or [] if isinstance(x, str)]
+    page = scope.get('page')
+    if page == 'home':
+        return 'The user is on the sessions home page (the list of visualize and labeling sessions), not in the Data Center.'
+    if page == 'label':
+        pid = str(scope.get('label_project') or '')[:64]
+        return (f'The user is on the labeling page of project {pid!r} (editing boxes; its own Label assistant handles '
+                'boxes there). You can answer about the data behind it.')
     if not bid:
         return 'The user is on the Data Center overview (no bucket open).'
     st = None

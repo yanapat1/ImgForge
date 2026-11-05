@@ -1,10 +1,9 @@
-/* The ◆ AI assistant (views/assistant.js): the #ai-side panel (the chat itself is chat.css), verdict cards, and the small ◆ hooks
+/* The ◆ AI assistant (views/assistant.js): the #ai-side panel in the right dock (the chat itself is chat.css), verdict cards, and the small ◆ hooks
    elsewhere (filter bar "Describe…", Evaluation "Explain", gallery "Check labels"). Gem colours come from
    --gem-1/2/3 (tokens.css); the fallbacks only matter if those tokens are missing. */
 
-/* ---- panel: only on the ai tab (core/llm.js shows every [data-llm] element, the tab decides here) */
-#ai-side { display: flex; flex-direction: column; min-height: 0; }
-main:not([data-tab="ai"]) #ai-side { display: none !important; }
+/* ---- panel: the visualizer's host section in the right dock */
+#ai-side { display: flex; flex-direction: column; min-height: 0; }      /* in the right dock (core/dock.ts, dock.css) */
 
 /* ---- small ◆ marks on AI buttons */
 .gem-mark { color: var(--gem-2); }
@@ -102,7 +101,6 @@ button .gem-mark, button:hover:not(:disabled) .gem-mark { color: var(--gem-2); }
 
 /* ---- narrow screens + reduced motion */
 @media (max-width: 900px) {
-  #ai-side { min-height: 70vh; }
   .ai-model { max-width: 100%; }
 }
 @media (max-width: 600px) {

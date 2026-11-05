@@ -1,5 +1,5 @@
 /* The Data Center (?data, js/datacenter/): the Sessions | Data header tabs (also on the home), the 3-pane layout
-   (tree | files | details) with the AI drawer docked under the centre and right panes, bucket cards, the thumbnail
+   (tree | files | details; the ◆ assistant is the right-side dock, dock.css), bucket cards, the thumbnail
    grid and names list, the details panel, the tag editor, the dialogs' parts, the action toast (core/toast.ts) and
    the narrow-screen rules (< 1100px the details panel is an overlay, < 760px the tree too). Tokens only. */
 
@@ -28,20 +28,15 @@
 .dc-only-narrow, .dc-only-overlay { display: none !important; }
 
 /* ---------------------------------------------------------------- 3-pane layout */
-.dc-app { --tw: var(--dc-tree-w, 268px); flex: 1; min-height: 0; display: grid; grid-template-columns: var(--tw) minmax(0, 1fr) 344px; grid-template-rows: minmax(0, 1fr) auto; position: relative; }
-.dc-tree { grid-row: 1 / 3; grid-column: 1; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.dc-app { --tw: var(--dc-tree-w, 268px); flex: 1; min-height: 0; display: grid; grid-template-columns: var(--tw) minmax(0, 1fr) 344px; grid-template-rows: minmax(0, 1fr); position: relative; }
+.dc-tree { grid-row: 1; grid-column: 1; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .dc-main { grid-row: 1; grid-column: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); position: relative; }
 .dc-details { grid-row: 1; grid-column: 3; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.dc-drawer { grid-row: 2; grid-column: 2 / 4; background: var(--surface); border-top: 1px solid var(--border-strong); display: flex; flex-direction: column; min-height: 0; }
-.dc-app.ai-open { grid-template-rows: minmax(150px, 1fr) var(--dc-ai-rows, min(560px, 64%)); }
 /* splitters (resize.ts): thin hit areas over the pane borders; an accent line on hover, focus and while dragging */
 .dc-split { z-index: 4; touch-action: none; background: transparent; transition: background var(--t-fast) var(--ease); outline: none; }
-.dc-split.v { grid-row: 1 / 3; grid-column: 1; justify-self: end; width: 7px; margin-right: -4px; cursor: col-resize; }
-.dc-split.h { grid-row: 2; grid-column: 2 / 4; align-self: start; height: 7px; margin-top: -4px; cursor: row-resize; display: none; }
-.dc-app.ai-open .dc-split.h { display: block; }
+.dc-split.v { grid-row: 1; grid-column: 1; justify-self: end; width: 7px; margin-right: -4px; cursor: col-resize; }
 .dc-split:hover, .dc-split:focus-visible, .dc-split.dragging { background: var(--accent-line); }
 body.resizing { user-select: none; cursor: col-resize; }
-body.resizing:has(.dc-split.h.dragging) { cursor: row-resize; }
 body.resizing iframe, body.resizing img { pointer-events: none; }
 .dc-scrim { display: none; }
 
@@ -495,22 +490,21 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .dc-dz.over, .dc-dz:hover { border-color: var(--accent); background: var(--accent-soft); }
 .dc-imp .dc-upline { border: 1px solid var(--border); border-radius: var(--r); }
 
-/* ---------------------------------------------------------------- AI drawer */
+/* ---------------------------------------------------------------- AI (in the right dock: core/dock.ts) */
 /* .ai-mark (the gem badge) lives in assistant.css */
-.dr-bar { height: 42px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px; }
-.dr-bar b { font-size: var(--fs-sm); font-weight: 700; }
-.dr-bar .model { font: var(--fs-xs) var(--mono); color: var(--text-faint); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; display: inline-flex; align-items: center; }
 .ok-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 6px; }
-.dr-bar .ask { flex: 1; height: 28px; max-width: 760px; min-width: 120px; padding: 0 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); font-size: var(--fs-sm); outline: none; }
-.dr-bar .ask:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.dr-bar .ask:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .hintline { font-size: var(--fs-xs); color: var(--text-faint); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
 .hintline .ico { width: 13px; height: 13px; }
-.dc-drawer:not(.open) .dr-bar .icon-btn:last-child { margin-left: auto; }
-.dc-drawer.open { min-height: 0; }
-.dc-drawer.open .dr-bar { border-bottom: 1px solid var(--border); }
-.dr-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
-.dr-main { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+#dc-ai .dc-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dc-ai-ctx { flex: none; border-bottom: 1px solid var(--border); }
+.dc-ai-scope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px var(--s3); font-size: var(--fs-2xs); }
+.dc-ai-scope .chip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-muted); }
+.dc-ai-scope .chip b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dc-ai-scope .chip .ico { width: 12px; height: 12px; }
+.dc-ai-scope .grow { flex: 1; }
+.dc-ai-scope button { height: 22px; padding: 0 6px; font-size: var(--fs-2xs); }
+.dc-ai-tools { display: flex; flex-direction: column; gap: 6px; padding: 0 var(--s3) var(--s2); max-height: 220px; overflow-y: auto; }
 .steps { padding: 5px 12px 6px; display: flex; flex-direction: column; }
 .step { display: flex; align-items: center; gap: 9px; min-height: 26px; font-size: var(--fs-sm); white-space: nowrap; color: var(--text); cursor: pointer; }
 .step input { margin: 0; }
@@ -519,7 +513,6 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .step .sub { margin-left: auto; font-size: var(--fs-xs); color: var(--text-faint); padding-left: 8px; }
 .step .sub.err { color: var(--danger-text); }
 .step.opt .op, .step.opt .d { color: var(--text-faint); }
-.dr-side { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow: auto; background: var(--surface); }
 .toolcat { display: flex; flex-wrap: wrap; gap: 4px; }
 .tchip { font: var(--fs-xs) var(--mono); padding: 2px 7px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); }
 .tchip.mut { border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
@@ -528,8 +521,6 @@ button.danger-ghost .ico, .dc-selbar button.danger-ghost .ico { color: var(--dan
 .scope .s span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scope .s .ico { width: 14px; height: 14px; color: var(--text-faint); }
 .scope .s .num { margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs); }
-.ai-pend { display: flex; justify-content: space-between; gap: 8px; padding: 7px 10px; border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--accent-soft); font-size: var(--fs-sm); font-weight: 600; }
-.ai-pend .faint { font-weight: 400; font-size: var(--fs-xs); }
 
 /* ---------------------------------------------------------------- action toast (core/toast.ts actionToast) */
 .act-toast { position: fixed; left: var(--s4); bottom: var(--s4); z-index: var(--z-toast); width: min(600px, calc(100vw - 2 * var(--s4)));
@@ -568,13 +559,25 @@ button.icon-btn.sm { width: 26px; padding: 0; }
 }
 @media (max-width: 1100px) {
   .dc-app { grid-template-columns: var(--tw) minmax(0, 1fr); }
-  .dc-drawer, .dc-split.h { grid-column: 2; }
   .dc-details { position: absolute; top: 0; right: 0; bottom: 0; width: min(360px, 92vw); z-index: 6; box-shadow: var(--shadow-3);
     transform: translateX(100%); visibility: hidden; transition: transform var(--t) var(--ease), visibility 0s linear var(--t); }
   .dc-app.details-open .dc-details { transform: none; visibility: visible; transition: transform var(--t) var(--ease); }
   .dc-app.details-open .dc-scrim, .dc-app.tree-open .dc-scrim { display: block; position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--scrim) 45%, transparent); }
   .dc-only-overlay { display: inline-flex !important; }
   .dc-wide-txt { display: none; }
+  .dc-hsearch { width: 220px; }
+}
+/* the ◆ dock open beside it: the same narrow layout by the Data Center's own width (the media query above only
+   sees the window) */
+html[data-dock="open"] #datacenter { container-type: inline-size; }
+@container (max-width: 1100px) {
+  .dc-app { grid-template-columns: var(--tw) minmax(0, 1fr); }
+  .dc-details { position: absolute; top: 0; right: 0; bottom: 0; width: min(360px, 92%); z-index: 6; box-shadow: var(--shadow-3);
+    transform: translateX(100%); visibility: hidden; transition: transform var(--t) var(--ease), visibility 0s linear var(--t); }
+  .dc-app.details-open .dc-details { transform: none; visibility: visible; transition: transform var(--t) var(--ease); }
+  .dc-app.details-open .dc-scrim, .dc-app.tree-open .dc-scrim { display: block; position: absolute; inset: 0; z-index: 5; background: color-mix(in srgb, var(--scrim) 45%, transparent); }
+  .dc-only-overlay { display: inline-flex !important; }
+  .dc-wide-txt, .dc-wide { display: none !important; }
   .dc-hsearch { width: 220px; }
 }
 @media (max-width: 900px) {
@@ -584,7 +587,7 @@ button.icon-btn.sm { width: 26px; padding: 0; }
 }
 @media (max-width: 760px) {
   .dc-app { grid-template-columns: minmax(0, 1fr); }
-  .dc-main, .dc-drawer, .dc-split.h { grid-column: 1; }
+  .dc-main { grid-column: 1; }
   .dc-split.v { display: none; }
   .dc-tree { position: absolute; top: 0; left: 0; bottom: 0; width: min(300px, 86vw); z-index: 6; box-shadow: var(--shadow-3); transform: translateX(-100%); visibility: hidden;
     transition: transform var(--t) var(--ease), visibility 0s linear var(--t); }

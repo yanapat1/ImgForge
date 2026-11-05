@@ -4,6 +4,8 @@
 // Entry point: boot (the signed-in user first, then the screen; the startup screen until the session's index is
 // ready), init (first render) and every event binding of the page. Loaded by index.html as <script type="module">.
 
+import { initAssistantDock } from './views/assistant.js';
+import { initPageDock } from './views/dock-page.js';
 import type { Caps, DatasetInfo, Job, Meta, Points, Status } from './types.js';
 import type { WorkspacePayload } from './types-plot.js';
 import { errText, getJSON, postJSON, waitForServer } from './core/api.js';
@@ -95,6 +97,8 @@ async function boot(): Promise<void> {
     $req<HTMLAnchorElement>('brand-home').href = homeUrl();
   }
   // the labeling page loads its own code on demand: the home and the visualizer never download it
+  if (LABEL) initPageDock('label', LABEL);      // ◆ the right-side dock (the Data assistant)
+  else if (!SESSION && !DATA) initPageDock('home');
   if (LABEL) { import('./label/app.js').then((m) => m.start(LABEL)).catch((e: unknown) => {
     $req('label').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the labeling page: ${esc(errText(e))}</div>`;
   }); return; }
@@ -212,6 +216,7 @@ async function init(st: Status): Promise<void> {
 
   buildClassFilter();
   bindEvents();
+  initAssistantDock();                          // ◆ the right-side dock (the chat is built on its first open)
   // ---- filters + curation: register their remembered settings before applySettings, re-apply the curation
   // edits of this server session (deleted boxes) before the first render
   initFilterBar();

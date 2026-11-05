@@ -12,6 +12,11 @@ summary: chat commands (/model, /mode, /effort, /web, /compact ...), modes, sess
   the last 3 exchanges. A dashed "Context compacted · view summary" line marks the place. `/compact` does it now and
   keeps the last exchange; `/compact <focus>` says what the summary must keep. The page still shows every message.
   If the summary call fails, the chat goes on and the oldest messages are left out instead.
+- **Where it is**: a dock on the right of every page (home, Data Center, visualizer, labeling). Ctrl+. or the ◆
+  icon opens / collapses it; drag its left edge to resize; on a phone a floating ◆ opens it as a sheet. The ring in
+  its head is how much of the input budget the chat uses (compaction at 80%). The Tasks strip shows the agent's
+  checklist, what it is driving and a Stop button. Visualizer and Data Center have their own chats (the Visual
+  and the Data assistant); home and labeling use the Data assistant.
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve).
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).
