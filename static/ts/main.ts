@@ -9,7 +9,7 @@ import { initPageDock } from './views/dock-page.js';
 import type { Caps, DatasetInfo, Job, Meta, Points, Status } from './types.js';
 import type { WorkspacePayload } from './types-plot.js';
 import { errText, getJSON, postJSON, waitForServer } from './core/api.js';
-import { hasSessions, loadMe } from './core/auth.js';
+import { hasSessions, loadMe, zoneOn } from './core/auth.js';
 import { dataUrl, homeUrl, pointsLayerFromPath, sessionIdFromPath, vizUrl } from './core/nav.js';
 import { $, $req, esc, fmtEta, icon, sleep } from './core/dom.js';
 import { showError, installCrashHandlers } from './core/errorpage.js';
@@ -40,6 +40,7 @@ const SCREEN = document.documentElement.dataset['screen'];
 const SESSION = SCREEN === 'viz' ? sessionIdFromPath() : null;
 const LABEL = SCREEN === 'label' ? new URLSearchParams(location.search).get('label') : null;
 const DATA = SCREEN === 'data';
+const ANALYSIS = SCREEN === 'analysis';
 
 // Plotly (~1.5 MB) only on the visualizer: theme-boot.js already preloads it, this runs it. Found from this module's
 // URL (static/js/main.js -> /plotly.min.js), the same absolute URL as the preload, never from the s/<id>/ page URL.
@@ -88,23 +89,27 @@ async function boot(): Promise<void> {
   initLLM();                                   // ◆ AI features: hidden until the server says they are usable
   // the user menu: the home's header here, the visualizer's activity bar; the label page mounts its own (label/app.js)
   const homeActions = document.querySelector<HTMLElement>('#home .header-actions');
-  if (!SESSION && !LABEL && !DATA && homeActions) mountUserMenu(homeActions);
+  if (!SESSION && !LABEL && !DATA && !ANALYSIS && homeActions) mountUserMenu(homeActions);
   const navS = $<HTMLAnchorElement>('home-nav-sessions'), navD = $<HTMLAnchorElement>('home-nav-data');
   if (navS) navS.href = homeUrl();
   if (navD) navD.href = dataUrl();
+  if (!zoneOn('analysis')) $('home-nav-analysis')?.remove();
   if (SESSION) {
     bindUserButton($req<HTMLButtonElement>('act-user'));
     $req<HTMLAnchorElement>('brand-home').href = homeUrl();
   }
   // the labeling page loads its own code on demand: the home and the visualizer never download it
   if (LABEL) initPageDock('label', LABEL);      // ◆ the right-side dock (the Data assistant)
-  else if (!SESSION && !DATA) initPageDock('home');
+  else if (!SESSION && !DATA && !ANALYSIS) initPageDock('home');
   if (LABEL) { import('./label/app.js').then((m) => m.start(LABEL)).catch((e: unknown) => {
     $req('label').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the labeling page: ${esc(errText(e))}</div>`;
   }); return; }
   // the Data Center loads its own code on demand too (it mounts its own header, user menu included)
   if (DATA) { import('./datacenter/app.js').then((m) => m.start()).catch((e: unknown) => {
     $req('datacenter').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the Data Center: ${esc(errText(e))}</div>`;
+  }); return; }
+  if (ANALYSIS) { import('./analysis/app.js').then((m) => m.start()).catch((e: unknown) => {
+    $req('analysis').innerHTML = `<div class="status-line err">${icon('alert')}Could not load Data Analysis: ${esc(errText(e))}</div>`;
   }); return; }
   if (!SESSION && !hasSessions()) { location.replace(dataUrl()); return; }   // an install without sessions opens on its data
   if (!SESSION) { void renderHome(); return; }      // the first page: no Plotly, no job polling

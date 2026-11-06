@@ -33,7 +33,8 @@
   var viz = !login && /\/s\/[^/]+\/$/.test(path);
   var label = !login && !viz && /[?&]label=[^&]/.test(location.search);
   var data = !login && !viz && !label && /[?&]data(=|&|$)/.test(location.search);
-  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : data ? 'data' : 'home');
+  var analysis = !login && !viz && !label && !data && /[?&]analysis(=|&|$)/.test(location.search);
+  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : data ? 'data' : analysis ? 'analysis' : 'home');
   var me = document.currentScript instanceof HTMLScriptElement ? document.currentScript.src : '';
   var base = me || document.baseURI;
   var url = function (rel: string): string { try { return new URL(rel, base).href; } catch (e) { return rel; } };

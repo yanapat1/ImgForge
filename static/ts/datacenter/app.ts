@@ -6,9 +6,9 @@
 // actions), the keyboard (/ search, Delete, F2 rename, Ctrl+A, Esc) and the loads (buckets, summary, tags).
 
 import { errText } from '../core/api.js';
-import { hasSessions, pref } from '../core/auth.js';
+import { hasSessions, pref, zoneOn } from '../core/auth.js';
 import { $, $req, esc, icon, ICONS } from '../core/dom.js';
-import { dataUrl, homeUrl } from '../core/nav.js';
+import { analysisUrl, dataUrl, homeUrl } from '../core/nav.js';
 import { closeFloat } from '../core/popover.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { openSettings } from '../settings/dialog.js';
@@ -50,6 +50,7 @@ const SKELETON = (): string => `
   <nav class="hdr-nav" aria-label="Pages">
     ${hasSessions() ? `<a href="${esc(homeUrl())}">${icon('layers')}Sessions</a>` : ''}
     <a class="on" href="${esc(dataUrl())}" aria-current="page">${icon('db')}Data<span id="dc-nav-n" class="count num"></span></a>
+    ${zoneOn('analysis') ? `<a href="${esc(analysisUrl())}">${icon('search')}Analysis</a>` : ''}
   </nav>
   <span class="grow"></span>
   <div class="dc-hsearch" role="search">
