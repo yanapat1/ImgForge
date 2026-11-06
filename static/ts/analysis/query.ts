@@ -6,6 +6,7 @@ import { $, $req, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, render, renderTree, saveTabs } from './app.js';
+import { B_ACTIONS, fitView, renderBuilder, syncFromSql } from './builder.js';
 import { mountGrid } from './grid.js';
 import { A, api, newTab, sourceOf, tab } from './state.js';
 import type { RunState, Statement, Tab } from './state.js';
@@ -21,6 +22,7 @@ async function vendor(): Promise<EditorModule> {
   return V;
 }
 
+const ranTyped = new Map<string, boolean>();
 const isRunning = (t: Tab): boolean => t.run?.status === 'running';
 
 function dbOptions(t: Tab): string {
@@ -34,9 +36,11 @@ export function renderQuery(): void {
   const t = tab();
   if (!w.querySelector('.an-q')) {
     w.innerHTML = `<div class="an-q"><div class="an-tabs" id="an-qtabs"></div><div class="an-toolbar" id="an-qbar"></div>` +
-      `<div class="an-qbody" id="an-qbody" style="--r1:42fr;--r2:58fr"><div class="an-pane"><div class="an-sqlhead">SQL <span class="faint">Type your query. Ctrl+Enter runs it. Nothing runs until you do.</span></div><div class="an-sql" id="an-sql"></div></div>` +
+      `<div class="an-qbody" id="an-qbody"><div class="an-split" id="an-pair"><div class="an-pane" data-pane="sql"><div class="an-sqlhead">SQL <span class="faint">Type your query. Ctrl+Enter runs it.</span><span class="grow"></span><button type="button" class="pb" data-act="fill" data-k="sql" aria-label="Fill the window" title="Fill the window">⤢</button></div><div class="an-sql" id="an-sql"></div></div>` +
+      `<div class="an-spv" data-sp="v" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"></div>` +
+      `<div class="an-pane" data-pane="viz"><div class="an-sqlhead">Visual builder <span class="faint lbl">Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.</span><span class="grow"></span><button type="button" class="pb" data-act="fill" data-k="viz" aria-label="Fill the window" title="Fill the window">⤢</button></div><div class="an-canvas" id="an-canvas"></div></div></div>` +
       `<div class="an-sph" data-sp="h" role="separator" aria-orientation="horizontal" aria-label="Resize panels" tabindex="0"></div>` +
-      `<div class="an-pane an-res"><div class="an-tabs" id="an-rtabs"></div><div class="an-rc" id="an-rc"></div></div></div></div>`;
+      `<div class="an-pane an-res" data-pane="res"><div class="an-tabs" id="an-rtabs"></div><div class="an-rc" id="an-rc"></div></div></div></div>`;
     editorTab = '';
     editor = null;
   }
@@ -46,25 +50,57 @@ export function renderQuery(): void {
   $req('an-qbar').innerHTML = `<button type="button" class="an-btn pri" data-act="run"${isRunning(t) ? ' disabled' : ''}>${icon('play')}Run</button><button type="button" class="an-btn" data-act="stop"${isRunning(t) ? '' : ' disabled'}>Stop</button>` +
     `<select class="an-sel" id="an-conn" aria-label="Connection"><option value="">Choose a connection</option>${A.sources.map((s) => `<option value="${esc(s.id)}" ${s.id === t.conn ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` +
     `<select class="an-sel" id="an-db" aria-label="Database"${t.conn ? '' : ' disabled'}>${dbOptions(t)}</select>` +
-    (src ? `${chip(src.kind)}<span class="pill faint">${esc(A.version.get(src.id) ?? '')}</span>` : '') + `<span class="grow"></span><span class="pill" title="A change never runs without your confirmation">Read-only until you confirm</span>`;
+    (src ? `${chip(src.kind)}<span class="pill faint">${esc(A.version.get(src.id) ?? '')}</span>` : '') + `<span class="grow"></span><span class="faint" style="font-size:12.5px">Layout</span><span class="an-seg">${[['std', 'Standard'], ['top', 'Table on top'], ['only', 'Table only']].map(([k, n]) => `<button type="button" data-act="layout" data-lay="${k}" data-k="${k}">${n}</button>`).join('')}</span>`;
   void mountEditor(t);
+  renderBuilder();
+  applyLayout();
   renderResults();
 }
+
+export function applyLayout(): void {
+  const b = $('an-qbody'), pair = $('an-pair'), L = A.layout;
+  if (!b || !pair) return;
+  b.className = `an-qbody${L.flip ? ' flip' : ''}${L.max ? ' one' : ''}`;
+  b.style.setProperty('--r1', `${L.h}fr`);
+  b.style.setProperty('--r2', `${100 - L.h}fr`);
+  pair.style.setProperty('--a', `${L.w}fr`);
+  pair.style.setProperty('--b', `${100 - L.w}fr`);
+  document.querySelector('.an-main')?.classList.toggle('filled', !!L.max);
+  ['sql', 'viz', 'res'].forEach((k) => { const p = document.querySelector<HTMLElement>(`[data-pane="${k}"]`); if (p) p.hidden = !!L.max && L.max !== k; });
+  pair.hidden = L.max === 'res';
+  const pres = $('an-rtabs');
+  if (pres && !pres.querySelector('[data-act="fill"]')) pres.insertAdjacentHTML('beforeend', '<button type="button" class="pb" data-act="fill" data-k="res" aria-label="Fill the window" title="Fill the window">⤢</button>');
+  document.querySelectorAll<HTMLElement>('[data-act="fill"]').forEach((x) => { const on = L.max === x.dataset['k']; x.textContent = on ? '⤡' : '⤢'; x.title = on ? 'Restore layout (Esc)' : 'Fill the window'; });
+  document.querySelectorAll<HTMLElement>('[data-lay]').forEach((x) => x.classList.toggle('on', x.dataset['lay'] === layoutName()));
+}
+
+const layoutName = (): string => (A.layout.max === 'res' ? 'only' : A.layout.flip ? 'top' : A.layout.max ? '' : 'std');
 
 async function mountEditor(t: Tab): Promise<void> {
   const host = $('an-sql');
   if (!host) return;
-  if (editor && editorTab === t.id) return;
+  if (editorTab === t.id) return;                  // mounted, or on its way: renders can arrive while it loads
   if (editor) { editor.destroy(); editor = null; }
   editorTab = t.id;
   const v = await vendor();
   if (editorTab !== t.id || !$('an-sql')) return;
   host.innerHTML = '';
-  editor = await v.createEditor(host, {
+  const made = await v.createEditor(host, {
     text: t.sql, lang: 'sql',
-    onChange: (text) => { t.sql = text; t.dirty = true; saveTabs(); markStale(); },
+    onChange: (text) => {
+      if (text === t.sql) return;
+      const wasTyped = t.typed && t.dirty;
+      t.sql = text;
+      t.dirty = true;
+      t.typed = true;
+      saveTabs();
+      markStale();
+      if (!wasTyped) renderBuilder();
+    },
   });
+  if (editorTab === t.id) editor = made; else made.destroy();
 }
+document.addEventListener('an-sql-changed', () => { editor?.setText(tab().sql); markStale(); });
 
 function markStale(): void {
   const n = $('an-stale');
@@ -140,8 +176,10 @@ export async function runQuery(): Promise<void> {
   }
   t.run = await api.run(t.conn, t.db, text, chk.confirm, t.name);
   t.result = 0;
-  t.dirty = false;
   t.plan = null;
+  const typed = t.typed && t.dirty;
+  t.dirty = false;
+  ranTyped.set(t.id, typed);
   renderIfActive(t);
   await follow(t);
 }
@@ -153,8 +191,14 @@ async function follow(t: Tab): Promise<void> {
     t.run = await api.runState(id);
     if (tab() === t) { const el = $('an-time'); if (el && t.run) el.textContent = timeText(t.run); }
   }
+  if (t.run?.status === 'error') { t.rt = 'messages'; t.dirty = true; toast('Query failed. See Messages.', 'err'); }
+  else if (ranTyped.get(t.id) && t.run?.status === 'done') {
+    await syncFromSql(t);                       // run first, draw after: the database decided it is valid
+    renderIfActive(t);
+    if (tab() === t) fitView();
+    toast('Query ran. The builder now shows your SQL.');
+  }
   renderIfActive(t);
-  if (t.run?.status === 'error') { t.rt = 'messages'; renderIfActive(t); toast('Query failed. See Messages.', 'err'); }
   const beat = await api.heartbeat();
   A.temps = beat.temps;
   renderTree();
@@ -165,6 +209,7 @@ function renderIfActive(t: Tab): void {
 }
 
 export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
+  ...B_ACTIONS,
   run: () => runQuery(),
   stop: async () => { const t = tab(); if (t.run) t.run = await api.stop(t.run.id); },
   explain: async () => {
@@ -173,6 +218,16 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     t.plan = await api.explain(t.conn, t.db, t.sql);
     renderQuery();
   },
+  layout: (el) => {
+    const L = A.layout, k = el.dataset['k'];
+    L.max = k === 'only' ? 'res' : '';
+    if (k === 'std') { L.flip = false; L.h = 46; }
+    if (k === 'top') { L.flip = true; L.h = 62; }
+    saveLayout();
+    applyLayout();
+    renderBuilderAfterLayout();
+  },
+  fill: (el) => { const k = el.dataset['k'] as 'sql' | 'viz' | 'res'; A.layout.max = A.layout.max === k ? '' : k; applyLayout(); renderBuilderAfterLayout(); },
   rt: (el) => { tab().rt = el.dataset['k'] as Tab['rt']; renderQuery(); },
   rset: (el) => { tab().result = Number(el.dataset['i']); renderQuery(); },
   qtab: (el) => { A.active = Number(el.dataset['i']); renderQuery(); saveTabs(); },
@@ -190,6 +245,9 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     saveTabs();
   },
 };
+
+function renderBuilderAfterLayout(): void { requestAnimationFrame(() => renderBuilder()); }
+export function saveLayout(): void { try { localStorage.setItem('dataviz.analysis.layout', JSON.stringify({ ...A.layout, max: '' })); } catch { /* a convenience only */ } }
 
 export function queryChange(t: HTMLInputElement | HTMLSelectElement): boolean {
   const c = tab();

@@ -9,8 +9,9 @@ import { setTheme, THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import { openSettings } from '../settings/dialog.js';
 import { mountUserMenu } from '../views/usermenu.js';
+import { addTable, builderContext, builderDown, builderKey, builderMove, builderUp, builderWheel, renderBuilder } from './builder.js';
 import { gridClick, gridFit, gridPointer } from './grid.js';
-import { Q_ACTIONS, queryChange, renderQuery, runQuery } from './query.js';
+import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout } from './query.js';
 import { A, api, newTab, tableKey } from './state.js';
 import type { Tab, Workspace } from './state.js';
 
@@ -88,7 +89,7 @@ function tableRow(conn: string, db: string, t: { schema: string; name: string; k
   const full = t.schema ? `${t.schema}.${t.name}` : t.name;
   const k = tableKey(conn, db, t.schema, t.name);
   const info = A.info.get(k);
-  return `<button type="button" class="an-tn" style="padding-left:46px" data-act="table" data-conn="${esc(conn)}" data-db="${esc(db)}" data-schema="${esc(t.schema)}" data-name="${esc(t.name)}" title="Click for its columns, double-click to query it">${tw(`t|${k}`)}<span class="lbl">${esc(full)}</span></button>` +
+  return `<button type="button" class="an-tn" draggable="true" style="padding-left:46px" data-act="table" data-conn="${esc(conn)}" data-db="${esc(db)}" data-schema="${esc(t.schema)}" data-name="${esc(t.name)}" title="Click for its columns, double-click to query it">${tw(`t|${k}`)}<span class="lbl">${esc(full)}</span></button>` +
     (A.open.has(`t|${k}`) ? (info ? info.columns.map((c) => `<div class="an-tcol" style="padding-left:66px" title="${esc(c.description)}"><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}<span class="faint an-n">${esc(c.type)}</span></div>`).join('') : '<div class="an-tload">Loading…</div>') : '');
 }
 
@@ -151,7 +152,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 export function saveTabs(): void {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    void api.saveSession({ active: A.active, tabs: A.tabs.map((t: Tab) => ({ id: t.id, name: t.name, sql: t.sql, conn: t.conn, db: t.db })) }).catch(() => {});
+    void api.saveSession({ active: A.active, tabs: A.tabs.map((t: Tab) => ({ id: t.id, name: t.name, sql: t.sql, conn: t.conn, db: t.db, model: t.model, typed: t.typed })) }).catch(() => {});
   }, 800);
 }
 
@@ -208,7 +209,38 @@ function bind(root: HTMLElement): void {
     const t = e.target instanceof Element ? e.target : null;
     if (t) gridFit(t);
   });
-  root.addEventListener('pointerdown', (e) => { gridPointer(e); });
+  root.addEventListener('pointerdown', (e) => {
+    if (gridPointer(e) || builderDown(e)) return;
+    const sp = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-sp]') : null;
+    if (!sp) return;
+    e.preventDefault();
+    const dir = sp.dataset['sp'], box = document.getElementById(dir === 'h' ? 'an-qbody' : 'an-pair')?.getBoundingClientRect();
+    if (!box) return;
+    const move = (m: PointerEvent): void => {
+      const v = dir === 'h' ? (m.clientY - box.top) / box.height * 100 : (m.clientX - box.left) / box.width * 100;
+      if (dir === 'h') A.layout.h = Math.round(Math.max(15, Math.min(85, v))); else A.layout.w = Math.round(Math.max(15, Math.min(85, v)));
+      applyLayout();
+    };
+    const up = (): void => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); saveLayout(); renderBuilder(); };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  });
+  document.addEventListener('pointermove', builderMove);
+  document.addEventListener('pointerup', builderUp);
+  document.addEventListener('contextmenu', builderContext);
+  root.addEventListener('wheel', builderWheel, { passive: false });
+  root.addEventListener('dragstart', (e) => {
+    const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-act="table"]') : null;
+    if (el) e.dataTransfer?.setData('text/an-table', JSON.stringify(el.dataset));
+  });
+  root.addEventListener('dragover', (e) => { if ((e.target as Element).closest?.('#an-canvas')) e.preventDefault(); });
+  root.addEventListener('drop', (e) => {
+    const raw = e.dataTransfer?.getData('text/an-table');
+    if (!raw || !(e.target as Element).closest?.('#an-canvas')) return;
+    e.preventDefault();
+    const d = JSON.parse(raw) as Record<string, string>;
+    void addTable(d['conn'] ?? '', d['db'] ?? '', d['schema'] ?? '', d['name'] ?? '');
+  });
   root.addEventListener('change', (e) => { queryChange(e.target as HTMLSelectElement); });
   root.addEventListener('input', (e) => {
     const t = e.target as HTMLInputElement;
@@ -225,6 +257,8 @@ function bind(root: HTMLElement): void {
     }
   });
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && A.layout.max) { A.layout.max = ''; applyLayout(); return; }
+    if (A.ws === 'query' && builderKey(e)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && A.ws === 'query') { e.preventDefault(); void runQuery().catch((err: unknown) => toast(errText(err), 'err')); return; }
     if (e.altKey && /^[1-9]$/.test(e.key)) { const w = WS[Number(e.key) - 1]; if (w) { e.preventDefault(); A.ws = w[0]; render(); } }
   });
@@ -234,6 +268,7 @@ export async function start(): Promise<void> {
   const root = $req('analysis');
   if (!zoneOn('analysis')) { root.innerHTML = '<p class="an-empty">This install has no Data Analysis zone.</p>'; return; }
   bind(root);
+  try { Object.assign(A.layout, JSON.parse(localStorage.getItem('dataviz.analysis.layout') ?? '{}')); } catch { /* a convenience only */ }
   const [{ sources }, { sessions }] = await Promise.all([api.sources(), api.sessions()]);
   A.sources = sources;
   const wanted = new URLSearchParams(location.search).get('analysis');
@@ -241,7 +276,7 @@ export async function start(): Promise<void> {
   A.sid = s.id;
   A.name = s.name;
   const st = s.state as { tabs?: Partial<Tab>[]; active?: number };
-  A.tabs = (st.tabs ?? []).map((t) => ({ ...newTab(t.name ?? 'Query', t.sql ?? '', t.conn ?? null, t.db ?? null), id: t.id ?? crypto.randomUUID() }));
+  A.tabs = (st.tabs ?? []).map((t) => ({ ...newTab(t.name ?? 'Query', t.sql ?? '', t.conn ?? null, t.db ?? null), id: t.id ?? crypto.randomUUID(), model: t.model ?? null, typed: t.typed ?? !!t.sql }));
   if (!A.tabs.length) A.tabs = [newTab('query 1', '', A.sources[0]?.id ?? null, A.sources[0]?.database || null)];
   A.active = Math.min(st.active ?? 0, A.tabs.length - 1);
   render();

@@ -26,7 +26,7 @@ from sqlalchemy import text
 from .. import db
 from ..auth import audit, tiers
 from ..core import logging as vlog
-from . import adapters, classify, spool
+from . import adapters, classify, querymodel, spool
 
 KINDS = ('postgres', 'mssql', 'mongo')
 TOKEN_S = 300
@@ -548,6 +548,26 @@ def explain(user, sid, cid, database, sql):
     for n in plan['nodes']:
         n['pct'] = round(n['cost'] / total * 100, 1)
     return plan
+
+
+# ---------------------------------------------------------------- the Visual builder
+def parse_model(user, cid, sql):
+    """SQL -> the builder's model. Only parses: nothing reaches the database."""
+    _use(user)
+    conn = _conn(user, cid)
+    if conn['kind'] == 'mongo':
+        return {'error': 'the builder does not read MongoDB text'}
+    return querymodel.parse(sql, _dialect(conn))
+
+
+def generate_sql(user, model, dialect):
+    _use(user)
+    if dialect not in adapters.ADAPTERS:
+        raise AnalysisError(f'unknown dialect {dialect}')
+    try:
+        return {'sql': querymodel.generate(model, dialect)}
+    except (KeyError, TypeError, ValueError) as e:
+        raise AnalysisError(f'the builder could not write this query: {e}') from None
 
 
 # ---------------------------------------------------------------- results

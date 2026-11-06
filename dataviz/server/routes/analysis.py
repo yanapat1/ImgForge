@@ -90,6 +90,14 @@ def router(state, ctx):
     def explain(body: dict = Body(...), user=me):
         return _call(service.explain, user, body.get('session'), body.get('connection'), body.get('database'), body.get('sql'))
 
+    @r.post('/model/parse')
+    def parse_model(body: dict = Body(...), user=me):
+        return _call(service.parse_model, user, body.get('connection'), body.get('sql'))
+
+    @r.post('/model/generate')
+    def generate(body: dict = Body(...), user=me):
+        return _call(service.generate_sql, user, body.get('model') or {}, body.get('dialect'))
+
     @r.get('/results/{rid}/page')
     def page(rid: str, offset: int = 0, limit: int = 200, sort: str | None = None, desc: int = 0, q: str = '', user=me):
         return _call(service.page, user, rid, offset, limit, sort, bool(desc), q)

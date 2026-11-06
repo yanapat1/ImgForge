@@ -22,10 +22,23 @@ export interface TempTable { name: string; connection: string; database: string;
 export interface PlanNode { label: string; kind: string; cost: number; rows: number | null; pct: number }
 export interface Plan { nodes: PlanNode[]; total: number; estimated: boolean }
 
+export interface MTable {
+  id: string; schema: string; name: string; database: string; alias: string; kind: 'table' | 'sub' | 'cte' | 'remote';
+  sql?: string; raw?: string; cols?: string[]; show: boolean; sel: string[]; star: boolean;
+  cast: Record<string, { type: string; safe: boolean }>; x: number; y: number;
+}
+export interface Join { a: [string, string]; b: [string, string]; type: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL' }
+export interface Calc { alias: string; t: string; kind: string; expr: string; spec?: unknown }
+export interface Parts { where?: string; group?: string; having?: string; order?: string; top?: number; distinct?: boolean; parsed?: boolean }
+export interface Model { tables: MTable[]; joins: Join[]; calc: Calc[]; parts: Parts; locked: string[]; adv: string; cte?: { name: string; sql: string }[] }
+export interface Parsed extends Model { error?: string; statement?: string; loose?: string[]; output?: string[] }
+
 export interface Tab {
   id: string; name: string; sql: string; conn: string | null; db: string | null;
   run: RunState | null; result: number; rt: 'results' | 'joins' | 'cost' | 'messages'; plan: Plan | null; dirty: boolean;
+  model: Model | null; typed: boolean; notDrawn: boolean; undo: string[]; redo: string[]; view: { z: number; x: number; y: number };
 }
+export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean }
 export type Workspace = 'query' | 'catalog' | 'scripts' | 'analyze' | 'dash' | 'history';
 
 export const A = {
@@ -35,6 +48,7 @@ export const A = {
   version: new Map<string, string>(), filter: '', explorer: true,
   catalog: null as { conn: string; db: string; schema: string; table: string } | null,
   history: [] as HistoryRow[], scripts: [] as Script[], script: 0,
+  layout: { flip: false, h: 46, w: 42, max: '', swap: false } as Layout,
 };
 
 const P = 'api/analysis';
@@ -45,7 +59,7 @@ export const tab = (): Tab => A.tabs[A.active] as Tab;
 export const sourceOf = (id: string | null): Source | undefined => A.sources.find((s) => s.id === id);
 export const tableKey = (conn: string, db: string, schema: string, table: string): string => `${conn}|${db}|${schema}|${table}`;
 export const newTab = (name: string, sql = '', conn: string | null = null, db: string | null = null): Tab =>
-  ({ id: crypto.randomUUID(), name, sql, conn, db, run: null, result: 0, rt: 'results', plan: null, dirty: false });
+  ({ id: crypto.randomUUID(), name, sql, conn, db, run: null, result: 0, rt: 'results', plan: null, dirty: false, model: null, typed: !!sql, notDrawn: false, undo: [], redo: [], view: { z: 1, x: 0, y: 0 } });
 
 export const api = {
   sources: () => getJSON<{ sources: Source[] }>(`${P}/sources`),
@@ -62,6 +76,8 @@ export const api = {
   run: (conn: string, db: string | null, sql: string, confirm: string | null, name: string) => postJSON<RunState>(`${P}/run`, { session: A.sid, connection: conn, database: db, sql, confirm, name }),
   runState: (id: string) => getJSON<RunState>(`${P}/run/${id}`),
   stop: (id: string) => postJSON<RunState>(`${P}/run/${id}/stop`, {}),
+  parseModel: (connection: string, sql: string) => postJSON<Parsed>(`${P}/model/parse`, { connection, sql }),
+  generate: async (model: Model, dialect: string) => (await postJSON<{ sql: string }>(`${P}/model/generate`, { model, dialect })).sql,
   explain: (conn: string, db: string | null, sql: string) => postJSON<Plan>(`${P}/explain`, { session: A.sid, connection: conn, database: db, sql }),
   page: (rid: string, offset: number, limit: number, sort: string | null, desc: boolean, q: string) =>
     getJSON<Page>(`${P}/results/${rid}/page?${qs({ offset, limit, sort, desc: desc ? 1 : 0, q })}`),
