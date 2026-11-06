@@ -1,13 +1,19 @@
 """Zones: which parts an install has (dataviz/zones.py), and that a partial install stays free of the visualizer."""
 
+import http.cookiejar
 import json
 import os
+import socket
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
 
+from conftest import TEST_SECRET_KEY
 from dataviz import zones
 
 APP_DIR = Path(__file__).resolve().parents[2]
@@ -98,3 +104,67 @@ def test_full_install_keeps_every_route():
     got = built_app('core,datacenter,labeling,visualizer', libs=())
     assert {'/api/points', '/api/meta', '/api/settings', '/api/workspace', '/api/datasets', '/api/fs/embeddings',
             '/api/connections', '/api/fs/browse', '/api/dc/summary'} <= set(got['paths'])
+
+
+# the real start-up (dataviz/cli.py) with the visualizer libraries blocked: database, sign-in and Data Center all work
+SERVE = '''
+import sys
+class Block:
+    def find_spec(self, name, path=None, target=None):
+        if name.split('.')[0] in LIBS:
+            raise ImportError('blocked in this test: ' + name)
+LIBS = set(sys.argv[1].split(','))
+sys.meta_path.insert(0, Block())
+sys.argv = ['app.py', *sys.argv[2:]]
+from dataviz.cli import main
+main()
+'''
+
+
+def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_path):
+    jar = http.cookiejar.CookieJar()
+    http_ = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    headers = {'Content-Type': 'application/json', 'X-Requested-With': 'dataviz'}
+
+    def get(path):
+        return json.loads(http_.open(urllib.request.Request(base + path, headers=headers), timeout=10).read())
+
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+    base = f'http://127.0.0.1:{port}'
+    cfg = tmp_path / 'config.yaml'
+    cfg.write_text(json.dumps({'dataset': {'workspace_root': str(tmp_path / 'ws')}, 'workers': {'enabled': False},
+                               'logging': {'level': 'WARNING'}}))
+    env = {**os.environ, 'DATAVIZ_ZONES': 'core,datacenter', 'DATABASE_URL': pg, 'DATAVIZ_SECRET_KEY': TEST_SECRET_KEY,
+           'DATAVIZ_ADMIN_USERNAME': 'admin', 'DATAVIZ_ADMIN_PASSWORD': 'zone-test-password-1', 'PYTHONPATH': str(APP_DIR)}
+    proc = subprocess.Popen([sys.executable, '-c', SERVE, ','.join(VISUALIZER_LIBS), '--config', str(cfg),
+                             '--host', '127.0.0.1', '--port', str(port)], cwd=APP_DIR, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        for _ in range(120):
+            if proc.poll() is not None:
+                pytest.fail(f'the server exited:\n{proc.stdout.read()[-3000:]}')
+            try:
+                get('/api/auth/config')
+                break
+            except OSError:
+                time.sleep(0.5)
+        else:
+            pytest.fail('the server did not answer in 60 s')
+        body = json.dumps({'login': 'admin', 'password': 'zone-test-password-1'}).encode()
+        http_.open(urllib.request.Request(base + '/api/auth/login', data=body, headers=headers), timeout=10)
+        assert get('/api/status')['methods'] == []
+        assert isinstance(get('/api/dc/summary'), dict)
+        assert get('/api/dc/buckets') == []
+        assert get('/api/connections') == {'connections': []}
+        assert b'<html' in http_.open(base + '/', timeout=10).read().lower()
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get('/api/datasets')
+        assert e.value.code == 404
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except subprocess.TimeoutExpired:
+            proc.kill()

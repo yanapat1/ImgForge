@@ -15,21 +15,12 @@ import yaml
 from .core import config as vconfig
 from .core import hardware
 from .core import logging as vlog
-from .core import workers as compute
 from .core.jobs import JobManager
-from . import db
+from . import db, zones
 from .data import connections
-from .labeling.projects import ProjectRegistry
 from .llm.store import LLMStore
-from .ml import analysis
-from .models import proc as mproc
-from .models.registry import ModelRegistry
-from .models.service import ModelService
-from .ml import features as feats
-from .ml import user_features
 from .paths import PROJECT_ROOT
 from .server.app import Ctx, create_app
-from .state import State
 
 DESCRIPTION = """FiftyOne-style dataset visualizer for YOLO datasets.
 
@@ -71,6 +62,10 @@ def main():
     args = ap.parse_args()
 
     cfg = vconfig.load_config(args.config)
+    try:
+        zones.selected(cfg)
+    except ValueError as e:
+        sys.exit(str(e))
     hardware.configure(cfg.get('hardware'))
     vlog.get_logger('hardware').info(hardware.describe())
     # command-line flags win over the file
@@ -88,20 +83,25 @@ def main():
         return
     vlog.setup_logging(cfg['logging']['level'])
     clog = vlog.get_logger('config')
-    analysis.configure(cfg['projections'])
 
-    registry = feats.build_registry(PROJECT_ROOT, args.yolo_weights, cfg['features'])
+    vb = None                               # the visualizer's start-up; left out of an install without that zone
+    registry = None
+    if zones.on('visualizer', cfg):
+        from . import visualizer_boot as vb
+        registry = vb.feature_registry(cfg, args.yolo_weights)
     if args.list_features:
+        if not vb:
+            sys.exit('this install has no visualizer zone, so it offers no feature spaces')
         for s in registry.values():
             print(f'{s.key:28s} {s.label}  {s.note}')
         return
-    for key in cfg['startup']['precompute']:
-        if key not in registry:
-            clog.warning(f'startup.precompute: unknown feature {key!r} (see --list-features)')
-    if cfg['startup']['feature'] not in registry:
-        clog.warning(f'startup.feature {cfg["startup"]["feature"]!r} is not offered; using {next(iter(registry))!r}')
+    if vb:
+        vb.check_features(cfg, registry)
 
     dataset_dir = vconfig.resolve(cfg['dataset']['path']) if cfg['dataset']['path'] else None
+    if dataset_dir is not None and not vb:
+        clog.warning('--dataset / dataset.path needs the visualizer zone: starting without it')
+        dataset_dir = None
     host, port = str(cfg['server']['host']), int(cfg['server']['port'])
     clog.info(vlog.esc(cfg['_path'] or 'built-in defaults'))
 
@@ -133,46 +133,27 @@ def main():
     llm_sessions.start_purger(log=vlog.get_logger('llm').info)     # deleted ◆ chats past retention: now + every 24 h
     datasets = connections.Registry(ws_root)
 
-    w = cfg['workers']
-    # heavy CPU work runs in worker processes, never blocking the web server
-    pools = compute.Pools(warm=bool(w['warmup']), log=vlog.log_fn('workers'),
-                          settings={'omp_threads': hardware.workers('omp') if str(w['omp_threads']) == 'auto' else int(w['omp_threads']), 'projections': cfg['projections'],
-                                    'warm_method': cfg['startup'].get('method', 'umap')}) \
-        if w['enabled'] else compute.InlinePools()
     jobs = JobManager()
-    mproc.configure(w['enabled'] and w.get('model_process', True), w.get('model_idle_s', mproc.IDLE_S))
-    model_reg = ModelRegistry(vconfig.resolve(cfg['models']['store_dir']) if cfg['models']['store_dir'] else ws_root,
-                              allowed_roots=[PROJECT_ROOT, *connections.allowed_roots(cfg),
-                                             *[vconfig.resolve(p) for p in cfg['models']['allowed_roots']]])
-    ctx = Ctx(None, registry=registry, datasets=datasets, cfg=cfg, models=model_reg,
-              model_service=ModelService(model_reg, cfg), jobs=jobs,
-              labeling=ProjectRegistry(ws_root / 'labeling'), llm=LLMStore(ws_root))
-
-    def open_dataset(ds, cache_dir=None, rebuild=False, refresh=False):
-        """A new State for `ds` (a saved dataset); indexing / syncing runs as a background job. Ctx keeps it
-        loaded under the session id (Ctx.open_dataset / state_for)."""
-        src = datasets.source(ds, cfg['s3'], ctx.labeling)
-        if src.kind in ('local', 'labeling'):       # labeling: its session + task still exist and have boxes
-            src.check()
-        if src.kind == 'embeddings':                 # an embeddings session offers only its own vector files, never the image models
-            reg = src.feature_registry()
-            if not reg:
-                raise ValueError(f'{src.uri} has no .npy vector files')
-        else:                                        # the config's features + the session owner's own models that embed (Settings › Models)
-            reg = feats.FeatureRegistry(registry, user_features.OwnerModels(model_reg, ds.get('owner_id'), ctx.model_service.workdir)
-                                        if ds.get('owner_id') else None)
-        state = State(src, cache_dir, reg, default_feature=cfg['startup']['feature'], jobs=jobs, rebuild=rebuild,
-                      pools=pools, cfg=cfg, workspace_root=ws_root, dataset_id=ds['id'], refresh=refresh,
-                      unit=ds.get('unit', 'auto'), class_from_folder=ds.get('class_from_folder', False),
-                      layer=ds.get('layer'))
-        vlog.get_logger('datasets').info(f'opening [bold]{vlog.esc(src.name)}[/] [dim]{vlog.esc(src.uri)}'
-                                         + {'s3': f' · {getattr(src, "mode", "")}', 'labeling': ' · live from the labeling session',
-                                            'embeddings': ' · vectors + metadata'}
-                                         .get(src.kind, ' · read in place') + '[/]')
-        state.start(precompute=cfg['startup']['precompute'], auto_compute=cfg['startup'].get('auto_compute', False))
-        return state
-
-    ctx.open_dataset = open_dataset
+    pools = vb.start_workers(cfg) if vb else None
+    model_reg = model_service = None
+    if vb or zones.on('labeling', cfg):
+        from .models import proc as mproc
+        from .models.registry import ModelRegistry
+        from .models.service import ModelService
+        w = cfg['workers']
+        mproc.configure(w['enabled'] and w.get('model_process', True), w.get('model_idle_s', mproc.IDLE_S))
+        model_reg = ModelRegistry(vconfig.resolve(cfg['models']['store_dir']) if cfg['models']['store_dir'] else ws_root,
+                                  allowed_roots=[PROJECT_ROOT, *connections.allowed_roots(cfg),
+                                                 *[vconfig.resolve(p) for p in cfg['models']['allowed_roots']]])
+        model_service = ModelService(model_reg, cfg)
+    labeling = None
+    if zones.on('labeling', cfg):
+        from .labeling.projects import ProjectRegistry
+        labeling = ProjectRegistry(ws_root / 'labeling')
+    ctx = Ctx(None, registry=registry, datasets=datasets, cfg=cfg, models=model_reg, model_service=model_service,
+              jobs=jobs, labeling=labeling, llm=LLMStore(ws_root))
+    if vb:
+        ctx.open_dataset = vb.dataset_opener(cfg, ctx, registry, pools, ws_root)
 
     # no dataset at start: the page opens on the Sessions home. --dataset / dataset.path opens one (saved as a
     # session, matched by its folder, so restarting with the same flag never adds duplicates)
@@ -194,15 +175,17 @@ def main():
         ('open', f'{state.source.name}  ({state.source.uri}) · /s/{ds["id"]}/' if state else
                  'none (pick a session in the page)'),
         ('workspaces', ws_root),
-        ('features', f'{len(registry)} offered · start: {cfg["startup"]["feature"]} / {cfg["startup"].get("method", "umap")}'),
-        ('workers', 'process pools (heavy + fast)' if w['enabled'] else 'inline (debug)'),
+        ('zones', ', '.join(zones.selected(cfg))),
+        *([('features', f'{len(registry)} offered · start: {cfg["startup"]["feature"]} / {cfg["startup"].get("method", "umap")}'),
+           ('workers', 'process pools (heavy + fast)' if cfg['workers']['enabled'] else 'inline (debug)')] if vb else []),
         ('config', cfg['_path'] or 'built-in defaults'),
     ], f'http://localhost:{port}')
     server = uvicorn.Server(uvicorn.Config(create_app(ctx), log_level='warning', ws='none'))   # no websocket routes: skips websockets.legacy
     try:
         server.run(sockets=[sock])
     finally:
-        pools.shutdown()
+        if pools is not None:
+            pools.shutdown()
 
 
 def start_database(cfg, ws_root):

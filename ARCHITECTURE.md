@@ -20,7 +20,7 @@ Data flows **Data Center → sessions**. Everything you import lands in a Data C
 
 ## Zones: what an install contains
 
-The product is being split into zones, so an analyst can install Data Center + Data Analysis without the visualizer and its GPU libraries. `dataviz/zones.py` is the list: `core` (always), `datacenter`, `labeling`, `visualizer`. An install picks them with `DATAVIZ_ZONES=core,datacenter` or `zones:` in the config; the default is every zone. Each `server/routes` module belongs to one zone (`zones.ROUTES`), and only the routes of the selected zones are loaded. The rule: core never needs another zone, and `tests/zones/` proves a partial install runs with the visualizer libraries blocked.
+The product is being split into zones, so an analyst can install Data Center + Data Analysis without the visualizer and its GPU libraries. `dataviz/zones.py` is the list: `core` (always), `datacenter`, `labeling`, `visualizer`. An install picks them with `DATAVIZ_ZONES=core,datacenter` or `zones:` in the config; the default is every zone. Each `server/routes` module belongs to one zone (`zones.ROUTES`), and only the routes of the selected zones are loaded. `cli.py` starts core; what only the visualizer needs at start-up (feature spaces, worker pools, opening a dataset) is in `visualizer_boot.py`, imported only when that zone is selected. The rule: core never needs another zone, and `tests/zones/` proves a partial install runs with the visualizer libraries blocked.
 
 ## Find the code for…
 
