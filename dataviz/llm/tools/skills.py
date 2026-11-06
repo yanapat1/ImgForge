@@ -18,10 +18,11 @@ def _use_skill(ctx, a):
 
 def _other_skill(ctx, name):
     """A skill of the other page's specialist (one chat follows the user): say where it is used."""
+    from ..engine import roles
     from ..prompting import skills
-    for role, (where, screen) in (('data', ('Data Center', 'data')), ('visual', ('Visualizer', 'viz'))):
+    for role, r in roles.installed().items():
         if role != ctx.role and name in skills(role):
-            return (f'{name} is a {where} skill and the user is not there: call navigate(screen={screen!r}, '
+            return (f'{name} is a {r.title} skill and the user is not there: call navigate(screen={r.screen!r}, '
                     'goal=<the request>) to continue there')
     return None
 

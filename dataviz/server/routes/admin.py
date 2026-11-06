@@ -7,7 +7,7 @@ log. Every change is audited.
 from fastapi import APIRouter, Body, Depends, Request
 from starlette.exceptions import HTTPException
 
-from ... import db
+from ... import db, zones
 from ...auth import audit, settings, tiers, tokens, users
 from ...auth.deps import admin_user
 from .auth import client_ip
@@ -77,7 +77,8 @@ def router(cfg, limiter):
     # ------------------------------------------------------------ tiers
     @r.get('/api/admin/tiers')
     def list_tiers(admin=Depends(admin_user)):
-        return {'tiers': tiers.list_all(), 'permissions': [{'key': k, 'label': v} for k, v in tiers.PERMS.items()]}
+        return {'tiers': tiers.list_all(), 'permissions': [{'key': k, 'label': v} for k, v in tiers.PERMS.items()
+                                                     if k not in zones.perms_off(cfg)]}
 
     @r.post('/api/admin/tiers')
     def create_tier(request: Request, body: dict = Body(...), admin=Depends(admin_user)):

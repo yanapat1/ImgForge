@@ -13,6 +13,8 @@ only names what the other pages can do (other_pages), so the model navigates the
 
 from dataclasses import dataclass
 
+from ... import zones
+
 
 @dataclass(frozen=True)
 class Role:
@@ -21,11 +23,15 @@ class Role:
     domains: tuple
     feature: str                    # the Settings › AI switch that gates the route
     needs_session: bool
+    zone: str                       # the zone that brings this specialist: without it, it does not exist
+    screen: str                     # the page navigate opens for it
 
 
 ROLES = {
-    'data': Role('data', 'Data Center', ('data', 'web', 'common', 'control', 'plugin'), 'data_center', False),
-    'visual': Role('visual', 'Visualizer', ('visual', 'web', 'common', 'control', 'plugin'), 'assistant', True),
+    'data': Role('data', 'Data Center', ('data', 'web', 'common', 'control', 'plugin'), 'data_center', False,
+                 'datacenter', 'data'),
+    'visual': Role('visual', 'Visualizer', ('visual', 'web', 'common', 'control', 'plugin'), 'assistant', True,
+                   'visualizer', 'viz'),
 }
 
 
@@ -38,6 +44,11 @@ CAN = {
     'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
               'curation, label errors, model runs + evaluation, compare',
 }
+
+
+def installed():
+    """The specialists this install has."""
+    return {k: r for k, r in ROLES.items() if zones.on(r.zone)}
 
 
 def get(name):
@@ -74,10 +85,16 @@ def page_of(role, scope, bound=None):
 
 def other_pages(role):
     """The "Other pages" card: one chat follows the user, only this page's tools are here."""
+    here = installed()
+    others = [f'Elsewhere: {CAN[k]}.' for k in CAN if k != role and k in here]
+    chosen = zones.selected()
+    missing = [z.title for k, z in zones.ZONES.items() if k not in chosen]
     return ('## Other pages\nThis chat follows the user across the app; you have only this page\'s tools. '
-            + ' '.join(f'Elsewhere: {CAN[k]}.' for k in CAN if k != role)
-            + ' A question about it: `consult`; to see or change it: `navigate` (`list_sessions` finds ids). Never '
-              'call another page\'s tools.')
+            + ' '.join(others)
+            + (' A question about it: `consult`; to see or change it: `navigate` (`list_sessions` finds ids). Never '
+               'call another page\'s tools.' if others else '')
+            + (f' This install has no {", ".join(missing)}: never offer it, and say so if the user asks for it.'
+               if missing else ''))
 
 
 # ---------------------------------------------------------------- "where the user is"

@@ -290,6 +290,7 @@ def create_app(ctx, auth=True) -> FastAPI:
     every request bound to that State. auth=False leaves out the sign-in layer (route tables, tests)."""
     if not isinstance(ctx, Ctx):
         ctx = Ctx(ctx)
+    zones.configure(ctx.cfg)
     state = _StateProxy(ctx)
     app = FastAPI(title='Dataset Visualizer', docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(JsonGZip)

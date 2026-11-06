@@ -176,3 +176,43 @@ def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_pat
             proc.wait(10)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+@pytest.fixture
+def data_center_install(monkeypatch):
+    monkeypatch.setenv('DATAVIZ_ZONES', 'core,datacenter')
+
+
+def test_tier_permissions_follow_the_zones(data_center_install):
+    assert zones.perms_off() == {'dataset.create', 'model.add', 'model.upload', 'label.create'}
+
+
+def test_a_shared_permission_stays_while_one_of_its_zones_is_there(monkeypatch):
+    monkeypatch.setenv('DATAVIZ_ZONES', 'core,datacenter,labeling')
+    assert zones.perms_off() == {'dataset.create'}
+
+
+def test_the_assistant_only_knows_the_installed_specialists(data_center_install):
+    from dataviz.llm.engine import roles
+    assert set(roles.installed()) == {'data'}
+    card = roles.other_pages('data')
+    assert 'no Dataset Visualizer, Labeling' in card and 'screen viz' not in card and 'consult' not in card
+
+
+def test_full_install_card_is_unchanged():
+    from dataviz.llm.engine import roles
+    assert set(roles.installed()) == {'data', 'visual'}
+    card = roles.other_pages('data')
+    assert 'screen viz' in card and 'This install has no' not in card
+
+
+def test_the_assistant_cannot_go_to_a_missing_zone(data_center_install):
+    from types import SimpleNamespace
+    from dataviz.llm.tools import ToolError, nav
+    ctx = SimpleNamespace(role='data', user={'id': 'u'}, depth=0)
+    with pytest.raises(ToolError, match='no Visualizer'):
+        nav._check_nav(ctx, {'screen': 'viz', 'goal': 'open it', 'session_id': 'x'})
+    with pytest.raises(ToolError, match='no Labeling'):
+        nav._check_nav(ctx, {'screen': 'label', 'goal': 'open it', 'session_id': 'x'})
+    with pytest.raises(ToolError, match='no Visualizer'):
+        nav._consult(ctx, {'page': 'viz', 'question': 'how many boxes?'})

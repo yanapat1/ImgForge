@@ -299,7 +299,7 @@ def _error_text(e):
     return f'{type(e).__name__}: {e}'
 
 
-PAGE_OF_DOMAIN = {'data': ('Data Center', 'data'), 'visual': ('Visualizer', 'viz')}
+PAGE_OF_DOMAIN = {r.name: (r.title, r.screen) for r in roles.ROLES.values()}
 
 
 def _missing_tool(run, name):
@@ -308,6 +308,8 @@ def _missing_tool(run, name):
     here = (run.ctx.scope or {}).get('page') or ('viz' if run.role.name == 'visual' else 'data')
     if t is not None and t.domain in PAGE_OF_DOMAIN and t.domain not in run.role.domains:
         where, screen = PAGE_OF_DOMAIN[t.domain]
+        if t.domain not in roles.installed():
+            return f'{name} is a {where} tool and this install has no {where}: tell the user'
         return (f'{name} is a {where} tool and the user is on {roles.SCREEN_LABEL.get(here, here)}: call '
                 f'navigate(screen={screen!r}, goal=<the request>) to continue there (it ends this turn), or answer '
                 'with the tools you have')

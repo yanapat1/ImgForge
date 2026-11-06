@@ -21,6 +21,10 @@ switch is on (all off by default).
 | `agent.py` | The OLD Data Center agent behind `/api/llm/dc/chat` + `/api/llm/dc/confirm` (≤ 8 steps, every change ends the turn as a plan): kept for that route and its tests; the ◆ chats run on `engine/` through `/api/llm/agent/*` (server/routes/agent.py). |
 | `tasks.py` | Structured features, JSON answers validated server side: `label_check`, `nl_filter` (+ `clean_filter`, the `core/filter.js` `emptyFilter()` shape), `auto_tag_job` (a job writing `ai:<tag>` tags), `label_assist` (boxes converted from the provider's `box_format` to normalised x1y1x2y2), `voice` (whitelisted actions). |
 
+## Zones
+
+A specialist exists only when its zone is installed (`engine/roles.py` `Role.zone`, `roles.installed()`): the Other pages card, `navigate`, `consult` and skill hints follow it, and the card tells the model what this install lacks. A new specialist is a new `Role` plus its prompts folder.
+
 ## Token cost
 
 One mosaic image instead of N crops; full images ≤ 1024 px; summaries as text tables; the exemplar sheet goes

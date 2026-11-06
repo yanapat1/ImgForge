@@ -27,6 +27,7 @@ import os
 from . import E, S, Tool, ToolError, _obj, register
 
 SCREENS = ('home', 'data', 'viz', 'label')
+SCREEN_ZONE = {'data': 'datacenter', 'viz': 'visualizer', 'label': 'labeling'}
 SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling'}
 VIZ_TABS = ('explore', 'stats', 'curation', 'model', 'eval', 'compare')
 MAX_SESSIONS = 40
@@ -87,9 +88,16 @@ def _list_sessions(ctx, a):
     return {'sessions': out[:MAX_SESSIONS], 'total': len(out)}, f'→ {len(out)} session{"" if len(out) == 1 else "s"}'
 
 
+def _need_zone(screen):
+    from ... import zones
+    if screen in SCREEN_ZONE and not zones.on(SCREEN_ZONE[screen]):
+        raise ToolError(f'this install has no {SCREEN_LABEL[screen]}: tell the user')
+
+
 def _check_nav(ctx, a):
     from ..engine import roles
     scr = a['screen']
+    _need_zone(scr)
     out = {'screen': scr, 'goal': str(a.get('goal') or '').strip()[:500]}
     if not out['goal']:
         raise ToolError('goal is required: what to continue doing on that page (the chat continues there with it)')
@@ -165,6 +173,7 @@ def _consult(ctx, a):
     from ..engine import react, roles
     from ..providers import LLMError
     target = 'visual' if a['page'] == 'viz' else 'data'
+    _need_zone(a['page'])
     if getattr(ctx, 'depth', 0):
         raise ToolError('a consult cannot consult again: answer with your tools')
     if target == ctx.role:

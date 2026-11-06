@@ -2,11 +2,13 @@
 Zones: the parts of the product an install can have. Core is always there; the others can be left out, so an analyst
 can run Data Center + Data Analysis without the visualizer and its GPU libraries. See ARCHITECTURE.md.
 
+    configure(cfg)       remember the server's config: code without a cfg at hand (the assistant) then gets the same answer
     selected(cfg)        the zones of this install, in dependency order (core first)
     on(zone, cfg)        is this zone part of the install?
     route_modules(cfg)   the server/routes modules of those zones, in the order they are included
     send_targets(cfg)    the Data Center "Send to" targets of those zones
     bucket_session_finders(cfg)   what lists each zone's sessions on a bucket card
+    perms_off(cfg)       the tier permissions that mean nothing in this install
 
 The choice comes from DATAVIZ_ZONES (comma separated), else `zones:` in config.yaml, else every zone. Core is added
 when it is not named. A zone needs the zones in its `requires`: a choice that misses one is refused at start-up, so a
@@ -27,15 +29,16 @@ class Zone:
     requires: tuple = ()
     send_target: str = ''           # the Data Center's "Send to" target this zone receives
     bucket_sessions: str = ''       # 'module:function': (rows, conn, out) adds this zone's sessions to the bucket cards
+    perms: tuple = ()               # the tier permissions (auth/tiers.py) that only mean something with this zone
 
 
 ZONES = {z.id: z for z in (
     Zone('core', 'Core'),
-    Zone('datacenter', 'Data Center', requires=('core',)),
+    Zone('datacenter', 'Data Center', requires=('core',), perms=('data.manage',)),
     Zone('visualizer', 'Dataset Visualizer', requires=('datacenter',), send_target='visualize',
-         bucket_sessions='dataviz.data.bucket_sessions:find'),
+         bucket_sessions='dataviz.data.bucket_sessions:find', perms=('dataset.create', 'model.add', 'model.upload')),
     Zone('labeling', 'Labeling', requires=('datacenter',), send_target='label',
-         bucket_sessions='dataviz.labeling.bucket_sessions:find'),
+         bucket_sessions='dataviz.labeling.bucket_sessions:find', perms=('label.create', 'model.add', 'model.upload')),
 )}
 
 # (server/routes module, its zone), in include order. auth.py, users.py, admin.py, me.py and sharing.py are not here:
@@ -62,11 +65,20 @@ ROUTES = (
 )
 
 
+_active = None
+
+
+def configure(cfg):
+    global _active
+    _active = cfg
+
+
 def _named(cfg):
     env = os.environ.get('DATAVIZ_ZONES')
     if env is not None and env.strip():
         return [x.strip() for x in env.split(',') if x.strip()]
-    value = (cfg or {}).get('zones')
+    value = (_active if cfg is None else cfg or {}) or {}
+    value = value.get('zones')
     return list(value) if value else None
 
 
@@ -92,6 +104,12 @@ def on(zone, cfg=None):
 
 def send_targets(cfg=None):
     return tuple(ZONES[z].send_target for z in selected(cfg) if ZONES[z].send_target)
+
+
+def perms_off(cfg=None):
+    chosen = selected(cfg)
+    keep = {p for z in chosen for p in ZONES[z].perms}
+    return {p for z in ZONES if z not in chosen for p in ZONES[z].perms} - keep
 
 
 def bucket_session_finders(cfg=None):
