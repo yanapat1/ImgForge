@@ -8,6 +8,7 @@ import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, render, renderTree, saveTabs } from './app.js';
 import { B_ACTIONS, fitView, renderBuilder, syncFromSql } from './builder.js';
 import { mountGrid } from './grid.js';
+import { countJoin, joinsHtml } from './joins.js';
 import { A, api, newTab, sourceOf, tab } from './state.js';
 import type { RunState, Statement, Tab } from './state.js';
 import type { EditorHandle, EditorModule } from '../types-editor.js';
@@ -110,13 +111,14 @@ function markStale(): void {
 function renderResults(): void {
   const t = tab();
   const res = t.run?.results ?? [];
-  $req('an-rtabs').innerHTML = (['results', 'cost', 'messages'] as const).map((k) => `<button type="button" class="an-tab ${t.rt === k ? 'on' : ''}" data-act="rt" data-k="${k}">${k[0]?.toUpperCase()}${k.slice(1)}</button>`).join('') +
+  $req('an-rtabs').innerHTML = (['results', 'joins', 'cost', 'messages'] as const).map((k) => `<button type="button" class="an-tab ${t.rt === k ? 'on' : ''}" data-act="rt" data-k="${k}">${k[0]?.toUpperCase()}${k.slice(1)}</button>`).join('') +
     `<span class="grow"></span><span class="pill" id="an-time">${t.run ? timeText(t.run) : ''}</span>`;
   const rc = $req('an-rc');
   const stale = `<div class="an-hint" id="an-stale" ${t.dirty && t.run ? '' : 'hidden'}><span>The query changed. These results are from the last run.</span><button type="button" class="an-btn sm pri" data-act="run">Run to update</button></div>`;
   if (t.run?.error) rc.dataset['err'] = '1'; else delete rc.dataset['err'];
   if (t.rt === 'messages') { rc.innerHTML = messages(t); return; }
   if (t.rt === 'cost') { rc.innerHTML = stale + cost(t); return; }
+  if (t.rt === 'joins') { rc.innerHTML = stale + joinsHtml(t); return; }
   if (!t.run) { rc.innerHTML = '<div class="an-empty">Press Run to see rows here.</div>'; return; }
   if (isRunning(t) && !res.length) { rc.innerHTML = '<div class="an-empty">Running…</div>'; return; }
   if (t.run.error && !res.length) { rc.innerHTML = `<div class="an-hint bad" role="alert"><span><b>Run failed.</b> ${esc(t.run.error)}</span></div>`; return; }
@@ -218,6 +220,8 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     t.plan = await api.explain(t.conn, t.db, t.sql);
     renderQuery();
   },
+  'join-step': (el) => { tab().joinStep = Number(el.dataset['i']); renderQuery(); },
+  'join-count': async (el) => { await countJoin(Number(el.dataset['i'])); renderQuery(); },
   layout: (el) => {
     const L = A.layout, k = el.dataset['k'];
     L.max = k === 'only' ? 'res' : '';

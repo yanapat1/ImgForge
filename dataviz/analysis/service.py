@@ -26,7 +26,8 @@ from sqlalchemy import text
 from .. import db
 from ..auth import audit, tiers
 from ..core import logging as vlog
-from . import adapters, classify, querymodel, spool
+from . import adapters, classify, joins, querymodel, spool
+from . import stats as stats_mod
 
 KINDS = ('postgres', 'mssql', 'mongo')
 TOKEN_S = 300
@@ -560,6 +561,28 @@ def parse_model(user, cid, sql):
     return querymodel.parse(sql, _dialect(conn))
 
 
+def join_stats(user, cid, database, model, index):
+    """What one join keeps and cuts. Asked for by the user, because it counts rows in their database."""
+    _use(user)
+    conn = _conn(user, cid)
+    if conn['kind'] == 'mongo':
+        raise AnalysisError('join counts work on SQL databases')
+    try:
+        j = model['joins'][int(index)]
+        sql = joins.query(model, int(index), _dialect(conn))
+    except (KeyError, IndexError, TypeError) as e:
+        raise AnalysisError(f'that join is not in the builder: {e}') from None
+    a = adapters.adapter(conn, database, _cfg().get('statement_timeout_s', 0))
+    try:
+        _, batches = a.run(sql, read=True)
+        rows = [r for b in batches for r in b]
+    except Exception as e:  # noqa: BLE001
+        raise AnalysisError(_clean(e, conn)) from None
+    finally:
+        a.close()
+    return joins.summary(rows[0], j['type'])
+
+
 def generate_sql(user, model, dialect):
     _use(user)
     if dialect not in adapters.ADAPTERS:
@@ -596,6 +619,33 @@ def histogram(user, rid, column, bins=12):
 
 def result_path(user, rid):
     return _result(user, rid)['path']
+
+
+def profile(user, rid):
+    r = _result(user, rid)
+    if r.get('profile') is None:
+        r['profile'] = stats_mod.profile(r['path'])
+    return r['profile']
+
+
+def run_test(user, rid, kind, a, b, group_a=None, group_b=None):
+    return stats_mod.test(_result(user, rid)['path'], kind, a, b, group_a, group_b)
+
+
+def suggest(user, rid):
+    return stats_mod.suggest(_result(user, rid)['path'])
+
+
+def quality(user, rid):
+    return stats_mod.quality(_result(user, rid)['path'])
+
+
+def pivot(user, rid, row, col, value, agg):
+    return stats_mod.pivot(_result(user, rid)['path'], row, col, value or None, agg or 'sum')
+
+
+def chart(user, rid, x, y, agg, limit):
+    return stats_mod.chart(_result(user, rid)['path'], x, y or None, agg or 'sum', limit)
 
 
 # ---------------------------------------------------------------- saved things

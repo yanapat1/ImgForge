@@ -6,7 +6,7 @@ import { $, $req, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { openDialog } from '../views/dialog.js';
 import { renderTree } from './app.js';
-import { A, api, sourceOf } from './state.js';
+import { A, api } from './state.js';
 import type { RunState, Script } from './state.js';
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -79,7 +79,6 @@ async function runAll(): Promise<void> {
   if (done.error) toast(done.error, 'err');
   A.temps = (await api.heartbeat()).temps;
   renderTree();
-  void sourceOf;
 }
 
 export const S_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {

@@ -209,3 +209,28 @@ def test_deleting_a_session_removes_its_files(an):
     assert path.exists()
     an.s.delete_session(an.user, an.sid)
     assert not path.exists()
+
+
+def join_model():
+    return {'tables': [{'id': 'o', 'schema': 'public', 'name': 'orders', 'alias': 'o', 'kind': 'table'},
+                       {'id': 'c', 'schema': 'public', 'name': 'buyers', 'alias': 'c', 'kind': 'table'}],
+            'joins': [{'a': ['o', 'cid'], 'b': ['c', 'id'], 'type': 'INNER'}]}
+
+
+def test_join_counts_match_a_hand_computed_case(an):
+    with psycopg.connect(an.url, autocommit=True) as c:
+        c.execute('CREATE TABLE public.buyers (id int)')
+        c.execute('INSERT INTO public.buyers VALUES (1), (2), (2), (9)')     # 2 twice: fan-out; 9 has no order
+        c.execute('ALTER TABLE public.orders ADD COLUMN cid int')
+        c.execute('UPDATE public.orders SET cid = CASE WHEN id <= 2 THEN 1 WHEN id = 3 THEN 2 WHEN id = 4 THEN 7 END')
+    # orders: cid 1 x2, 2 x1, 7 x1, NULL x46. buyers: 1 x1, 2 x2, 9 x1
+    s = an.s.join_stats(an.user, an.cid, an.db, join_model(), 0)
+    assert s['a_rows'] == 50 and s['b_rows'] == 4
+    assert s['matched_a'] == 3 and s['matched_b'] == 3 and s['lost_a'] == 47 and s['lost_b'] == 1
+    assert s['joined'] == 4 and s['kept'] == 4 and s['fan_out']          # 1 x 2 orders + 2 x 2 buyers
+    with psycopg.connect(an.url) as c:
+        assert c.execute('SELECT count(*) FROM public.orders o JOIN public.buyers b ON o.cid = b.id').fetchone()[0] == 4
+        assert c.execute('SELECT count(*) FROM public.orders o LEFT JOIN public.buyers b ON o.cid = b.id').fetchone()[0] == 51
+    m = join_model()
+    m['joins'][0]['type'] = 'LEFT'
+    assert an.s.join_stats(an.user, an.cid, an.db, m, 0)['kept'] == 51

@@ -223,3 +223,79 @@ def test_visual_builder(server, target):  # noqa: F811
         page.wait_for_selector('#an-rc .an-grid td', timeout=20000)
         browser.close()
     assert not errors, errors
+
+
+def test_workspaces(server, target):  # noqa: F811
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 950})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('response', lambda r: errors.append(f'{r.status} {r.url}') if r.status >= 400 and '/api/' in r.url else None)
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.select_option('#an-conn', target['conn'])
+        page.wait_for_function("document.querySelector('#an-db option:nth-child(2)')", timeout=10000)
+        page.select_option('#an-db', target['db'])
+        page.wait_for_selector('#an-sql .cm-content')
+        page.locator('#an-sql .cm-content').click()
+        page.keyboard.insert_text("SELECT id, total, CASE WHEN id % 2 = 0 THEN 'even' ELSE 'odd' END AS kind, DATE '2026-01-01' + (id % 5) AS day FROM public.orders")
+        page.keyboard.press('Control+Enter')
+        page.wait_for_selector('#an-rc .an-grid td', timeout=20000)
+
+        # Analyze: profile, a suggested test in plain words, quality, pivot
+        page.click('.an-rail [data-k="analyze"]')
+        page.wait_for_selector('.an-card h4:has-text("total")', timeout=20000)
+        page.click('[data-act="sheet"][data-k="tests"]')
+        page.click('.an-suggest button >> nth=0', timeout=20000)
+        page.wait_for_selector('#an-t-out .an-hint', timeout=20000)
+        page.click('[data-act="sheet"][data-k="quality"]')
+        page.wait_for_selector('.an-doc td:has-text("No duplicate rows")', timeout=20000)
+        page.click('[data-act="sheet"][data-k="pivot"]')
+        page.select_option('#an-p-row', 'kind')
+        page.select_option('#an-p-col', 'day')
+        page.click('[data-act="pivot-run"]')
+        page.wait_for_selector('#an-p-out td:has-text("even")', timeout=20000)
+
+        # Dashboards: a draft from the result, then a saved board comes back
+        page.click('.an-rail [data-k="dash"]')
+        page.wait_for_selector('.an-fld:has-text("total")', timeout=20000)
+        page.click('[data-act="d-auto"]')
+        page.wait_for_selector('.an-w svg', timeout=20000)
+        n = page.locator('.an-w').count()
+        page.click('[data-act="d-add"][data-k="text"]')
+        page.wait_for_function(f"document.querySelectorAll('.an-w').length === {n + 1}", timeout=10000)
+        page.wait_for_timeout(900)
+        page.click('.an-rail [data-k="history"]')
+        page.click('.an-rail [data-k="dash"]')
+        page.wait_for_function(f"document.querySelectorAll('.an-w').length === {n + 1}", timeout=10000)
+
+        # Catalog: a description is saved and stays
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        page.click('.an-rail [data-k="catalog"]')
+        page.click('.an-tn:has-text("public.orders")', timeout=20000)
+        page.wait_for_selector('.an-desc[data-col="note"]', timeout=20000)
+        page.fill('.an-desc[data-col="note"]', 'Sales note')
+        page.keyboard.press('Tab')
+        page.wait_for_selector('td:has-text("You")', timeout=10000)
+
+        # Scripts: named boxes, confirm for a temp table, the temp table appears with its mark
+        page.click('.an-rail [data-k="scripts"]')
+        page.wait_for_selector('#an-sbody', timeout=20000)
+        page.select_option('#an-sconn', target['conn'])
+        page.fill('#an-sdb', target['db'])
+        page.fill('#an-sname', '3 temp with doc')
+        page.fill('#an-sbody', 'CREATE TEMP TABLE recent AS SELECT * FROM public.orders WHERE id < 5;\nSELECT count(*) FROM recent;')
+        page.click('[data-act="script-run"]')
+        page.wait_for_selector('.an-confirm code:has-text("CREATE TEMP")', timeout=10000)
+        page.click('.ui-dlg [data-dlg="ok"]')
+        page.wait_for_selector('.an-tn.temp:has-text("recent")', timeout=20000)
+        page.wait_for_timeout(800)
+        page.reload()
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.click('.an-rail [data-k="scripts"]')
+        page.wait_for_selector('.an-cmd:has-text("3 temp with doc")', timeout=20000)
+        page.wait_for_selector('.an-tn.temp:has-text("recent")', timeout=20000)      # a refresh loses nothing
+        browser.close()
+    assert not errors, errors

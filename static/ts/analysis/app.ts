@@ -9,6 +9,10 @@ import { setTheme, THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import { openSettings } from '../settings/dialog.js';
 import { mountUserMenu } from '../views/usermenu.js';
+import { A_ACTIONS, analyzeChange, renderAnalyze } from './analyze.js';
+import { catalogChange, openCatalog, renderCatalog } from './catalog.js';
+import { D_ACTIONS, dashDrag, dashDrop, dashInput, renderDash } from './dash.js';
+import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
 import { addTable, builderContext, builderDown, builderKey, builderMove, builderUp, builderWheel, renderBuilder } from './builder.js';
 import { gridClick, gridFit, gridPointer } from './grid.js';
 import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout } from './query.js';
@@ -16,7 +20,7 @@ import { A, api, newTab, tableKey } from './state.js';
 import type { Tab, Workspace } from './state.js';
 
 const WS: [Workspace, string, string][] = [
-  ['query', 'search', 'Query'], ['history', 'list', 'History'],
+  ['query', 'search', 'Query'], ['catalog', 'db', 'Catalog'], ['scripts', 'text', 'Scripts'], ['analyze', 'bars', 'Analyze'], ['dash', 'grid', 'Dashboards'], ['history', 'list', 'History'],
 ];
 const CHIP: Record<string, string> = { mssql: 'MS', postgres: 'PG', mongo: 'MG' };
 export const chip = (kind: string): string => `<span class="an-chip ${esc(kind)}" title="${esc(kind)}">${CHIP[kind] ?? kind.toUpperCase()}</span>`;
@@ -39,6 +43,10 @@ export function render(): void {
   renderTree();
   if (A.ws === 'query') renderQuery();
   else if (A.ws === 'history') void renderHistory();
+  else if (A.ws === 'catalog') renderCatalog();
+  else if (A.ws === 'scripts') void renderScripts();
+  else if (A.ws === 'analyze') void renderAnalyze();
+  else if (A.ws === 'dash') void renderDash();
 }
 
 // ---------------------------------------------------------------- object explorer
@@ -171,6 +179,7 @@ const ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
     const key = `${el.dataset['conn']}|${el.dataset['db']}|${el.dataset['schema']}|${el.dataset['name']}`;
     const twice = key === lastTable.key && Date.now() - lastTable.at < 400;
     lastTable = { key, at: twice ? 0 : Date.now() };
+    if (A.ws === 'catalog') return openCatalog(el.dataset['conn'] ?? '', el.dataset['db'] ?? '', el.dataset['schema'] ?? '', el.dataset['name'] ?? '');
     return twice ? queryTable(el) : openTable(el);
   },
   'refresh-tree': async () => {
@@ -193,6 +202,13 @@ const ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
     render();
     saveTabs();
   },
+  'cat-query': () => {
+    const c = A.catalog;
+    if (c) queryTable({ dataset: { conn: c.conn, db: c.db, schema: c.schema, name: c.table } } as unknown as HTMLElement);
+  },
+  ...S_ACTIONS,
+  ...A_ACTIONS,
+  ...D_ACTIONS,
   ...Q_ACTIONS,
 };
 
@@ -230,20 +246,27 @@ function bind(root: HTMLElement): void {
   document.addEventListener('contextmenu', builderContext);
   root.addEventListener('wheel', builderWheel, { passive: false });
   root.addEventListener('dragstart', (e) => {
+    dashDrag(e);
     const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-act="table"]') : null;
     if (el) e.dataTransfer?.setData('text/an-table', JSON.stringify(el.dataset));
   });
-  root.addEventListener('dragover', (e) => { if ((e.target as Element).closest?.('#an-canvas')) e.preventDefault(); });
+  root.addEventListener('dragover', (e) => { if ((e.target as Element).closest?.('#an-canvas, .an-w, .an-well')) e.preventDefault(); });
   root.addEventListener('drop', (e) => {
+    if (dashDrop(e)) return;
     const raw = e.dataTransfer?.getData('text/an-table');
     if (!raw || !(e.target as Element).closest?.('#an-canvas')) return;
     e.preventDefault();
     const d = JSON.parse(raw) as Record<string, string>;
     void addTable(d['conn'] ?? '', d['db'] ?? '', d['schema'] ?? '', d['name'] ?? '');
   });
-  root.addEventListener('change', (e) => { queryChange(e.target as HTMLSelectElement); });
+  root.addEventListener('change', (e) => {
+    const t = e.target as HTMLInputElement;
+    if (queryChange(t) || scriptInput(t) || analyzeChange(t) || dashInput(t)) return;
+    catalogChange(t);
+  });
   root.addEventListener('input', (e) => {
     const t = e.target as HTMLInputElement;
+    if (scriptInput(t) || t.dataset['text'] && dashInput(t)) return;
     if (t.id === 'an-tfind') {
       A.filter = t.value.toLowerCase();
       renderTree();

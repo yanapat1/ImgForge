@@ -94,6 +94,10 @@ def router(state, ctx):
     def parse_model(body: dict = Body(...), user=me):
         return _call(service.parse_model, user, body.get('connection'), body.get('sql'))
 
+    @r.post('/joins')
+    def joins(body: dict = Body(...), user=me):
+        return _call(service.join_stats, user, body.get('connection'), body.get('database'), body.get('model') or {}, body.get('index'))
+
     @r.post('/model/generate')
     def generate(body: dict = Body(...), user=me):
         return _call(service.generate_sql, user, body.get('model') or {}, body.get('dialect'))
@@ -109,6 +113,30 @@ def router(state, ctx):
     @r.get('/results/{rid}/histogram')
     def histogram(rid: str, column: str, bins: int = 12, user=me):
         return _call(service.histogram, user, rid, column, bins)
+
+    @r.get('/results/{rid}/profile')
+    def profile(rid: str, user=me):
+        return _call(service.profile, user, rid)
+
+    @r.post('/results/{rid}/test')
+    def run_test(rid: str, body: dict = Body(...), user=me):
+        return _call(service.run_test, user, rid, body.get('kind'), body.get('a'), body.get('b'), body.get('group_a'), body.get('group_b'))
+
+    @r.get('/results/{rid}/suggest')
+    def suggest(rid: str, user=me):
+        return {'tests': _call(service.suggest, user, rid)}
+
+    @r.get('/results/{rid}/quality')
+    def quality(rid: str, user=me):
+        return _call(service.quality, user, rid)
+
+    @r.get('/results/{rid}/pivot')
+    def pivot(rid: str, row: str, col: str, value: str = '', agg: str = 'sum', user=me):
+        return _call(service.pivot, user, rid, row, col, value, agg)
+
+    @r.get('/results/{rid}/chart')
+    def chart(rid: str, x: str, y: str = '', agg: str = 'sum', limit: int = 30, user=me):
+        return _call(service.chart, user, rid, x, y, agg, limit)
 
     @r.get('/results/{rid}/export')
     def export(rid: str, user=me):
