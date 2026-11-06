@@ -6,7 +6,7 @@
 // actions), the keyboard (/ search, Delete, F2 rename, Ctrl+A, Esc) and the loads (buckets, summary, tags).
 
 import { errText } from '../core/api.js';
-import { pref } from '../core/auth.js';
+import { hasSessions, pref } from '../core/auth.js';
 import { $, $req, esc, icon, ICONS } from '../core/dom.js';
 import { dataUrl, homeUrl } from '../core/nav.js';
 import { closeFloat } from '../core/popover.js';
@@ -43,12 +43,12 @@ const ACTIONS: Record<string, Action> = {};
 
 const SKELETON = (): string => `
 <header class="app-header dc-header">
-  <a class="brand" href="${esc(homeUrl())}" aria-label="Dataset Visualizer: Sessions">
+  <a class="brand" href="${esc(hasSessions() ? homeUrl() : dataUrl())}" aria-label="Dataset Visualizer: Sessions">
     <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg>
     <h1>Dataset Visualizer</h1>
   </a>
   <nav class="hdr-nav" aria-label="Pages">
-    <a href="${esc(homeUrl())}">${icon('layers')}Sessions</a>
+    ${hasSessions() ? `<a href="${esc(homeUrl())}">${icon('layers')}Sessions</a>` : ''}
     <a class="on" href="${esc(dataUrl())}" aria-current="page">${icon('db')}Data<span id="dc-nav-n" class="count num"></span></a>
   </nav>
   <span class="grow"></span>

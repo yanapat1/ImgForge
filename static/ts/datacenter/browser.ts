@@ -9,7 +9,7 @@
 // Also the header search results (renderSearch).
 
 import { errText } from '../core/api.js';
-import { rememberPref } from '../core/auth.js';
+import { rememberPref, zoneOn } from '../core/auth.js';
 import { $, copyText, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { closeFloat, floatPopover } from '../core/popover.js';
@@ -521,12 +521,12 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
     nameTimer = setTimeout(() => { if (v !== D.nameQ) { D.nameQ = v; D.sel.clear(); void loadListing(); } }, 250);
   },
   'clear-nameq': () => { D.nameQ = ''; closeFloat(); void loadListing(); },
-  'send-menu': (el) => menu(el, `<div class="dc-menu-h">Send ${D.sel.size ? `${fmtN(D.sel.size)} selected` : 'this folder'} to</div>` +
-    `<button type="button" role="menuitem" data-act="send" data-target="visualize">${icon('scatter')}Visualize<span class="faint">explore embeddings</span></button>` +
-    `<button type="button" role="menuitem" data-act="send" data-target="label">${icon('edit')}Label<span class="faint">a labeling project</span></button>` +
+  'send-menu': (el) => menu(el, (zoneOn('visualizer') || zoneOn('labeling') ? `<div class="dc-menu-h">Send ${D.sel.size ? `${fmtN(D.sel.size)} selected` : 'this folder'} to</div>` : '') +
+    (zoneOn('visualizer') ? `<button type="button" role="menuitem" data-act="send" data-target="visualize">${icon('scatter')}Visualize<span class="faint">explore embeddings</span></button>` : '') +
+    (zoneOn('labeling') ? `<button type="button" role="menuitem" data-act="send" data-target="label">${icon('edit')}Label<span class="faint">a labeling project</span></button>` : '') +
     (videosHere() ? `<button type="button" role="menuitem" data-act="extract-frames">${icon('film')}Extract frames…<span class="faint">${D.sel.size ? 'from the selected videos' : 'from this folder’s videos'}</span></button>` : '') +
     (D.sel.size ? '' : `<div class="dc-menu-h">This folder</div>` +
-      `<button type="button" role="menuitem" data-act="autolabel" data-path="${esc(D.path)}">${icon('robot')}Label with model…<span class="faint">auto-label every image</span></button>` +
+      (!zoneOn('labeling') ? '' : `<button type="button" role="menuitem" data-act="autolabel" data-path="${esc(D.path)}">${icon('robot')}Label with model…<span class="faint">auto-label every image</span></button>`) +
       `<button type="button" role="menuitem" data-act="export-zip">${icon('download')}Export (zip)<span class="faint">download this folder</span></button>` +
       `<button type="button" role="menuitem" data-act="export-to">${icon('upload')}Export to…<span class="faint">S3 · RustFS, FTP, SFTP</span></button>`)),
   'export-zip': () => { closeFloat(); if (D.bid) void downloadZip(D.bid, D.path); },

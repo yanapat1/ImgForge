@@ -5,6 +5,7 @@
 // a pairing check, actions (Move / Copy / Tag / Rename / Delete) and Visualize N / Label N. Below ~1100px the panel
 // is an overlay (css), opened by a focus and closed by its × or the scrim.
 
+import { zoneOn } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { errText } from '../core/api.js';
 import { floatPopover } from '../core/popover.js';
@@ -87,9 +88,9 @@ const sendFoot = (bid: string, paths: string[], n?: number, fmt?: Format | null,
   const conv = !n && writable && fmtKey(fmt) === 'embeddings'
     ? `<button type="button" class="ghost sm d-auto" data-act="convert" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('refresh')}Convert to npy / Parquet / CSV…</button>` : '';
   return `<div class="details-foot"><div class="send-row">` +
-    `<button type="button" class="primary" data-act="send" data-target="visualize" data-bid="${esc(bid)}" data-paths="${p}">${icon('scatter')}${n ? `Visualize ${fmtN(n)}` : 'Send to Visualize'}</button>` +
-    `<button type="button" data-act="send" data-target="label" data-bid="${esc(bid)}" data-paths="${p}">${icon('edit')}${n ? `Label ${fmtN(n)}` : 'Send to Label'}</button></div>` +
-    (n || conv ? conv : `<button type="button" class="ghost sm d-auto" data-act="autolabel" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('robot')}Label all with a model…</button>`) + '</div>';
+    (!zoneOn('visualizer') ? '' : `<button type="button" class="primary" data-act="send" data-target="visualize" data-bid="${esc(bid)}" data-paths="${p}">${icon('scatter')}${n ? `Visualize ${fmtN(n)}` : 'Send to Visualize'}</button>`) +
+    (!zoneOn('labeling') ? '' : `<button type="button" data-act="send" data-target="label" data-bid="${esc(bid)}" data-paths="${p}">${icon('edit')}${n ? `Label ${fmtN(n)}` : 'Send to Label'}</button>`) + '</div>' +
+    (n || conv || !zoneOn('labeling') ? conv : `<button type="button" class="ghost sm d-auto" data-act="autolabel" data-bid="${esc(bid)}" data-path="${esc(paths[0] ?? '')}">${icon('robot')}Label all with a model…</button>`) + '</div>';
 };
 
 const head = (ico: string, title: string, extra = ''): string =>

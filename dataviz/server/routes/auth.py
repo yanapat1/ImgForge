@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException
 
+from ... import zones
 from ...auth import audit, passwords, settings, tiers, tokens, users
 from ...auth.deps import current_user
 from ...auth.middleware import cookie_secure, cookie_token
@@ -123,6 +124,6 @@ def router(cfg, limiter):
     @r.get('/api/auth/me')
     def me(user=Depends(current_user)):
         from .me import get_prefs
-        return {'user': {**user, **tiers.describe(user)}, 'prefs': get_prefs(user['id'])}
+        return {'user': {**user, **tiers.describe(user)}, 'prefs': get_prefs(user['id']), 'zones': zones.selected(cfg)}
 
     return r

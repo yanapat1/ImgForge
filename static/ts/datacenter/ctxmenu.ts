@@ -6,6 +6,7 @@
 // why). The menu opens at the pointer (keyboard: the ContextMenu key / Shift+F10, under the focused item), closes
 // after an item ran, on Escape or a click outside. Inputs, the assistant and the file editor keep the browser menu.
 
+import { zoneOn } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { closeFloat, floatPopover } from '../core/popover.js';
 import * as api from './api.js';
@@ -49,8 +50,8 @@ function readOnlyWhy(): string {
 
 const sendItems = (bid: string, paths: string[]): string[] => {
   const data = { bid, paths: paths.join('\n') };
-  return [item({ act: 'send', ico: 'scatter', label: 'Send to Visualize', data: { ...data, target: 'visualize' } }),
-    item({ act: 'send', ico: 'edit', label: 'Send to Label', data: { ...data, target: 'label' } })];
+  return [...(zoneOn('visualizer') ? [item({ act: 'send', ico: 'scatter', label: 'Send to Visualize', data: { ...data, target: 'visualize' } })] : []),
+    ...(zoneOn('labeling') ? [item({ act: 'send', ico: 'edit', label: 'Send to Label', data: { ...data, target: 'label' } })] : [])];
 };
 
 // ---------------------------------------------------------------- the menus

@@ -162,6 +162,14 @@ def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_pat
         with pytest.raises(urllib.error.HTTPError) as e:
             get('/api/datasets')
         assert e.value.code == 404
+        made = http_.open(urllib.request.Request(base + '/api/dc/buckets', data=json.dumps({'name': 'x'}).encode(),
+                                                 headers=headers), timeout=10)
+        bid = json.loads(made.read())['id']
+        send = {'bucket': bid, 'paths': [''], 'target': 'visualize'}
+        with pytest.raises(urllib.error.HTTPError) as e:          # hiding the button is not enough: the server refuses
+            http_.open(urllib.request.Request(base + '/api/dc/send', data=json.dumps(send).encode(), headers=headers),
+                       timeout=10)
+        assert 'no visualizer zone' in e.value.read().decode()
     finally:
         proc.terminate()
         try:

@@ -20,7 +20,7 @@ import { LLM_ACTIONS, LLM_CHANGES, llmInput, loadLlmData, renderLlmSec } from '.
 import { ACCOUNT_ACTIONS, accFile, accInput, renderAccountSec } from './account.js';
 import { admInput, renderUsersSec, USERS_ACTIONS, USERS_CHANGES } from './users.js';
 import { PROMPTS_ACTIONS, PROMPTS_CHANGES, prInput, renderPromptsSec } from './prompts.js';
-import { isAdmin } from '../core/auth.js';
+import { isAdmin, zoneOn } from '../core/auth.js';
 import { bindTagFields, commitTagDraft, sameTags } from '../core/tag-field.js';
 import { confirmDialog, trapTab } from '../views/dialog.js';
 import { deferDelete } from '../core/defer-delete.js';
@@ -40,6 +40,9 @@ const hasSession = () => document.documentElement.dataset.screen === 'viz';
 // Models are global (also on the home and the label page: models/hub.py); Plot and Workspace need an open dataset
 const NEEDS_SESSION = new Set<string>(['plot', 'workspace']);
 
+/** The sections that belong to a zone: gone from the sidebar in an install without it. */
+const SEC_ZONE: Record<string, string> = { datasets: 'visualizer', models: 'visualizer', labeling: 'labeling' };
+const secInstalled = (sec: string | undefined): boolean => { const z = SEC_ZONE[sec ?? '']; return !z || zoneOn(z); };
 const isSection = (x: string | undefined): x is SectionId => x !== undefined && x in SECTIONS;
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
 type FormControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
@@ -50,6 +53,7 @@ export async function openSettings(sec: SectionId = 'datasets', opts: OpenSettin
   if (box.classList.contains('hidden')) settingsReturnFocus = document.activeElement;
   if (NEEDS_SESSION.has(sec) && !hasSession()) sec = 'labeling';
   if (sec === 'users' && !isAdmin()) sec = 'account';
+  if (!secInstalled(sec)) sec = 'connections';
   $req('hover-tip').classList.add('hidden');
   box.classList.remove('hidden');
   SET.solo = !!opts.solo;
@@ -75,9 +79,9 @@ function closeSettings(): void {
 
 async function loadSettingsData(): Promise<void> {
   // the models need an open session; the labeling options load on their own (one failing hides nothing else)
-  const extra: Promise<void>[] = [loadModelsData().catch(() => {}), loadLabSettings(), loadLlmData()];
+  const extra: Promise<void>[] = [zoneOn('visualizer') ? loadModelsData().catch(() => {}) : Promise.resolve(), zoneOn('labeling') ? loadLabSettings() : Promise.resolve(), loadLlmData()];
   try {
-    const [d, c] = await Promise.all([getJSON<DatasetsPayload>('api/datasets'), getJSON<ConnectionsPayload>('api/connections'), ...extra]);
+    const [d, c] = await Promise.all([zoneOn('visualizer') ? getJSON<DatasetsPayload>('api/datasets') : Promise.resolve<DatasetsPayload>({ datasets: [], active: null }), getJSON<ConnectionsPayload>('api/connections'), ...extra]);
     SET.datasets = d.datasets;
     SET.active = d.active;
     SET.conns = c.connections;
@@ -96,7 +100,7 @@ export function renderSettings(): void {
   const viz = hasSession();
   document.querySelectorAll<HTMLElement>('.snav').forEach((b) => {
     b.classList.toggle('active', b.dataset.sec === SET.sec);
-    b.classList.toggle('hidden', (!viz && NEEDS_SESSION.has(b.dataset.sec ?? '')) || (b.dataset.needs === 'admin' && !isAdmin()));
+    b.classList.toggle('hidden', !secInstalled(b.dataset.sec) || (!viz && NEEDS_SESSION.has(b.dataset.sec ?? '')) || (b.dataset.needs === 'admin' && !isAdmin()));
   });
   const count = (id: string, n: number) => { const el = $(id); if (el) el.textContent = String(n || ''); };
   count('snav-nds', SET.datasets.length);

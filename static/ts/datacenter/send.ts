@@ -4,6 +4,7 @@
 // creates the session (the data is referenced in place, never copied), then the page goes there.
 
 import { errText } from '../core/api.js';
+import { zoneOn } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { labelUrl, vizUrl } from '../core/nav.js';
 import { TASK_TYPES } from '../label/state.js';
@@ -24,7 +25,7 @@ const today = (): string => new Date().toLocaleDateString('en-US', { month: 'sho
 export async function openSend(bid: string, paths0: string[], target0: SendTarget = 'visualize'): Promise<void> {
   const b = bucketOf(bid);
   if (!b) return;
-  let target = target0;
+  let target: SendTarget = zoneOn(target0 === 'label' ? 'labeling' : 'visualizer') ? target0 : target0 === 'label' ? 'visualize' : 'label';
   const paths = paths0.length ? [...new Set(paths0)] : [''];
   const fmt = D.bid === bid && D.listing ? D.listing.format ?? b.format : b.format;
   let task: TaskType = FMT_TASK[fmtKey(fmt)] ?? 'object_detection';
@@ -46,8 +47,8 @@ export async function openSend(bid: string, paths0: string[], target0: SendTarge
     `<span class="ri" aria-hidden="true"></span><span class="dt"><b>${title}</b><span>${txt}</span></span>${icon(ico)}</button>`;
   const body = (): string =>
     `<div class="dc-send"><div class="m-lbl">Destination</div><div class="dest" role="radiogroup" aria-label="Destination">` +
-    destCard('visualize', 'scatter', 'Visualize', 'Embed and explore: clusters, outliers, near-duplicates') +
-    destCard('label', 'edit', 'Label', 'Draw, fix and review annotations with your team') + '</div>' +
+    (zoneOn('visualizer') ? destCard('visualize', 'scatter', 'Visualize', 'Embed and explore: clusters, outliers, near-duplicates') : '') +
+    (zoneOn('labeling') ? destCard('label', 'edit', 'Label', 'Draw, fix and review annotations with your team') : '') + '</div>' +
     `<div class="f2"><label class="fld"><span>Session name</span><input type="text" class="txt" id="dc-send-name" value="${esc(defName)}" autocomplete="off"></label>` +
     `<div class="fld dc-task${target === 'label' ? '' : ' hidden'}"><span>Task type</span><div class="segmented" role="radiogroup" aria-label="Task type">` +
     (Object.keys(TASK_TYPES) as TaskType[]).map((k) => `<button type="button" class="view-btn${task === k ? ' active' : ''}" data-task="${k}" role="radio" aria-checked="${task === k}" title="${esc(TASK_TYPES[k].label)}">${icon(TASK_TYPES[k].icon)}${TASK_SHORT[k]}</button>`).join('') +

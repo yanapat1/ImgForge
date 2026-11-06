@@ -5,6 +5,8 @@ can run Data Center + Data Analysis without the visualizer and its GPU libraries
     selected(cfg)        the zones of this install, in dependency order (core first)
     on(zone, cfg)        is this zone part of the install?
     route_modules(cfg)   the server/routes modules of those zones, in the order they are included
+    send_targets(cfg)    the Data Center "Send to" targets of those zones
+    bucket_session_finders(cfg)   what lists each zone's sessions on a bucket card
 
 The choice comes from DATAVIZ_ZONES (comma separated), else `zones:` in config.yaml, else every zone. Core is added
 when it is not named. A zone needs the zones in its `requires`: a choice that misses one is refused at start-up, so a
@@ -23,13 +25,17 @@ class Zone:
     id: str
     title: str
     requires: tuple = ()
+    send_target: str = ''           # the Data Center's "Send to" target this zone receives
+    bucket_sessions: str = ''       # 'module:function': (rows, conn, out) adds this zone's sessions to the bucket cards
 
 
 ZONES = {z.id: z for z in (
     Zone('core', 'Core'),
     Zone('datacenter', 'Data Center', requires=('core',)),
-    Zone('labeling', 'Labeling', requires=('datacenter',)),
-    Zone('visualizer', 'Dataset Visualizer', requires=('datacenter',)),
+    Zone('visualizer', 'Dataset Visualizer', requires=('datacenter',), send_target='visualize',
+         bucket_sessions='dataviz.data.bucket_sessions:find'),
+    Zone('labeling', 'Labeling', requires=('datacenter',), send_target='label',
+         bucket_sessions='dataviz.labeling.bucket_sessions:find'),
 )}
 
 # (server/routes module, its zone), in include order. auth.py, users.py, admin.py, me.py and sharing.py are not here:
@@ -82,6 +88,19 @@ def selected(cfg=None):
 
 def on(zone, cfg=None):
     return zone in selected(cfg)
+
+
+def send_targets(cfg=None):
+    return tuple(ZONES[z].send_target for z in selected(cfg) if ZONES[z].send_target)
+
+
+def bucket_session_finders(cfg=None):
+    found = []
+    for z in selected(cfg):
+        if ZONES[z].bucket_sessions:
+            module, name = ZONES[z].bucket_sessions.split(':')
+            found.append(getattr(importlib.import_module(module), name))
+    return found
 
 
 def route_modules(cfg=None):

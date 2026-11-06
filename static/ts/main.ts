@@ -9,7 +9,7 @@ import { initPageDock } from './views/dock-page.js';
 import type { Caps, DatasetInfo, Job, Meta, Points, Status } from './types.js';
 import type { WorkspacePayload } from './types-plot.js';
 import { errText, getJSON, postJSON, waitForServer } from './core/api.js';
-import { loadMe } from './core/auth.js';
+import { hasSessions, loadMe } from './core/auth.js';
 import { dataUrl, homeUrl, pointsLayerFromPath, sessionIdFromPath, vizUrl } from './core/nav.js';
 import { $, $req, esc, fmtEta, icon, sleep } from './core/dom.js';
 import { showError, installCrashHandlers } from './core/errorpage.js';
@@ -106,6 +106,7 @@ async function boot(): Promise<void> {
   if (DATA) { import('./datacenter/app.js').then((m) => m.start()).catch((e: unknown) => {
     $req('datacenter').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the Data Center: ${esc(errText(e))}</div>`;
   }); return; }
+  if (!SESSION && !hasSessions()) { location.replace(dataUrl()); return; }   // an install without sessions opens on its data
   if (!SESSION) { void renderHome(); return; }      // the first page: no Plotly, no job polling
   const plotly = loadPlotly();
   plotly.catch(() => {});                      // reported below, once the data is there

@@ -11,10 +11,12 @@ export interface Me {
   tier?: { id: string; name: string } | null; perms?: string[];
 }
 export type Prefs = Record<string, unknown>;
-interface MePayload { user: Me; prefs?: Prefs | null }
+interface MePayload { user: Me; prefs?: Prefs | null; zones?: string[] }
 
 /** The signed-in user; null before loadMe() resolves (and on the sign-in page). */
 export let ME: Me | null = null;
+/** The zones of this install (dataviz/zones.py); null before loadMe() resolves. */
+let ZONES: string[] | null = null;
 let PREFS: Prefs = {};
 let loading: Promise<Me | null> | null = null;
 
@@ -26,6 +28,7 @@ export function loadMe(): Promise<Me | null> {
   if (!loading) {
     loading = getJSON<MePayload>('api/auth/me').then((r) => {
       ME = r.user;
+      ZONES = r.zones ?? null;
       PREFS = isRecord(r.prefs) ? { ...r.prefs } : {};
       return ME;
     }).catch((e: unknown) => {
@@ -43,6 +46,10 @@ export function setMe(u: Me): void {
   document.dispatchEvent(new CustomEvent('me-changed'));
 }
 
+/** Whether this install has a zone. Before the user is loaded, or on an old server: yes. */
+export const zoneOn = (zone: string): boolean => !ZONES || ZONES.includes(zone);
+/** The Sessions home lists visualize and labeling sessions: without those zones it has nothing to show. */
+export const hasSessions = (): boolean => zoneOn('visualizer') || zoneOn('labeling');
 export const isAdmin = (): boolean => !!ME && !!ME.is_admin;
 /** Whether the user's tier grants `perm` (e.g. 'dataset.create'); the server checks it again. Unknown (an older
  *  server without tiers): allowed. */

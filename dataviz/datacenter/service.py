@@ -27,7 +27,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 
-from .. import db
+from .. import db, zones
 from ..auth import tiers as vtiers
 from . import formats, s3dir, s3list, store, tags as vtags, video
 from .store import DCError
@@ -391,39 +391,12 @@ def _revalidate(r):
 
 # ---------------------------------------------------------------------------------------------- bucket shape
 def _sessions_for(rows, conn):
-    """{bucket id: [{id, kind, name, url}]}: the owner's sessions whose source lies inside the bucket (cheap:
-    two queries for every bucket at once, matched by path prefix)."""
+    """{bucket id: [{id, kind, name, url}]}: the owner's sessions whose source lies inside the bucket. Each zone
+    with sessions lists its own (zones.bucket_session_finders)."""
     out = {r.id: [] for r in rows}
-    owners = list({r.owner_id for r in rows})
-    if not owners:
-        return out
-    viz = conn.execute(text("""SELECT s.id, s.name, s.owner_id, v.source_kind, v.path, v.bucket, v.prefix
-                               FROM app.sessions s JOIN app.viz_sessions v ON v.session_id = s.id
-                               WHERE s.owner_id = ANY(:o)"""), {'o': owners}).all()
-    lab = conn.execute(text("""SELECT s.id, s.name, s.owner_id, p.source FROM app.sessions s
-                               JOIN app.label_projects p ON p.session_id = s.id WHERE s.owner_id = ANY(:o)"""),
-                       {'o': owners}).all()
-
-    def inside(path, root):
-        return bool(path) and (path == root or path.startswith(root.rstrip('/') + '/'))
-
-    for r in rows:
-        for v in viz:
-            if v.owner_id != r.owner_id:
-                continue
-            hit = inside(v.path, r.root) if r.kind != 's3' else (
-                v.source_kind == 's3' and v.bucket == r.s3_bucket and
-                (not r.prefix or inside((v.prefix or '').strip('/'), r.prefix.strip('/'))))
-            if hit:
-                out[r.id].append({'id': v.id, 'kind': 'visualize', 'name': v.name, 'url': f's/{v.id}/'})
-        for p in lab:
-            src = p.source or {}
-            if p.owner_id != r.owner_id:
-                continue
-            hit = (src.get('kind') == 'local' and inside(src.get('path'), r.root)) if r.kind != 's3' else (
-                src.get('kind') == 's3' and src.get('bucket') == r.s3_bucket)
-            if hit:
-                out[r.id].append({'id': p.id, 'kind': 'label', 'name': p.name, 'url': f'?label={p.id}'})
+    if rows:
+        for find in zones.bucket_session_finders(_cfg()):
+            find(rows, conn, out)
     return out
 
 
@@ -2353,6 +2326,8 @@ def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
     _need(user)
     if target not in ('visualize', 'label'):
         raise DCError('target must be visualize or label')
+    if target not in zones.send_targets(_cfg()):
+        raise DCError(f'this install has no {"visualizer" if target == "visualize" else "labeling"} zone')
     _need(user, 'dataset.create' if target == 'visualize' else 'label.create')
     paths = [paths] if isinstance(paths, str) else list(paths or [''])
     if len(paths) != 1:

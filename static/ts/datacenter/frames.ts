@@ -7,6 +7,7 @@
 // goes (this bucket, or a new one: the only way for a bucket streamed from S3). POST api/dc/frames runs one job;
 // progress shows in the activity strip, and at the end the folder opens or goes on to Label / Visualize.
 
+import { zoneOn } from '../core/auth.js';
 import { errText } from '../core/api.js';
 import { esc, icon, syncRanges } from '../core/dom.js';
 import { waitJob } from '../core/jobs.js';
@@ -149,7 +150,7 @@ function form(F: FR, bid: string, one: string | null, canInplace: boolean, name:
     `<div class="f2"><label class="fld"><span>Folder name</span><input type="text" class="txt" data-f="out" value="${esc(F.out)}" placeholder="${esc(name)}" autocomplete="off" spellcheck="false"></label>` +
     (F.target === 'copy' ? `<label class="fld"><span>New bucket name</span><input type="text" class="txt" data-f="newName" value="${esc(F.newName)}" autocomplete="off" spellcheck="false"></label>` : '<span></span>') + '</div>' +
     `<label class="fld"><span>When done</span><select data-f="after"><option value="open"${F.after === 'open' ? ' selected' : ''}>Open the folder</option>` +
-    `<option value="label"${F.after === 'label' ? ' selected' : ''}>Send to Label</option><option value="visualize"${F.after === 'visualize' ? ' selected' : ''}>Send to Visualize</option></select></label>` +
+    (zoneOn('labeling') ? `<option value="label"${F.after === 'label' ? ' selected' : ''}>Send to Label</option>` : '') + (zoneOn('visualizer') ? `<option value="visualize"${F.after === 'visualize' ? ' selected' : ''}>Send to Visualize</option>` : '') + `</select></label>` +
     (canInplace ? `<label class="check"><input type="checkbox" data-f="remember"${F.remember ? ' checked' : ''}> Use these settings for every new video in this bucket <span class="faint">(auto-extract on upload and import)</span></label>` : '') +
     '</div>';
 }
