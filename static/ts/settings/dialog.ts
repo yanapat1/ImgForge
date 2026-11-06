@@ -161,14 +161,23 @@ async function dcBrowse(path: string): Promise<void> {
   renderSettings();
 }
 
+let s3BrowseSeq = 0;      // only the newest listing is shown: a slow reply for the previous folder must not replace it
+
 async function s3Browse(): Promise<void> {
   const f = formOf('s3');
+  const seq = ++s3BrowseSeq;
   f.locStatus = { kind: 'busy', text: `listing ${f.bucket}/${f.prefix || ''}…` };
   renderSettings();
   try {
-    f.browse = await postJSON<BrowseResult>('api/connections/browse', { connection: connPayload(f), bucket: f.bucket, prefix: f.prefix || '' });
+    const listed = await postJSON<BrowseResult>('api/connections/browse', { connection: connPayload(f), bucket: f.bucket, prefix: f.prefix || '' });
+    if (seq !== s3BrowseSeq) return;
+    f.browse = listed;
     f.locStatus = null;
-  } catch (e) { f.browse = null; f.locStatus = { kind: 'err', text: errText(e) }; }
+  } catch (e) {
+    if (seq !== s3BrowseSeq) return;
+    f.browse = null;
+    f.locStatus = { kind: 'err', text: errText(e) };
+  }
   renderSettings();
 }
 
