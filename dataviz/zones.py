@@ -37,6 +37,7 @@ ZONES = {z.id: z for z in (
     Zone('datacenter', 'Data Center', requires=('core',), perms=('data.manage',)),
     Zone('visualizer', 'Dataset Visualizer', requires=('datacenter',), send_target='visualize',
          bucket_sessions='dataviz.data.bucket_sessions:find', perms=('dataset.create', 'model.add', 'model.upload')),
+    Zone('analysis', 'Data Analysis', requires=('datacenter',), perms=('analysis.use', 'analysis.write')),
     Zone('labeling', 'Labeling', requires=('datacenter',), send_target='label',
          bucket_sessions='dataviz.labeling.bucket_sessions:find', perms=('label.create', 'model.add', 'model.upload')),
 )}
@@ -59,6 +60,7 @@ ROUTES = (
     ('live', 'visualizer'),
     ('promote', 'visualizer'),
     ('datacenter', 'datacenter'),
+    ('analysis', 'analysis'),
     ('agent', 'core'),
     ('sessions', 'core'),
     ('assets', 'core'),

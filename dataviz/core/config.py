@@ -82,6 +82,14 @@ DEFAULTS = {
     'database': {'url': '${DATABASE_URL}', 'pool_size': 10},
     'auth': {'cookie_secure': '${DATAVIZ_COOKIE_SECURE:-auto}',   # auto = Secure cookie when the request came over https
              'session_idle_days': 7, 'session_max_days': 30},
+    'data_analysis': {                      # the Data Analysis zone
+        'max_rows': 1000000,                # rows kept of one result
+        'max_spool_mb': 4096,               # result files kept per user
+        'statement_timeout_s': 600,
+        'runs_per_user': 4,                 # queries one user runs at once
+        'tree_cache_s': 120,                # object explorer cache; Refresh ignores it
+        'temp_grace_s': 900,                # a session with no page open keeps its temp tables this long
+    },
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root
     'storage': {'allowed_roots': ['.'], 'data_root': 'data'},   # data_root: Data Center managed buckets

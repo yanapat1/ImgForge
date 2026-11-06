@@ -39,6 +39,13 @@ argon2-cffi>=23.1
 cryptography>=42
 pymssql>=2.3
 paramiko>=3.4
+# Data Analysis zone: one SQL parser for T-SQL / PostgreSQL / DuckDB (safety gate, builder), result files + fast
+# statistics, MongoDB, statistic tests
+sqlglot==30.29.0
+duckdb==2.0.0
+pyarrow==26.0.1
+pymongo==4.19.0
+statsmodels==0.15.0
 regex                # optional: timeout-guarded /regex/ in the label image strip filter (falls back to re + a deadline)
 # test only (tests/): not needed to run the server
 #   pytest              the unit + I/O suite

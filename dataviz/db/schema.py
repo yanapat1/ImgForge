@@ -16,7 +16,7 @@ because its API, its card stats and the visualizer's live-source fingerprint all
 JSONB. Secrets are Fernet ciphertext (db/crypto.py) in bytea columns named *secrets*.
 """
 
-from sqlalchemy import (BigInteger, Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey, Index, Integer,
+from sqlalchemy import (PrimaryKeyConstraint, BigInteger, Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey, Index, Integer,
                         LargeBinary, MetaData, PrimaryKeyConstraint, String, Table, Text, func, text)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
@@ -607,6 +607,71 @@ feature_sets = Table(
     _now('created_at'),
     Index('ux_feature_sets_fp_key', 'fingerprint', 'feature_key', unique=True),
     schema='vec')
+
+# ==================================================== Data Analysis zone (analysis/): private to their owner, never shared
+an_sessions = Table(
+    'an_sessions', metadata,
+    Column('id', String(36), primary_key=True),
+    _user_fk('owner_id'),
+    Column('name', String(200), nullable=False),
+    Column('state', JSONB, nullable=False, server_default=text("'{}'::jsonb")),     # open query tabs, layout
+    _now('created_at'), _now('updated_at'),
+    Index('ix_an_sessions_owner', 'owner_id'),
+    schema='app')
+
+an_history = Table(
+    'an_history', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('session_id', String(36), ForeignKey('app.an_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('connection_id', String(36)),
+    Column('database', String(200)),
+    Column('name', String(200), nullable=False, server_default=''),
+    Column('sql', Text, nullable=False),
+    Column('kind', String(8), nullable=False),
+    Column('status', String(12), nullable=False),
+    Column('rows', Integer),
+    Column('ms', Integer),
+    Column('error', Text),
+    _now('at'),
+    Index('ix_an_history_session_at', 'session_id', 'at'),
+    schema='app')
+
+an_scripts = Table(
+    'an_scripts', metadata,
+    Column('id', String(36), primary_key=True),
+    Column('session_id', String(36), ForeignKey('app.an_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('name', String(200), nullable=False),
+    Column('position', Integer, nullable=False, server_default=text('0')),
+    Column('connection_id', String(36)),
+    Column('database', String(200)),
+    Column('body', Text, nullable=False, server_default=''),
+    _now('updated_at'),
+    Index('ix_an_scripts_session', 'session_id', 'position'),
+    schema='app')
+
+an_column_docs = Table(
+    'an_column_docs', metadata,
+    Column('connection_id', String(36), nullable=False),
+    Column('database', String(200), nullable=False, server_default=''),
+    Column('schema_name', String(200), nullable=False, server_default=''),
+    Column('table_name', String(200), nullable=False),
+    Column('column_name', String(200), nullable=False, server_default=''),      # '' = the table itself
+    Column('description', Text, nullable=False),
+    Column('source', String(8), nullable=False, server_default='user'),         # user | ai
+    _user_fk('updated_by'),
+    _now('updated_at'),
+    PrimaryKeyConstraint('connection_id', 'database', 'schema_name', 'table_name', 'column_name'),
+    schema='app')
+
+an_dashboards = Table(
+    'an_dashboards', metadata,
+    Column('id', String(36), primary_key=True),
+    Column('session_id', String(36), ForeignKey('app.an_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('name', String(200), nullable=False),
+    Column('layout', JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    _now('updated_at'),
+    Index('ix_an_dashboards_session', 'session_id'),
+    schema='app')
 
 SCHEMAS = ('app', 'lbl', 'vec')
 EXTENSIONS = ('vector',)

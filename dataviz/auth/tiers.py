@@ -11,6 +11,8 @@ someone else's session still comes from sharing (auth/access.py). Admins have ev
     model.upload     upload or register model FILES and folders: loading them runs code on the server
     llm.use          the LLM features (chat, assist, pre-label)
     data.manage      the Data Center: create buckets, change their files (ops, upload, undo), tag, send to sessions
+    analysis.use     the Data Analysis zone: query the user's own connections, read only
+    analysis.write   run statements that change data there, after confirming each one
 
 Reads are cached for a few seconds in-process like auth/settings.py; every write clears the cache.
 """
@@ -34,11 +36,14 @@ PERMS = {
     'model.upload': 'Upload model files (runs their code on the server)',
     'llm.use': 'Use the LLM assistant',
     'data.manage': 'Manage Data Center buckets (create, change files, tag, send)',
+    'analysis.use': 'Use Data Analysis (read-only queries on their own connections)',
+    'analysis.write': 'Change data from Data Analysis (each statement is confirmed)',
 }
 DENIED = {
     'dataset.create': 'add datasets', 'label.create': 'create labeling projects', 'connection.add': 'add connections',
     'model.add': 'add models', 'model.upload': 'upload model files', 'llm.use': 'use the LLM assistant',
     'data.manage': 'manage Data Center buckets',
+    'analysis.use': 'use Data Analysis', 'analysis.write': 'change data from Data Analysis',
 }
 CACHE_TTL = 5.0
 

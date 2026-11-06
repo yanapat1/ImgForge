@@ -15,7 +15,7 @@ fresh database has no sessions.
 The formats are the ones db/legacy.py writes when it imports the old connections.json.
 
 Connection kinds: s3, ftp, sftp (labeling image sources / export targets), postgres, mssql (labeling database
-export), model (a self-hosted model server the labeling page sends images to: url, optional api_key sent as
+export, Data Analysis), mongo (Data Analysis), model (a self-hosted model server the labeling page sends images to: url, optional api_key sent as
 a Bearer token, timeout_s). A connection used by a visualize session or a labeling session (app.label_projects,
 including a task's model link) cannot be deleted.
 
@@ -42,6 +42,7 @@ CONN_KIND_FIELDS = {
     'sftp': ('name', 'host', 'port', 'username', 'secret_key', 'private_key', 'base_path'),
     'postgres': _DB_FIELDS,
     'mssql': _DB_FIELDS,
+    'mongo': ('name', 'host', 'port', 'database', 'username', 'secret_key', 'encrypt'),      # Data Analysis
     'model': ('name', 'url', 'api_key', 'timeout_s'),
     # web dataset sources (Data Center › From the web): the token, encrypted like every secret
     'kaggle': ('name', 'username', 'api_key'),
@@ -51,7 +52,7 @@ CONN_KIND_FIELDS = {
 }
 TOKEN_KINDS = ('kaggle', 'huggingface', 'roboflow', 'zenodo')
 CONN_KINDS = tuple(CONN_KIND_FIELDS)
-DEFAULT_PORTS = {'ftp': 21, 'sftp': 22, 'postgres': 5432, 'mssql': 1433}
+DEFAULT_PORTS = {'ftp': 21, 'sftp': 22, 'postgres': 5432, 'mssql': 1433, 'mongo': 27017}
 SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')      # blank in an update = keep the stored one
 _BOOL_FIELDS = ('verify_ssl', 'tls', 'passive', 'encrypt')
 DS_FIELDS = ('name', 'kind', 'path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
