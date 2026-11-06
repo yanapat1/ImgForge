@@ -65,6 +65,11 @@ const badge = (risk: string): string => `<span class="ct-badge r-${esc(risk)}">$
 const since = (t0: number): string => `<span class="num" data-since="${t0}">${fmtSince(Math.max(0, performance.now() - t0))}</span>`;
 
 const MODE_HINT: Record<ChatRole, Record<ChatMode, string>> = {
+  analysis: {
+    ask: 'ask: every change waits for your OK',
+    auto: '⏵⏵ auto: reads run, changes still ask',
+    plan: '⏸ plan: read-only research, then a plan to approve',
+  },
   data: {
     ask: 'ask: every change waits for your OK',
     auto: '⏵⏵ auto: changes run, deletes still ask',

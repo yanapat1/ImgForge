@@ -10,6 +10,7 @@ import { toast } from '../core/toast.js';
 import { openSettings } from '../settings/dialog.js';
 import { mountUserMenu } from '../views/usermenu.js';
 import { A_ACTIONS, analyzeChange, renderAnalyze } from './analyze.js';
+import { mountDock } from './dock.js';
 import { catalogChange, openCatalog, renderCatalog } from './catalog.js';
 import { D_ACTIONS, dashDrag, dashDrop, dashInput, renderDash } from './dash.js';
 import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
@@ -160,7 +161,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 export function saveTabs(): void {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    void api.saveSession({ active: A.active, tabs: A.tabs.map((t: Tab) => ({ id: t.id, name: t.name, sql: t.sql, conn: t.conn, db: t.db, model: t.model, typed: t.typed })) }).catch(() => {});
+    void api.saveSession({ active: A.active, ai_rows: A.aiRows, tabs: A.tabs.map((t: Tab) => ({ id: t.id, name: t.name, sql: t.sql, conn: t.conn, db: t.db, model: t.model, typed: t.typed })) }).catch(() => {});
   }, 800);
 }
 
@@ -302,6 +303,7 @@ export async function start(): Promise<void> {
   A.tabs = (st.tabs ?? []).map((t) => ({ ...newTab(t.name ?? 'Query', t.sql ?? '', t.conn ?? null, t.db ?? null), id: t.id ?? crypto.randomUUID(), model: t.model ?? null, typed: t.typed ?? !!t.sql }));
   if (!A.tabs.length) A.tabs = [newTab('query 1', '', A.sources[0]?.id ?? null, A.sources[0]?.database || null)];
   A.active = Math.min(st.active ?? 0, A.tabs.length - 1);
+  A.aiRows = !!(s.state as { ai_rows?: boolean }).ai_rows;
   render();
   const beat = (): void => { void api.heartbeat().then((r) => {
     const changed = JSON.stringify(r.temps) !== JSON.stringify(A.temps);
@@ -310,5 +312,6 @@ export async function start(): Promise<void> {
   }).catch(() => {}); };
   beat();
   setInterval(beat, 60000);
+  mountDock();
 }
 export { renderTree };

@@ -21,7 +21,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import duckdb
+import orjson
 from sqlalchemy import text
+from sqlglot import exp, parse_one
 
 from .. import db
 from ..auth import audit, tiers
@@ -134,7 +137,6 @@ def update_session(user, sid, name=None, state=None):
         sets.append('name = :n')
         args['n'] = str(name).strip()[:200] or 'Untitled analysis'
     if state is not None:
-        import orjson
         sets.append('state = CAST(:s AS JSONB)')
         args['s'] = orjson.dumps(state).decode()
     with db.begin() as c:
@@ -648,6 +650,168 @@ def chart(user, rid, x, y, agg, limit):
     return stats_mod.chart(_result(user, rid)['path'], x, y or None, agg or 'sum', limit)
 
 
+# ---------------------------------------------------------------- what the assistant sees
+def _ai_cfg(k, default):
+    return int(_cfg().get(k, default))
+
+
+def _cap(payload):
+    """Every tool result stays under the limit, whatever a table holds. The last list is what gets shorter."""
+    limit = _ai_cfg('ai_result_chars', 4000)
+    text = orjson.dumps(payload, default=str)
+    if len(text) <= limit:
+        return payload
+    for key in ('rows', 'columns', 'tables', 'top', 'cells'):
+        items = payload.get(key)
+        while isinstance(items, list) and len(items) > 1 and len(orjson.dumps(payload, default=str)) > limit:
+            del items[max(1, len(items) * 3 // 4):]
+            payload['truncated'] = True
+    if len(orjson.dumps(payload, default=str)) > limit:
+        return {'truncated': True, 'note': 'this result was too large to show: ask for less'}
+    return payload
+
+
+def _cell(v):
+    n = _ai_cfg('ai_cell_chars', 80)
+    v = spool._json(v)
+    return f'{v[:n]}…' if isinstance(v, str) and len(v) > n else v
+
+
+def _rows_allowed(user, sid):
+    return bool((_session(user, sid).state or {}).get('ai_rows'))
+
+
+def search_catalog(user, cid, database, query):
+    """Tables whose name or saved description holds the words, so the model never needs a whole schema."""
+    words = [w for w in str(query).lower().split() if w]
+    tables = tree(user, cid, database).get('tables') or []
+    with db.connect() as c:
+        docs = c.execute(text("""SELECT schema_name, table_name, column_name, description FROM app.an_column_docs
+                                 WHERE connection_id = :c AND database = :d"""), {'c': cid, 'd': database or ''}).all()
+    note = {}
+    for d in docs:
+        note.setdefault((d.schema_name, d.table_name), []).append(f'{d.column_name} {d.description}'.lower())
+    hits = []
+    for t in tables:
+        if t['kind'] == 'system':
+            continue
+        blob = f'{t["schema"]} {t["name"]} {" ".join(note.get((t["schema"], t["name"]), []))}'.lower()
+        score = sum(w in blob for w in words)
+        if score or not words:
+            hits.append((score, t))
+    hits.sort(key=lambda x: (-x[0], x[1]['name']))
+    return _cap({'tables': [{'schema': t['schema'], 'name': t['name'], 'kind': t['kind']} for _, t in hits[:30]],
+                 'matched': len(hits), 'of': len(tables)})
+
+
+def describe_for_ai(user, cid, database, schema, table, offset=0):
+    d = describe(user, cid, database, schema, table)
+    size, offset = _ai_cfg('ai_table_columns', 200), max(0, int(offset or 0))
+    cols = d['columns'][offset:offset + size]
+    return _cap({'table': table, 'description': d['description'], 'rows_estimate': d['rows'], 'total_columns': len(d['columns']),
+                 'offset': offset, 'columns': [{k: c.get(k) for k in ('name', 'type', 'key', 'description') if c.get(k)} for c in cols],
+                 'keys': d['keys'][:40]})
+
+
+def _result_card(rid, res, status):
+    r = _results[rid]
+    st = stats(r['_owner'], rid) if r.get('_owner') else None
+    columns = []
+    for name in res['columns']:
+        s = (st or {}).get('columns', {}).get(name, {})
+        columns.append({'name': name, 'type': s.get('type'), 'empty': s.get('nulls'), 'distinct': s.get('distinct'),
+                        'min': _cell(s.get('min')), 'max': _cell(s.get('max')), 'mean': s.get('mean')})
+    return _cap({'status': status, 'result_id': rid, 'rows': res['rows'], 'hit_row_limit': res['truncated'], 'columns': columns,
+                 'duplicates': (st or {}).get('duplicates')})
+
+
+def _wait(run, seconds):
+    t0 = time.time()
+    while run.status == 'running' and time.time() - t0 < seconds:
+        time.sleep(0.05)
+    return run
+
+
+def run_for_ai(user, sid, cid, database, sql, name, wait_s):
+    """A read, for the assistant: the result stays on the server and the model gets its summary."""
+    _session(user, sid)
+    conn = _conn(user, cid)
+    if classify.needs_confirm(_classify(conn, sql, sid)):
+        raise AnalysisError('this is not a plain read: use run_change, and the user confirms it')
+    pub = start(user, sid, cid, database, sql, None, name)
+    run = _wait(_run(user, pub['id']), wait_s)
+    if run.status == 'running':
+        stop(user, run.id)
+        raise AnalysisError(f'this query took over {wait_s} s, so it was stopped: narrow it')
+    if run.status == 'error':
+        return {'status': 'error', 'error': run.error}
+    if not run.results:
+        return {'status': run.status, 'rows': 0, 'columns': []}
+    last = run.results[-1]
+    with _lock:
+        _results[last['id']]['_owner'] = user
+    return _result_card(last['id'], last, run.status)
+
+
+def change_for_ai(user, sid, cid, database, sql, wait_s):
+    """Reached only after the user confirmed the card: the engine runs a 'danger' tool only then."""
+    token = check(user, sid, cid, database, sql)['confirm']
+    pub = start(user, sid, cid, database, sql, token, 'AI change')
+    run = _wait(_run(user, pub['id']), wait_s)
+    return {'status': run.status, 'error': run.error, 'statements': run.total}
+
+
+def query_result(user, sid, rid, sql):
+    """SQL over a saved result. Only that file exists for it: no tables, no other files, no network."""
+    path = str(_result(user, rid)['path'])
+    st = classify.classify(sql, 'workspace')
+    if len(st) != 1 or st[0]['kind'] != classify.READ:
+        raise AnalysisError('one SELECT over the table named result')
+    tree_ = parse_one(st[0]['sql'], dialect='duckdb')
+    if any(t.name.lower() != 'result' for t in tree_.find_all(exp.Table)):
+        raise AnalysisError('the only table here is named result')
+    allowed = _rows_allowed(user, sid)
+    if not allowed and tree_.find(exp.AggFunc) is None:
+        raise AnalysisError('row access is off for this session: aggregate with COUNT, SUM, AVG, GROUP BY ...')
+    con = duckdb.connect(':memory:', config={'threads': 2})
+    try:
+        con.execute('CREATE VIEW result AS SELECT * FROM read_parquet(?)'.replace('?', "'" + path.replace("'", "''") + "'"))
+        con.execute(f"SET allowed_paths=['{path.replace(chr(39), chr(39) * 2)}']")
+        con.execute('SET enable_external_access=false')
+        con.execute('SET lock_configuration=true')
+        cur = con.execute(st[0]['sql'])
+        limit = _ai_cfg('ai_rows', 20) if allowed else 50
+        rows = cur.fetchmany(limit + 1)
+        names = [d[0] for d in cur.description]
+    except duckdb.Error as e:
+        raise AnalysisError(str(e).splitlines()[0][:300]) from None
+    finally:
+        con.close()
+    return _cap({'columns': names, 'rows': [[_cell(v) for v in r] for r in rows[:limit]], 'rows_returned': min(len(rows), limit),
+                 'more': len(rows) > limit})
+
+
+def sample_for_ai(user, sid, rid):
+    if not _rows_allowed(user, sid):
+        raise AnalysisError('the user has not allowed row access for this session: it is on the Query toolbar')
+    n = _ai_cfg('ai_rows', 20)
+    p = spool.page(_result(user, rid)['path'], 0, n)
+    return _cap({'columns': p['columns'], 'rows': [[_cell(v) for v in r] for r in p['rows']], 'rows_returned': len(p['rows']),
+                 'rows_total': p['total'], 'note': 'a sample, not all the data'})
+
+
+def profile_for_ai(user, rid, column=None):
+    p = profile(user, rid)
+    cols = [c for c in p['columns'] if not column or c['name'] == column]
+    return _cap({'rows': p['rows'], 'columns': [{k: _cell(c[k]) for k in ('name', 'type', 'nulls', 'distinct', 'min', 'max', 'mean', 'note')} for c in cols]})
+
+
+def explain_for_ai(user, sid, cid, database, sql):
+    p = explain(user, sid, cid, database, sql)
+    top = sorted(p['nodes'], key=lambda n: -n['pct'])[:8]
+    return _cap({'estimated': p['estimated'], 'top': [{'step': n['label'][:200], 'share_pct': n['pct'], 'rows': n['rows']} for n in top], 'steps': len(p['nodes'])})
+
+
 # ---------------------------------------------------------------- saved things
 def history(user, sid, limit=200):
     _session(user, sid)
@@ -697,7 +861,6 @@ def dashboards(user, sid):
 
 
 def save_dashboard(user, sid, body):
-    import orjson
     _session(user, sid)
     pid = str(body.get('id') or uuid.uuid4().hex)
     args = {'i': pid, 's': sid, 'n': str(body.get('name') or 'Dashboard').strip()[:200], 'l': orjson.dumps(body.get('layout') or []).decode()}

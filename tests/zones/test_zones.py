@@ -202,7 +202,7 @@ def test_the_assistant_only_knows_the_installed_specialists(data_center_install)
 
 def test_full_install_card_is_unchanged():
     from dataviz.llm.engine import roles
-    assert set(roles.installed()) == {'data', 'visual'}
+    assert set(roles.installed()) == {'data', 'visual', 'analysis'}
     card = roles.other_pages('data')
     assert 'screen viz' in card and 'This install has no' not in card
 

@@ -32,17 +32,21 @@ ROLES = {
                  'datacenter', 'data'),
     'visual': Role('visual', 'Visualizer', ('visual', 'web', 'common', 'control', 'plugin'), 'assistant', True,
                    'visualizer', 'viz'),
+    'analysis': Role('analysis', 'Data Analysis', ('analysis', 'web', 'common', 'control', 'plugin'), 'data_center', False,
+                     'analysis', 'analysis'),
 }
 
 
-SCREEN_ROLE = {'home': 'data', 'data': 'data', 'label': 'data', 'viz': 'visual'}
-SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling'}
+SCREEN_ROLE = {'home': 'data', 'data': 'data', 'label': 'data', 'viz': 'visual', 'analysis': 'analysis'}
+SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling', 'analysis': 'Data Analysis'}
 # what each specialist's pages do, for the other one's prompt (one line: the tools stay with their page)
 CAN = {
     'data': 'Data Center (screen data; Home lists the sessions): buckets, folders, files, tags, S3, import / export, '
             'send a folder to the visualizer or labeling',
     'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
               'curation, label errors, model runs + evaluation, compare',
+    'analysis': 'Data Analysis (screen analysis): SQL and MongoDB queries on the user\'s databases, joins, statistics, '
+                'dashboards',
 }
 
 
@@ -72,6 +76,8 @@ def page_of(role, scope, bound=None):
             out['tab'] = tab
         return out
     screen = scope.get('page') if scope.get('page') in ('home', 'label') else 'data'
+    if role == 'analysis':
+        return {'role': 'analysis', 'screen': 'analysis', 'label': SCREEN_LABEL['analysis']}
     out = {'role': 'data', 'screen': screen, 'label': SCREEN_LABEL[screen]}
     if screen == 'label' and scope.get('label_project'):
         out['session_id'] = str(scope['label_project'])
@@ -167,4 +173,20 @@ def visual_scope(user, scope):
     return 'The visualizer shows:\n' + '\n'.join(rows) if rows else 'The visualizer state is empty.'
 
 
-SCOPES = {'data': data_scope, 'visual': visual_scope}
+def analysis_scope(user, scope):
+    """What the page has open: the connection and database, the provider's syntax, the last result."""
+    from ...analysis import service
+    scope = scope if isinstance(scope, dict) else {}
+    cid, db, rid = scope.get('connection'), scope.get('database'), scope.get('result')
+    kind = next((s['kind'] for s in service.sources(user) if s['id'] == cid), None)
+    out = [f'Connection {cid!r} ({kind}), database {db!r}.' if cid else 'No connection is chosen on the page.']
+    if rid:
+        out.append(f'The open tab\'s last result is {rid!r}.')
+    if scope.get('rows_ok'):
+        out.append('The user allowed row samples for this session.')
+    else:
+        out.append('Row samples are off: answer from aggregates.')
+    return ' '.join(out)
+
+
+SCOPES = {'data': data_scope, 'visual': visual_scope, 'analysis': analysis_scope}

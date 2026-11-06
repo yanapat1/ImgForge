@@ -51,7 +51,7 @@ export function renderQuery(): void {
   $req('an-qbar').innerHTML = `<button type="button" class="an-btn pri" data-act="run"${isRunning(t) ? ' disabled' : ''}>${icon('play')}Run</button><button type="button" class="an-btn" data-act="stop"${isRunning(t) ? '' : ' disabled'}>Stop</button>` +
     `<select class="an-sel" id="an-conn" aria-label="Connection"><option value="">Choose a connection</option>${A.sources.map((s) => `<option value="${esc(s.id)}" ${s.id === t.conn ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` +
     `<select class="an-sel" id="an-db" aria-label="Database"${t.conn ? '' : ' disabled'}>${dbOptions(t)}</select>` +
-    (src ? `${chip(src.kind)}<span class="pill faint">${esc(A.version.get(src.id) ?? '')}</span>` : '') + `<span class="grow"></span><span class="faint" style="font-size:12.5px">Layout</span><span class="an-seg">${[['std', 'Standard'], ['top', 'Table on top'], ['only', 'Table only']].map(([k, n]) => `<button type="button" data-act="layout" data-lay="${k}" data-k="${k}">${n}</button>`).join('')}</span>`;
+    (src ? `${chip(src.kind)}<span class="pill faint">${esc(A.version.get(src.id) ?? '')}</span>` : '') + `<span class="grow"></span><label class="an-chk2" title="The assistant gets at most 20 rows, each cell cut short. Off: it only sees totals."><input type="checkbox" id="an-airows" ${A.aiRows ? 'checked' : ''}> Let AI read sample rows</label><span class="faint" style="font-size:12.5px">Layout</span><span class="an-seg">${[['std', 'Standard'], ['top', 'Table on top'], ['only', 'Table only']].map(([k, n]) => `<button type="button" data-act="layout" data-lay="${k}" data-k="${k}">${n}</button>`).join('')}</span>`;
   void mountEditor(t);
   renderBuilder();
   applyLayout();
@@ -257,5 +257,6 @@ export function queryChange(t: HTMLInputElement | HTMLSelectElement): boolean {
   const c = tab();
   if (t.id === 'an-conn') { c.conn = t.value || null; c.db = sourceOf(c.conn)?.database || null; if (c.conn && !A.dbs.has(c.conn)) void api.databases(c.conn).then((r) => { A.dbs.set(c.conn as string, r.databases); renderQuery(); }).catch((e: unknown) => toast(errText(e), 'err')); renderQuery(); saveTabs(); return true; }
   if (t.id === 'an-db') { c.db = t.value || null; saveTabs(); return true; }
+  if (t.id === 'an-airows') { A.aiRows = (t as HTMLInputElement).checked; saveTabs(); return true; }
   return false;
 }

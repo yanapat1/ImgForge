@@ -103,6 +103,15 @@ export const D_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   },
 };
 
+/** The assistant's draft: added to the open board, or a new one. */
+export function addCharts(charts: { kind: string; title: string; x?: string; y?: string; agg?: string }[]): void {
+  if (!D.boards.length) D.boards = [{ id: crypto.randomUUID(), name: 'Dashboard', layout: [] }];
+  const b = board();
+  if (!b) return;
+  for (const c of charts) b.layout.push(mk(c.kind as Widget['kind'], c.title, { x: c.x ?? '', y: c.y ?? '', agg: c.agg ?? 'sum' }));
+  save();
+}
+
 export function dashInput(t: HTMLInputElement): boolean {
   const b = board();
   if (!b) return false;

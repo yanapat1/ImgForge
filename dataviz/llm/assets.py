@@ -27,7 +27,7 @@ from .. import db
 from ..core import logging as vlog
 
 KINDS = ('prompt', 'skill')
-ROLES = ('data', 'visual', 'all')
+ROLES = ('data', 'visual', 'analysis', 'all')
 MAX_ITEMS = 100
 MAX_BODY = 20000
 MAX_NAME = 120

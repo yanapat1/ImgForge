@@ -26,9 +26,9 @@ import os
 
 from . import E, S, Tool, ToolError, _obj, register
 
-SCREENS = ('home', 'data', 'viz', 'label')
-SCREEN_ZONE = {'data': 'datacenter', 'viz': 'visualizer', 'label': 'labeling'}
-SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling'}
+SCREENS = ('home', 'data', 'viz', 'label', 'analysis')
+SCREEN_ZONE = {'data': 'datacenter', 'viz': 'visualizer', 'label': 'labeling', 'analysis': 'analysis'}
+SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling', 'analysis': 'Data Analysis'}
 VIZ_TABS = ('explore', 'stats', 'curation', 'model', 'eval', 'compare')
 MAX_SESSIONS = 40
 

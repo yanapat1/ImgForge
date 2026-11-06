@@ -55,6 +55,7 @@ export const A = {
   version: new Map<string, string>(), filter: '', explorer: true,
   catalog: null as { conn: string; db: string; schema: string; table: string } | null,
   history: [] as HistoryRow[], scripts: [] as Script[], script: 0,
+  aiRows: false,
   layout: { flip: false, h: 46, w: 42, max: '', swap: false } as Layout,
 };
 

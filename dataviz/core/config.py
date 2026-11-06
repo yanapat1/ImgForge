@@ -89,6 +89,10 @@ DEFAULTS = {
         'runs_per_user': 4,                 # queries one user runs at once
         'tree_cache_s': 120,                # object explorer cache; Refresh ignores it
         'temp_grace_s': 900,                # a session with no page open keeps its temp tables this long
+        'ai_rows': 20,                      # the ◆ assistant: sample rows at most, with the user's permission
+        'ai_cell_chars': 80,                # one cell
+        'ai_result_chars': 4000,            # one tool result, whatever is in it
+        'ai_table_columns': 200,            # columns of one describe_table page
     },
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root

@@ -41,7 +41,7 @@ MAX_BUDGET = 100_000            # hard cap on estimated input tokens per request
 _FIELDS = ('name', 'kind', 'base_url', 'model', 'vision', 'audio', 'box_format', 'timeout_s', 'max_output_tokens',
            'temperature', 'agent_profile')
 PROFILES = ('auto', 'small', 'large')       # agent profile: small (<= 14B) gets a shorter prompt and fewer tools
-ROLES = ('data', 'visual')                  # the two ◆ agents (llm/engine/roles.py)
+ROLES = ('data', 'visual', 'analysis')      # the ◆ agents (llm/engine/roles.py)
 CHAT_KEYS = {'mode': ('ask', 'auto', 'plan'), 'effort': ('low', 'medium', 'high'),
              'think': ('off', 'low', 'medium', 'high')}
 WEB_ENGINES = ('auto', 'searxng', 'duckduckgo', 'brave', 'tavily', 'serper', 'google_cse')

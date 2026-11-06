@@ -234,3 +234,85 @@ def test_join_counts_match_a_hand_computed_case(an):
     m = join_model()
     m['joins'][0]['type'] = 'LEFT'
     assert an.s.join_stats(an.user, an.cid, an.db, m, 0)['kept'] == 51
+
+
+def rid(an, sql):
+    return an.s.run_for_ai(an.user, an.sid, an.cid, an.db, sql, 'q', 20)
+
+
+def allow_rows(an, on=True):
+    an.s.update_session(an.user, an.sid, state={'ai_rows': on})
+
+
+def size(x):
+    import orjson
+    return len(orjson.dumps(x, default=str))
+
+
+def test_a_query_result_gives_no_rows_to_the_model(an):
+    got = rid(an, "SELECT id, note, 'secret-value' AS s FROM public.orders")
+    assert got['rows'] == 50 and 'result_id' in got and not isinstance(got['rows'], list)
+    assert 'even' not in str({k: v for k, v in got.items() if k != 'columns'})
+
+
+def test_a_change_is_refused_on_the_read_tool(an):
+    from dataviz.analysis.service import AnalysisError
+    with pytest.raises(AnalysisError, match='run_change'):
+        rid(an, 'DELETE FROM public.orders')
+
+
+def test_query_result_needs_an_aggregate_without_permission(an):
+    from dataviz.analysis.service import AnalysisError
+    r = rid(an, 'SELECT id, total, note FROM public.orders')['result_id']
+    got = an.s.query_result(an.user, an.sid, r, 'SELECT note, COUNT(*) AS n, SUM(total) AS s FROM result GROUP BY note ORDER BY n')
+    assert got['rows_returned'] == 2
+    with pytest.raises(AnalysisError, match='row access is off'):
+        an.s.query_result(an.user, an.sid, r, 'SELECT * FROM result')
+    allow_rows(an)
+    assert an.s.query_result(an.user, an.sid, r, 'SELECT * FROM result')['rows_returned'] == 20
+
+
+@pytest.mark.parametrize('sql', ["SELECT * FROM read_csv('/etc/passwd')", 'SELECT * FROM other', "COPY result TO '/tmp/x.csv'",
+                                 "SELECT COUNT(*) FROM read_text('/etc/passwd')", "SELECT COUNT(*) FROM '/etc/passwd'", 'DROP VIEW result'])
+def test_query_result_reaches_nothing_but_the_result(an, sql):
+    from dataviz.analysis.service import AnalysisError
+    r = rid(an, 'SELECT id FROM public.orders')['result_id']
+    with pytest.raises(AnalysisError):
+        an.s.query_result(an.user, an.sid, r, sql)
+
+
+def test_samples_need_permission_and_stay_small(an):
+    from dataviz.analysis.service import AnalysisError
+    r = rid(an, "SELECT i, repeat('x', 5000) AS big FROM generate_series(1, 900) i")['result_id']
+    with pytest.raises(AnalysisError, match='not allowed row access'):
+        an.s.sample_for_ai(an.user, an.sid, r)
+    allow_rows(an)
+    got = an.s.sample_for_ai(an.user, an.sid, r)
+    assert got['rows_returned'] <= 20 and got['rows_total'] == 900 and size(got) <= 4000
+    assert all(len(row[1]) <= 81 for row in got['rows'])
+
+
+def test_a_huge_result_costs_the_same_as_a_small_one(an):
+    big = rid(an, 'SELECT i, i * 2 AS b FROM generate_series(1, 900) i')
+    assert size(big) <= 4000
+
+
+def test_two_thousand_columns_stay_under_the_cap(an):
+    with psycopg.connect(an.url, autocommit=True) as c:
+        c.execute('CREATE TABLE public.wide (' + ', '.join(f'column_number_{i} int' for i in range(1500)) + ')')
+    got = an.s.describe_for_ai(an.user, an.cid, an.db, 'public', 'wide')
+    assert size(got) <= 4000 and got['total_columns'] == 1500 and got['truncated']
+    assert len(got['columns']) < 200
+    wide = rid(an, 'SELECT * FROM public.wide')
+    assert size(wide) <= 4000
+
+
+def test_search_catalog_finds_by_description_and_never_dumps_all(an):
+    an.s.set_description(an.user, an.cid, an.db, 'public', 'orders', 'note', 'free text from the sales team')
+    got = an.s.search_catalog(an.user, an.cid, an.db, 'sales team')
+    assert got['tables'][0]['name'] == 'orders' and len(got['tables']) <= 30
+
+
+def test_explain_for_the_model_is_short(an):
+    got = an.s.explain_for_ai(an.user, an.sid, an.cid, an.db, 'SELECT * FROM public.orders a JOIN public.orders b ON a.id = b.id')
+    assert got['top'] and size(got) <= 4000

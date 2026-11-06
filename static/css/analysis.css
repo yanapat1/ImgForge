@@ -166,6 +166,7 @@ html:not([data-screen=analysis]) #analysis { display: none; }
 .an-fields { display: flex; flex-wrap: wrap; gap: 4px; }
 .an-fld { padding: 2px 7px; background: var(--surface-3); border-radius: 99px; font-size: 12px; cursor: grab; }
 .an-well { display: flex; justify-content: space-between; gap: 6px; align-items: center; min-height: 30px; padding: 5px 8px; border: 1px dashed var(--border-strong); border-radius: var(--r-sm); }
+.an-chk2 { display: inline-flex; gap: 5px; align-items: center; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
 .an-sph { background: var(--border); cursor: row-resize; touch-action: none; }
 .an-sph:hover, .an-sph:focus-visible { background: var(--accent); }
 .an-rc { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
