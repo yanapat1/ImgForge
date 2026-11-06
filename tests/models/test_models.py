@@ -107,7 +107,10 @@ def _serve(app):
     s.bind(('127.0.0.1', 0))
     port = s.getsockname()[1]
     s.close()
-    server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port, log_level='warning', access_log=False, ws='none'))
+    server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port, log_level='warning', access_log=False, ws='none',
+                                            loop='asyncio'))
+    # loop='asyncio', not uvloop: uvloop would stay installed for this whole test worker, and its fork handler runs in
+    # the child of a later Playwright start, where freeing a PyAV frame waits forever on threads that no longer exist
     th = threading.Thread(target=server.run, daemon=True)
     th.start()
     t0 = time.time()
