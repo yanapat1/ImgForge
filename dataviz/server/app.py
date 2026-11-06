@@ -19,16 +19,12 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 
+from .. import zones
 from ..auth import access, context
 from ..core import logging as vlog
 from ..paths import STATIC_DIR
-from ..state import State
 from .routing import FixedSession, SessionRouting
 from .static import JsonGZip, NoCacheStatic
-from .routes import system, projections, samples, datasets, models, labeling, label_import, curation, llm, compare, live, promote, agent
-from .routes import datacenter
-from .routes import sessions as llm_sessions
-from .routes import assets
 
 _DS_FIELDS = ('path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
 
@@ -292,7 +288,7 @@ class _AuthUnlessPreset:
 def create_app(ctx, auth=True) -> FastAPI:
     """The app for `ctx`. A bare State (or Ctx(state)) is the TEST-ONLY single-dataset mode: no sign-in layer,
     every request bound to that State. auth=False leaves out the sign-in layer (route tables, tests)."""
-    if isinstance(ctx, State):
+    if not isinstance(ctx, Ctx):
         ctx = Ctx(ctx)
     state = _StateProxy(ctx)
     app = FastAPI(title='Dataset Visualizer', docs_url=None, redoc_url=None, openapi_url=None)
@@ -360,8 +356,7 @@ def create_app(ctx, auth=True) -> FastAPI:
                               request.url.path)
         return JSONResponse({'detail': 'internal server error'}, status_code=500)
 
-    for module in (system, projections, samples, datasets, models, labeling, label_import, curation, llm, compare, live, promote,
-                   datacenter, agent, llm_sessions, assets):
+    for module in zones.route_modules(ctx.cfg):
         app.include_router(module.router(state, ctx))
     app.mount('/static', NoCacheStatic(directory=STATIC_DIR), name='static')
     if ctx.fixed is not None:

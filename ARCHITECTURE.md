@@ -18,6 +18,10 @@ browser (one index.html, five screens)                 server (FastAPI, package 
 
 Data flows **Data Center → sessions**. Everything you import lands in a Data Center bucket. From there you **send** folders to a Visualize session (embeddings plot, curation, models) or a Label session (annotation). A session can still point at its own folder or S3 prefix directly.
 
+## Zones: what an install contains
+
+The product is being split into zones, so an analyst can install Data Center + Data Analysis without the visualizer and its GPU libraries. `dataviz/zones.py` is the list: `core` (always), `datacenter`, `labeling`, `visualizer`. An install picks them with `DATAVIZ_ZONES=core,datacenter` or `zones:` in the config; the default is every zone. Each `server/routes` module belongs to one zone (`zones.ROUTES`), and only the routes of the selected zones are loaded. The rule: core never needs another zone, and `tests/zones/` proves a partial install runs with the visualizer libraries blocked.
+
 ## Find the code for…
 
 | I want to change… | Backend (`dataviz/`) | Frontend (`static/`) |
@@ -36,6 +40,7 @@ Data flows **Data Center → sessions**. Everything you import lands in a Data C
 | Accounts, tiers, permissions | `auth/` (`tiers.py` = the permission list) | `ts/settings/users.ts`, `ts/core/auth.ts` |
 | Database tables / migrations | `db/schema.py`, `db/migrations/versions/` | |
 | Config keys | `config.yaml`, `core/config.py` | |
+| Which zones exist, which routes each owns | `zones.py` | |
 | Colours, fonts, looks | | `css/tokens.css` (tokens only), `css/<look>.css` |
 | Routing between screens | `server/routing.py`, `server/routes/system.py` | `ts/theme-boot.ts`, `ts/core/nav.ts`, `ts/main.ts` |
 
@@ -45,5 +50,5 @@ Data flows **Data Center → sessions**. Everything you import lands in a Data C
 - **Dependencies point one way:** `server → (state, models, datacenter, llm) → (data, labeling, ml, core) → db`. Nothing imports `server` or `cli` back.
 - **Frontend:** one module per concern, loaded lazily per screen (`main.ts` imports `label/app.js` / `datacenter/app.js` on demand). One `innerHTML` render per change plus delegated listeners. Colours exist only as CSS tokens.
 - **Slow work is a job** with progress (`core/jobs.py` ↔ `ts/core/jobs.ts`); no request blocks on it.
-- **Tests** live in `tests/<feature>/` (`auth`, `datacenter`, `labeling`, `models`, `visualizer`, `compare`, `ml`, `llm`, `storage`, `ui`, `bench`; see the README's Testing section); a new test goes in the folder of its feature. Shared fixtures stay in `tests/` (`conftest.py`, `conftest_io.py`, `authutil.py`, `vizutil.py`), and file names stay unique across folders. Run them with `pytest tests` against PostgreSQL (see `tests/conftest.py`).
+- **Tests** live in `tests/<feature>/` (`auth`, `datacenter`, `labeling`, `models`, `visualizer`, `compare`, `ml`, `llm`, `storage`, `ui`, `zones`, `bench`; see the README's Testing section); a new test goes in the folder of its feature. Shared fixtures stay in `tests/` (`conftest.py`, `conftest_io.py`, `authutil.py`, `vizutil.py`), and file names stay unique across folders. Run them with `pytest tests` against PostgreSQL (see `tests/conftest.py`).
 - **Design references** live in `design/` (rendered mockups and their sources).

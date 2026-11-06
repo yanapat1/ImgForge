@@ -1,9 +1,11 @@
 # `dataviz/server/routes/` — the JSON API, by area
 
-Each module exports `router(state, ctx) -> APIRouter`, included by `server/app.py`.
+Each module exports `router(state, ctx) -> APIRouter`. `dataviz/zones.py` (`ROUTES`) says which zone owns it, and `server/app.py` includes the modules of the zones this install has. A new route module needs a line there.
 
 | Module | Endpoints |
 |---|---|
+| `connections.py` | `/api/connections*` (the caller's saved connections: list, save, delete, test, browse), `/api/fs/browse` (allowed server folders) |
+| `session_data.py` | what one open visualizer session serves: `/api/settings`, `/api/workspace`, `/api/meta`, `/api/points` |
 | `system.py` | `GET /` (the page), `/plotly.min.js`, `/api/status` (startup polling, features ✓, active dataset + its index job), `GET/POST /api/settings` (remembered UI), `/api/jobs`, `/api/jobs/{id}`, `/api/meta`, `/api/points` (columnar, every box), `/api/workspace` |
 | `projections.py` | `/api/projections` (saved views), `/api/scores`, `POST /api/projection`, `POST /api/groups` |
 | `samples.py` | `/api/images` (background image names for the image browser), `/api/img/raw?name=` (the plain image), `/api/img/thumb?name=&size=` (boxes drawn, cached on disk), `/api/crop/{id}`, `/api/image/{id}` (full image with boxes drawn), `/api/sample/{id}`, `/api/similar/{id}`, `/api/duplicates`, `POST /api/distances`, `POST /api/export` (CSV), `GET/POST /api/tags` |
