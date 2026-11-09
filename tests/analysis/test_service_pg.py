@@ -316,3 +316,16 @@ def test_search_catalog_finds_by_description_and_never_dumps_all(an):
 def test_explain_for_the_model_is_short(an):
     got = an.s.explain_for_ai(an.user, an.sid, an.cid, an.db, 'SELECT * FROM public.orders a JOIN public.orders b ON a.id = b.id')
     assert got['top'] and size(got) <= 4000
+
+
+def test_a_forecast_reads_the_saved_result_and_the_model_gets_no_history(an):
+    from dataviz.analysis.service import AnalysisError
+    sql = ("SELECT d::date AS day, 100 + extract(dow FROM d) * 10 + extract(doy FROM d) AS v "
+           "FROM generate_series(DATE '2025-01-06', DATE '2025-06-30', INTERVAL '1 day') d")
+    res = go(an, sql)['results'][0]
+    f = an.s.forecast(an.user, res['id'], 'day', 'v', 'sum', 'auto', 7, None)
+    assert f['grain'] == 'day' and len(f['forecast']) == 7 and f['season'] == 7
+    ai = an.s.forecast_for_ai(an.user, rid(an, sql)['result_id'], 'day', 'v')
+    assert 'history' not in ai and ai['forecast'] and size(ai) <= 4000
+    with pytest.raises(AnalysisError):
+        an.s.forecast({'id': 'someone-else'}, res['id'], 'day', 'v')

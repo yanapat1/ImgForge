@@ -39,7 +39,17 @@ export interface Parsed extends Model { error?: string; statement?: string; loos
 
 export interface Profile { rows: number; columns: { name: string; type: string; numeric: boolean; nulls: number; null_pct: number; distinct: number; min: unknown; max: unknown; mean: number | null; note: string; hist: { counts: number[] } }[] }
 export interface TestResult { test: string; stat: { name: string; value: number; df?: number }; p: number; effect: { name: string; value: number; label: string }; groups?: { name: string; n: number; mean: number }[]; text: string }
-export interface Widget { id: string; kind: 'bar' | 'line' | 'table' | 'kpi' | 'text'; title: string; x: string; y: string; agg: string; span: number; text?: string }
+export interface ForecastPoint { t: string; yhat: number; lo80: number; hi80: number; lo95: number; hi95: number }
+export interface Forecast {
+  date: string; value: string | null; agg: string; grain: string; horizon: number; group: string | null;
+  history: { t: string; v: number }[]; forecast: ForecastPoint[]; model: { key: string; name: string }; season: number | null;
+  backtest: { steps: number; folds: number; mae: number; mase: number | null; baseline: string; baseline_mae: number | null; vs_baseline: number | null; models: { name: string; mae: number }[] };
+  anomalies: { t: string; value: number; expected: number; z: number; direction: 'high' | 'low' }[];
+  warnings: string[]; text: string;
+  groups: { name: string; model: string | null; next: number | null; ahead: number | null; recent: number | null; change_pct: number | null; note: string }[] | null;
+}
+export interface ForecastAsk { date: string; value?: string; agg?: string; grain?: string; horizon?: number | null; group?: string }
+export interface Widget { id: string; kind: 'bar' | 'line' | 'table' | 'kpi' | 'text' | 'forecast'; title: string; x: string; y: string; agg: string; span: number; text?: string }
 export interface Dashboard { id: string; name: string; layout: Widget[] }
 
 export interface Tab {
@@ -106,6 +116,7 @@ export const api = {
   suggest: async (rid: string) => (await getJSON<{ tests: { kind: string; a: string; b: string | null; label: string }[] }>(`${P}/results/${rid}/suggest`)).tests,
   quality: (rid: string) => getJSON<{ rows: number; checks: { rule: string; ok: boolean; rows: number }[] }>(`${P}/results/${rid}/quality`),
   pivot: (rid: string, row: string, col: string, value: string, agg: string) => getJSON<{ columns: string[]; rows: { name: string; cells: (number | string | null)[] }[] }>(`${P}/results/${rid}/pivot?${qs({ row, col, value, agg })}`),
+  forecast: (rid: string, ask: ForecastAsk) => postJSON<Forecast>(`${P}/results/${rid}/forecast`, ask),
   chart: (rid: string, x: string, y: string | null, agg: string, limit = 30) => getJSON<{ labels: string[]; values: number[] }>(`${P}/results/${rid}/chart?${qs({ x, y, agg, limit })}`),
   dashboards: () => getJSON<{ dashboards: Dashboard[] }>(`${P}/sessions/${A.sid}/dashboards`),
   saveDashboard: (d: Dashboard) => sendJSON('PUT', `${P}/sessions/${A.sid}/dashboards`, d),

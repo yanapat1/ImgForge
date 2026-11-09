@@ -1,5 +1,5 @@
 # Data Analysis (with core + datacenter): one SQL parser for T-SQL / PostgreSQL / DuckDB (safety gate, builder),
-# result files + fast statistics, MongoDB, statistic tests
+# result files + fast statistics, MongoDB, statistic tests and forecasts (scipy; the forecast models need no other library)
 sqlglot==30.29.0
 duckdb==2.0.0
 pyarrow==26.0.1

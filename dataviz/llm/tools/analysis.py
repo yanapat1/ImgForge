@@ -91,6 +91,12 @@ def _stat(ctx, a):
     return got, f'→ {got["test"]}'
 
 
+def _forecast(ctx, a):
+    got = _call(_svc().forecast_for_ai, ctx.user, a['result_id'], a['date'], a.get('value'), a.get('agg') or 'sum',
+                a.get('grain') or 'auto', a.get('horizon'), a.get('group'))
+    return got, f'→ {got.get("forecast_steps", 0)} {got.get("grain", "")}s ahead' if 'forecast' in got else '→ forecast'
+
+
 def _explain(ctx, a):
     cid, db = _target(ctx, a)
     got = _call(_svc().explain_for_ai, ctx.user, _sid(ctx), cid, db, a['sql'])
@@ -140,6 +146,15 @@ register(Tool('stat_test', 'A statistic test on a result, with its effect size a
               _obj({'result_id': S('from run_query'), 'kind': E('the test', ['ttest', 'mannwhitney', 'anova', 'chi2', 'pearson', 'spearman', 'normal']),
                     'a': S('value, or first column'), 'b': S('group, or second column'), 'group_a': S('ttest: one group'), 'group_b': S('ttest: the other')},
                    ['result_id', 'kind', 'a']), False, _stat, **_R))
+register(Tool('forecast', 'Forecast a measure of a result over time, from the saved file: a value per step (day, week, '
+                         '...) with an 80% and 95% range, the model that tested best on held-back history, its accuracy '
+                         'against repeating the past, warnings, unusual steps, and with group one forecast per group. '
+                         'Never the rows. Say the range and the warnings, not only the line.',
+              _obj({'result_id': S('from run_query'), 'date': S('the date or time column'),
+                    'value': S('the number column; empty = count rows'), 'agg': E('per step', ['sum', 'avg', 'count', 'min', 'max']),
+                    'grain': E('the step; auto picks one from the span of the dates', ['auto', 'hour', 'day', 'week', 'month', 'quarter', 'year']),
+                    'horizon': I('steps ahead; default 14 days, 8 weeks, 6 months ...'), 'group': S('a category column: one forecast per group (the 12 largest)')},
+                   ['result_id', 'date']), False, _forecast, **_R))
 register(Tool('explain_query', 'Where a read spends its effort: the costliest steps. Does not run the query.',
               _obj({'sql': S('the query'), **CONN}, ['sql']), False, _explain, **_R))
 register(Tool('set_column_description', 'Save what a column means, after the user told you. Stays in this app.',
@@ -153,6 +168,7 @@ register(Tool('set_editor_query', 'Page action: put a query in the SQL editor so
               _obj({'sql': S('the query')}, ['sql']), False, _ui_run, lambda b, a: 'Put this query in the editor', check=_ui_ok, **_U))
 register(Tool('build_dashboard', 'Page action: add charts from the last result to the dashboard.',
               _obj({'charts': {'type': 'array', 'description': 'the charts to add', 'items': {'type': 'object', 'properties': {
-                  'kind': E('chart', ['bar', 'line', 'table', 'kpi']), 'title': S('title'), 'x': S('column'), 'y': S('column'),
+                  'kind': E('chart; forecast = a line with its forecast band, x the date', ['bar', 'line', 'table', 'kpi', 'forecast']),
+                  'title': S('title'), 'x': S('column'), 'y': S('column'),
                   'agg': E('how', ['sum', 'avg', 'count', 'min', 'max'])}, 'required': ['kind', 'title']}}}, ['charts']),
               False, _ui_run, lambda b, a: f'Add {len(a.get("charts") or [])} charts', check=_ui_ok, **_U))

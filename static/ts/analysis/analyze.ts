@@ -1,12 +1,13 @@
-// Analyze: profile, statistic tests, data quality and pivot, all on the open tab's last result. Nothing here reaches the
+// Analyze: profile, statistic tests, data quality, pivot and forecast, all on the open tab's last result. Nothing here reaches the
 // user's database: the saved result is read on the server.
 
 import { errText } from '../core/api.js';
 import { $, $req, esc } from '../core/dom.js';
+import { F_ACTIONS, forecastSheet } from './forecast.js';
 import { api, tab } from './state.js';
 import type { ResultInfo, TestResult } from './state.js';
 
-const SHEETS = [['profile', 'Profile'], ['tests', 'Statistic tests'], ['quality', 'Data quality'], ['pivot', 'Pivot']] as const;
+const SHEETS = [['profile', 'Profile'], ['tests', 'Statistic tests'], ['quality', 'Data quality'], ['pivot', 'Pivot'], ['forecast', 'Forecast']] as const;
 type Sheet = typeof SHEETS[number][0];
 let sheet: Sheet = 'profile';
 const TESTS: [string, string, string, string][] = [
@@ -35,6 +36,7 @@ export async function renderAnalyze(): Promise<void> {
     if (sheet === 'profile') el.innerHTML = await profile(r);
     else if (sheet === 'tests') el.innerHTML = await tests(r);
     else if (sheet === 'quality') el.innerHTML = await quality(r);
+    else if (sheet === 'forecast') el.innerHTML = await forecastSheet(r);
     else el.innerHTML = pivotForm(r);
   } catch (e) { el.innerHTML = `<div class="an-hint notice bad"><span>${esc(errText(e))}</span></div>`; }
 }
@@ -71,6 +73,7 @@ function pivotForm(r: ResultInfo): string {
 const val = (id: string): string => ($(id) as HTMLSelectElement | null)?.value ?? '';
 
 export const A_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
+  ...F_ACTIONS,
   sheet: (el) => { sheet = el.dataset['k'] as Sheet; return renderAnalyze(); },
   'test-pick': async (el) => {
     form.kind = el.dataset['kind'] ?? 'ttest';

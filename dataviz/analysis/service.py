@@ -30,6 +30,7 @@ from .. import db
 from ..auth import audit, tiers
 from ..core import logging as vlog
 from . import adapters, classify, joins, querymodel, spool
+from . import forecast as forecast_mod
 from . import stats as stats_mod
 
 KINDS = ('postgres', 'mssql', 'mongo')
@@ -650,6 +651,11 @@ def chart(user, rid, x, y, agg, limit):
     return stats_mod.chart(_result(user, rid)['path'], x, y or None, agg or 'sum', limit)
 
 
+def forecast(user, rid, date, value=None, agg='sum', grain='auto', horizon=None, group=None):
+    """A measure over time, forecast ahead with its range, its tested accuracy and the unusual steps (forecast.py)."""
+    return forecast_mod.forecast(_result(user, rid)['path'], date, value or None, agg or 'sum', grain or 'auto', horizon, group or None)
+
+
 # ---------------------------------------------------------------- what the assistant sees
 def _ai_cfg(k, default):
     return int(_cfg().get(k, default))
@@ -661,7 +667,7 @@ def _cap(payload):
     text = orjson.dumps(payload, default=str)
     if len(text) <= limit:
         return payload
-    for key in ('rows', 'columns', 'tables', 'top', 'cells'):
+    for key in ('rows', 'columns', 'tables', 'top', 'cells', 'forecast', 'groups', 'anomalies'):
         items = payload.get(key)
         while isinstance(items, list) and len(items) > 1 and len(orjson.dumps(payload, default=str)) > limit:
             del items[max(1, len(items) * 3 // 4):]
@@ -804,6 +810,10 @@ def profile_for_ai(user, rid, column=None):
     p = profile(user, rid)
     cols = [c for c in p['columns'] if not column or c['name'] == column]
     return _cap({'rows': p['rows'], 'columns': [{k: _cell(c[k]) for k in ('name', 'type', 'nulls', 'distinct', 'min', 'max', 'mean', 'note')} for c in cols]})
+
+
+def forecast_for_ai(user, rid, date, value=None, agg='sum', grain='auto', horizon=None, group=None):
+    return _cap(forecast_mod.summary(forecast(user, rid, date, value, agg, grain, horizon, group)))
 
 
 def explain_for_ai(user, sid, cid, database, sql):

@@ -7,10 +7,11 @@ import { $, $req, esc } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { promptDialog } from '../views/dialog.js';
 import { currentResult } from './analyze.js';
+import { forecastSvg } from './forecast.js';
 import { api } from './state.js';
 import type { Dashboard, Widget } from './state.js';
 
-const KINDS: [Widget['kind'], string][] = [['bar', 'Bar'], ['line', 'Line'], ['table', 'Table'], ['kpi', 'KPI number'], ['text', 'Text box']];
+const KINDS: [Widget['kind'], string][] = [['bar', 'Bar'], ['line', 'Line'], ['forecast', 'Forecast'], ['table', 'Table'], ['kpi', 'KPI number'], ['text', 'Text box']];
 const D = { boards: [] as Dashboard[], cur: 0, sel: '' };
 
 const board = (): Dashboard | undefined => D.boards[D.cur];
@@ -51,6 +52,13 @@ async function fill(w: Widget): Promise<void> {
   }
   if (!w.x) { el.innerHTML = '<div class="faint">Drag a field onto this chart.</div>'; return; }
   if (!r.columns.includes(w.x)) { el.innerHTML = `<div class="faint">${esc(w.x)} is not in the last result. Drag another field here.</div>`; return; }
+  if (w.kind === 'forecast') {
+    try {
+      const f = await api.forecast(r.id, { date: w.x, value: w.y && r.columns.includes(w.y) ? w.y : '', agg: w.agg });
+      el.innerHTML = forecastSvg(f, true);
+    } catch (e) { el.innerHTML = `<div class="faint">${esc(errText(e))}</div>`; }
+    return;
+  }
   try {
     const c = await api.chart(r.id, w.x, w.y && r.columns.includes(w.y) ? w.y : null, w.agg);
     el.innerHTML = w.kind === 'table' ? `<table class="an-doc list-table"><tbody>${c.labels.map((l, i) => `<tr><td>${esc(l)}</td><td class="num">${esc((c.values[i] ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 }))}</td></tr>`).join('')}</tbody></table>` : chartSvg(w, c.labels, c.values);
@@ -69,7 +77,7 @@ export async function renderDash(reload = true): Promise<void> {
   w.innerHTML = `<div class="an-toolbar toolbar"><select id="an-d-pick" aria-label="Dashboard">${D.boards.map((x, i) => `<option value="${i}" ${i === D.cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select><button type="button" class="sm" data-act="d-rename">Rename</button><button type="button" class="sm" data-act="d-new">New dashboard</button><span class="grow"></span><button type="button" data-act="d-auto">Build from this result</button><button type="button" data-act="d-clear">Clear</button></div>` +
     `<div class="an-dash"><div class="an-dgrid" id="an-dgrid">${b.layout.map((x) => `<article class="an-w${x.id === D.sel ? ' on' : ''}" draggable="true" data-w="${esc(x.id)}" style="grid-column:span ${x.span};grid-row:span ${x.kind === 'kpi' || x.kind === 'text' ? 2 : 4}"><div class="an-wh" data-act="d-sel" data-id="${esc(x.id)}"><span class="lbl">${esc(x.title)}</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="d-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.title)}">×</button></div><div class="an-wb">${x.kind === 'text' ? `<textarea data-text="${esc(x.id)}" aria-label="Text box">${esc(x.text ?? '')}</textarea>` : '<div class="faint">Loading…</div>'}</div></article>`).join('') || '<div class="an-empty empty an-dempty">This space is blank. Add a tool on the right, or build a first draft from your last result.</div>'}</div>` +
     `<aside class="an-dside"><h4>Add to dashboard</h4><div class="an-tools">${KINDS.map(([k, n]) => `<button type="button" class="sm" data-act="d-add" data-k="${k}">${n}</button>`).join('')}</div><h4>Fields from your query</h4><div class="an-fields">${(r?.columns ?? []).map((c) => `<span class="an-fld chip" draggable="true" data-f="${esc(c)}">${esc(c)}</span>`).join('') || '<span class="faint">Run a query first.</span>'}</div>` +
-    (sel && sel.kind !== 'text' ? `<h4>${esc(sel.title)}</h4><label class="an-well" data-well="x"><span class="faint">X</span><b>${esc(sel.x || 'Drop a field')}</b></label><label class="an-well" data-well="y"><span class="faint">Y</span><b>${esc(sel.y || 'Row count')}</b></label><label>Using<select id="an-d-agg">${['sum', 'avg', 'min', 'max', 'count'].map((a) => `<option ${a === sel.agg ? 'selected' : ''}>${a}</option>`).join('')}</select></label><label>Width<select id="an-d-span">${[[4, 'Small'], [6, 'Half'], [12, 'Full']].map(([v, n]) => `<option value="${v}" ${sel.span === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>` : '') + '</aside></div>';
+    (sel && sel.kind !== 'text' ? `<h4>${esc(sel.title)}</h4><label class="an-well" data-well="x"><span class="faint">${sel.kind === 'forecast' ? 'Date' : 'X'}</span><b>${esc(sel.x || 'Drop a field')}</b></label><label class="an-well" data-well="y"><span class="faint">Y</span><b>${esc(sel.y || 'Row count')}</b></label><label>Using<select id="an-d-agg">${['sum', 'avg', 'min', 'max', 'count'].map((a) => `<option ${a === sel.agg ? 'selected' : ''}>${a}</option>`).join('')}</select></label><label>Width<select id="an-d-span">${[[4, 'Small'], [6, 'Half'], [12, 'Full']].map(([v, n]) => `<option value="${v}" ${sel.span === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>` : '') + '</aside></div>';
   await Promise.all(b.layout.map(fill));
 }
 
@@ -98,6 +106,8 @@ export const D_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     const when = cols.filter(([, c]) => /DATE|TIMESTAMP/.test(c.type)).map(([k]) => k);
     b.layout = [mk('kpi', 'Rows'), ...num.slice(0, 2).map((n) => mk('kpi', `Sum of ${n}`, { y: n, x: r.columns[0] ?? '' })),
       ...(when[0] ? [mk('line', `By ${when[0]}`, { x: when[0], y: num[0] ?? '' })] : []),
+      // a forecast needs 8 steps of history (analysis/forecast.py MIN_POINTS): fewer dates than that cannot give them
+      ...(when[0] && (st.columns[when[0]]?.distinct ?? 0) >= 8 ? [mk('forecast', `Forecast by ${when[0]}`, { x: when[0], y: num[0] ?? '' })] : []),
       ...cat.slice(0, 2).map((c) => mk('bar', `By ${c}`, { x: c, y: num[0] ?? '' }))];
     save();
     await renderDash(false);

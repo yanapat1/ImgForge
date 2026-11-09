@@ -138,6 +138,11 @@ def router(state, ctx):
     def chart(rid: str, x: str, y: str = '', agg: str = 'sum', limit: int = 30, user=me):
         return _call(service.chart, user, rid, x, y, agg, limit)
 
+    @r.post('/results/{rid}/forecast')
+    def forecast(rid: str, body: dict = Body(...), user=me):
+        return _call(service.forecast, user, rid, body.get('date'), body.get('value'), body.get('agg'), body.get('grain'),
+                     body.get('horizon'), body.get('group'))
+
     @r.get('/results/{rid}/export')
     def export(rid: str, user=me):
         return FileResponse(_call(service.result_path, user, rid), filename=f'result-{rid[:8]}.parquet',

@@ -46,7 +46,7 @@ CAN = {
     'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
               'curation, label errors, model runs + evaluation, compare',
     'analysis': 'Data Analysis (screen analysis): SQL and MongoDB queries on the user\'s databases, joins, statistics, '
-                'dashboards',
+                'forecasts, dashboards',
 }
 
 

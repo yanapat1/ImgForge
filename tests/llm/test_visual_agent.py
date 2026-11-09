@@ -327,7 +327,7 @@ def test_skills_name_only_real_tools():
     vocab = _vocab() | set(prompting.skills('data')) | args         # a tool's own argument names are fine too
     call = re.compile(r'^([a-z_][a-z0-9_]*)(\(.*\))?$')
     files = sorted((PROMPTS / 'skills').glob('*/*/SKILL.md'))
-    assert len(files) == 24
+    assert len(files) == 25
     for f in files:
         meta, body = prompting.front(f.read_text())
         assert meta['name'] == f.parent.name and meta['description'] and meta['when'], f
