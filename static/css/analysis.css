@@ -37,6 +37,36 @@ main.an-work { grid-template-columns: none; }
 .an-thead { padding: var(--s3) var(--s2) var(--s1); font-size: var(--fs-xs); color: var(--text-muted); }
 .an-tload { padding: var(--s2) var(--s3); color: var(--text-muted); font-size: var(--fs-sm); }
 
+/* a table row: the table button and its star; Favorites with its categories at the top */
+.an-trow { display: flex; align-items: center; min-width: 0; border-radius: var(--r); }
+.an-trow > .an-tn { flex: 1; }
+.an-trow:hover { background: var(--surface-2); }
+.an-trow > .an-tn:hover:not(:disabled) { background: none; }
+.an-star { flex: none; opacity: 0; color: var(--text-faint); }
+.an-trow:hover .an-star, .an-star:focus-visible, .an-star.on { opacity: 1; }
+.an-star.on { color: var(--highlight); }
+.an-fsec { padding-bottom: var(--s2); margin-bottom: var(--s2); border-bottom: 1px solid var(--border); }
+.an-fhead > .an-tn > .ico { color: var(--text-muted); }
+.an-fhead:first-child > .an-tn > .ico { color: var(--highlight); }
+.an-fmore { flex: none; opacity: 0; }
+.an-fhead:hover .an-fmore, .an-fmore:focus-visible, .an-fmore[aria-expanded="true"] { opacity: 1; }
+.an-fdrop.over { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.an-fmiss > .an-tn { cursor: default; color: var(--text-faint); }
+.an-fnote { margin: 0; padding: var(--s1) var(--s2) var(--s1) 34px; font-size: var(--fs-xs); }
+.an-menu { position: fixed; z-index: var(--z-popover); min-width: 220px; max-width: 320px; max-height: 70vh; overflow: auto; padding: 4px;
+  display: flex; flex-direction: column; gap: 1px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-3); font-size: var(--fs-sm); }
+.an-menu.hidden { display: none; }
+.an-menu > button { justify-content: flex-start; gap: 8px; background: none; border-color: transparent; height: 30px; font-weight: 500; min-width: 0; }
+.an-menu > button:hover:not(:disabled), .an-menu > button:focus-visible { background: var(--surface-3); }
+.an-menu > button.on { color: var(--accent-text); }
+.an-menu > button.danger { color: var(--danger-text); }
+.an-menu > button.danger .ico { color: var(--danger); }
+.an-menu .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.an-menu-h { padding: 6px 8px 2px; font-size: var(--fs-2xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.an-menu-note { padding: 2px 8px 4px; font-size: var(--fs-2xs); }
+.an-menu .sep { height: 1px; background: var(--border); margin: 4px 2px; flex: none; }
+
 /* ---------------------------------------------------------------- Query: tabs, toolbar, panes */
 .an-q { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .an-tabw { display: inline-flex; align-items: center; flex: none; gap: 1px; padding-right: 2px; border-radius: var(--r-md) var(--r-md) 0 0; }

@@ -18,6 +18,7 @@ import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
 import { addTable, builderContext, builderDown, builderKey, builderMove, builderUp, builderWheel, renderBuilder } from './builder.js';
 import { gridClick, gridFit, gridPointer } from './grid.js';
 import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout } from './query.js';
+import { F_ACTIONS, favDrop, favMenu, isFav, loadFavs, renderFavs } from './favorites.js';
 import { A, api, newTab, tableKey } from './state.js';
 import type { Tab, Workspace } from './state.js';
 
@@ -60,7 +61,7 @@ const hit = (t: { schema: string; name: string }): boolean => !A.filter || `${t.
 
 function renderTree(): void {
   const el = $req('an-explorer');
-  let h = '';
+  let h = renderFavs(hit);
   if (!A.sources.length) h = `<p class="an-empty empty">No database connection yet. Add a PostgreSQL, SQL Server or MongoDB connection in Settings.</p><button type="button" class="sm" data-act="settings-conn">Add connection</button>`;
   for (const s of A.sources) {
     const k = `c|${s.id}`;
@@ -96,12 +97,15 @@ function renderTree(): void {
   if (t) t.scrollTop = scroll;
 }
 
-function tableRow(conn: string, db: string, t: { schema: string; name: string; kind: string }): string {
+/** A table of the tree, or of Favorites (`pre` = its own open key for the columns, `label` = its own label). */
+export function tableRow(conn: string, db: string, t: { schema: string; name: string }, pad = 46, pre = 't', label?: string): string {
   const full = t.schema ? `${t.schema}.${t.name}` : t.name;
-  const k = tableKey(conn, db, t.schema, t.name);
-  const info = A.info.get(k);
-  return `<button type="button" class="an-tn" draggable="true" style="padding-left:46px" data-act="table" data-conn="${esc(conn)}" data-db="${esc(db)}" data-schema="${esc(t.schema)}" data-name="${esc(t.name)}" title="Click for its columns, double-click to query it">${tw(`t|${k}`)}<span class="lbl">${esc(full)}</span></button>` +
-    (A.open.has(`t|${k}`) ? (info ? info.columns.map((c) => `<div class="an-tcol" style="padding-left:66px" title="${esc(c.description)}"><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}<span class="faint an-n">${esc(c.type)}</span></div>`).join('') : '<div class="an-tload">Loading…</div>') : '');
+  const k = tableKey(conn, db, t.schema, t.name), ok = `${pre}|${k}`;
+  const info = A.info.get(k), on = isFav(k);
+  const data = `data-conn="${esc(conn)}" data-db="${esc(db)}" data-schema="${esc(t.schema)}" data-name="${esc(t.name)}"`;
+  return `<div class="an-trow"><button type="button" class="an-tn" draggable="true" style="padding-left:${pad}px" data-act="table" ${data} data-pre="${pre}" title="Click for its columns, double-click to query it, right-click for favorites">${tw(ok)}${label ?? `<span class="lbl">${esc(full)}</span>`}</button>` +
+    `<button type="button" class="icon-btn ghost xs an-star${on ? ' on' : ''}" data-act="fav" ${data} aria-pressed="${on}" aria-label="${on ? 'Remove from' : 'Add to'} favorites: ${esc(full)}" title="${on ? 'Remove from' : 'Add to'} favorites">${icon(on ? 'star-on' : 'star')}</button></div>` +
+    (A.open.has(ok) ? (info ? info.columns.map((c) => `<div class="an-tcol" style="padding-left:${pad + 20}px" title="${esc(c.description)}"><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}<span class="faint an-n">${esc(c.type)}</span></div>`).join('') : '<div class="an-tload">Loading…</div>') : '');
 }
 
 async function toggle(k: string): Promise<void> {
@@ -125,8 +129,8 @@ async function toggle(k: string): Promise<void> {
 }
 
 async function openTable(el: HTMLElement): Promise<void> {
-  const { conn = '', db = '', schema = '', name = '' } = el.dataset;
-  const key = tableKey(conn, db, schema, name), k = `t|${key}`;
+  const { conn = '', db = '', schema = '', name = '', pre = 't' } = el.dataset;
+  const key = tableKey(conn, db, schema, name), k = `${pre}|${key}`;
   if (A.open.has(k)) { A.open.delete(k); renderTree(); return; }
   A.open.add(k);
   renderTree();
@@ -209,6 +213,7 @@ const ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
     const c = A.catalog;
     if (c) queryTable({ dataset: { conn: c.conn, db: c.db, schema: c.schema, name: c.table } } as unknown as HTMLElement);
   },
+  ...F_ACTIONS,
   ...S_ACTIONS,
   ...A_ACTIONS,
   ...D_ACTIONS,
@@ -248,15 +253,34 @@ function bind(root: HTMLElement): void {
   document.addEventListener('pointerup', builderUp);
   document.addEventListener('contextmenu', builderContext);
   root.addEventListener('wheel', builderWheel, { passive: false });
+  // right-click (or the context-menu key) on a table of the Objects panel: its favorites menu
+  root.addEventListener('contextmenu', (e) => {
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>('#an-explorer [data-act="table"], #an-explorer .an-fmiss .an-star') : null;
+    if (!el) return;
+    e.preventDefault();
+    favMenu(el, e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : undefined);
+  });
   root.addEventListener('dragstart', (e) => {
     dashDrag(e);
     const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-act="table"]') : null;
     if (el) e.dataTransfer?.setData('text/an-table', JSON.stringify(el.dataset));
   });
-  root.addEventListener('dragover', (e) => { if ((e.target as Element).closest?.('#an-canvas, .an-w, .an-well')) e.preventDefault(); });
+  const dropAt = (e: DragEvent): HTMLElement | null =>
+    (e.dataTransfer?.types.includes('text/an-table') && e.target instanceof Element ? e.target.closest<HTMLElement>('.an-fdrop') : null);
+  const unmark = (): void => { document.querySelectorAll('.an-fdrop.over').forEach((x) => x.classList.remove('over')); };
+  root.addEventListener('dragover', (e) => {
+    const fd = dropAt(e);
+    if (fd) { e.preventDefault(); if (!fd.classList.contains('over')) { unmark(); fd.classList.add('over'); } return; }
+    unmark();
+    if ((e.target as Element).closest?.('#an-canvas, .an-w, .an-well')) e.preventDefault();
+  });
+  root.addEventListener('dragend', unmark);
   root.addEventListener('drop', (e) => {
+    unmark();
     if (dashDrop(e)) return;
     const raw = e.dataTransfer?.getData('text/an-table');
+    const fd = dropAt(e);
+    if (raw && fd) { e.preventDefault(); favDrop(JSON.parse(raw) as Record<string, string>, fd.dataset['g'] ?? ''); return; }
     if (!raw || !(e.target as Element).closest?.('#an-canvas')) return;
     e.preventDefault();
     const d = JSON.parse(raw) as Record<string, string>;
@@ -304,6 +328,7 @@ export async function start(): Promise<void> {
   try { Object.assign(A.layout, JSON.parse(localStorage.getItem('dataviz.analysis.layout') ?? '{}')); } catch { /* a convenience only */ }
   const [{ sources }, { sessions }] = await Promise.all([api.sources(), api.sessions()]);
   A.sources = sources;
+  loadFavs();
   const wanted = new URLSearchParams(location.search).get('analysis');
   const s = sessions.find((x) => x.id === wanted) ?? sessions[0] ?? await api.newSession('My analysis');
   A.sid = s.id;

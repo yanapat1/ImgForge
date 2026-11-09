@@ -478,3 +478,62 @@ def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
             browser.close()
     finally:
         fake.should_exit = True
+
+
+def test_favorites(server, target):  # noqa: F811
+    """Star a table, keep it across a reload, put it in a category, query it from there, then remove it all."""
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('response', lambda r: errors.append(f'{r.status} {r.url}') if r.status >= 400 and '/api/' in r.url else None)
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        fav = '.an-fsec .an-tn[data-act="table"]:has-text("public.orders")'
+        try:
+            page.wait_for_selector('.an-fsec .an-fnote', timeout=10000)          # empty Favorites says how to fill it
+            page.click('.an-tn:has-text("sales")')
+            page.click(f'.an-tn:has-text("{target["db"]}")')
+            page.wait_for_selector('.an-tn:has-text("public.orders")', timeout=10000)
+            tree_star = '.an-trow:has(.an-tn[data-pre="t"][data-name="orders"]) .an-star'
+            page.hover(f'.an-tn[data-pre="t"][data-name="orders"]')
+            page.click(tree_star)
+            page.wait_for_selector(fav)
+            assert page.locator(tree_star).get_attribute('aria-pressed') == 'true'
+
+            # kept in the user's prefs: back after a reload
+            page.wait_for_timeout(900)
+            page.reload()
+            page.wait_for_selector(fav, timeout=20000)
+
+            # a category from the right-click menu, the table goes into it
+            page.click(fav, button='right')
+            page.click('#an-fmenu [data-m="new"]')
+            page.fill('#ui-dlg-in', 'Sales')
+            page.click('.ui-dlg [data-dlg="ok"]')
+            page.wait_for_selector('.an-fhead[data-g="Sales"]:has-text("1")')
+            assert page.locator('.an-fhead[data-g="Sales"] + .an-trow .an-tn:has-text("public.orders")').count() == 1
+
+            # its columns open on their own (not in the tree), a double click queries it
+            page.click(fav)
+            page.wait_for_selector('.an-fsec .an-tcol:has-text("total")', timeout=10000)
+            page.dblclick(fav)
+            page.wait_for_selector('.an-tab.on:has-text("orders")')
+
+            # deleting the category keeps the table in Favorites, the star removes it
+            page.hover('.an-fhead[data-g="Sales"]')
+            page.click('.an-fhead[data-g="Sales"] [data-act="fav-gmenu"]')
+            page.click('#an-fmenu [data-m="delete"]')
+            page.wait_for_selector('.an-fhead[data-g="Sales"]', state='detached')
+            page.wait_for_selector(fav)
+            page.click('.an-fsec .an-trow:has(.an-tn[data-act="table"][data-name="orders"]) .an-star')
+            page.wait_for_selector(fav, state='detached')
+            page.wait_for_timeout(900)
+            page.reload()
+            page.wait_for_selector('.an-fsec .an-fnote', timeout=20000)
+        finally:   # the other tests share this user: leave no favorites behind
+            page.evaluate("fetch('api/me/prefs', {method: 'PUT', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'dataviz'}, body: JSON.stringify({prefs: {analysis_favorites: null}})})")
+            page.wait_for_timeout(300)
+            browser.close()
+    assert not errors, errors
