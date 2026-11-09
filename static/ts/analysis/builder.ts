@@ -45,7 +45,7 @@ function columnsOf(t: Tab, m: MTable): { name: string; type: string; key: string
 }
 
 async function needInfo(t: Tab, m: MTable): Promise<void> {
-  if (!t.conn || m.kind !== 'table' || m.name.startsWith('#')) return;
+  if (!t.conn || m.kind !== 'table' || !m.name || m.name.startsWith('#')) return;   // no name: a table function such as generate_series()
   const key = tableKey(t.conn, m.database || t.db || '', m.schema, m.name);
   if (A.info.has(key)) return;
   try { A.info.set(key, await api.describe(t.conn, m.database || t.db || '', m.schema, m.name)); } catch { /* the card shows the columns it knows */ }
