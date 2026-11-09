@@ -1,0 +1,107 @@
+/* The shared kit: parts every screen uses, shown live on the UI sheet (?ui, static/ts/ui/sheet.ts). A screen's own
+   stylesheet lays its page out with these; it does not restyle them. A new part goes here and onto the sheet first.
+   Buttons, inputs, selects, checkboxes, .segmented / .view-btn and .panel are in base.css; .pill, the header and the
+   activity bar in layout.css; .chip, .count-badge and .empty in components.css; .fld / input.txt in settings.css.
+   Tokens only (tokens.css), so every look and palette applies. */
+
+/* ---------------------------------------------------------------- header: brand link + page links */
+.app-header a.brand { color: inherit; text-decoration: none; }
+.hdr-nav { display: flex; gap: 2px; align-self: stretch; align-items: stretch; margin-left: calc(-1 * var(--s2)); }
+.hdr-nav a { display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--text-muted); font-weight: 650; font-size: var(--fs-sm);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; transition: color var(--t-fast) var(--ease); }
+.hdr-nav a .ico { color: var(--text-faint); }
+.hdr-nav a:hover { color: var(--text); }
+.hdr-nav a.on { color: var(--accent-text); border-bottom-color: var(--accent); }
+.hdr-nav a.on .ico { color: var(--accent); }
+.hdr-nav .count { font: 600 var(--fs-2xs) var(--mono); padding: 1px 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
+.hdr-nav .count:empty { display: none; }
+
+/* ---------------------------------------------------------------- tabs: a row of [role=tab] buttons */
+.tabbar { display: flex; gap: 2px; border-bottom: 1px solid var(--border-strong); overflow-x: auto; flex: none; }
+.tabbar [role=tab] { height: 40px; padding: 0 var(--s4) 0 var(--s3); gap: 8px; margin-bottom: -1px; border-radius: var(--r-md) var(--r-md) 0 0;
+  background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 650; }
+.tabbar [role=tab]:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; color: var(--text); }
+.tabbar [role=tab][aria-selected=true] { color: var(--accent-text); border-bottom-color: var(--accent); }
+.tabbar [role=tab][aria-selected=true] .ico { color: var(--accent); }
+.tabbar [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tabbar .count-badge { font-size: var(--fs-xs); font-weight: 650; }
+.tabbar .count-badge:empty { display: none; }
+/* inside a panel: lower, on the panel's surface, with room for small actions at the end */
+.tabbar.sm { align-items: center; padding: 0 var(--s2); background: var(--surface); border-bottom-color: var(--border); }
+.tabbar.sm [role=tab] { height: 34px; padding: 0 var(--s3); font-size: var(--fs-sm); }
+.tabbar .grow { flex: 1; }
+
+/* ---------------------------------------------------------------- toolbar: a row of controls above a pane */
+.toolbar { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-wrap: wrap; flex: none; min-width: 0; }
+.toolbar .grow { flex: 1; }
+.toolbar .sep { width: 1px; align-self: stretch; margin: 2px var(--s1); background: var(--border); }
+
+/* ---------------------------------------------------------------- buttons: compact size, small icon button */
+button.danger-btn { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 650; }
+button.danger-btn .ico { color: var(--on-danger); }
+button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); filter: brightness(1.08); }
+button.sm { height: 26px; padding: 0 var(--s2); gap: 5px; font-size: var(--fs-xs); }
+button.sm .ico { width: 14px; height: 14px; }
+.icon-btn.xs { width: 22px; height: 22px; min-height: 0; padding: 0; font-size: var(--fs-sm); }
+.icon-btn.xs .ico { width: 13px; height: 13px; }
+
+/* ---------------------------------------------------------------- small labels */
+/* a source or kind in a few letters (MS, PG, temp ...): coloured by tone, readable without colour */
+.badge { display: inline-flex; align-items: center; flex: none; padding: 1px 5px; border: 1px solid currentColor; border-radius: var(--r-sm);
+  font: 600 var(--fs-2xs)/1.3 var(--mono); letter-spacing: .03em; color: var(--text-muted); white-space: nowrap; }
+.badge.accent { color: var(--accent-text); }
+.badge.ok { color: var(--ok-text); }
+.badge.warn { color: var(--highlight); }
+.badge.danger { color: var(--danger-text); }
+.badge.alt { color: var(--err-fp); }
+.badge.dashed { border-style: dashed; }
+.badge.solid { border-color: transparent; background: var(--surface-3); }
+.badge.solid.warn { background: var(--highlight-soft); }
+.badge.solid.danger { background: var(--danger-soft); }
+.pill.warn { background: var(--highlight-soft); border-color: transparent; color: var(--highlight); }
+.pill.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok-text); }
+
+/* ---------------------------------------------------------------- one-line feedback */
+.status-line { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); min-height: 22px; color: var(--text-muted); }
+.status-line.ok { color: var(--ok-text); }
+.status-line.err { color: var(--danger-text); }
+.status-line .ico { width: 15px; height: 15px; }
+.hintline { font-size: var(--fs-xs); color: var(--text-faint); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
+.hintline .ico { width: 13px; height: 13px; }
+/* a notice box: something to act on (out of date, a fix to apply, a failure), with its action at the end */
+.notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); padding: var(--s2) var(--s3); border-radius: var(--r);
+  background: var(--highlight-soft); color: var(--text); font-size: var(--fs-sm); flex: none; }
+.notice.bad { background: var(--danger-soft); }
+.notice.info { background: var(--accent-soft); }
+
+/* ---------------------------------------------------------------- numbers: a strip of totals */
+.stat-strip { display: flex; flex-wrap: wrap; gap: var(--s5); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border);
+  font-size: var(--fs-2xs); color: var(--text-faint); flex: none; }
+.stat-strip b { display: block; font: 650 var(--fs-lg) var(--font); color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- tables: .class-table (layout.css) for short lists,
+   .data-grid for long results (fixed columns, sticky header, resizable) */
+.data-grid { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
+.data-grid th, .data-grid td { padding: 0 var(--s2); height: 28px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.data-grid th { position: sticky; top: 0; z-index: 2; height: 32px; background: var(--surface); color: var(--text-muted); font-weight: 600;
+  border-bottom-color: var(--border-strong); }
+.data-grid tbody tr:hover td { background: var(--surface-2); }
+.data-grid td.n { text-align: right; font-family: var(--mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.data-grid td.null { color: var(--text-faint); font-style: italic; }
+.data-grid td.cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---------------------------------------------------------------- a simple list table (descriptions, history, rules) */
+.list-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.list-table th { padding: var(--s2); text-align: left; font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted);
+  border-bottom: 1px solid var(--border-strong); }
+.list-table td { padding: 6px var(--s2); border-bottom: 1px solid var(--border); vertical-align: top; }
+.list-table tr[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- a tile: a titled box of content on a grid */
+.tile { padding: var(--s3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); font-size: var(--fs-sm); min-width: 0; }
+.tile h4 { margin: 0 0 var(--s1); font-size: var(--fs-sm); font-weight: 650; display: flex; align-items: center; gap: var(--s2); }
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s3); }
+.sec-title { margin: 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.01em; }
+.sec-label { margin: var(--s4) 0 var(--s2); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }

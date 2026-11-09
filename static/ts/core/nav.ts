@@ -44,6 +44,8 @@ export function dataUrl(bucket?: string | null, path?: string | null): string {
 
 /** The sign-in page; `next` (a path of this app) is where it goes after signing in. */
 export const analysisUrl = (session?: string): string => `${appRoot()}?analysis${session ? `=${encodeURIComponent(session)}` : ''}`;
+/** The UI sheet: every shared part of the page, drawn live (ui/sheet.ts). */
+export const uiUrl = (): string => `${appRoot()}?ui`;
 export const loginUrl = (next?: string): string => `${appRoot()}login${next ? `?next=${encodeURIComponent(next)}` : ''}`;
 
 export const onLoginPage = (): boolean => LOGIN_PATH.test(location.pathname);

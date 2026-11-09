@@ -84,10 +84,6 @@
 /* .fld.mono: only the typed value is monospace, the caption keeps the UI font (the global .mono would turn it mono) */
 .fld.mono { font-family: var(--font); }
 .fld.mono input, .fld.mono textarea, .fld input.mono, input.txt.mono { font-family: var(--mono); font-size: var(--fs-xs); }
-.status-line { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); min-height: 22px; color: var(--text-muted); }
-.status-line.ok { color: var(--ok-text); }
-.status-line.err { color: var(--danger-text); }
-.status-line .ico { width: 15px; height: 15px; }
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent);
   animation: spin .7s linear infinite; flex: none; }
 

@@ -34,7 +34,8 @@
   var label = !login && !viz && /[?&]label=[^&]/.test(location.search);
   var data = !login && !viz && !label && /[?&]data(=|&|$)/.test(location.search);
   var analysis = !login && !viz && !label && !data && /[?&]analysis(=|&|$)/.test(location.search);
-  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : data ? 'data' : analysis ? 'analysis' : 'home');
+  var ui = !login && !viz && !label && !data && !analysis && /[?&]ui(=|&|$)/.test(location.search);
+  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : data ? 'data' : analysis ? 'analysis' : ui ? 'ui' : 'home');
   var me = document.currentScript instanceof HTMLScriptElement ? document.currentScript.src : '';
   var base = me || document.baseURI;
   var url = function (rel: string): string { try { return new URL(rel, base).href; } catch (e) { return rel; } };

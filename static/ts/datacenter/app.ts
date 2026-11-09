@@ -6,14 +6,15 @@
 // actions), the keyboard (/ search, Delete, F2 rename, Ctrl+A, Esc) and the loads (buckets, summary, tags).
 
 import { errText } from '../core/api.js';
-import { hasSessions, pref, zoneOn } from '../core/auth.js';
-import { $, $req, esc, icon, ICONS } from '../core/dom.js';
-import { analysisUrl, dataUrl, homeUrl } from '../core/nav.js';
+import { pref } from '../core/auth.js';
+import { $, $req, icon } from '../core/dom.js';
+import { dataUrl } from '../core/nav.js';
 import { closeFloat } from '../core/popover.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { openSettings } from '../settings/dialog.js';
 import { toast } from '../core/toast.js';
 import { mountUserMenu } from '../views/usermenu.js';
+import { appHeader } from '../core/header.js';
 import * as api from './api.js';
 import { ACTIVITY_ACTIONS, watchJobs } from './activity.js';
 import { AI_ACTIONS, aiScopeChanged, bindAi, renderAi } from './ai.js';
@@ -42,28 +43,9 @@ export type Action = (el: HTMLElement, ev: Event) => void;
 const ACTIONS: Record<string, Action> = {};
 
 const SKELETON = (): string => `
-<header class="app-header dc-header">
-  <a class="brand" href="${esc(hasSessions() ? homeUrl() : dataUrl())}" aria-label="Dataset Visualizer: Sessions">
-    <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg>
-    <h1>Dataset Visualizer</h1>
-  </a>
-  <nav class="hdr-nav" aria-label="Pages">
-    ${hasSessions() ? `<a href="${esc(homeUrl())}">${icon('layers')}Sessions</a>` : ''}
-    <a class="on" href="${esc(dataUrl())}" aria-current="page">${icon('db')}Data<span id="dc-nav-n" class="count num"></span></a>
-    ${zoneOn('analysis') ? `<a href="${esc(analysisUrl())}">${icon('search')}Analysis</a>` : ''}
-  </nav>
-  <span class="grow"></span>
-  <div class="dc-hsearch" role="search">
-    ${icon('search')}<input id="dc-q" type="search" placeholder="Search files, folders, tags…" aria-label="Search files, folders and tags" autocomplete="off" spellcheck="false">
-    <kbd aria-hidden="true">/</kbd>
-  </div>
-  <div id="dc-hactions" class="header-actions">
-    <button type="button" class="icon-btn ghost dc-only-narrow" data-act="toggle-tree" aria-label="Show the bucket tree" title="Buckets">${icon('list')}</button>
-    <button type="button" class="icon-btn ghost" data-act="settings" aria-label="Settings: connections, labeling, appearance" title="Settings">${icon('gear')}</button>
-    <button type="button" class="icon-btn ghost" data-act="theme" aria-label="Switch light / dark theme" title="Switch light / dark theme">
-      <svg class="ico only-dark" aria-hidden="true"><use href="${ICONS}#i-sun"/></svg><svg class="ico only-light" aria-hidden="true"><use href="${ICONS}#i-moon"/></svg></button>
-  </div>
-</header>
+${appHeader({ page: 'data', cls: 'dc-header', actionsId: 'dc-hactions',
+    middle: `<div class="dc-hsearch" role="search">${icon('search')}<input id="dc-q" type="search" placeholder="Search files, folders, tags…" aria-label="Search files, folders and tags" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">/</kbd></div>`,
+    actions: `<button type="button" class="icon-btn ghost dc-only-narrow" data-act="toggle-tree" aria-label="Show the bucket tree" title="Buckets">${icon('list')}</button>` })}
 <div id="dc-activity" class="dc-activity hidden" role="status" aria-live="polite" aria-label="Running jobs"></div>
 <div id="dc-app" class="dc-app">
   <aside id="dc-tree" class="dc-tree" aria-label="Buckets and folders"></aside>

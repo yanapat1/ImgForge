@@ -1,0 +1,36 @@
+/* The UI sheet page (?ui, static/ts/ui/sheet.ts): only its own frame. The parts it shows are styled by kit.css and
+   the other shared stylesheets, never here. */
+html:not([data-screen=ui]) #ui-sheet { display: none; }
+#ui-sheet { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+.ui-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+.ui-toc { display: flex; flex-direction: column; gap: 2px; padding: var(--s3); overflow: auto; border-right: 1px solid var(--border); background: var(--surface); }
+.ui-toc a { padding: 6px var(--s2); border-radius: var(--r); color: var(--text-muted); font-size: var(--fs-sm); text-decoration: none; }
+.ui-toc a:hover { background: var(--surface-2); color: var(--text); }
+.ui-main { display: block; overflow: auto; padding: 0 0 var(--s6); }
+.ui-switch { position: sticky; top: 0; z-index: 5; }
+.ui-intro { max-width: 70ch; margin: var(--s4) var(--s6); }
+.ui-part { margin: var(--s6); padding-bottom: var(--s6); border-bottom: 1px solid var(--border); display: grid; gap: var(--s2); max-width: 1100px; }
+.ui-part > p { max-width: 75ch; margin: 0; }
+.ui-classes { display: flex; flex-wrap: wrap; gap: 4px; }
+.ui-classes code, .ui-fs code, .ui-sp code, .ui-r code, .ui-sw code { font: var(--fs-2xs) var(--mono); padding: 1px 5px; border-radius: var(--r-sm); background: var(--surface-3); color: var(--text-muted); }
+.ui-demo { display: grid; gap: var(--s3); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); min-width: 0; }
+.ui-row { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.ui-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s3); align-items: end; }
+.ui-frame { border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.ui-rail { height: 300px; width: var(--activity-w); border: 1px solid var(--border); border-radius: var(--r); }
+.ui-side { display: flex; flex-direction: column; width: 280px; height: 200px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.ui-scroll { overflow-x: auto; }
+.ui-fs { padding: 4px 0; }
+.ui-sp { display: flex; align-items: center; gap: var(--s3); }
+.ui-sp i { display: block; height: 12px; background: var(--accent); border-radius: 2px; }
+.ui-r { width: 110px; height: 64px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--border); }
+.ui-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--s2); }
+.ui-sw { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.ui-sw i { width: 28px; height: 28px; flex: none; border-radius: var(--r); border: 1px solid var(--border-strong); }
+.ui-val { font: var(--fs-2xs) var(--mono); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  #ui-sheet { position: static; display: block; min-height: 100%; }
+  .ui-body { display: block; }
+  .ui-toc { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); }
+  .ui-part, .ui-intro { margin: var(--s4); }
+}

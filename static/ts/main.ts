@@ -23,6 +23,7 @@ const SESSION = SCREEN === 'viz' ? sessionIdFromPath() : null;
 const LABEL = SCREEN === 'label' ? new URLSearchParams(location.search).get('label') : null;
 const DATA = SCREEN === 'data';
 const ANALYSIS = SCREEN === 'analysis';
+const SHEET = SCREEN === 'ui';
 
 // still loading after 10 s / 30 s: say so, then offer the way out (the overlay itself only appears after 300 ms)
 function slowHints(): { stop: () => void } {
@@ -58,7 +59,7 @@ async function boot(): Promise<void> {
   initLLM();                                   // ◆ AI features: hidden until the server says they are usable
   // the user menu: the home's header here, the visualizer's activity bar; the label page mounts its own (label/app.js)
   const homeActions = document.querySelector<HTMLElement>('#home .header-actions');
-  if (!SESSION && !LABEL && !DATA && !ANALYSIS && homeActions) mountUserMenu(homeActions);
+  if (!SESSION && !LABEL && !DATA && !ANALYSIS && !SHEET && homeActions) mountUserMenu(homeActions);
   const navS = $<HTMLAnchorElement>('home-nav-sessions'), navD = $<HTMLAnchorElement>('home-nav-data');
   if (navS) navS.href = homeUrl();
   if (navD) navD.href = dataUrl();
@@ -69,7 +70,7 @@ async function boot(): Promise<void> {
   }
   // the labeling page loads its own code on demand: the home and the visualizer never download it
   if (LABEL) initPageDock('label', LABEL);      // ◆ the right-side dock (the Data assistant)
-  else if (!SESSION && !DATA && !ANALYSIS) initPageDock('home');
+  else if (!SESSION && !DATA && !ANALYSIS && !SHEET) initPageDock('home');
   if (LABEL) { import('./label/app.js').then((m) => m.start(LABEL)).catch((e: unknown) => {
     $req('label').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the labeling page: ${esc(errText(e))}</div>`;
   }); return; }
@@ -79,6 +80,9 @@ async function boot(): Promise<void> {
   }); return; }
   if (ANALYSIS) { import('./analysis/app.js').then((m) => m.start()).catch((e: unknown) => {
     $req('analysis').innerHTML = `<div class="status-line err">${icon('alert')}Could not load Data Analysis: ${esc(errText(e))}</div>`;
+  }); return; }
+  if (SHEET) { import('./ui/sheet.js').then((m) => m.start()).catch((e: unknown) => {
+    $req('ui-sheet').innerHTML = `<div class="status-line err">${icon('alert')}Could not load the UI sheet: ${esc(errText(e))}</div>`;
   }); return; }
   if (!SESSION && !hasSessions()) { location.replace(dataUrl()); return; }   // an install without sessions opens on its data
   if (!SESSION) { void renderHome(); return; }      // the first page: no Plotly, no job polling

@@ -29,15 +29,7 @@ button.big { height: 40px; padding: 0 var(--s5); font-size: var(--fs); border-ra
 .home-status .status-line button { margin-left: var(--s2); }
 
 /* ---------------------------------------------------------------- tabs: Visualize (n) · Label (n) */
-.home-tabs { display: flex; gap: 2px; margin-bottom: var(--s4); border-bottom: 1px solid var(--border-strong); }
-.home-tabs [role=tab] { height: 40px; padding: 0 var(--s4) 0 var(--s3); gap: 8px; margin-bottom: -1px; border-radius: var(--r-md) var(--r-md) 0 0;
-  background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 650; }
-.home-tabs [role=tab]:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; color: var(--text); }
-.home-tabs [role=tab][aria-selected=true] { color: var(--accent-text); border-bottom-color: var(--accent); }
-.home-tabs [role=tab][aria-selected=true] .ico { color: var(--accent); }
-.home-tabs [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.home-tabs .count-badge { font-size: var(--fs-xs); font-weight: 650; }
-.home-tabs .count-badge:empty { display: none; }
+.home-tabs { margin-bottom: var(--s4); }          /* the tabs themselves: .tabbar (kit.css) */
 
 /* ---------------------------------------------------------------- find: name search + tag filter (current tab) */
 .home-filter { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s2) var(--s4); margin: -4px 0 var(--s4); }
@@ -268,8 +260,6 @@ body.home-opening .session-card:not(.opening) { opacity: .6; }
 .lp-more { font-size: var(--fs-xs); color: var(--text-faint); }
 
 /* ---------------------------------------------------------------- small confirm dialog */
-button.danger-btn { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 650; }
-button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); filter: brightness(1.08); }
 
 /* ---------------------------------------------------------------- labeling session wizard (#lw, views/label-new.js) */
 .lw-box { width: min(860px, 100%); height: min(720px, 100%); display: flex; flex-direction: column; overflow: hidden; padding: 0;

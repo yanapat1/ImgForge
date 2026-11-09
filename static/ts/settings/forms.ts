@@ -3,6 +3,7 @@
 import { getJSON } from '../core/api.js';
 import { can, cannot } from '../core/auth.js';
 import { $req, esc, icon } from '../core/dom.js';
+import { uiUrl } from '../core/nav.js';
 import { tagFieldHTML, tagState } from '../core/tag-field.js';
 import { lookName, PALETTES, paletteName, themeMode, THEME } from '../core/theme.js';
 import type { PaletteSpec } from '../core/theme.js';
@@ -700,7 +701,8 @@ export function renderAppearanceSec(): string {
     choice('dark', 'Dark', 'moon') + '</div><h3 class="sec-sub">Palette</h3>' + palGroups +
     '<p class="sec-note">Colour-blind safe and High contrast also replace the class and error colours with the Okabe-Ito set (no red-green pairs). ' +
     'Class colours switch to a darker set in the light theme ' +
-    '(config.yaml <code>ui.palette_light</code>) so every class stays readable on the white plot.</p></section>';
+    '(config.yaml <code>ui.palette_light</code>) so every class stays readable on the white plot.</p>' +
+    `<h3 class="sec-sub">UI sheet</h3><p class="sec-note"><a href="${esc(uiUrl())}">Open the UI sheet</a>: every shared part of the page (header, buttons, inputs, tabs, tables, dialogs, colours), drawn live in the current style.</p></section>`;
 }
 
 export function renderPlotSec(): string {
