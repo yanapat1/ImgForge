@@ -19,7 +19,7 @@ import { addTable, builderContext, builderDown, builderKey, builderMove, builder
 import { gridClick, gridFit, gridPointer } from './grid.js';
 import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout } from './query.js';
 import { F_ACTIONS, favDrop, favMenu, isFav, loadFavs, renderFavs } from './favorites.js';
-import { A, api, newTab, tableKey } from './state.js';
+import { A, api, clampExp, EXP_MIN, EXP_W, expMax, newTab, tableKey } from './state.js';
 import type { Tab, Workspace } from './state.js';
 
 const WS: [Workspace, string, string][] = [
@@ -36,7 +36,8 @@ export function render(): void {
   if (!root.querySelector('.an-main')) {
     // the same header as every page (core/header.ts); the session name sits after the links, like the visualizer's dataset
     root.innerHTML = appHeader({ page: 'analysis', cls: 'an-header', actionsId: 'an-hact' }).replace('<span class="grow"></span>', '<div class="ds-info"><span class="pill name"><b id="an-sess"></b></span></div>') +
-      `<div class="an-main"><nav class="an-rail activity-bar" id="an-rail" aria-label="Workspaces"></nav><aside class="an-explorer left-panel" id="an-explorer" aria-label="Object explorer"></aside><main class="an-work" id="an-work"></main></div>`;
+      `<div class="an-main"><nav class="an-rail activity-bar" id="an-rail" aria-label="Workspaces"></nav><aside class="an-explorer left-panel" id="an-explorer" aria-label="Object explorer"></aside><main class="an-work" id="an-work"></main>` +
+      `<div class="an-expsz" data-sp="e" role="separator" aria-orientation="vertical" aria-controls="an-explorer" aria-label="Objects panel width" aria-valuemin="${EXP_MIN}" tabindex="0" title="Drag to resize · double-click: fit the longest name"></div></div>`;
     mountUserMenu($req('an-hact'));
   }
   $req('an-sess').textContent = A.name;
@@ -44,6 +45,10 @@ export function render(): void {
     `<button type="button" class="act an-rail-end${A.explorer ? ' active' : ''}" data-act="explorer" aria-pressed="${A.explorer}" aria-label="Object explorer" title="${A.explorer ? 'Close' : 'Open'} object explorer">${icon('layers')}</button>`;
   const main = document.querySelector<HTMLElement>('.an-main');
   main?.classList.toggle('noexp', !A.explorer);
+  main?.style.setProperty('--an-exp', `${clampExp(A.layout.exp)}px`);
+  const sz = document.querySelector('.an-expsz');
+  sz?.setAttribute('aria-valuenow', String(clampExp(A.layout.exp)));
+  sz?.setAttribute('aria-valuemax', String(expMax()));
   renderTree();
   if (A.ws === 'query') renderQuery();
   else if (A.ws === 'history') void renderHistory();
@@ -103,7 +108,7 @@ export function tableRow(conn: string, db: string, t: { schema: string; name: st
   const k = tableKey(conn, db, t.schema, t.name), ok = `${pre}|${k}`;
   const info = A.info.get(k), on = isFav(k);
   const data = `data-conn="${esc(conn)}" data-db="${esc(db)}" data-schema="${esc(t.schema)}" data-name="${esc(t.name)}"`;
-  return `<div class="an-trow"><button type="button" class="an-tn" draggable="true" style="padding-left:${pad}px" data-act="table" ${data} data-pre="${pre}" title="Click for its columns, double-click to query it, right-click for favorites">${tw(ok)}${label ?? `<span class="lbl">${esc(full)}</span>`}</button>` +
+  return `<div class="an-trow"><button type="button" class="an-tn" draggable="true" style="padding-left:${pad}px" data-act="table" ${data} data-pre="${pre}" title="${esc(db ? `${db} · ${full}` : full)}&#10;Click for its columns, double-click to query it, right-click for favorites">${tw(ok)}${label ?? `<span class="lbl">${esc(full)}</span>`}</button>` +
     `<button type="button" class="icon-btn ghost xs an-star${on ? ' on' : ''}" data-act="fav" ${data} aria-pressed="${on}" aria-label="${on ? 'Remove from' : 'Add to'} favorites: ${esc(full)}" title="${on ? 'Remove from' : 'Add to'} favorites">${icon(on ? 'star-on' : 'star')}</button></div>` +
     (A.open.has(ok) ? (info ? info.columns.map((c) => `<div class="an-tcol" style="padding-left:${pad + 20}px" title="${esc(c.description)}"><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}<span class="faint an-n">${esc(c.type)}</span></div>`).join('') : '<div class="an-tload">Loading…</div>') : '');
 }
@@ -151,6 +156,47 @@ export function queryTable(el: HTMLElement): void {
   A.ws = 'query';
   render();
   saveTabs();
+}
+
+// ---------------------------------------------------------------- the Objects panel's width
+/** Set the width now (a CSS variable on .an-main: no re-render), clamped. */
+function setExplorer(px: number): void {
+  A.layout.exp = clampExp(px);
+  document.querySelector<HTMLElement>('.an-main')?.style.setProperty('--an-exp', `${A.layout.exp}px`);
+  document.querySelector('.an-expsz')?.setAttribute('aria-valuenow', String(A.layout.exp));
+}
+
+function dragExplorer(e: PointerEvent, handle: HTMLElement): void {
+  const x0 = e.clientX, w0 = A.layout.exp;
+  handle.classList.add('on');
+  document.documentElement.classList.add('an-resizing');
+  let raf = 0, x = x0;
+  const move = (m: PointerEvent): void => {
+    x = m.clientX;
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; setExplorer(w0 + x - x0); });     // one layout per frame
+  };
+  const up = (): void => {
+    cancelAnimationFrame(raf);
+    setExplorer(w0 + x - x0);
+    handle.classList.remove('on');
+    document.documentElement.classList.remove('an-resizing');
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    saveLayout();
+    if (A.ws === 'query') renderBuilder();
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+}
+
+/** Widen (or narrow) the panel to the longest name shown: one read pass over the labels, then one write. */
+function fitExplorer(): void {
+  let over = -Infinity;
+  for (const l of document.querySelectorAll<HTMLElement>('#an-explorer .an-tree .lbl')) over = Math.max(over, l.scrollWidth - l.clientWidth);
+  if (over === -Infinity) return;
+  setExplorer(A.layout.exp + over + 8);
+  saveLayout();
+  if (A.ws === 'query') renderBuilder();
 }
 
 // ---------------------------------------------------------------- history
@@ -231,6 +277,7 @@ function bind(root: HTMLElement): void {
   });
   root.addEventListener('dblclick', (e) => {
     const t = e.target instanceof Element ? e.target : null;
+    if (t?.closest('.an-expsz')) { fitExplorer(); return; }
     if (t) gridFit(t);
   });
   root.addEventListener('pointerdown', (e) => {
@@ -238,6 +285,7 @@ function bind(root: HTMLElement): void {
     const sp = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-sp]') : null;
     if (!sp) return;
     e.preventDefault();
+    if (sp.dataset['sp'] === 'e') { dragExplorer(e, sp); return; }
     const dir = sp.dataset['sp'], box = document.getElementById(dir === 'h' ? 'an-qbody' : 'an-pair')?.getBoundingClientRect();
     if (!box) return;
     const move = (m: PointerEvent): void => {
@@ -314,6 +362,16 @@ function bind(root: HTMLElement): void {
     e.stopPropagation();
     void runQuery().catch((err: unknown) => toast(errText(err), 'err'));
   }, true);
+  root.addEventListener('keydown', (e) => {
+    if (!(e.target instanceof HTMLElement) || !e.target.classList.contains('an-expsz')) return;
+    const d = ({ ArrowLeft: -20, ArrowRight: 20 } as Record<string, number>)[e.key];
+    if (d) setExplorer(A.layout.exp + (e.shiftKey ? d * 4 : d));
+    else if (e.key === 'Home') setExplorer(EXP_W);
+    else if (e.key === 'Enter') fitExplorer();
+    else return;
+    e.preventDefault();
+    saveLayout();
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && A.layout.max) { A.layout.max = ''; applyLayout(); return; }
     if (A.ws === 'query' && builderKey(e)) return;

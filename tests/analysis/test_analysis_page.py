@@ -548,3 +548,54 @@ def test_favorites(server, target):  # noqa: F811
             page.wait_for_timeout(300)
             browser.close()
     assert not errors, errors
+
+
+def test_objects_panel_resizes(server, target):  # noqa: F811
+    """Drag the Objects panel's edge to see long names; it is remembered; a double-click fits the longest name."""
+    long = 'customer_lifetime_value_by_region_and_quarter_snapshot'
+    with psycopg.connect(target['url'], autocommit=True) as c:
+        c.execute(f'CREATE TABLE IF NOT EXISTS public.{long} (id int)')
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.evaluate("localStorage.removeItem('dataviz.analysis.layout')")
+        page.reload()
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        row = page.locator(f'.an-tn[data-name="{long}"]')
+        row.wait_for(timeout=10000)
+        assert f'public.{long}' in row.get_attribute('title')                      # the full name on hover
+        lbl = row.locator('.lbl')
+        assert lbl.evaluate('l => l.scrollWidth > l.clientWidth')                    # cut at the default width
+        w0 = page.locator('#an-explorer').bounding_box()['width']
+
+        h = page.locator('.an-expsz').bounding_box()
+        page.mouse.move(h['x'] + 3, h['y'] + 300)
+        page.mouse.down()
+        page.mouse.move(h['x'] + 103, h['y'] + 300, steps=5)
+        page.mouse.up()
+        w1 = page.locator('#an-explorer').bounding_box()['width']
+        assert abs(w1 - (w0 + 100)) <= 2, (w0, w1)
+        work = page.locator('.an-work').bounding_box()
+        assert work['x'] >= page.locator('#an-explorer').bounding_box()['x'] + w1 - 1  # the work area moved over
+
+        page.reload()                                                                 # remembered
+        page.wait_for_selector('.an-main .an-expsz', timeout=20000)
+        assert abs(page.locator('#an-explorer').bounding_box()['width'] - w1) <= 2
+
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        row.wait_for(timeout=10000)
+        page.dblclick('.an-expsz')
+        page.wait_for_timeout(100)
+        assert lbl.evaluate('l => l.scrollWidth <= l.clientWidth')                   # fits: the whole name shows
+        page.focus('.an-expsz')
+        page.keyboard.press('Home')                                                   # back to the default
+        assert abs(page.locator('#an-explorer').bounding_box()['width'] - w0) <= 2
+        browser.close()
+    assert not errors, errors

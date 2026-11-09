@@ -11,12 +11,19 @@ html:not([data-screen=analysis]) #analysis { display: none; }
 #analysis .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------------------------------------------------------------- shell: activity bar | objects | work */
-.an-main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--activity-w) 280px minmax(0, 1fr); }
+.an-main { --an-expw: min(var(--an-exp, 280px), max(200px, calc(100vw - 360px))); position: relative; flex: 1; min-height: 0; display: grid;
+  grid-template-columns: var(--activity-w) var(--an-expw) minmax(0, 1fr); }
 .an-main.noexp, .an-main.filled { grid-template-columns: var(--activity-w) minmax(0, 1fr); }
-.an-main.noexp .an-explorer, .an-main.filled .an-explorer { display: none; }
+.an-main.noexp .an-explorer, .an-main.filled .an-explorer, .an-main.noexp .an-expsz, .an-main.filled .an-expsz { display: none; }
 .an-rail { grid-row: 1; }
 .an-rail .an-rail-end { margin-top: auto; }
-.an-explorer { grid-column: 2; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); }
+.an-explorer { grid-column: 2; position: relative; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); }
+/* its right edge: drag to resize, double-click to fit the longest name (the 6px grip sits over the border) */
+.an-expsz { position: absolute; top: 0; bottom: 0; left: calc(var(--activity-w) + var(--an-expw) - 4px); width: 7px; z-index: 3; cursor: col-resize; touch-action: none; }
+.an-expsz::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; }
+.an-expsz:hover::after, .an-expsz:focus-visible::after, .an-expsz.on::after { left: 2px; width: 3px; background: var(--accent); }
+.an-expsz:focus-visible { outline: none; }
+html.an-resizing, html.an-resizing * { cursor: col-resize !important; user-select: none !important; }
 .an-explorer .side-head { align-items: center; }
 .an-tfind { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border); }
 .an-tfind input { width: 100%; }
@@ -255,7 +262,7 @@ main.an-work { grid-template-columns: none; }
   .an-rail .an-rail-end { margin-top: 0; margin-left: auto; }
   .an-explorer.left-panel { min-height: 0; max-height: 260px; border-right: 0; border-bottom: 1px solid var(--border); }   /* not the visualizer's 60vh */
   .an-qbody { display: block; }
-  .an-sph, .an-spv { display: none; }
+  .an-sph, .an-spv, .an-expsz { display: none; }
   .an-two, .an-scr, .an-dash { grid-template-columns: minmax(0, 1fr); }
   .an-split { grid-template-columns: minmax(0, 1fr); }
   .an-canvas { height: 320px; }

@@ -46,8 +46,13 @@ export interface Tab {
   model: Model | null; typed: boolean; notDrawn: boolean; undo: string[]; redo: string[]; view: { z: number; x: number; y: number };
   joinStep: number; joinStats: Record<string, JoinStats>;
 }
-export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean; viz: boolean }
+export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean; viz: boolean; exp: number }
 export type Workspace = 'query' | 'catalog' | 'scripts' | 'analyze' | 'dash' | 'history';
+
+/** The Objects panel's width in px: the default, and the bounds of a drag (the right side keeps at least 360 px). */
+export const EXP_W = 280, EXP_MIN = 200;
+export const expMax = (): number => Math.max(EXP_MIN, Math.min(900, innerWidth - 360));
+export const clampExp = (v: number): number => Math.round(Math.max(EXP_MIN, Math.min(expMax(), Number.isFinite(v) ? v : EXP_W)));
 
 export const A = {
   sid: '', name: '', ws: 'query' as Workspace,
@@ -57,7 +62,7 @@ export const A = {
   catalog: null as { conn: string; db: string; schema: string; table: string } | null,
   history: [] as HistoryRow[], scripts: [] as Script[], script: 0,
   aiRows: false,
-  layout: { flip: false, h: 46, w: 55, max: '', swap: false, viz: true } as Layout,
+  layout: { flip: false, h: 46, w: 55, max: '', swap: false, viz: true, exp: EXP_W } as Layout,
 };
 
 const P = 'api/analysis';
