@@ -7,3 +7,4 @@ core: false
 - PostgreSQL: `LIMIT 10`, `"names"`, `CREATE TEMP TABLE`, `::` casts, `STDDEV`, `VARIANCE`. Reads run in a read-only transaction, so the database itself refuses a hidden write.
 - MongoDB: `db.getCollection("name").find({...})`, `.aggregate([...])`, joins are `$lookup`, casts are `$convert`. `$out`, `$merge`, `$where` and `$function` count as changes. Fields are sampled, so a rare field may be missing from describe_table.
 - One connection can reach many databases. Tables keep their own schema, not only dbo.
+- Adding a database: Settings › Connections › Add, kind PostgreSQL, SQL Server or MongoDB (port 27017). Leave Database blank on SQL Server or MongoDB to list every database. Test checks the login and shows the server version. Connections are private to their owner; a read-only login is the safest choice.

@@ -16,6 +16,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ... import zones
 from ...auth import deps, tiers
 from ...core import logging as vlog
 from ...data import connections, sources
@@ -106,6 +107,9 @@ def router(state, ctx):
             elif kind in ('ftp', 'sftp'):
                 from ...labeling import media
                 res = await run_io(media.remote_test, conn)
+            elif kind == 'mongo' or not zones.on('labeling', ctx.cfg):
+                from ...analysis import adapters
+                res = await run_io(adapters.ping, conn)
             else:
                 from ...labeling import db_export
                 res = await run_io(db_export.test, conn)

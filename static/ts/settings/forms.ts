@@ -493,8 +493,9 @@ export const CONN_KINDS: Record<ConnKind, { label: string; icon: string; port?: 
   s3: { label: 'S3 / RustFS', icon: 'cloud', note: 'Buckets for datasets, labeling images and exports' },
   ftp: { label: 'FTP', icon: 'folder', port: 21, note: 'Labeling images and exports over FTP / FTPS' },
   sftp: { label: 'SFTP', icon: 'folder', port: 22, note: 'Labeling images and exports over SSH' },
-  postgres: { label: 'PostgreSQL', icon: 'db', port: 5432, note: 'Labeling exports, upserted per task' },
-  mssql: { label: 'SQL Server', icon: 'db', port: 1433, note: 'Labeling exports, merged per task' },
+  postgres: { label: 'PostgreSQL', icon: 'db', port: 5432, note: 'Data Analysis and labeling exports' },
+  mssql: { label: 'SQL Server', icon: 'db', port: 1433, note: 'Data Analysis and labeling exports. Leave Database blank to list every database' },
+  mongo: { label: 'MongoDB', icon: 'db', port: 27017, note: 'Data Analysis. Leave Database blank to list every database' },
   model: { label: 'Model', icon: 'robot', note: 'Your model server: labels images for you (YOLO serving or the generic API)' },
   kaggle: { label: 'Kaggle', icon: 'download', note: 'Your Kaggle API token: download datasets and competitions in Data Center' },
   huggingface: { label: 'Hugging Face', icon: 'download', note: 'An access token for gated or private Hugging Face datasets' },
@@ -519,6 +520,7 @@ export function connDefaults(kind: string): ConnDraft {
   if (kind === 'model') return { kind, name: '', url: '', api_key: '', timeout_s: 60 };
   if (kind === 'kaggle') return { kind, name: '', username: '', api_key: '' };
   if (kind === 'huggingface' || kind === 'roboflow' || kind === 'zenodo') return { kind, name: '', api_key: '' };
+  if (kind === 'mongo') return { kind, name: '', host: '', port: 27017, database: '', username: '', secret_key: '', encrypt: false };
   if (kind === 'postgres' || kind === 'mssql') {
     return { kind, name: '', host: '', port: CONN_KINDS[kind].port, database: '', username: '', secret_key: '',
       schema: kind === 'postgres' ? 'public' : 'dbo', table_prefix: 'lbl_', encrypt: kind === 'mssql' };
@@ -573,7 +575,9 @@ export function connTestText(r: ConnTestResult): string {
 }
 
 type FieldSpec = [key: keyof ConnDraft & string, label: string, type: 'text' | 'int' | 'password' | 'textarea' | 'check', cls?: string, ph?: string];
-const KIND_FIELDS: Record<'ftp' | 'sftp' | 'model' | 'db' | 'kaggle' | 'token', FieldSpec[]> = {
+const KIND_FIELDS: Record<'ftp' | 'sftp' | 'model' | 'db' | 'mongo' | 'kaggle' | 'token', FieldSpec[]> = {
+  mongo: [['name', 'Name', 'text', '', 'e.g. app logs'], ['host', 'Host', 'text', 'mono', 'db.example.org'], ['port', 'Port', 'int', 'mono'],
+    ['database', 'Database (blank: all)', 'text', 'mono'], ['username', 'User', 'text', 'mono'], ['secret_key', 'Password', 'password', 'mono'], ['encrypt', 'Encrypt the connection (TLS)', 'check']],
   kaggle: [['name', 'Name', 'text', '', 'e.g. my Kaggle'], ['username', 'Username', 'text', 'mono', 'from kaggle.json'],
     ['api_key', 'Key / API token', 'password', 'mono', 'from kaggle.json, or a KGAT_… token']],
   token: [['name', 'Name', 'text', ''], ['api_key', 'Token / API key', 'password', 'mono']],
@@ -594,7 +598,7 @@ const KIND_FIELDS: Record<'ftp' | 'sftp' | 'model' | 'db' | 'kaggle' | 'token', 
 export function connFormHTML(c: ConnDraft, saved?: ConnItem | null): string {
   const kind = connKind(c);
   if (kind === 's3') return connFieldsHTML({ ...c, access_key_masked: saved?.access_key, has_secret: saved?.has_secret }, !!saved);
-  const fields = KIND_FIELDS[kind === 'postgres' || kind === 'mssql' ? 'db' : kind === 'kaggle' ? 'kaggle' : TOKEN_KINDS.has(kind) ? 'token' : kind as 'ftp'];
+  const fields = KIND_FIELDS[kind === 'mongo' ? 'mongo' : kind === 'postgres' || kind === 'mssql' ? 'db' : kind === 'kaggle' ? 'kaggle' : TOKEN_KINDS.has(kind) ? 'token' : kind as 'ftp'];
   const v = (k: keyof ConnDraft) => esc(c[k] == null ? '' : c[k]);
   return '<div class="form-grid">' + fields.map(([k, label, type, cls = '', ph = '']) => {
     if (type === 'check') {

@@ -17,6 +17,7 @@ Nothing here decides what may run: classify.py does, before an adapter is touche
 import json
 import re
 import threading
+import time
 import xml.etree.ElementTree as ET
 from collections import Counter
 
@@ -474,6 +475,16 @@ def _take(cur, n):
 
 
 ADAPTERS = {'postgres': PostgresAdapter, 'mssql': MssqlAdapter, 'mongo': MongoAdapter}
+
+
+def ping(conn):
+    """The connection form's Test button: {ok, ms, server_version}. Raises on a connection or login error."""
+    t0 = time.time()
+    a = adapter(conn)
+    try:
+        return {'ok': True, 'ms': round((time.time() - t0) * 1000), 'server_version': a.version()}
+    finally:
+        a.close()
 
 
 def adapter(conn, database=None, statement_timeout_s=0):

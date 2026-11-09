@@ -47,7 +47,7 @@ export interface EmbeddingsSummary {
 }
 
 // ------------------------------------------------------------------ connections
-export type ConnKind = 's3' | 'ftp' | 'sftp' | 'postgres' | 'mssql' | 'model' | 'kaggle' | 'huggingface' | 'roboflow' | 'zenodo';
+export type ConnKind = 's3' | 'ftp' | 'sftp' | 'postgres' | 'mssql' | 'mongo' | 'model' | 'kaggle' | 'huggingface' | 'roboflow' | 'zenodo';
 /** The editable copy of a connection (also a blank form). Secrets are write-only: blank on save = keep the stored one. */
 export type ConnDraft = {
   id?: string | undefined; kind?: ConnKind | undefined; name?: string | undefined;
