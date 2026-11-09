@@ -24,6 +24,7 @@ async function vendor(): Promise<EditorModule> {
 }
 
 const ranTyped = new Map<string, boolean>();
+let lastTab = { i: -1, at: 0 };
 const isRunning = (t: Tab): boolean => t.run?.status === 'running';
 
 function dbOptions(t: Tab): string {
@@ -37,21 +38,21 @@ export function renderQuery(): void {
   const t = tab();
   if (!w.querySelector('.an-q')) {
     w.innerHTML = `<div class="an-q"><div class="an-tabs tabbar sm" role="tablist" id="an-qtabs"></div><div class="an-toolbar toolbar" id="an-qbar"></div>` +
-      `<div class="an-qbody" id="an-qbody"><div class="an-split" id="an-pair"><div class="an-pane" data-pane="sql"><div class="an-sqlhead">SQL <span class="faint lbl" title="Type your query. Ctrl+Enter runs it.">Type your query. Ctrl+Enter runs it.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="sql" aria-label="Fill the window" title="Fill the window">⤢</button></div><div class="an-sql" id="an-sql"></div></div>` +
+      `<div class="an-qbody" id="an-qbody"><div class="an-split" id="an-pair"><div class="an-pane" data-pane="viz"><div class="an-sqlhead">Visual builder <span class="faint lbl" title="Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.">Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="viz" aria-label="Fill the window" title="Fill the window">⤢</button><button type="button" class="icon-btn ghost xs" data-act="viz-hide" aria-label="Close the visual builder" title="Close the visual builder (SQL only). Builder on the toolbar brings it back.">×</button></div><div class="an-canvas" id="an-canvas"></div></div>` +
       `<div class="an-spv" data-sp="v" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"></div>` +
-      `<div class="an-pane" data-pane="viz"><div class="an-sqlhead">Visual builder <span class="faint lbl" title="Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.">Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="viz" aria-label="Fill the window" title="Fill the window">⤢</button></div><div class="an-canvas" id="an-canvas"></div></div></div>` +
+      `<div class="an-pane" data-pane="sql"><div class="an-sqlhead">SQL <span class="faint lbl" title="Type your query. Ctrl+Enter runs it.">Type your query. Ctrl+Enter runs it.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="sql" aria-label="Fill the window" title="Fill the window">⤢</button></div><div class="an-sql" id="an-sql"></div></div></div>` +
       `<div class="an-sph" data-sp="h" role="separator" aria-orientation="horizontal" aria-label="Resize panels" tabindex="0"></div>` +
       `<div class="an-pane an-res" data-pane="res"><div class="an-tabs tabbar sm" role="tablist" id="an-rtabs"></div><div class="an-rc" id="an-rc"></div></div></div></div>`;
     editorTab = '';
     editor = null;
   }
-  $req('an-qtabs').innerHTML = A.tabs.map((x, i) => `<span class="an-tabw"><button type="button" class="an-tab ${i === A.active ? 'on' : ''}" role="tab" aria-selected="${i === A.active}" data-act="qtab" data-i="${i}">${esc(x.name)}</button>${i === A.active ? `<button type="button" class="icon-btn ghost xs" data-act="tab-rename" aria-label="Rename ${esc(x.name)}" title="Rename">✎</button><button type="button" class="icon-btn ghost xs" data-act="tab-dup" aria-label="Duplicate ${esc(x.name)}" title="Duplicate">⧉</button>` : ''}${A.tabs.length > 1 ? `<button type="button" class="icon-btn ghost xs" data-act="tab-close" data-i="${i}" aria-label="Close ${esc(x.name)}" title="Close">×</button>` : ''}</span>`).join('') +
+  $req('an-qtabs').innerHTML = A.tabs.map((x, i) => `<span class="an-tabw${i === A.active ? ' on' : ''}"><button type="button" class="an-tab ${i === A.active ? 'on' : ''}" role="tab" aria-selected="${i === A.active}" data-act="qtab" data-i="${i}" title="${esc(x.name)} · double-click to rename">${esc(x.name)}</button>${i === A.active ? `<button type="button" class="icon-btn ghost xs" data-act="tab-rename" data-i="${i}" aria-label="Rename ${esc(x.name)}" title="Rename">✎</button><button type="button" class="icon-btn ghost xs" data-act="tab-dup" data-i="${i}" aria-label="Duplicate ${esc(x.name)}" title="Duplicate">⧉</button>` : ''}${A.tabs.length > 1 ? `<button type="button" class="icon-btn ghost xs" data-act="tab-close" data-i="${i}" aria-label="Close ${esc(x.name)}" title="Close">×</button>` : ''}</span>`).join('') +
     `<button type="button" class="an-tab" role="tab" aria-selected="false" data-act="tab-new" aria-label="New query tab">+</button>`;
   const src = sourceOf(t.conn);
   $req('an-qbar').innerHTML = `<button type="button" class="primary" data-act="run"${isRunning(t) ? ' disabled' : ''}>${icon('play')}Run</button><button type="button" data-act="stop"${isRunning(t) ? '' : ' disabled'}>Stop</button>` +
     `<select id="an-conn" aria-label="Connection"><option value="">Choose a connection</option>${A.sources.map((s) => `<option value="${esc(s.id)}" ${s.id === t.conn ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` +
     `<select id="an-db" aria-label="Database"${t.conn ? '' : ' disabled'}>${dbOptions(t)}</select>` +
-    (src ? `${chip(src.kind)}${A.version.get(src.id) ? `<span class="pill faint an-ver" title="${esc(A.version.get(src.id) ?? '')}">${esc(A.version.get(src.id) ?? '')}</span>` : ''}` : '') + `<span class="grow"></span><label class="check" title="The assistant gets at most 20 rows, each cell cut short. Off: it only sees totals."><input type="checkbox" id="an-airows" ${A.aiRows ? 'checked' : ''}> Let AI read sample rows</label><span class="an-lay"><span class="faint">Layout</span><span class="an-seg segmented">${[['std', 'Standard'], ['top', 'Table on top'], ['only', 'Table only']].map(([k, n]) => `<button type="button" class="view-btn" data-act="layout" data-lay="${k}" data-k="${k}">${n}</button>`).join('')}</span></span>`;
+    (src ? `${chip(src.kind)}${A.version.get(src.id) ? `<span class="pill faint an-ver" title="${esc(A.version.get(src.id) ?? '')}">${esc(A.version.get(src.id) ?? '')}</span>` : ''}` : '') + `<span class="grow"></span><label class="check" title="The assistant gets at most 20 rows, each cell cut short. Off: it only sees totals."><input type="checkbox" id="an-airows" ${A.aiRows ? 'checked' : ''}> Let AI read sample rows</label><span class="an-lay"><span class="faint">Layout</span><button type="button" class="view-btn an-vizbtn${A.layout.viz ? ' active' : ''}" data-act="viz-toggle" aria-pressed="${A.layout.viz}" title="${A.layout.viz ? 'Close' : 'Open'} the visual builder">Builder</button><span class="an-seg segmented">${[['std', 'Standard'], ['top', 'Table on top'], ['only', 'Table only']].map(([k, n]) => `<button type="button" class="view-btn" data-act="layout" data-lay="${k}" data-k="${k}">${n}</button>`).join('')}</span></span>`;
   void mountEditor(t);
   renderBuilder();
   applyLayout();
@@ -67,7 +68,10 @@ export function applyLayout(): void {
   pair.style.setProperty('--a', `${L.w}fr`);
   pair.style.setProperty('--b', `${100 - L.w}fr`);
   document.querySelector('.an-main')?.classList.toggle('filled', !!L.max);
-  ['sql', 'viz', 'res'].forEach((k) => { const p = document.querySelector<HTMLElement>(`[data-pane="${k}"]`); if (p) p.hidden = !!L.max && L.max !== k; });
+  ['sql', 'viz', 'res'].forEach((k) => { const p = document.querySelector<HTMLElement>(`[data-pane="${k}"]`); if (p) p.hidden = !!L.max && L.max !== k || k === 'viz' && !L.viz; });
+  pair.classList.toggle('nobuild', !L.viz);
+  const vb = document.querySelector<HTMLElement>('.an-vizbtn');
+  if (vb) { vb.classList.toggle('active', L.viz); vb.setAttribute('aria-pressed', String(L.viz)); vb.title = `${L.viz ? 'Close' : 'Open'} the visual builder`; }
   pair.hidden = L.max === 'res';
   const pres = $('an-rtabs');
   if (pres && !pres.querySelector('[data-act="fill"]')) pres.insertAdjacentHTML('beforeend', '<button type="button" class="icon-btn ghost xs" data-act="fill" data-k="res" aria-label="Fill the window" title="Fill the window">⤢</button>');
@@ -232,13 +236,21 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     applyLayout();
     renderBuilderAfterLayout();
   },
+  'viz-hide': () => setViz(false),
+  'viz-toggle': () => setViz(!A.layout.viz),
   fill: (el) => { const k = el.dataset['k'] as 'sql' | 'viz' | 'res'; A.layout.max = A.layout.max === k ? '' : k; applyLayout(); renderBuilderAfterLayout(); },
   rt: (el) => { tab().rt = el.dataset['k'] as Tab['rt']; renderQuery(); },
   rset: (el) => { tab().result = Number(el.dataset['i']); renderQuery(); },
-  qtab: (el) => { A.active = Number(el.dataset['i']); renderQuery(); saveTabs(); },
+  qtab: (el) => {                   // a click rebuilds the tab bar, so a double click is told from two clicks (no dblclick event)
+    const i = Number(el.dataset['i']), twice = i === lastTab.i && Date.now() - lastTab.at < 400;
+    lastTab = { i, at: twice ? 0 : Date.now() };
+    if (twice) return Q_ACTIONS['tab-rename']?.(el);
+    if (i === A.active) return;
+    A.active = i; renderQuery(); saveTabs();
+  },
   'tab-new': () => { const c = tab(); A.tabs.push(newTab(`query ${A.tabs.length + 1}`, '', c.conn, c.db)); A.active = A.tabs.length - 1; renderQuery(); saveTabs(); },
-  'tab-dup': () => { const c = tab(); A.tabs.push(newTab(`${c.name} copy`, c.sql, c.conn, c.db)); A.active = A.tabs.length - 1; renderQuery(); saveTabs(); },
-  'tab-rename': async () => { const c = tab(); const n = await promptDialog({ title: 'Rename query tab', label: 'Name', value: c.name, ok: 'Rename' }); if (n) { c.name = n; renderQuery(); saveTabs(); } },
+  'tab-dup': (el) => { const c = A.tabs[Number(el.dataset['i'] ?? A.active)] ?? tab(); A.tabs.push(newTab(`${c.name} copy`, c.sql, c.conn, c.db)); A.active = A.tabs.length - 1; renderQuery(); saveTabs(); },
+  'tab-rename': async (el) => { const c = A.tabs[Number(el.dataset['i'] ?? A.active)] ?? tab(); const n = await promptDialog({ title: 'Rename query tab', label: 'Name', value: c.name, ok: 'Rename' }); if (n) { c.name = n; renderQuery(); saveTabs(); } },
   'tab-close': async (el) => {
     const i = Number(el.dataset['i']), c = A.tabs[i];
     if (!c || A.tabs.length < 2) return;
@@ -250,6 +262,14 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     saveTabs();
   },
 };
+
+function setViz(on: boolean): void {
+  A.layout.viz = on;
+  if (!on && A.layout.max === 'viz') A.layout.max = '';
+  saveLayout();
+  applyLayout();
+  if (on) renderBuilderAfterLayout();
+}
 
 function renderBuilderAfterLayout(): void { requestAnimationFrame(() => renderBuilder()); }
 export function saveLayout(): void { try { localStorage.setItem('dataviz.analysis.layout', JSON.stringify({ ...A.layout, max: '' })); } catch { /* a convenience only */ } }

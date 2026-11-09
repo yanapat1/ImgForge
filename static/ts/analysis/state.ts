@@ -46,7 +46,7 @@ export interface Tab {
   model: Model | null; typed: boolean; notDrawn: boolean; undo: string[]; redo: string[]; view: { z: number; x: number; y: number };
   joinStep: number; joinStats: Record<string, JoinStats>;
 }
-export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean }
+export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean; viz: boolean }
 export type Workspace = 'query' | 'catalog' | 'scripts' | 'analyze' | 'dash' | 'history';
 
 export const A = {
@@ -57,7 +57,7 @@ export const A = {
   catalog: null as { conn: string; db: string; schema: string; table: string } | null,
   history: [] as HistoryRow[], scripts: [] as Script[], script: 0,
   aiRows: false,
-  layout: { flip: false, h: 46, w: 42, max: '', swap: false } as Layout,
+  layout: { flip: false, h: 46, w: 55, max: '', swap: false, viz: true } as Layout,
 };
 
 const P = 'api/analysis';

@@ -225,6 +225,19 @@ def test_visual_builder(server, target):  # noqa: F811
         page.click('[data-act="b-panel"]')
         page.wait_for_selector('.an-cvt.bl:has-text("size")', timeout=10000)
 
+        # subqueries are cards with their columns, joined by a line (a SELECT * card used to have no rows to end a line on)
+        box.click()
+        page.keyboard.press('Control+a')
+        page.keyboard.press('Delete')
+        page.keyboard.insert_text('SELECT * FROM (SELECT id, name FROM public.customers) AS cu '
+                                  'LEFT JOIN (SELECT * FROM public.orders WHERE total > 10) AS od ON od.customer_id = cu.id')
+        page.keyboard.press('Control+Enter')
+        page.wait_for_function("document.querySelectorAll('#an-canvas .an-tb.sub').length === 2", timeout=20000)
+        page.wait_for_selector('.an-tb[data-t="cu"] .an-col[data-c="name"]')
+        page.wait_for_selector('.an-tb[data-t="od"] .an-col[data-c="customer_id"]')
+        assert page.locator('#an-lines .an-jhit').count() == 1 and page.inner_text('.an-jl') == 'LEFT'
+        assert not page.locator('#an-canvas .an-cvt.tl:has-text("Locked")').count()
+
         # a query the builder cannot hold still runs, and says why
         box.click()
         page.keyboard.press('Control+a')
@@ -233,6 +246,30 @@ def test_visual_builder(server, target):  # noqa: F811
         page.keyboard.press('Control+Enter')
         page.wait_for_selector('#an-canvas .an-cvt.tl:has-text("Locked")', timeout=20000)
         page.wait_for_selector('#an-rc .an-grid td', timeout=20000)
+
+        # the builder is on the left, next to the object explorer; it closes for SQL only and comes back from the toolbar
+        viz, sqlp = (page.locator(f'[data-pane="{k}"]').bounding_box() for k in ('viz', 'sql'))
+        assert viz['x'] < sqlp['x']
+        page.click('[data-pane="viz"] [data-act="viz-hide"]')
+        page.wait_for_selector('[data-pane="viz"]', state='hidden')
+        assert page.locator('[data-pane="sql"]').bounding_box()['width'] > viz['width'] + sqlp['width'] - 10
+        page.reload()
+        page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+        assert page.locator('[data-pane="viz"]').is_hidden()                         # remembered
+        page.click('.an-vizbtn')
+        page.wait_for_selector('[data-pane="viz"] .an-canvas', state='visible')
+
+        # tabs: the open one is filled; double-click renames, its own duplicate copies it
+        page.click('[data-act="tab-new"]')
+        page.wait_for_selector('.an-tabw.on:has-text("query 2")')
+        bg = page.eval_on_selector('.an-tabw.on', 'e => getComputedStyle(e).backgroundColor')
+        assert bg not in ('rgba(0, 0, 0, 0)', 'transparent'), bg
+        page.dblclick('.an-tabw.on [data-act="qtab"]')
+        page.fill('#ui-dlg-in', 'monthly sales')
+        page.click('.ui-dlg [data-dlg="ok"]')
+        page.wait_for_selector('.an-tabw.on:has-text("monthly sales")')
+        page.click('.an-tabw.on [data-act="tab-dup"]')
+        page.wait_for_selector('.an-tabw.on:has-text("monthly sales copy")')
         browser.close()
     assert not errors, errors
 

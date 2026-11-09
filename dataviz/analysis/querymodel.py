@@ -8,6 +8,8 @@ The model:
 
     tables  [{id, schema, name, database, alias, kind, sql, raw, show, sel: [column], star, cast: {column: {type, safe}}}]
             kind: table | sub (a subquery) | cte | remote (OPENQUERY)
+            cols: for sub / cte / remote, the column names known from the SQL alone (its own SELECT list, and every
+                  column the outer query uses through its alias), so the card has rows and join lines a place to end
     joins   [{a: [table id, column], b: [table id, column], type: INNER | LEFT | RIGHT | FULL}]
     calc    [{alias, t: table id, kind: case | window | sub | cast | expr, expr}]
     parts   {where, group, having, order, top, limit, distinct}
@@ -43,25 +45,47 @@ def _table_id(t, used):
     return name
 
 
+def _outputs(tree):
+    """The column names a SELECT (or the left side of a UNION) gives, without its stars."""
+    while isinstance(tree, exp.SetOperation):
+        tree = tree.left
+    if not isinstance(tree, exp.Select):
+        return []
+    return [e.alias_or_name for e in tree.expressions if e.alias_or_name and e.alias_or_name != '*']
+
+
+def _remote_outputs(text):
+    """The column names of the query inside OPENQUERY, when it reads as SQL (the remote server's dialect is unknown)."""
+    try:
+        return _outputs(parse_one(text, dialect='tsql'))
+    except (SqlglotError, ValueError):
+        return []
+
+
 def _source(node, dialect, locked, cte_names):
     """A FROM / JOIN item -> a model table, or None when it is outside what the model holds."""
     if isinstance(node, exp.Subquery):
         alias = node.alias or 'sub'
-        return {'schema': '', 'name': alias, 'database': '', 'alias': alias, 'kind': 'sub', 'sql': node.this.sql(dialect=dialect, pretty=True)}
+        return {'schema': '', 'name': alias, 'database': '', 'alias': alias, 'kind': 'sub', 'sql': node.this.sql(dialect=dialect, pretty=True),
+                'cols': _outputs(node.this)}
     if isinstance(node, exp.Table):
         fn = node.this
         if isinstance(fn, exp.Anonymous):
             if str(fn.this).upper() == 'OPENQUERY':
                 alias = node.alias or 'remote'
                 arg = fn.expressions[1] if len(fn.expressions) > 1 else None
+                text = arg.this if isinstance(arg, exp.Literal) else ''
                 return {'schema': '', 'name': alias, 'database': '', 'alias': alias, 'kind': 'remote',
-                        'sql': arg.this if isinstance(arg, exp.Literal) else '', 'raw': fn.sql(dialect=dialect)}
+                        'sql': text, 'raw': fn.sql(dialect=dialect), 'cols': _remote_outputs(text) if text else []}
             locked.append(f'{fn.this} in FROM')
             return None
         name = node.name
         kind = 'cte' if name.lower() in cte_names else 'table'
         temp = isinstance(node.this, exp.Identifier) and node.this.args.get('temporary')
-        return {'schema': node.db, 'name': f'#{name}' if temp else name, 'database': node.catalog, 'alias': node.alias or '', 'kind': kind}
+        out = {'schema': node.db, 'name': f'#{name}' if temp else name, 'database': node.catalog, 'alias': node.alias or '', 'kind': kind}
+        if kind == 'cte':
+            out['cols'] = list(cte_names[name.lower()])
+        return out
     locked.append('this FROM form')
     return None
 
@@ -139,14 +163,11 @@ def _parse_select(tree, dialect, model, used, cte_names, counter):
         if kind == 'CROSS' or join.args.get('using') or on is None:
             locked.append('CROSS JOIN' if kind == 'CROSS' or on is None else 'JOIN USING')
             continue
-        if not isinstance(on, exp.EQ) or not isinstance(on.left, exp.Column) or not isinstance(on.right, exp.Column):
+        pairs = _column_pairs(on, tables)
+        if pairs is None:
             locked.append('a join condition the builder cannot draw')
             continue
-        a, b = _find(tables, on.left.table), _find(tables, on.right.table)
-        if a is None or b is None:
-            locked.append('a join condition the builder cannot draw')
-            continue
-        model['joins'].append({'a': [a['id'], on.left.name], 'b': [b['id'], on.right.name], 'type': _TYPES.get(side, 'INNER')})
+        model['joins'].extend({'a': [a['id'], ca], 'b': [b['id'], cb], 'type': _TYPES.get(side, 'INNER')} for a, ca, b, cb in pairs)
 
     bucket = {'sel': [], 'loose': [], 'calc': model['calc']}
     for item in tree.expressions:
@@ -156,8 +177,36 @@ def _parse_select(tree, dialect, model, used, cte_names, counter):
         if t is not None:
             t['sel'].append(col)
     model.setdefault('loose', []).extend(c for _, c in bucket['loose'])
+    _known_columns(tree, tables)
     model['tables'].extend(tables)
     return tables
+
+
+def _column_pairs(on, tables):
+    """ON a.x = b.x [AND a.y = b.y ...] between two tables -> [(a, x, b, x), ...]; None for any other condition."""
+    terms = list(on.flatten()) if isinstance(on, exp.And) else [on]
+    out = []
+    for e in terms:
+        if not isinstance(e, exp.EQ) or not isinstance(e.left, exp.Column) or not isinstance(e.right, exp.Column):
+            return None
+        a, b = _find(tables, e.left.table), _find(tables, e.right.table)
+        if a is None or b is None or a is b:
+            return None
+        out.append((a, e.left.name, b, e.right.name))
+    return out if len({frozenset((a['id'], b['id'])) for a, _, b, _ in out}) == 1 else None
+
+
+def _known_columns(tree, tables):
+    """A subquery, CTE or OPENQUERY card has no catalog entry: add every column this SELECT uses through its alias."""
+    derived = [t for t in tables if t['kind'] != 'table']
+    if not derived:
+        return
+    for col in tree.find_all(exp.Column):
+        if not col.table or col.find_ancestor(exp.Select) is not tree:
+            continue
+        t = _find(derived, col.table)
+        if t is not None and col.name not in t['cols']:
+            t['cols'].append(col.name)
 
 
 def _parts(tree, dialect, one):
@@ -206,12 +255,12 @@ def parse(sql, dialect):
         for node, why in _NO_BUILDER:
             if tree.find(node) is not None:
                 model['locked'].append(why)
-        cte_names = set()
+        cte_names = {}
         withs = tree.args.get('with_') or tree.args.get('with')
         if withs is not None:
             if withs.recursive:
                 model['locked'].append('a recursive CTE')
-            cte_names = {c.alias.lower() for c in withs.expressions}
+            cte_names = {c.alias.lower(): _outputs(c.this) for c in withs.expressions}
             model['cte'] = [{'name': c.alias, 'sql': c.this.sql(dialect=d, pretty=True)} for c in withs.expressions]
         _parse_select(tree, d, model, used, cte_names, counter)
         model['parts'] = {**_parts(tree, d, len(statements) == 1), 'parsed': True}
@@ -292,16 +341,19 @@ def _one_select(group, model, d, solo, default_top):
     head = 'SELECT ' + ('DISTINCT ' if parts.get('distinct') else '') + (f'TOP ({int(top)}) ' if d == 'tsql' and top else '')
     lines = [head + (',\n       '.join(items) or '*'), 'FROM ' + _ref(group['tables'][0], d)]
     done, pending = {group['tables'][0]['id']}, list(group['joins'])
+    line_of = {group['tables'][0]['id']: 1}             # the FROM / JOIN line that brought each table in
     while pending:
         i = next((n for n, j in enumerate(pending) if j['a'][0] in done or j['b'][0] in done), 0)
         j = pending.pop(i)
         left, right = by_id[j['a'][0]], by_id[j['b'][0]]
         cond = f'{_quote(_alias(left), d)}.{_quote(j["a"][1], d)} = {_quote(_alias(right), d)}.{_quote(j["b"][1], d)}'
         if j['a'][0] in done and j['b'][0] in done:
-            lines[-1] += f'\n  AND {cond}'
+            at = max(line_of[j['a'][0]], line_of[j['b'][0]])
+            lines[at] += f'\n  AND {cond}'
             continue
         new = right if j['a'][0] in done else left
         done.add(new['id'])
+        line_of[new['id']] = len(lines)
         lines.append(f'{"INNER" if j["type"] == "INNER" else j["type"] + " OUTER"} JOIN {_ref(new, d)}\n  ON {cond}')
     for key, word in (('where', 'WHERE'), ('group', 'GROUP BY'), ('having', 'HAVING'), ('order', 'ORDER BY')):
         if parts.get(key):

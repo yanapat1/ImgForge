@@ -39,7 +39,13 @@ main.an-work { grid-template-columns: none; }
 
 /* ---------------------------------------------------------------- Query: tabs, toolbar, panes */
 .an-q { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.an-tabw { display: inline-flex; align-items: center; flex: none; }
+.an-tabw { display: inline-flex; align-items: center; flex: none; gap: 1px; padding-right: 2px; border-radius: var(--r-md) var(--r-md) 0 0; }
+/* the open query tab is one filled block: its name and its own rename / duplicate / close */
+.an-tabw.on { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.an-tabw.on .an-tab, .an-tabw.on .an-tab:hover:not(:disabled) { background: none; color: var(--accent-text); font-weight: 650; }
+.an-tabw.on .icon-btn { color: var(--accent-text); }
+.an-tabw:not(.on) .icon-btn { opacity: .55; }
+.an-tabw:not(.on):hover .icon-btn { opacity: 1; }
 .an-toolbar select { max-width: 240px; }
 .an-toolbar.an-plain { background: none; border: 0; padding: var(--s2) 0; }
 .an-qbody { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, var(--r1, 42fr)) 6px minmax(0, var(--r2, 58fr)); }
@@ -51,6 +57,8 @@ main.an-work { grid-template-columns: none; }
 .an-qbody.one .an-split { grid-template-columns: minmax(0, 1fr); }
 .an-split { display: grid; grid-template-columns: minmax(0, var(--a, 42fr)) 6px minmax(0, var(--b, 58fr)); min-height: 0; }
 .an-split[hidden], .an-pane[hidden] { display: none; }
+.an-split.nobuild { grid-template-columns: minmax(0, 1fr); }
+.an-split.nobuild .an-spv { display: none; }
 .an-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); }
 .an-sqlhead { display: flex; gap: var(--s2); align-items: center; min-width: 0; height: 34px; padding: 0 var(--s3); flex: none;
   border-bottom: 1px solid var(--border); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
@@ -122,6 +130,7 @@ main.an-work { grid-template-columns: none; }
 .an-col:hover { background: var(--surface-2); }
 .an-col:not(.sel) { color: var(--text-faint); }
 .an-col.sel { color: var(--text); font-weight: 600; }
+.an-col.an-allcols { cursor: default; font-weight: normal; }
 .an-col.drop { background: var(--accent-soft); }
 .an-dot { width: 9px; height: 9px; flex: none; border: 1.5px solid var(--text-faint); border-radius: 50%; }
 .an-col.sel .an-dot { background: var(--accent); border-color: var(--accent); }

@@ -4,12 +4,14 @@ summary: query tabs, Run, Stop, the confirm gate, layouts, the Visual builder
 core: true
 ---
 - **Nothing runs while the user types or edits the builder.** Only Run (or Ctrl+Enter) reaches the database.
-- A query tab has its own text, connection, database, builder and results. Tabs can be renamed, duplicated and closed.
+- A query tab has its own text, connection, database, builder and results. The open tab is filled with colour and carries its own ✎ rename, ⧉ duplicate and × close; double-click any tab to rename it.
 - **Run** asks the server what the text does. A plain read runs at once. Anything else, including what cannot be parsed, shows a confirm listing each statement.
 - **Results**: rows are saved on the server. Sort and filter work on the saved result, so they never query the database again. Several statements give several result tabs.
 - **Joins** counts rows on both sides when the user asks: a Venn of what the join keeps and cuts, and a fan-out warning.
 - **Cost** shows each step's share of the plan. It is an estimate and does not run the query.
 - **Visual builder**: left-drag selects, right-drag moves the board, wheel zooms. Click a column to select it, a table header to show or hide it. Drag a column onto another table to join. Click a join label to change it, right-click a line to remove it. Click a column's type to CAST it. + Column adds CASE WHEN, window functions or an expression. + Subquery adds a card. Filters holds WHERE, GROUP BY, HAVING and ORDER BY.
+- The builder sits left (next to the object explorer, to drag tables onto it), the SQL editor right. × on the builder closes it for SQL-only work; **Builder** on the toolbar opens it again (remembered).
+- Subqueries in FROM / JOIN, CTEs and `OPENQUERY(...)` are cards (SUB, CTE, REMOTE) with the columns their SQL names: their own SELECT list plus every column the outer query uses through the alias, so join lines show between them. A `SELECT *` card with nothing else known shows "all columns (*)". A join on several columns (`ON a.x = b.x AND a.y = b.y`) is drawn as several lines with one join type.
 - Unjoined tables give one result each; joined tables share one.
-- Typed SQL keeps the builder read-only until it runs; then the builder redraws. What it cannot hold (UNION, PIVOT, APPLY, recursive CTE, self join, custom join conditions) locks it and names why, and the query still runs.
-- Layout: Standard, Table on top, Table only. Dividers resize panels, the corner button fills the window, Esc restores.
+- Typed SQL keeps the builder read-only until it runs; then the builder redraws. What it cannot hold (UNION, PIVOT, APPLY, recursive CTE, self join, a join condition other than column = column [AND ...]) locks it and names why, and the query still runs.
+- Layout: Builder (show or hide it), Standard, Table on top, Table only. Dividers resize panels, the corner button fills the window, Esc restores.

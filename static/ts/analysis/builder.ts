@@ -12,7 +12,7 @@ import { toast } from '../core/toast.js';
 import { openDialog } from '../views/dialog.js';
 import { chip, saveTabs } from './app.js';
 import { A, api, sourceOf, tab, tableKey } from './state.js';
-import type { Calc, Model, MTable, Tab } from './state.js';
+import type { Calc, Join, Model, MTable, Tab } from './state.js';
 
 const WINDOW_FNS = ['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE', 'PERCENT_RANK', 'CUME_DIST', 'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'STDEV', 'VAR'];
 const NO_ARG = new Set(['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK', 'CUME_DIST']);
@@ -26,6 +26,9 @@ const ORDER = ['INNER', 'LEFT', 'RIGHT', 'FULL'];
 const emptyModel = (): Model => ({ tables: [], joins: [], calc: [], parts: {}, locked: [], adv: '' });
 export const modelOf = (t: Tab): Model => (t.model ??= emptyModel());
 const alias = (m: MTable): string => m.alias || m.id;
+/** joins between the same two tables are one ON … AND …: they share one type */
+const samePair = (x: Join, y: Join): boolean => (x.a[0] === y.a[0] && x.b[0] === y.b[0]) || (x.a[0] === y.b[0] && x.b[0] === y.a[0]);
+const CARD_LABEL: Record<string, string> = { sub: 'SUB', cte: 'CTE', remote: 'REMOTE' };
 const readOnly = (t: Tab): boolean => t.dirty && t.typed || !!modelOf(t).locked.length || t.notDrawn;
 
 function columnsOf(t: Tab, m: MTable): { name: string; type: string; key: string }[] {
@@ -104,8 +107,8 @@ export function renderBuilder(): void {
   const cards = m.tables.map((x) => {
     const cols = columnsOf(t, x), on = (c: string): boolean => x.star || x.sel.includes(c);
     return `<div class="an-tb${x.show ? '' : ' off'}${S.sel.includes(x.id) ? ' picked' : ''}${x.kind !== 'table' ? ' sub' : ''}" data-t="${esc(x.id)}" tabindex="0" aria-label="${esc(x.name)} table" style="left:${x.x}px;top:${x.y}px">` +
-      `<div class="an-th" data-mv="${esc(x.id)}" title="${x.show ? 'Shown in results. Click to hide.' : 'Hidden from results. Click to show.'}">${chip(x.kind === 'table' ? (sourceOf(t.conn)?.kind ?? '') : 'sub')}<span class="lbl">${esc(x.name)}</span><button type="button" class="an-x icon-btn ghost xs" data-act="b-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">×</button></div>` +
-      cols.map((c) => { const cast = x.cast[c.name]; return `<div class="an-col${on(c.name) ? ' sel' : ''}" tabindex="0" role="checkbox" aria-checked="${on(c.name)}" data-t="${esc(x.id)}" data-c="${esc(c.name)}"><span class="an-dot"></span><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}${x.kind === 'table' ? `<button type="button" class="an-ty${cast ? ' cast' : ''}" data-act="b-cast" data-t="${esc(x.id)}" data-c="${esc(c.name)}" title="Change type with CAST">${esc(cast?.type ?? c.type ?? 'type')}</button>` : ''}</div>`; }).join('') + '</div>';
+      `<div class="an-th" data-mv="${esc(x.id)}" title="${x.show ? 'Shown in results. Click to hide.' : 'Hidden from results. Click to show.'}">${x.kind === 'table' ? chip(sourceOf(t.conn)?.kind ?? '') : `<span class="badge alt" title="${esc(x.kind === 'remote' ? 'OPENQUERY: runs on the linked server' : x.kind === 'cte' ? 'a WITH query' : 'a subquery')}">${CARD_LABEL[x.kind] ?? 'SUB'}</span>`}<span class="lbl">${esc(x.name)}</span><button type="button" class="an-x icon-btn ghost xs" data-act="b-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">×</button></div>` +
+      cols.map((c) => { const cast = x.cast[c.name]; return `<div class="an-col${on(c.name) ? ' sel' : ''}" tabindex="0" role="checkbox" aria-checked="${on(c.name)}" data-t="${esc(x.id)}" data-c="${esc(c.name)}"><span class="an-dot"></span><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}${x.kind === 'table' ? `<button type="button" class="an-ty${cast ? ' cast' : ''}" data-act="b-cast" data-t="${esc(x.id)}" data-c="${esc(c.name)}" title="Change type with CAST">${esc(cast?.type ?? c.type ?? 'type')}</button>` : ''}</div>`; }).join('') + (x.star && x.kind !== 'table' && !cols.length ? '<div class="an-col sel an-allcols"><span class="an-dot"></span><span class="lbl faint">all columns (*)</span></div>' : '') + '</div>';
   }).join('');
   host.classList.toggle('ro', readOnly(t));
   host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="sm" data-act="b-fit">Fit</button></div>` +
@@ -248,7 +251,8 @@ function joinDialog(i: number): void {
       record(t);
       if (root.querySelector<HTMLInputElement>('#an-j-rm')?.checked) m.joins.splice(i, 1);
       else {
-        j.type = root.querySelector<HTMLSelectElement>('#an-j-type')?.value as typeof j.type;
+        const type = root.querySelector<HTMLSelectElement>('#an-j-type')?.value as typeof j.type;
+        m.joins.forEach((x) => { if (samePair(x, j)) x.type = type; });
         j.a[1] = root.querySelector<HTMLSelectElement>('#an-j-a')?.value ?? j.a[1];
         j.b[1] = root.querySelector<HTMLSelectElement>('#an-j-b')?.value ?? j.b[1];
       }
@@ -511,7 +515,9 @@ export function builderUp(e: PointerEvent): void {
   const o = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('.an-col');
   if (o && o.dataset['t'] !== p.t) {
     record(t);
-    m.joins.push({ a: [p.t, p.c], b: [o.dataset['t'] ?? '', o.dataset['c'] ?? ''], type: 'INNER' });
+    const nj: Join = { a: [p.t, p.c], b: [o.dataset['t'] ?? '', o.dataset['c'] ?? ''], type: 'INNER' };
+    nj.type = m.joins.find((x) => samePair(x, nj))?.type ?? 'INNER';
+    m.joins.push(nj);
     m.tables.forEach((x) => { if (x.id === p.t || x.id === o.dataset['t']) x.show = true; });
     void changed(t);
     toast('Join added. Press Run to see the result.');
@@ -561,8 +567,10 @@ export async function syncFromSql(t: Tab): Promise<void> {
   const old = new Map(modelOf(t).tables.map((x) => [`${x.schema}.${x.name}`, x]));
   p.tables.forEach((x, i) => {
     const o = old.get(`${x.schema}.${x.name}`);
-    x.x = o?.x ?? 24 + (i % 3) * 226;
-    x.y = o?.y ?? 60 + Math.floor(i / 3) * 190;
+    // three cards a row, 100 px apart so a join's label sits between them; the middle one a little lower, so a line
+    // from the first card to the third does not run under it
+    x.x = o?.x ?? 24 + (i % 3) * 300;
+    x.y = o?.y ?? 60 + Math.floor(i / 3) * 240 + (i % 3 === 1 ? 110 : 0);
   });
   t.model = p as Model;
   await Promise.all(p.tables.map((x) => needInfo(t, x)));

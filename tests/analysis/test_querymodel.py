@@ -76,7 +76,7 @@ def test_openquery_is_a_remote_card():
     ('SELECT * FROM a CROSS JOIN b', 'CROSS JOIN', 'postgres'),
     ('SELECT * FROM t AS a JOIN t AS b ON a.i = b.i', 'self join', 'postgres'),
     ('SELECT * FROM a JOIN b ON a.i > b.i', 'join condition', 'postgres'),
-    ('SELECT * FROM a JOIN b ON a.i = b.i AND a.j = b.j', 'join condition', 'postgres'),
+    ('SELECT * FROM a JOIN b ON a.i = b.i AND a.j > 1', 'join condition', 'postgres'),
     ('WITH RECURSIVE r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r) SELECT * FROM r', 'recursive', 'postgres'),
     ('SELECT a, SUM(b) FROM t GROUP BY ROLLUP (a)', 'ROLLUP', 'postgres'),
 ])
@@ -146,3 +146,32 @@ def test_mongo_pipeline():
     from dataviz.analysis import classify
     got = classify.classify_mongo(out)[0]
     assert got['kind'] == 'read' and got['command']['args'][0][0]['$lookup']['from'] == 'customers'
+
+
+def test_subquery_and_openquery_cards_have_columns_for_their_join_lines():
+    # the builder anchors a join line on a column row: a SELECT * card used to have no rows, so no line was drawn
+    m = qm.parse("SELECT * FROM OPENQUERY(srv, 'SELECT id, name FROM people') AS o "
+                 "LEFT JOIN (SELECT * FROM data2 WHERE a = 2) AS dt ON o.id = dt.pid "
+                 "LEFT JOIN (SELECT pid, amount AS amt FROM data3) AS d3 ON d3.pid = dt.pid WHERE dt.flag = 1", 'mssql')
+    assert not m['locked']
+    cols = {t['id']: t['cols'] for t in m['tables']}
+    assert cols == {'o': ['id', 'name'], 'dt': ['pid', 'flag'], 'd3': ['pid', 'amt']}
+    assert [(j['a'], j['b'], j['type']) for j in m['joins']] == [(['o', 'id'], ['dt', 'pid'], 'LEFT'), (['d3', 'pid'], ['dt', 'pid'], 'LEFT')]
+    out = qm.generate(m, 'mssql')
+    assert 'OPENQUERY' in out and out.count('LEFT OUTER JOIN') == 2
+    sqlglot.parse_one(out.rstrip(';'), dialect='tsql')
+
+
+def test_cte_card_has_its_columns():
+    m = qm.parse('WITH r AS (SELECT id, total FROM o) SELECT * FROM r JOIN p ON p.id = r.id', 'postgres')
+    assert next(t for t in m['tables'] if t['id'] == 'r')['cols'] == ['id', 'total']
+
+
+def test_a_join_on_several_columns_is_drawn_and_written_back():
+    m = qm.parse('SELECT * FROM a LEFT JOIN b ON a.i = b.i AND a.j = b.j JOIN c ON c.i = a.i', 'postgres')
+    assert not m['locked'] and len(m['joins']) == 3
+    out = qm.generate(m, 'postgres')
+    b_on = out.split('LEFT OUTER JOIN')[1].split('INNER JOIN')[0]
+    assert '"a"."i" = "b"."i"' in b_on and 'AND "a"."j" = "b"."j"' in b_on
+    again = qm.parse(out, 'postgres')
+    assert len(again['joins']) == 3 and not again['locked']
