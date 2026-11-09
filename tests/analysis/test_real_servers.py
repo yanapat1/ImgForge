@@ -172,7 +172,7 @@ def test_mssql_writes_a_description_back(ms):
 
 
 # ---------------------------------------------------------------- MongoDB
-def _mongo_ready(host, port):
+def _mongo_ready(host, port, quick=False):  # noqa: ARG001 - docker_db passes quick; this check is already short
     try:
         with socket.create_connection((host, port), 2):
             pass
