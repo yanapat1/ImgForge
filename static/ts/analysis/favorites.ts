@@ -5,10 +5,10 @@
 
 import { pref, setPrefs } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
-import { arrowNav, closeFloat, floatPopover } from '../core/popover.js';
 import { toast } from '../core/toast.js';
 import { promptDialog } from '../views/dialog.js';
 import { chip, renderTree, tableRow } from './app.js';
+import { menuItem, openMenu } from './menu.js';
 import { A, tableKey } from './state.js';
 
 /** One favorite: connection, database, schema, table, category ('' = no category). */
@@ -148,33 +148,7 @@ export function renderFavs(hit: Hit): string {
 let menuFor: Fav | null = null;
 let menuGroup = '';
 
-function menuEl(): HTMLElement {
-  let m = document.getElementById('an-fmenu');
-  if (m) return m;
-  m = document.createElement('div');
-  m.id = 'an-fmenu';
-  m.className = 'an-menu hidden';
-  m.setAttribute('role', 'menu');
-  m.addEventListener('click', (e) => {
-    const b = e.target instanceof Element ? e.target.closest<HTMLElement>('button[data-m]') : null;
-    if (!b) return;
-    closeFloat();
-    void menuAct(b.dataset['m'] ?? '', b.dataset['g'] ?? '');
-  });
-  document.body.appendChild(m);
-  arrowNav('an-fmenu', 'button');
-  return m;
-}
-
-const item = (m: string, label: string, ic: string, g = '', cls = ''): string =>
-  `<button type="button" role="menuitem" class="${cls}" data-m="${m}" data-g="${esc(g)}">${icon(ic)}<span class="lbl">${label}</span></button>`;
-
-function openMenu(html: string, from: HTMLElement, at?: { x: number; y: number }): void {
-  const m = menuEl();
-  m.innerHTML = html;
-  floatPopover(m, from, undefined, 'right', at);
-  m.querySelector<HTMLElement>('button')?.focus();
-}
+const item = menuItem;
 
 /** The favorites menu of a table row (right-click, or the context-menu key). */
 export function favMenu(el: HTMLElement, at?: { x: number; y: number }): void {
@@ -193,7 +167,7 @@ export function favMenu(el: HTMLElement, at?: { x: number; y: number }): void {
   h += item('new', 'New category…', 'folder-plus');
   if (cur) h += `<div class="sep"></div>${item('remove', 'Remove from Favorites', 'x', '', 'danger')}`;
   if (!at) { const r = el.getBoundingClientRect(); at = { x: r.left + 24, y: r.bottom }; }
-  openMenu(h, el, at);
+  openMenu(h, el, menuAct, at);
 }
 
 async function menuAct(m: string, g: string): Promise<void> {
@@ -244,6 +218,6 @@ export const F_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
     const i = F.groups.indexOf(menuGroup);
     openMenu(`<div class="an-menu-h">${esc(menuGroup)}</div>` + item('rename', 'Rename…', 'edit') +
       (i > 0 ? item('up', 'Move up', 'chev-u') : '') + (i < F.groups.length - 1 ? item('down', 'Move down', 'chev-d') : '') +
-      `<div class="sep"></div>${item('delete', 'Delete category', 'trash', '', 'danger')}<div class="an-menu-note faint">Its tables stay in Favorites.</div>`, el);
+      `<div class="sep"></div>${item('delete', 'Delete category', 'trash', '', 'danger')}<div class="an-menu-note faint">Its tables stay in Favorites.</div>`, el, menuAct);
   },
 };

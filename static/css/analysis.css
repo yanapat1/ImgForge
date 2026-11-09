@@ -151,18 +151,24 @@ main.an-work { grid-template-columns: none; }
 .an-board { position: absolute; left: 0; top: 0; width: 2400px; height: 1600px; transform-origin: 0 0; }
 .an-lines { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .an-jhit { pointer-events: stroke; cursor: context-menu; }
-.an-tb { position: absolute; width: 200px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+/* a card is as wide as its name and columns (up to 560 px); collapsed (.slim) it is 200 px and long names end in … */
+.an-tb { position: absolute; width: max-content; min-width: 200px; max-width: 560px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md);
   box-shadow: var(--shadow-2); font-size: var(--fs-xs); overflow: hidden; }
 .an-tb:focus-visible { outline: 2px solid var(--accent); }
 .an-tb.picked { outline: 2px solid var(--accent); outline-offset: 1px; }
 .an-tb.off { opacity: .55; }
 .an-tb.sub { border-style: dashed; }
+.an-tb.slim { width: 200px; }
+.an-tb.slim .an-ty { max-width: 76px; }
+.an-th .lbl { flex: 1; }
 .an-th { display: flex; gap: 6px; align-items: center; height: 32px; padding: 0 var(--s2); background: var(--surface-2); border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm); font-weight: 650; cursor: grab; touch-action: none; }
 .an-tb.off .an-th { font-weight: normal; }
 .an-th .ico { width: 14px; height: 14px; color: var(--accent); }
 .an-tb.off .an-th .ico { color: var(--text-faint); }
-.an-x { margin-left: auto; }
+.an-sl, .an-x { flex: none; }
+.an-sl { margin-left: auto; opacity: 0; }
+.an-tb:hover .an-sl, .an-tb:focus-within .an-sl, .an-tb.slim .an-sl, .an-sl:focus-visible { opacity: 1; }
 .an-col { display: flex; gap: 6px; align-items: center; height: 24px; padding: 0 var(--s2); cursor: pointer; touch-action: none; }
 .an-col:hover { background: var(--surface-2); }
 .an-col:not(.sel) { color: var(--text-faint); }
@@ -171,7 +177,7 @@ main.an-work { grid-template-columns: none; }
 .an-col.drop { background: var(--accent-soft); }
 .an-dot { width: 9px; height: 9px; flex: none; border: 1.5px solid var(--text-faint); border-radius: 50%; }
 .an-col.sel .an-dot { background: var(--accent); border-color: var(--accent); }
-.an-ty { margin-left: auto; flex: none; max-width: 76px; height: auto; padding: 0; overflow: hidden; text-overflow: ellipsis; border: 0;
+.an-ty { margin-left: auto; flex: none; max-width: 140px; height: auto; padding: 0; overflow: hidden; text-overflow: ellipsis; border: 0;
   border-bottom: 1px dotted var(--text-faint); border-radius: 0; background: none; color: var(--text-faint); font: var(--fs-2xs) var(--mono); }
 .an-ty:hover:not(:disabled) { background: none; border-color: var(--accent); color: var(--text); }
 .an-ty.cast { color: var(--highlight); border-bottom-color: var(--highlight); font-weight: 600; }
@@ -269,3 +275,11 @@ main.an-work { grid-template-columns: none; }
   .an-sql { height: 220px; }
   .an-rc { max-height: 480px; }
 }
+
+/* Change type: the current type, common types as chips by group, the combobox, the SQL it makes */
+.an-cast-now { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.an-cast-now code, .an-cast .cbx-in { font-family: var(--mono); }
+.an-cast-grp { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: var(--s2); align-items: start; }
+.an-cast-gl { padding-top: 4px; font-size: var(--fs-xs); color: var(--text-muted); }
+.an-cast .chip { font-family: var(--mono); font-size: var(--fs-xs); }
+@media (max-width: 560px) { .an-cast-grp { grid-template-columns: minmax(0, 1fr); gap: var(--s1); } }

@@ -7,20 +7,26 @@
 // click on a header shows or hides the table, drag a column onto another table to join, right-click a line removes it.
 
 import { errText } from '../core/api.js';
-import { $, esc } from '../core/dom.js';
+import { bindCombo, comboHTML } from '../core/combobox.js';
+import { $, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
-import { openDialog } from '../views/dialog.js';
+import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, saveTabs } from './app.js';
+import { MENU_SEP, menuHead, menuItem, openMenu } from './menu.js';
 import { A, api, sourceOf, tab, tableKey } from './state.js';
 import type { Calc, Join, Model, MTable, Tab } from './state.js';
 
 const WINDOW_FNS = ['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE', 'PERCENT_RANK', 'CUME_DIST', 'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'STDEV', 'VAR'];
 const NO_ARG = new Set(['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK', 'CUME_DIST']);
-const TYPES: Record<string, string[]> = {
-  mssql: ['int', 'bigint', 'decimal(18,2)', 'float', 'varchar(100)', 'nvarchar(100)', 'date', 'datetime2', 'bit'],
-  postgres: ['integer', 'bigint', 'numeric(18,2)', 'double precision', 'text', 'date', 'timestamp', 'boolean'],
-  mongo: ['int', 'long', 'decimal', 'double', 'string', 'date', 'bool'],
+/** CAST targets by dialect, grouped as the Change type dialog shows them (any other type can be typed). */
+const TYPES: Record<string, [string, string[]][]> = {
+  mssql: [['Number', ['int', 'bigint', 'smallint', 'decimal(18,2)', 'float', 'money']], ['Text', ['varchar(100)', 'nvarchar(100)', 'nvarchar(max)']],
+    ['Date and time', ['date', 'datetime2', 'datetime', 'time']], ['Yes / no', ['bit']]],
+  postgres: [['Number', ['integer', 'bigint', 'smallint', 'numeric(18,2)', 'double precision']], ['Text', ['text', 'varchar(100)']],
+    ['Date and time', ['date', 'timestamp', 'timestamptz', 'time']], ['Yes / no', ['boolean']]],
+  mongo: [['Number', ['int', 'long', 'decimal', 'double']], ['Text', ['string']], ['Date and time', ['date']], ['Yes / no', ['bool']]],
 };
+const TYPE_RE = /^[A-Za-z][\w ]*(\(\s*(\d+|max)(\s*,\s*\d+)?\s*\))?$/i;
 const ORDER = ['INNER', 'LEFT', 'RIGHT', 'FULL'];
 
 const emptyModel = (): Model => ({ tables: [], joins: [], calc: [], parts: {}, locked: [], adv: '' });
@@ -43,6 +49,20 @@ async function needInfo(t: Tab, m: MTable): Promise<void> {
   const key = tableKey(t.conn, m.database || t.db || '', m.schema, m.name);
   if (A.info.has(key)) return;
   try { A.info.set(key, await api.describe(t.conn, m.database || t.db || '', m.schema, m.name)); } catch { /* the card shows the columns it knows */ }
+}
+
+/** Cards drawn from a saved tab (after a reload) have no columns yet: fetch the missing ones once, together, then
+ *  draw again. A failed fetch is not retried on every draw (the card keeps the columns it knows). */
+const asked = new Set<string>();
+function loadMissing(t: Tab): void {
+  const want = modelOf(t).tables.filter((x) => {
+    if (!t.conn || x.kind !== 'table' || x.name.startsWith('#')) return false;
+    const key = tableKey(t.conn, x.database || t.db || '', x.schema, x.name);
+    if (A.info.has(key) || asked.has(key)) return false;
+    asked.add(key);
+    return true;
+  });
+  if (want.length) void Promise.all(want.map((x) => needInfo(t, x))).then(() => { if (tab() === t) renderBuilder(); });
 }
 
 // ---------------------------------------------------------------- undo
@@ -78,7 +98,7 @@ async function changed(t: Tab): Promise<void> {
 }
 
 // ---------------------------------------------------------------- what is on the canvas
-const S = { sel: [] as string[], calcOpen: false };
+const S = { sel: [] as string[], calcOpen: false, settle: [] as string[] };   // settle: new cards to move off the others once drawn
 
 function cvTop(t: Tab): string {
   if (t.dirty && t.typed) return `<div class="an-cvt tl"><span>SQL changed. Press Run to update the builder.</span></div>`;
@@ -106,8 +126,10 @@ export function renderBuilder(): void {
   const t = tab(), m = modelOf(t), v = t.view;
   const cards = m.tables.map((x) => {
     const cols = columnsOf(t, x), on = (c: string): boolean => x.star || x.sel.includes(c);
-    return `<div class="an-tb${x.show ? '' : ' off'}${S.sel.includes(x.id) ? ' picked' : ''}${x.kind !== 'table' ? ' sub' : ''}" data-t="${esc(x.id)}" tabindex="0" aria-label="${esc(x.name)} table" style="left:${x.x}px;top:${x.y}px">` +
-      `<div class="an-th" data-mv="${esc(x.id)}" title="${x.show ? 'Shown in results. Click to hide.' : 'Hidden from results. Click to show.'}">${x.kind === 'table' ? chip(sourceOf(t.conn)?.kind ?? '') : `<span class="badge alt" title="${esc(x.kind === 'remote' ? 'OPENQUERY: runs on the linked server' : x.kind === 'cte' ? 'a WITH query' : 'a subquery')}">${CARD_LABEL[x.kind] ?? 'SUB'}</span>`}<span class="lbl">${esc(x.name)}</span><button type="button" class="an-x icon-btn ghost xs" data-act="b-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">×</button></div>` +
+    const full = x.schema ? `${x.schema}.${x.name}` : x.name, name = x.label || x.name;
+    const tip = `${x.label ? `${x.label} = ` : ''}${full} AS ${alias(x)}\n${x.show ? 'Shown in results. Click to hide.' : 'Hidden from results. Click to show.'} Right-click for more.`;
+    return `<div class="an-tb${x.show ? '' : ' off'}${x.slim ? ' slim' : ''}${S.sel.includes(x.id) ? ' picked' : ''}${x.kind !== 'table' ? ' sub' : ''}" data-t="${esc(x.id)}" tabindex="0" aria-label="${esc(name)} table" style="left:${x.x}px;top:${x.y}px">` +
+      `<div class="an-th" data-mv="${esc(x.id)}" title="${esc(tip)}">${x.kind === 'table' ? chip(sourceOf(t.conn)?.kind ?? '') : `<span class="badge alt" title="${esc(x.kind === 'remote' ? 'OPENQUERY: runs on the linked server' : x.kind === 'cte' ? 'a WITH query' : 'a subquery')}">${CARD_LABEL[x.kind] ?? 'SUB'}</span>`}<span class="lbl">${esc(name)}</span><button type="button" class="an-sl icon-btn ghost xs" data-act="b-slim" data-id="${esc(x.id)}" aria-label="${x.slim ? 'Show the full name' : 'Collapse'}: ${esc(name)}" title="${x.slim ? 'Show the full name' : 'Collapse the card'}">${icon(x.slim ? 'chev-r' : 'chev-l')}</button><button type="button" class="an-x icon-btn ghost xs" data-act="b-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(name)}">×</button></div>` +
       cols.map((c) => { const cast = x.cast[c.name]; return `<div class="an-col${on(c.name) ? ' sel' : ''}" tabindex="0" role="checkbox" aria-checked="${on(c.name)}" data-t="${esc(x.id)}" data-c="${esc(c.name)}"><span class="an-dot"></span><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}${x.kind === 'table' ? `<button type="button" class="an-ty${cast ? ' cast' : ''}" data-act="b-cast" data-t="${esc(x.id)}" data-c="${esc(c.name)}" title="Change type with CAST">${esc(cast?.type ?? c.type ?? 'type')}</button>` : ''}</div>`; }).join('') + (x.star && x.kind !== 'table' && !cols.length ? '<div class="an-col sel an-allcols"><span class="an-dot"></span><span class="lbl faint">all columns (*)</span></div>' : '') + '</div>';
   }).join('');
   host.classList.toggle('ro', readOnly(t));
@@ -116,7 +138,36 @@ export function renderBuilder(): void {
     (!m.tables.length && !t.notDrawn ? '<div class="an-cvhint">Drag a table here from the object explorer.</div>' : '');
   host.style.backgroundSize = `${18 * v.z}px ${18 * v.z}px`;
   host.style.backgroundPosition = `${v.x}px ${v.y}px`;
+  if (S.settle.length) settle();
   drawLines();
+  loadMissing(t);
+}
+
+/** Move the new cards (S.settle) right of any card they cover: cards are as wide as their names now. One read of the
+ *  drawn sizes (board px, so the zoom does not matter), then one write per moved card. */
+function settle(): void {
+  const b = $('an-board'), m = modelOf(tab()), ids = new Set(S.settle);
+  S.settle = [];
+  if (!b) return;
+  const size = new Map<string, { w: number; h: number }>();
+  b.querySelectorAll<HTMLElement>('.an-tb').forEach((e) => size.set(e.dataset['t'] ?? '', { w: e.offsetWidth, h: e.offsetHeight }));
+  const GAP = 24, placed = m.tables.filter((x) => !ids.has(x.id));
+  let moved = false;
+  for (const x of m.tables.filter((y) => ids.has(y.id))) {
+    const s = size.get(x.id);
+    if (!s) continue;
+    for (let i = 0; i < 60; i++) {
+      const hit = placed.find((o) => { const q = size.get(o.id); return q && x.x < o.x + q.w + GAP && x.x + s.w + GAP > o.x && x.y < o.y + q.h + GAP && x.y + s.h + GAP > o.y; });
+      if (!hit) break;
+      x.x = hit.x + (size.get(hit.id)?.w ?? 200) + 80;                        // room for a join's label between them
+      if (x.x + s.w > 2300) { x.x = 24; x.y += 200; }                          // the board's edge: the next row
+      moved = true;
+    }
+    placed.push(x);
+    const el = b.querySelector<HTMLElement>(`.an-tb[data-t="${CSS.escape(x.id)}"]`);
+    if (el) { el.style.left = `${x.x}px`; el.style.top = `${x.y}px`; }
+  }
+  if (moved) saveTabs();
 }
 
 function drawLines(): void {
@@ -193,6 +244,7 @@ export async function addTable(conn: string, db: string, schema: string, name: s
   while (used.has(id)) id = `${base}${++i}`;
   const card: MTable = { id, schema, name, database: db === t.db ? '' : db, alias: id, kind: 'table', show: true, sel: [], star: false, cast: {}, x: Math.round((24 + (n % 3) * 216 - v.x) / v.z), y: Math.round((60 + (n % 2) * 160 - v.y) / v.z) };
   m.tables.push(card);
+  S.settle.push(id);
   await needInfo(t, card);
   await changed(t);
   fitIfOutside(id);
@@ -265,13 +317,41 @@ function joinDialog(i: number): void {
 function castDialog(id: string, c: string): void {
   const t = tab(), m = modelOf(t), x = m.tables.find((y) => y.id === id);
   if (!x) return;
-  const kind = sourceOf(t.conn)?.kind ?? 'postgres', now = x.cast[c], types = TYPES[kind] ?? [];
+  const kind = sourceOf(t.conn)?.kind ?? 'postgres', now = x.cast[c], groups = TYPES[kind] ?? TYPES['postgres'] ?? [];
+  const all = groups.flatMap(([, ts]) => ts), was = columnsOf(t, x).find((k) => k.name === c)?.type ?? '';
+  const preview = (v: string, safe: boolean): string => (kind === 'mongo' ? `${c} → ${v || '…'}` : `${safe ? 'TRY_CAST' : 'CAST'}(${alias(x)}.${c} AS ${v || '…'})`);
   void openDialog({
-    title: `Change type of ${c}`, ok: 'Apply', body: `<div class="an-form form-stack"><p class="faint">This changes the query only. The table in your database stays the same.</p><label>New type<input id="an-c-type" list="an-c-list" value="${esc(now?.type ?? '')}" placeholder="${esc(types[0] ?? '')}"><datalist id="an-c-list">${types.map((y) => `<option value="${esc(y)}">`).join('')}</datalist></label>${kind === 'mssql' ? `<label class="check"><input type="checkbox" id="an-c-safe" ${now?.safe ? 'checked' : ''}> Use TRY_CAST, so a bad value becomes NULL instead of failing the query</label>` : ''}<label class="check"><input type="checkbox" id="an-c-rm"> Remove this CAST</label></div>`,
+    title: `Change the type of ${c}`, ok: 'Apply', focus: '.an-cast .chip.on, .an-cast .chip',
+    body: `<div class="an-form form-stack an-cast"><p class="faint">This changes the query only. The table in your database stays the same.</p>` +
+      `<div class="an-cast-now"><span class="faint">Now</span><code>${esc(was || 'unknown')}</code>${now ? `<span class="faint">→ cast to</span><code>${esc(now.type)}</code>` : ''}</div>` +
+      groups.map(([g, ts]) => `<div class="an-cast-grp"><span class="an-cast-gl">${esc(g)}</span><div class="chips">${ts.map((y) =>
+        `<button type="button" class="chip${y === now?.type ? ' on' : ''}" data-ty="${esc(y)}" aria-pressed="${y === now?.type}">${esc(y)}</button>`).join('')}</div></div>`).join('') +
+      `<label class="fld"><span>Type</span>${comboHTML('an-cast', now?.type ?? '', { mono: true, placeholder: 'pick one above, or type e.g. varchar(50)', attrs: 'id="an-c-type"' })}</label>` +
+      (kind === 'mssql' ? `<label class="check"><input type="checkbox" id="an-c-safe" ${now?.safe ? 'checked' : ''}> Use TRY_CAST, so a bad value becomes NULL instead of failing the query</label>` : '') +
+      `<pre class="an-prev" id="an-c-prev">${esc(preview(now?.type ?? '', !!now?.safe))}</pre>` +
+      (now ? '<label class="check"><input type="checkbox" id="an-c-rm"> Remove this CAST</label>' : '') + '</div>',
+    bind: (root) => {
+      const inp = root.querySelector<HTMLInputElement>('#an-c-type'), safe = root.querySelector<HTMLInputElement>('#an-c-safe');
+      const sync = (): void => {
+        const v = inp?.value.trim() ?? '';
+        root.querySelectorAll<HTMLElement>('[data-ty]').forEach((b) => { const on = b.dataset['ty'] === v; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+        const pv = root.querySelector('#an-c-prev');
+        if (pv) pv.textContent = preview(v, !!safe?.checked);
+      };
+      bindCombo(root, 'an-cast', { options: () => all, onPick: sync });
+      root.addEventListener('input', sync);
+      root.addEventListener('change', sync);
+      root.addEventListener('click', (e) => {
+        const b = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-ty]') : null;
+        if (!b || !inp) return;
+        inp.value = b.dataset['ty'] ?? '';
+        sync();                                    // the focus stays on the chip: the input's list opens only when asked
+      });
+    },
     onOk: (root) => {
       const v = root.querySelector<HTMLInputElement>('#an-c-type')?.value.trim() ?? '';
       const rm = root.querySelector<HTMLInputElement>('#an-c-rm')?.checked;
-      if (!rm && !/^[A-Za-z][\w ]*(\(\s*(\d+|max)(\s*,\s*\d+)?\s*\))?$/i.test(v)) return 'Write a type such as int or varchar(100).';
+      if (!rm && !TYPE_RE.test(v)) return 'Pick a type, or write one such as int or varchar(100).';
       record(t);
       if (rm) delete x.cast[c];
       else { x.cast[c] = { type: v, safe: !!root.querySelector<HTMLInputElement>('#an-c-safe')?.checked }; if (!x.sel.includes(c) && !x.star) x.sel.push(c); }
@@ -402,11 +482,51 @@ export const B_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   'b-fit': () => fitView(),
   'b-join': (el) => joinDialog(Number(el.dataset['i'])),
   'b-cast': (el) => castDialog(el.dataset['t'] ?? '', el.dataset['c'] ?? ''),
+  'b-slim': (el) => cardAct(el.dataset['id'] ?? '', 'slim'),
 };
+
+// ---------------------------------------------------------------- a card's menu (right-click, or the menu key)
+function cardMenu(id: string, at?: { x: number; y: number }): void {
+  const t = tab(), x = modelOf(t).tables.find((y) => y.id === id);
+  const el = document.querySelector<HTMLElement>(`#an-board .an-tb[data-t="${CSS.escape(id)}"]`);
+  if (!x || !el) return;
+  const full = x.schema ? `${x.schema}.${x.name}` : x.name, ro = readOnly(t);
+  let h = menuHead(x.label ? `${x.label} · ${full}` : full) + menuItem('rename', 'Rename…', 'edit') +
+    (x.label ? menuItem('unname', 'Use the table name', 'undo') : '') +
+    menuItem('slim', x.slim ? 'Show the full name' : 'Collapse the card', x.slim ? 'chev-r' : 'chev-l');
+  if (!ro) {
+    h += MENU_SEP + menuItem('show', x.show ? 'Hide from results' : 'Show in results', x.show ? 'eye-off' : 'eye') +
+      menuItem('all', 'Select all columns', 'check-c') + menuItem('none', 'Clear the columns', 'circle') +
+      MENU_SEP + menuItem('rm', 'Remove from the builder', 'trash', '', 'danger');
+  }
+  if (!at) { const r = el.getBoundingClientRect(); at = { x: r.left + 16, y: r.top + 32 }; }
+  openMenu(h, el, (k) => cardAct(id, k), at);
+}
+
+async function cardAct(id: string, k: string): Promise<void> {
+  const t = tab(), x = modelOf(t).tables.find((y) => y.id === id);
+  if (!x) return;
+  const full = x.schema ? `${x.schema}.${x.name}` : x.name;
+  if (k === 'rename') {
+    const v = await promptDialog({ title: 'Rename the card', label: 'Name', value: x.label || x.name, ok: 'Rename',
+      hint: `Only the card's header changes: the SQL still reads ${full} AS ${alias(x)}.`,
+      check: (s) => (s.length > 80 ? 'Keep it to 80 characters' : null) });
+    if (v === null) return;
+    if (v === x.name) delete x.label; else x.label = v;
+  } else if (k === 'unname') delete x.label;
+  else if (k === 'slim') { if (x.slim) delete x.slim; else x.slim = true; }
+  else if (readOnly(t)) return;
+  else if (k === 'show') { toggleShow(id); return; }
+  else if (k === 'all' || k === 'none') { record(t); x.star = k === 'all'; x.sel = []; void changed(t); return; }
+  else if (k === 'rm') { await removeTables([id]); return; }
+  renderBuilder();                                   // the card only: the SQL is the same
+  saveTabs();
+  document.querySelector<HTMLElement>(`#an-board .an-tb[data-t="${CSS.escape(id)}"]`)?.focus();
+}
 
 // ---------------------------------------------------------------- pointer, keyboard, drops
 type Drag =
-  | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number; moved: boolean; join: string | null }
+  | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number; moved: boolean; join: string | null; card: string | null }
   | { kind: 'marq'; sx: number; sy: number; el: HTMLElement; r: DOMRect; add: boolean; moved: boolean }
   | { kind: 'move'; id: string; sx: number; sy: number; moved: boolean; group: { m: MTable; ox: number; oy: number }[] }
   | { kind: 'col'; t: string; c: string; sx: number; sy: number; moved: boolean };
@@ -420,12 +540,12 @@ export function builderDown(e: PointerEvent): boolean {
   if (target.closest('.an-cvt')) return false;
   const t = tab();
   if (e.button === 1 || e.button === 2 || (e.pointerType === 'touch' && !target.closest('.an-tb'))) {
-    P = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: t.view.x, oy: t.view.y, moved: false, join: target.closest<HTMLElement>('[data-j]')?.dataset['j'] ?? null };
+    P = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: t.view.x, oy: t.view.y, moved: false, join: target.closest<HTMLElement>('[data-j]')?.dataset['j'] ?? null, card: target.closest<HTMLElement>('.an-tb')?.dataset['t'] ?? null };
     cv.classList.add('panning');
     e.preventDefault();
     return true;
   }
-  if (e.button !== 0 || target.closest('.an-x,.an-ty')) return false;
+  if (e.button !== 0 || target.closest('.an-x,.an-ty,.an-sl')) return false;
   const head = target.closest<HTMLElement>('.an-th[data-mv]'), col = target.closest<HTMLElement>('.an-col');
   if (head) {
     const id = head.dataset['mv'] ?? '', ids = S.sel.includes(id) ? S.sel : [id];
@@ -493,6 +613,7 @@ export function builderUp(e: PointerEvent): void {
   if (p.kind === 'pan') {
     $('an-canvas')?.classList.remove('panning');
     panEnd = Date.now();
+    if (!p.moved && p.card && p.join === null && e.button === 2) { cardMenu(p.card, { x: e.clientX, y: e.clientY }); return; }
     if (!p.moved && p.join !== null && e.button === 2 && !readOnly(t)) { record(t); m.joins.splice(Number(p.join), 1); void changed(t); toast('Join removed. Press Run to update the result.'); }
     return;
   }
@@ -546,6 +667,7 @@ export function builderKey(e: KeyboardEvent): boolean {
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel.length && !readOnly(t)) { e.preventDefault(); void removeTables([...S.sel]); return true; }
   const col = target.closest<HTMLElement>('.an-col');
   if (col && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); toggleColumn(col.dataset['t'] ?? '', col.dataset['c'] ?? ''); return true; }
+  if (target.classList.contains('an-tb') && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) { e.preventDefault(); cardMenu(target.dataset['t'] ?? ''); return true; }
   if (target.classList.contains('an-tb')) {
     const m = modelOf(t).tables.find((x) => x.id === target.dataset['t']), d = ({ ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] } as Record<string, number[]>)[e.key];
     if (m && d) { e.preventDefault(); m.x += d[0] ?? 0; m.y += d[1] ?? 0; target.style.left = `${m.x}px`; target.style.top = `${m.y}px`; drawLines(); return true; }
@@ -571,6 +693,9 @@ export async function syncFromSql(t: Tab): Promise<void> {
     // from the first card to the third does not run under it
     x.x = o?.x ?? 24 + (i % 3) * 300;
     x.y = o?.y ?? 60 + Math.floor(i / 3) * 240 + (i % 3 === 1 ? 110 : 0);
+    if (o?.label) x.label = o.label;
+    if (o?.slim) x.slim = true;
+    if (!o) S.settle.push(x.id);
   });
   t.model = p as Model;
   await Promise.all(p.tables.map((x) => needInfo(t, x)));

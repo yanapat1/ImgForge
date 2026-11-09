@@ -520,7 +520,7 @@ def test_favorites(server, target):  # noqa: F811
 
             # a category from the right-click menu, the table goes into it
             page.click(fav, button='right')
-            page.click('#an-fmenu [data-m="new"]')
+            page.click('#an-menu [data-m="new"]')
             page.fill('#ui-dlg-in', 'Sales')
             page.click('.ui-dlg [data-dlg="ok"]')
             page.wait_for_selector('.an-fhead[data-g="Sales"]:has-text("1")')
@@ -535,7 +535,7 @@ def test_favorites(server, target):  # noqa: F811
             # deleting the category keeps the table in Favorites, the star removes it
             page.hover('.an-fhead[data-g="Sales"]')
             page.click('.an-fhead[data-g="Sales"] [data-act="fav-gmenu"]')
-            page.click('#an-fmenu [data-m="delete"]')
+            page.click('#an-menu [data-m="delete"]')
             page.wait_for_selector('.an-fhead[data-g="Sales"]', state='detached')
             page.wait_for_selector(fav)
             page.click('.an-fsec .an-trow:has(.an-tn[data-act="table"][data-name="orders"]) .an-star')
@@ -597,5 +597,85 @@ def test_objects_panel_resizes(server, target):  # noqa: F811
         page.focus('.an-expsz')
         page.keyboard.press('Home')                                                   # back to the default
         assert abs(page.locator('#an-explorer').bounding_box()['width'] - w0) <= 2
+        browser.close()
+    assert not errors, errors
+
+
+def test_builder_cards(server, target):  # noqa: F811
+    """A card opens as wide as its name and can collapse to …; right-click renames it (header only, the SQL keeps the
+    table); the Change type dialog offers themed chips and a combobox, not the browser's datalist."""
+    long = 'customer_lifetime_value_by_region_and_quarter_snapshot'
+    with psycopg.connect(target['url'], autocommit=True) as c:
+        c.execute(f'CREATE TABLE IF NOT EXISTS public.{long} (id int, amount_total numeric(10,2))')
+    errors = []
+    shots = os.environ.get('DATAVIZ_SCREENSHOTS')
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 950})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('response', lambda r: errors.append(f'{r.status} {r.url}') if r.status >= 500 else None)
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.select_option('#an-conn', target['conn'])
+        page.wait_for_function("document.querySelector('#an-db option:nth-child(2)')", timeout=10000)
+        page.select_option('#an-db', target['db'])
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        page.wait_for_selector(f'.an-tn[data-name="{long}"]', timeout=10000)
+        for name in ('orders', long):
+            page.drag_and_drop(f'.an-tn[data-pre="t"][data-name="{name}"]', '#an-canvas', target_position={'x': 200, 'y': 160})
+            page.wait_for_selector(f'.an-tb:has(.an-th .lbl:text-is("{name}")) .an-col', timeout=10000)
+        card = page.locator(f'.an-tb:has(.an-th .lbl:text-is("{long}"))')
+        lbl = card.locator('.an-th .lbl')
+        assert lbl.evaluate('l => l.scrollWidth <= l.clientWidth')                 # the full name shows
+        boxes = page.eval_on_selector_all('#an-board .an-tb', 'els => els.map(e => [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight])')
+        (ax, ay, aw, ah), (bx, by, bw, bh) = boxes
+        assert ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay, boxes   # the two cards do not overlap
+        if shots:
+            page.screenshot(path=f'{shots}/builder-wide.png')
+
+        # collapse: 200 px, the name ends in …; the button brings it back
+        card.hover()
+        card.locator('[data-act="b-slim"]').click()
+        assert card.evaluate('e => e.offsetWidth') == 200
+        assert lbl.evaluate('l => l.scrollWidth > l.clientWidth')
+        card.locator('[data-act="b-slim"]').click()
+        assert lbl.evaluate('l => l.scrollWidth <= l.clientWidth')
+
+        # right-click: the card's menu; Rename changes the header only
+        sql_before = page.locator('#an-sql .cm-content').inner_text()
+        card.locator('.an-th').click(button='right')
+        page.wait_for_selector('#an-menu:not(.hidden) [data-m="rename"]')
+        if shots:
+            page.screenshot(path=f'{shots}/builder-menu.png')
+        page.click('#an-menu [data-m="rename"]')
+        page.fill('#ui-dlg-in', 'CLV')
+        page.click('.ui-dlg [data-dlg="ok"]')
+        page.wait_for_selector('.an-tb .an-th .lbl:text-is("CLV")')
+        assert page.locator('#an-sql .cm-content').inner_text() == sql_before          # the SQL still names the table
+        assert long in sql_before
+        page.locator('.an-tb:has(.an-th .lbl:text-is("CLV")) .an-th').click(button='right')
+        page.click('#an-menu [data-m="slim"]')
+        page.wait_for_selector('.an-tb.slim .an-th .lbl:text-is("CLV")')
+        page.wait_for_timeout(1000)                                                    # the tab is saved
+        page.reload()
+        page.wait_for_selector('.an-tb.slim .an-th .lbl:text-is("CLV")', timeout=20000)   # kept
+
+        # Change type: chips by group, the themed combobox, the SQL it makes
+        clv = page.locator('.an-tb:has(.an-th .lbl:text-is("CLV"))')
+        clv.locator('.an-ty[data-c="amount_total"]').click()
+        page.wait_for_selector('.ui-dlg .an-cast')
+        assert page.locator('.ui-dlg datalist').count() == 0
+        assert page.locator('.ui-dlg .an-cast-now code').first.inner_text() == 'numeric(10,2)'
+        page.click('.ui-dlg .chip[data-ty="integer"]')
+        assert page.locator('.ui-dlg .chip.on').inner_text() == 'integer'
+        assert 'AS integer' in page.locator('#an-c-prev').inner_text()
+        page.click('.ui-dlg .cbx-btn')
+        page.wait_for_selector('#cbx-list-an-cast', state='visible', timeout=5000)
+        if shots:
+            page.screenshot(path=f'{shots}/builder-cast.png')
+        page.keyboard.press('Escape')
+        page.click('.ui-dlg [data-dlg="ok"]')
+        page.wait_for_function("document.querySelector('#an-sql .cm-content').innerText.includes('AS integer')", timeout=10000)
         browser.close()
     assert not errors, errors

@@ -27,6 +27,8 @@ export interface MTable {
   id: string; schema: string; name: string; database: string; alias: string; kind: 'table' | 'sub' | 'cte' | 'remote';
   sql?: string; raw?: string; cols?: string[]; show: boolean; sel: string[]; star: boolean;
   cast: Record<string, { type: string; safe: boolean }>; x: number; y: number;
+  /** the card only, never the SQL: a header name the user chose, and a collapsed (200 px) card */
+  label?: string; slim?: boolean;
 }
 export interface Join { a: [string, string]; b: [string, string]; type: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL' }
 export interface Calc { alias: string; t: string; kind: string; expr: string; spec?: unknown }
