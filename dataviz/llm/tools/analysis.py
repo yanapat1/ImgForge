@@ -58,6 +58,11 @@ def _search(ctx, a):
     return got, f'→ {len(got["tables"])} tables'
 
 
+def _favorites(ctx, a):
+    got = _call(_svc().favorites_for_ai, ctx.user, a.get('name'))
+    return got, f'→ {got.get("match", "?")}: {len(got.get("tables") or [])} tables'
+
+
 def _describe(ctx, a):
     cid, db = _target(ctx, a)
     got = _call(_svc().describe_for_ai, ctx.user, cid, db or '', a.get('schema') or '', a['table'], a.get('offset') or 0)
@@ -127,6 +132,10 @@ CONN = {'connection': S('connection id, default the page\'s'), 'database': S('da
 register(Tool('list_sources', 'The databases this user connected: id, name, kind.', _obj({}), False, _list_sources, **_R))
 register(Tool('search_catalog', 'Find tables by words in their name, columns or descriptions. Start here: never ask for a '
                                 'whole database.', _obj({'query': S('words to look for'), **CONN}, ['query']), False, _search, **_R))
+register(Tool('list_favorites', 'The user\'s favorite tables in their own categories (the scope line names the categories). '
+                                'Give the word the user used ("Motion"): it matches a category, else favorite table names. '
+                                'Each table says its connection and database. match none / ambiguous: ask_user.',
+              _obj({'name': S('a category or table word; empty = all categories')}), False, _favorites, **_R))
 register(Tool('describe_table', 'One table: columns, types, keys, descriptions. Wide tables come in pages (offset).',
               _obj({'table': S('table name'), 'schema': S('schema'), 'offset': I('first column'), **CONN}, ['table']),
               False, _describe, **_R))

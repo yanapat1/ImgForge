@@ -186,7 +186,9 @@ def analysis_scope(user, scope):
         out.append('The user allowed row samples for this session.')
     else:
         out.append('Row samples are off: answer from aggregates.')
-    return ' '.join(out)
+    from ...analysis import favorites
+    line = favorites.index_line(favorites.load(service.user_prefs(user)))
+    return ' '.join(out) + (f'\n{line}' if line else '')
 
 
 SCOPES = {'data': data_scope, 'visual': visual_scope, 'analysis': analysis_scope}

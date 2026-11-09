@@ -28,6 +28,7 @@ from sqlglot import exp, parse_one
 
 from .. import db
 from ..auth import audit, tiers
+from . import favorites
 from ..core import logging as vlog
 from . import adapters, classify, joins, querymodel, spool
 from . import forecast as forecast_mod
@@ -706,8 +707,56 @@ def search_catalog(user, cid, database, query):
         if score or not words:
             hits.append((score, t))
     hits.sort(key=lambda x: (-x[0], x[1]['name']))
-    return _cap({'tables': [{'schema': t['schema'], 'name': t['name'], 'kind': t['kind']} for _, t in hits[:30]],
-                 'matched': len(hits), 'of': len(tables)})
+    cat = favorites.lookup(favorites.load(user_prefs(user)), cid, database)
+    out = []
+    for _, t in hits[:30]:
+        row = {'schema': t['schema'], 'name': t['name'], 'kind': t['kind']}
+        g = cat.get((t['schema'] or '', t['name']))
+        if g is not None:
+            row['category' if g else 'favorite'] = g or True
+        out.append(row)
+    return _cap({'tables': out, 'matched': len(hits), 'of': len(tables)})
+
+
+def user_prefs(user):
+    """The user's prefs blob (favorites live there); {} when it cannot be read, so the assistant never breaks on it."""
+    try:
+        from ..server.routes.me import get_prefs
+        return get_prefs(user['id']) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def favorites_for_ai(user, name=None):
+    """The user's favorite tables of the category (or table words) `name`, with where each lives and its saved
+    description. 'none' / 'ambiguous' come back with the category names so the model can ask the user."""
+    got = favorites.resolve(favorites.load(user_prefs(user)), name)
+    items = got['items']
+    names = {s['id']: s['name'] for s in sources(user)} if items else {}
+    docs = {}
+    if items:
+        with db.connect() as c:
+            for r in c.execute(text("""SELECT connection_id, database, schema_name, table_name, description
+                                         FROM app.an_column_docs WHERE column_name = '' AND connection_id = ANY(:c)"""),
+                               {'c': sorted({f['c'] for f in items})}).all():
+                docs[(r.connection_id, r.database, r.schema_name, r.table_name)] = r.description
+    tables = []
+    for f in items:
+        row = {'category': f['g'], 'connection': f['c'], 'database': f['d'], 'schema': f['s'], 'table': f['t']}
+        d = docs.get((f['c'], f['d'], f['s'], f['t']))
+        if d:
+            row['description'] = _cell(d)
+        if f['c'] not in names:
+            row['missing'] = 'this connection is gone'
+        tables.append({k: v for k, v in row.items() if v != '' or k == 'category'})
+    used = {f['c'] for f in items}
+    out = {'match': got['match'], 'categories': got['categories'],
+           'connections': {k: v for k, v in names.items() if k in used}, 'tables': tables, 'total': len(tables)}
+    if got['match'] == 'none':
+        out['note'] = 'not a category or favorite table: try search_catalog, then ask_user'
+    elif got['match'] == 'ambiguous':
+        out['note'] = 'several categories match: ask_user which one'
+    return _cap(out)
 
 
 def describe_for_ai(user, cid, database, schema, table, offset=0):
