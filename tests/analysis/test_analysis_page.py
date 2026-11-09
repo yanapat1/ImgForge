@@ -409,3 +409,35 @@ def test_analysis_has_the_same_header_as_the_data_center(server):  # noqa: F811
     assert [x.split('\n')[0] for x in heads['data']['links']] == [x.split('\n')[0] for x in heads['analysis']['links']]
     assert heads['data']['on'].startswith('Data') and heads['analysis']['on'] == 'Analysis'
     assert {'settings', 'theme'} <= set(heads['analysis']['actions']) and {'settings', 'theme'} <= set(heads['data']['actions'])
+
+
+def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
+    """#analysis is position:fixed, so the dock's body padding never reached it: the dock covered the page's right side."""
+    from test_page_smoke import _post, _put
+    from test_llm import fake_app
+    from test_models import _serve
+    fake, url = _serve(fake_app())
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1', 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1400, 'height': 900})
+            page.goto(f'{server}/?analysis')
+            page.wait_for_selector('.an-main', timeout=20000)
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=10000)
+            dock = page.locator('#ai-dock').bounding_box()
+            for sel in ('#analysis', '.an-header', '.an-work'):
+                b = page.locator(sel).bounding_box()
+                assert b['x'] + b['width'] <= dock['x'] + 1, (sel, b, dock)
+            page.click('#ai-dock [data-dock="rail"]')
+            page.wait_for_function("document.documentElement.dataset.dock === 'rail'")
+            rail = page.locator('#ai-dock').bounding_box()
+            b = page.locator('#analysis').bounding_box()
+            assert abs(b['x'] + b['width'] - rail['x']) <= 1
+            page.set_viewport_size({'width': 800, 'height': 800})        # below 900 px the dock is a sheet: the page is full width
+            assert page.locator('#analysis').bounding_box()['width'] == 800
+            browser.close()
+    finally:
+        fake.should_exit = True

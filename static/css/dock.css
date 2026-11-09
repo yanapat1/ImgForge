@@ -5,6 +5,9 @@
 
 html[data-dock="open"] body { padding-right: var(--dock-w); }
 html[data-dock="rail"] body { padding-right: var(--dock-rail-w); }
+/* full-screen pages are position:fixed, so body padding does not reach them: they stop at the dock's edge themselves */
+html[data-dock="open"] :is(#analysis, #label, #ui-sheet) { right: var(--dock-w); }
+html[data-dock="rail"] :is(#analysis, #label, #ui-sheet) { right: var(--dock-rail-w); }
 html[data-dock="off"] .ai-dock, html:not([data-dock]) .ai-dock, html[data-dock="off"] .ai-fab, html:not([data-dock]) .ai-fab { display: none; }
 html.dock-dragging, html.dock-dragging * { cursor: col-resize !important; user-select: none; }
 html[data-screen="login"] .ai-dock, html[data-screen="login"] .ai-fab { display: none; }
@@ -99,6 +102,7 @@ html[data-dock="open"] .dock-rail { display: none; }
 
 @media (max-width: 899px) {
   html[data-dock] body { padding-right: 0; }
+  html[data-dock] :is(#analysis, #label, #ui-sheet) { right: 0; }
   html[data-dock] .app-toast { left: 50%; }
   html[data-dock="rail"] .ai-dock { display: none; }
   html[data-dock="rail"] .ai-fab { display: inline-flex; }
