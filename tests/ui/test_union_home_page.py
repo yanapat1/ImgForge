@@ -110,13 +110,15 @@ def test_compare_combine_from_the_home_and_settings(server, tmp_path):  # noqa: 
         page.wait_for_url(re.compile(r'/s/[0-9a-f]+/#compare$'), timeout=20000)
         assert f'/s/{uid}/' in page.url and len(_unions()) == 1
 
-        # removing a member that a combined dataset uses: the server's 400 shows on the home
+        # removing a member that a combined dataset uses: the delete waits for Undo (core/defer-delete.ts), then the
+        # server's 400 shows as an error toast and the card comes back
         page.goto(server)
         _card(page, 'Survey A').wait_for(timeout=20000)
         _card(page, 'Survey A').locator('[data-act="remove"]').click()
-        status = page.locator('#home-status .status-line.err')
-        status.wait_for(timeout=10000)
+        status = page.locator('#app-toast.err')
+        status.wait_for(timeout=20000)
         assert 'used by the combined dataset' in status.inner_text() and 'Survey A vs Survey B' in status.inner_text()
+        _card(page, 'Survey A').wait_for(timeout=10000)
         assert _card(page, 'Survey A').count() == 1
         shot(page, '57-home-remove-member-refused')
 

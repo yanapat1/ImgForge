@@ -454,9 +454,9 @@ def test_review_card_label_page_review_all_and_every_theme(server, tmp_path):
         # Review all from the ⋯ menu: p0 becomes bulk, p3 (to do) is left alone
         card.locator('[data-act="lmore"]').click()
         page.click('#home-cardmenu [data-m="review"]')
-        page.wait_for_selector('#home-dlg:not(.hidden)')
-        assert 'Review 1' in page.inner_text('#home-dlg-ok')
-        page.click('#home-dlg-ok')
+        page.wait_for_selector('.ui-dlg [data-dlg="ok"]')               # the shared dialog (views/dialog.ts)
+        assert 'Review 1' in page.inner_text('.ui-dlg [data-dlg="ok"]')
+        page.click('.ui-dlg [data-dlg="ok"]')
         for _ in range(100):
             if state()['p0.jpg'] == 'bulk':
                 break
@@ -595,7 +595,8 @@ def test_plot_bar_and_cleanlab_label_quality(server, tmp_path):
             assert page.locator('#btn-cl-fix').is_visible()
             if shots:
                 page.locator('#gallery-panel').screenshot(path=f'{shots}/gallery-fix.png')
-            page.click('#btn-cl-fix')                       # confirm() is accepted: the labels change, with undo
+            page.click('#btn-cl-fix')
+            page.click('.ui-dlg [data-dlg="ok"]')            # the shared confirm dialog: the labels change, with undo
             page.wait_for_function("document.querySelector('#lq-info').textContent.includes('labels changed')", timeout=15000)
             assert page.locator('#btn-cl-fix').is_hidden()
             page.click('#issues-btn')
@@ -617,6 +618,7 @@ def test_plot_bar_and_cleanlab_label_quality(server, tmp_path):
         page.click('#activity [data-tab="explore"]')
         page.click('#map-btn')
         page.set_input_files('#feat-import-file', str(tmp_path / 'vecs.npy'))
+        page.click('.ui-dlg [data-dlg="ok"]')                # the name dialog, prefilled with the file name
         page.wait_for_function("document.querySelector('#map-summary').textContent.startsWith('vecs')", timeout=30000)
         page.wait_for_selector('#plot .main-svg', timeout=60000)
         browser.close()
