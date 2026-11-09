@@ -28,17 +28,18 @@ const PARTS: Part[] = [
     use: 'The panel next to the activity bar: a title row, then a list that scrolls by itself.',
     demo: `<section class="left-panel ui-side"><div class="side-head"><h2>Objects</h2><span class="muted hint">3 connections</span></div>` +
       `<div class="side-scroll"><div class="check">${icon('db')} sales · public</div><div class="check">${icon('db')} test2 · dbo</div><div class="check">${icon('folder')} finance-exports</div></div></section>` },
-  { id: 'buttons', title: 'Buttons', classes: 'button button.primary button.ghost button.danger-btn button.sm button.block .icon-btn .icon-btn.xs',
+  { id: 'buttons', title: 'Buttons', classes: 'button button.primary button.ghost button.danger-btn button.sm a.btn .icon-btn .icon-btn.xs',
     use: 'One primary action per area. Ghost for quiet actions in toolbars and headers, danger for removing things (always behind a confirm). .sm inside dense toolbars, .icon-btn when an icon says it all (with a title).',
     demo: `<div class="ui-row"><button class="primary">${icon('play')}Run</button><button>${icon('refresh')}Refresh</button><button class="ghost">Cancel</button><button class="danger-btn">${icon('trash')}Delete</button><button disabled>Disabled</button></div>` +
-      `<div class="ui-row"><button class="sm primary">${icon('play')}Run</button><button class="sm">Copy</button><button class="icon-btn" title="Settings">${icon('gear')}</button><button class="icon-btn ghost" title="Close">${icon('x')}</button><button class="icon-btn ghost xs" title="Rename">${icon('edit')}</button></div>` },
+      `<div class="ui-row"><button class="sm primary">${icon('play')}Run</button><button class="sm">Copy</button><button class="icon-btn" title="Settings">${icon('gear')}</button><button class="icon-btn ghost" title="Close">${icon('x')}</button><button class="icon-btn ghost xs" title="Rename">${icon('edit')}</button><a class="btn sm" href="#ui-buttons">${icon('download')}Export (a link)</a></div>` },
   { id: 'segmented', title: 'Segmented choice', classes: '.segmented .view-btn .view-btn.active',
     use: 'A few exclusive options shown at once (a mode, a layout). More than five: use a select.',
     demo: `<div class="segmented"><button class="view-btn active">Standard</button><button class="view-btn">Table on top</button><button class="view-btn">Table only</button></div>` },
-  { id: 'inputs', title: 'Inputs', classes: 'select input.txt input[type=number] input[type=range] .check .fld .fld .help',
-    use: 'Labelled fields in forms (.fld: label above, help below). input.txt for free text on its own; a .check row for a yes / no.',
-    demo: `<div class="ui-row"><select aria-label="Connection"><option>sales (PostgreSQL)</option><option>test2 (SQL Server)</option></select><input class="txt" placeholder="Find table or column" aria-label="Find"><input type="number" value="20" aria-label="Number"><input type="range" aria-label="Range"></div>` +
-      `<div class="ui-grid2"><label class="fld">Name<input type="text" value="Orders by customer"><span class="help">Shown on the tab and in History.</span></label><label class="check"><input type="checkbox" checked> Let AI read sample rows</label></div>` },
+  { id: 'inputs', title: 'Inputs', classes: 'select input.txt input.txt.sm input[type=number] input[type=range] .check .fld .help .form-stack',
+    use: 'Labelled fields in forms (.fld: label above, help below; .form-stack lays a dialog form out). input.txt for free text on its own (.sm in a dense toolbar); a .check row for a yes / no.',
+    demo: `<div class="ui-row"><select aria-label="Connection"><option>sales (PostgreSQL)</option><option>test2 (SQL Server)</option></select><input class="txt" placeholder="Find table or column" aria-label="Find"><input class="txt sm" placeholder="Filter these rows" aria-label="Filter"><input type="number" value="20" aria-label="Number"><input type="range" aria-label="Range"></div>` +
+      `<div class="ui-grid2"><label class="fld">Name<input type="text" value="Orders by customer"><span class="help">Shown on the tab and in History.</span></label><label class="check"><input type="checkbox" checked> Let AI read sample rows</label></div>` +
+      `<div class="form-stack" style="max-width:420px"><label>Column<select><option>total</option></select></label><label>Cast to<input type="text" value="int"></label><label class="check"><input type="checkbox"> Use TRY_CAST</label></div>` },
   { id: 'tabs', title: 'Tabs', classes: '.tabbar [role=tab][aria-selected] .tabbar.sm',
     use: 'Pages of one area. .tabbar on a page (the Sessions home); .tabbar.sm inside a panel (query tabs, Results | Joins | Cost), with small actions at its end.',
     demo: `<div class="tabbar" role="tablist"><button role="tab" aria-selected="true">${icon('scatter')}Visualize<span class="count-badge">4</span></button><button role="tab" aria-selected="false">${icon('tag')}Label<span class="count-badge">2</span></button></div>` +
@@ -46,10 +47,10 @@ const PARTS: Part[] = [
   { id: 'toolbar', title: 'Toolbar', classes: '.toolbar .grow .sep',
     use: 'A row of controls above a pane: the main action first, then choices, then status at the end.',
     demo: `<div class="toolbar"><button class="primary sm">${icon('play')}Run</button><button class="sm">${icon('stop')}Stop</button><span class="sep"></span><select aria-label="Connection"><option>sales</option></select><span class="badge ok">PG</span><span class="grow"></span><span class="hintline">${icon('lock')}Read-only guard on</span></div>` },
-  { id: 'labels', title: 'Pills, chips, badges', classes: '.pill .pill.name .pill.warn .chip .chip.on .count-badge .badge .badge.accent|ok|warn|danger|alt .badge.dashed',
+  { id: 'labels', title: 'Pills, chips, badges', classes: '.pill .pill.name .pill.warn .chip .chip.on .count-badge .badge .badge.accent|ok|warn|danger|alt .badge.dashed .badge.solid.read|temp|write',
     use: 'Pill: a fact with a number (rows, time). Chip: a filter you can toggle. Badge: a source or kind in a few letters, readable without colour. Count badge: a count next to a title.',
     demo: `<div class="ui-row"><span class="pill name"><b>Q3 customer orders</b></span><span class="pill"><b>12,480</b>rows</span><span class="pill warn">Out of date</span><span class="chip on">${icon('check')}All classes</span><span class="chip">person</span><span class="count-badge">42</span></div>` +
-      `<div class="ui-row"><span class="badge accent">MS</span><span class="badge ok">PG</span><span class="badge alt">MG</span><span class="badge warn dashed">TEMP</span><span class="badge solid danger">change</span><span class="badge solid">read</span></div>` },
+      `<div class="ui-row"><span class="badge accent">MS</span><span class="badge ok">PG</span><span class="badge alt">MG</span><span class="badge warn dashed">TEMP</span><span class="badge solid">read</span><span class="badge solid temp">temp</span><span class="badge solid write">change</span></div>` },
   { id: 'feedback', title: 'Feedback', classes: '.status-line .status-line.ok|err .hintline .notice .notice.bad|info openDialog() toast() actionToast()',
     use: 'Status line: the result of a check, in place. Notice: something to act on, with its action at the end. Dialog: a decision or a form. Toast: a short "done" or "failed"; an action toast offers Undo.',
     demo: `<div class="status-line ok">${icon('check-c')}Connected · PostgreSQL 16</div><div class="status-line err">${icon('alert')}Could not reach the server</div>` +
@@ -60,10 +61,10 @@ const PARTS: Part[] = [
     demo: `<table class="class-table"><thead><tr><th>class</th><th class="r">boxes</th><th class="r">share</th></tr></thead><tbody><tr><td>person</td><td class="r">1,204</td><td class="r">48%</td></tr><tr><td>car</td><td class="r">812</td><td class="r">32%</td></tr></tbody></table>` +
       `<div class="ui-scroll"><table class="data-grid" style="width:520px"><colgroup><col style="width:110px"><col style="width:170px"><col style="width:120px"><col style="width:120px"></colgroup><thead><tr><th>id</th><th>name</th><th>total</th><th>note</th></tr></thead>` +
       `<tbody><tr><td class="n">100231</td><td>Siam Parts</td><td class="n">1,519.73</td><td class="null">NULL</td></tr><tr><td class="n">100238</td><td>Mekong Foods</td><td class="n">1,076.96</td><td>Rush delivery</td></tr><tr class="cur"><td class="n">100245</td><td class="cur">Lanna Print</td><td class="n">1,268.35</td><td></td></tr></tbody></table></div>` },
-  { id: 'tiles', title: 'Totals, tiles, empty state', classes: '.stat-strip .tile .tile-grid .sec-title .sec-label .empty',
-    use: 'A strip of totals above a result; tiles for a grid of small reports (a column profile, a dashboard item); an empty state that says what to do next.',
+  { id: 'tiles', title: 'Totals, mini cards, empty state', classes: '.stat-strip .mini-card .mini-grid .sec-title .sec-label .empty',
+    use: 'A strip of totals above a result; mini cards for a grid of small reports (a column profile, a dashboard item); an empty state that says what to do next.',
     demo: `<div class="stat-strip"><div><b>12,480</b>rows</div><div><b>8</b>columns</div><div><b>2.1%</b>empty cells</div><div><b>0</b>duplicate rows</div></div>` +
-      `<div class="tile-grid"><div class="tile"><h4>total <span class="badge">numeric</span></h4><span class="muted">mean 765.75 · median 690.10</span></div><div class="tile"><h4>status <span class="badge">text</span></h4><span class="muted">4 values, no empty cells</span></div></div>` +
+      `<div class="mini-grid"><div class="mini-card"><h4>total <span class="badge">numeric</span></h4><span class="muted">mean 765.75 · median 690.10</span></div><div class="mini-card"><h4>status <span class="badge">text</span></h4><span class="muted">4 values, no empty cells</span></div></div>` +
       `<div class="empty"><h3>No results yet</h3><p>Write a query or drag a table onto the builder, then press Run.</p></div>` },
 ];
 

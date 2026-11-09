@@ -40,18 +40,18 @@ function venn(s: JoinStats, j: Join, a: string, b: string): string {
 
 export function joinsHtml(t: Tab): string {
   const m = t.model;
-  if (!m?.joins.length) return '<div class="an-empty">Add a join in the Visual builder to see which rows it keeps and cuts.</div>';
+  if (!m?.joins.length) return '<div class="an-empty empty">Add a join in the Visual builder to see which rows it keeps and cuts.</div>';
   const i = Math.min(t.joinStep, m.joins.length - 1), j = m.joins[i] as Join;
   const name = (id: string): string => m.tables.find((x: MTable) => x.id === id)?.name ?? id;
   const a = name(j.a[0]), b = name(j.b[0]), s = t.joinStats[`${j.a.join('.')}|${j.b.join('.')}`];
-  const steps = `<div class="an-steps">${m.joins.map((x, n) => `<button type="button" class="an-btn sm ${n === i ? 'pri' : ''}" data-act="join-step" data-i="${n}">${esc(x.type)}: ${esc(name(x.a[0]))} ⋈ ${esc(name(x.b[0]))}</button>`).join('')}</div>`;
-  if (!s) return `<div class="an-pad">${steps}<p class="an-empty">This counts the rows on both sides in your database, so it runs only when you ask.</p><button type="button" class="an-btn pri" data-act="join-count" data-i="${i}">Count rows</button></div>`;
+  const steps = `<div class="an-steps">${m.joins.map((x, n) => `<button type="button" class="sm ${n === i ? 'primary' : ''}" data-act="join-step" data-i="${n}">${esc(x.type)}: ${esc(name(x.a[0]))} ⋈ ${esc(name(x.b[0]))}</button>`).join('')}</div>`;
+  if (!s) return `<div class="an-pad">${steps}<p class="an-empty empty">This counts the rows on both sides in your database, so it runs only when you ask.</p><button type="button" class="primary" data-act="join-count" data-i="${i}">Count rows</button></div>`;
   const cut = (j.type === 'INNER' || j.type === 'RIGHT' ? s.lost_a : 0) + (j.type === 'INNER' || j.type === 'LEFT' ? s.lost_b : 0);
   const flow = Math.max(s.a_rows, s.kept, 1);
   return `<div class="an-pad">${steps}<div class="an-two"><div>${venn(s, j, a, b)}<div class="an-legend"><span><i class="ok"></i>kept, matched</span><span><i class="cut"></i>cut by this join</span><span class="faint">Circle size follows distinct join keys.</span></div></div>
-  <div><div class="an-sum"><div><b>${s.kept.toLocaleString()}</b>rows after this join</div><div><b>${cut.toLocaleString()}</b>rows cut</div></div>
-  <table class="an-doc"><tbody><tr><td>${esc(a)} rows with no match</td><td class="num">${s.lost_a.toLocaleString()}</td><td>${j.type === 'LEFT' || j.type === 'FULL' ? 'kept' : '<b>cut</b>'}</td></tr><tr><td>${esc(b)} rows with no match</td><td class="num">${s.lost_b.toLocaleString()}</td><td>${j.type === 'RIGHT' || j.type === 'FULL' ? 'kept' : '<b>cut</b>'}</td></tr></tbody></table>
-  ${s.fan_out ? `<div class="an-hint"><span>One key matches several rows, so ${s.joined.toLocaleString()} rows come out. Check totals before you sum columns, because their values repeat.</span></div>` : ''}
+  <div><div class="an-sum stat-strip"><div><b>${s.kept.toLocaleString()}</b>rows after this join</div><div><b>${cut.toLocaleString()}</b>rows cut</div></div>
+  <table class="an-doc list-table"><tbody><tr><td>${esc(a)} rows with no match</td><td class="num">${s.lost_a.toLocaleString()}</td><td>${j.type === 'LEFT' || j.type === 'FULL' ? 'kept' : '<b>cut</b>'}</td></tr><tr><td>${esc(b)} rows with no match</td><td class="num">${s.lost_b.toLocaleString()}</td><td>${j.type === 'RIGHT' || j.type === 'FULL' ? 'kept' : '<b>cut</b>'}</td></tr></tbody></table>
+  ${s.fan_out ? `<div class="an-hint notice"><span>One key matches several rows, so ${s.joined.toLocaleString()} rows come out. Check totals before you sum columns, because their values repeat.</span></div>` : ''}
   <div class="an-flow"><div class="an-fr"><span>${esc(a)}</span><div class="an-bar"><i style="width:${s.a_rows / flow * 100}%"></i></div><b class="num">${s.a_rows.toLocaleString()}</b></div><div class="an-fr"><span>${esc(j.type)} ${esc(b)}</span><div class="an-bar"><i style="width:${s.kept / flow * 100}%"></i></div><b class="num">${s.kept.toLocaleString()}</b></div></div></div></div></div>`;
 }
 

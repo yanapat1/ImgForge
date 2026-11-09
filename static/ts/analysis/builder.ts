@@ -83,9 +83,9 @@ function cvTop(t: Tab): string {
   if (t.notDrawn) return `<div class="an-cvt tl"><span>Change statements stay in SQL. The builder does not draw them.</span></div>`;
   if (m.locked.length) return `<div class="an-cvt tl"><span class="pill warn">Locked</span><span>This query uses ${esc(m.locked.join(', '))}. It still runs. Edit it in SQL.</span></div>`;
   const n = S.sel.length;
-  return `<div class="an-cvt tl"><button type="button" class="an-btn sm" data-act="b-calc">+ Column</button><button type="button" class="an-btn sm" data-act="b-sub">+ Subquery</button><button type="button" class="an-btn sm" data-act="b-filters">Filters</button>` +
-    `<button type="button" class="an-btn sm" data-act="b-del" ${n ? '' : 'disabled'} title="Delete key">Delete${n ? ` ${n}` : ''}</button><button type="button" class="an-btn sm" data-act="b-unused" title="Removes tables that are hidden and have no join">Remove unused</button>` +
-    `<button type="button" class="an-btn sm" data-act="b-undo" ${t.undo.length ? '' : 'disabled'} title="Ctrl+Z">Undo</button><button type="button" class="an-btn sm" data-act="b-redo" ${t.redo.length ? '' : 'disabled'} title="Ctrl+Y">Redo</button></div>`;
+  return `<div class="an-cvt tl"><button type="button" class="sm" data-act="b-calc">+ Column</button><button type="button" class="sm" data-act="b-sub">+ Subquery</button><button type="button" class="sm" data-act="b-filters">Filters</button>` +
+    `<button type="button" class="sm" data-act="b-del" ${n ? '' : 'disabled'} title="Delete key">Delete${n ? ` ${n}` : ''}</button><button type="button" class="sm" data-act="b-unused" title="Removes tables that are hidden and have no join">Remove unused</button>` +
+    `<button type="button" class="sm" data-act="b-undo" ${t.undo.length ? '' : 'disabled'} title="Ctrl+Z">Undo</button><button type="button" class="sm" data-act="b-redo" ${t.redo.length ? '' : 'disabled'} title="Ctrl+Y">Redo</button></div>`;
 }
 
 function panel(t: Tab): string {
@@ -93,8 +93,8 @@ function panel(t: Tab): string {
   if (!m.calc.length && !cl.length) return '';
   const edit = !readOnly(t);
   return `<div class="an-cvt bl"><button type="button" class="an-cr" data-act="b-panel" aria-expanded="${S.calcOpen}"><b>${S.calcOpen ? '▾' : '▸'} Computed and filters</b><span class="faint num">${m.calc.length + cl.length}</span></button>` +
-    (S.calcOpen ? m.calc.map((c, i) => `<div class="an-cr"><span class="an-tag temp">${esc(c.kind.toUpperCase())}</span><span class="lbl" title="${esc(c.expr)}">${esc(c.alias)}</span>${edit ? `<button type="button" class="pb" data-act="b-calc-edit" data-i="${i}" aria-label="Edit ${esc(c.alias)}">✎</button><button type="button" class="pb" data-act="b-calc-rm" data-i="${i}" aria-label="Remove ${esc(c.alias)}">×</button>` : ''}</div>`).join('') +
-      cl.map((x) => `<div class="an-cr"><span class="an-tag">${x[0]}</span><span class="lbl" title="${esc(x[1])}">${esc(x[1])}</span></div>`).join('') : '') + '</div>';
+    (S.calcOpen ? m.calc.map((c, i) => `<div class="an-cr"><span class="badge solid temp">${esc(c.kind.toUpperCase())}</span><span class="lbl" title="${esc(c.expr)}">${esc(c.alias)}</span>${edit ? `<button type="button" class="icon-btn ghost xs" data-act="b-calc-edit" data-i="${i}" aria-label="Edit ${esc(c.alias)}">✎</button><button type="button" class="icon-btn ghost xs" data-act="b-calc-rm" data-i="${i}" aria-label="Remove ${esc(c.alias)}">×</button>` : ''}</div>`).join('') +
+      cl.map((x) => `<div class="an-cr"><span class="badge solid">${x[0]}</span><span class="lbl" title="${esc(x[1])}">${esc(x[1])}</span></div>`).join('') : '') + '</div>';
 }
 
 export function renderBuilder(): void {
@@ -104,11 +104,11 @@ export function renderBuilder(): void {
   const cards = m.tables.map((x) => {
     const cols = columnsOf(t, x), on = (c: string): boolean => x.star || x.sel.includes(c);
     return `<div class="an-tb${x.show ? '' : ' off'}${S.sel.includes(x.id) ? ' picked' : ''}${x.kind !== 'table' ? ' sub' : ''}" data-t="${esc(x.id)}" tabindex="0" aria-label="${esc(x.name)} table" style="left:${x.x}px;top:${x.y}px">` +
-      `<div class="an-th" data-mv="${esc(x.id)}" title="${x.show ? 'Shown in results. Click to hide.' : 'Hidden from results. Click to show.'}">${chip(x.kind === 'table' ? (sourceOf(t.conn)?.kind ?? '') : 'sub')}<span class="lbl">${esc(x.name)}</span><button type="button" class="an-x" data-act="b-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">×</button></div>` +
+      `<div class="an-th" data-mv="${esc(x.id)}" title="${x.show ? 'Shown in results. Click to hide.' : 'Hidden from results. Click to show.'}">${chip(x.kind === 'table' ? (sourceOf(t.conn)?.kind ?? '') : 'sub')}<span class="lbl">${esc(x.name)}</span><button type="button" class="an-x icon-btn ghost xs" data-act="b-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">×</button></div>` +
       cols.map((c) => { const cast = x.cast[c.name]; return `<div class="an-col${on(c.name) ? ' sel' : ''}" tabindex="0" role="checkbox" aria-checked="${on(c.name)}" data-t="${esc(x.id)}" data-c="${esc(c.name)}"><span class="an-dot"></span><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}${x.kind === 'table' ? `<button type="button" class="an-ty${cast ? ' cast' : ''}" data-act="b-cast" data-t="${esc(x.id)}" data-c="${esc(c.name)}" title="Change type with CAST">${esc(cast?.type ?? c.type ?? 'type')}</button>` : ''}</div>`; }).join('') + '</div>';
   }).join('');
   host.classList.toggle('ro', readOnly(t));
-  host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="pb" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="pb" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="an-btn sm" data-act="b-fit">Fit</button></div>` +
+  host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="sm" data-act="b-fit">Fit</button></div>` +
     `<div class="an-board" id="an-board" style="transform:translate(${v.x}px,${v.y}px) scale(${v.z})"><svg class="an-lines" id="an-lines" width="2400" height="1600" aria-hidden="true"></svg>${cards}<span id="an-jl"></span>${m.adv ? `<div class="an-remote" style="left:${m.tables[0]?.x ?? 24}px;top:${Math.max(60, ...m.tables.map((x) => x.y)) + 240}px"><span class="pill warn">Locked part</span><pre class="an-hq">${esc(m.adv)}</pre></div>` : ''}</div>` +
     (!m.tables.length && !t.notDrawn ? '<div class="an-cvhint">Drag a table here from the object explorer.</div>' : '');
   host.style.backgroundSize = `${18 * v.z}px ${18 * v.z}px`;
@@ -243,7 +243,7 @@ function joinDialog(i: number): void {
   if (!a || !b) return;
   const opts = (x: MTable, cur: string): string => columnsOf(t, x).map((c) => `<option ${c.name === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
   void openDialog({
-    title: `Join ${a.name} and ${b.name}`, ok: 'Done', body: `<div class="an-form"><label>Join type<select id="an-j-type">${ORDER.map((k) => `<option ${k === j.type ? 'selected' : ''}>${k}</option>`).join('')}</select></label><label>${esc(a.name)} column<select id="an-j-a">${opts(a, j.a[1])}</select></label><label>${esc(b.name)} column<select id="an-j-b">${opts(b, j.b[1])}</select></label><label class="an-chk"><input type="checkbox" id="an-j-rm"> Remove this join</label><p class="faint">Press Run to see the new result.</p></div>`,
+    title: `Join ${a.name} and ${b.name}`, ok: 'Done', body: `<div class="an-form form-stack"><label>Join type<select id="an-j-type">${ORDER.map((k) => `<option ${k === j.type ? 'selected' : ''}>${k}</option>`).join('')}</select></label><label>${esc(a.name)} column<select id="an-j-a">${opts(a, j.a[1])}</select></label><label>${esc(b.name)} column<select id="an-j-b">${opts(b, j.b[1])}</select></label><label class="check"><input type="checkbox" id="an-j-rm"> Remove this join</label><p class="faint">Press Run to see the new result.</p></div>`,
     onOk: (root) => {
       record(t);
       if (root.querySelector<HTMLInputElement>('#an-j-rm')?.checked) m.joins.splice(i, 1);
@@ -263,7 +263,7 @@ function castDialog(id: string, c: string): void {
   if (!x) return;
   const kind = sourceOf(t.conn)?.kind ?? 'postgres', now = x.cast[c], types = TYPES[kind] ?? [];
   void openDialog({
-    title: `Change type of ${c}`, ok: 'Apply', body: `<div class="an-form"><p class="faint">This changes the query only. The table in your database stays the same.</p><label>New type<input id="an-c-type" list="an-c-list" value="${esc(now?.type ?? '')}" placeholder="${esc(types[0] ?? '')}"><datalist id="an-c-list">${types.map((y) => `<option value="${esc(y)}">`).join('')}</datalist></label>${kind === 'mssql' ? `<label class="an-chk"><input type="checkbox" id="an-c-safe" ${now?.safe ? 'checked' : ''}> Use TRY_CAST, so a bad value becomes NULL instead of failing the query</label>` : ''}<label class="an-chk"><input type="checkbox" id="an-c-rm"> Remove this CAST</label></div>`,
+    title: `Change type of ${c}`, ok: 'Apply', body: `<div class="an-form form-stack"><p class="faint">This changes the query only. The table in your database stays the same.</p><label>New type<input id="an-c-type" list="an-c-list" value="${esc(now?.type ?? '')}" placeholder="${esc(types[0] ?? '')}"><datalist id="an-c-list">${types.map((y) => `<option value="${esc(y)}">`).join('')}</datalist></label>${kind === 'mssql' ? `<label class="check"><input type="checkbox" id="an-c-safe" ${now?.safe ? 'checked' : ''}> Use TRY_CAST, so a bad value becomes NULL instead of failing the query</label>` : ''}<label class="check"><input type="checkbox" id="an-c-rm"> Remove this CAST</label></div>`,
     onOk: (root) => {
       const v = root.querySelector<HTMLInputElement>('#an-c-type')?.value.trim() ?? '';
       const rm = root.querySelector<HTMLInputElement>('#an-c-rm')?.checked;
@@ -299,13 +299,13 @@ function calcDialog(edit: number): void {
   const fns = WINDOW_FNS.filter((x) => !(kind === 'mssql' && x === 'NTH_VALUE'));
   const body = (): string => {
     let b = '';
-    if (c.tab === 'case') b = `${c.whens.map((w, i) => `<div class="an-when"><select aria-label="Column" data-w="${i}" data-f="col">${opt(w.col)}</select><select aria-label="Condition" data-w="${i}" data-f="op">${['=', '<>', '>', '>=', '<', '<=', 'LIKE', 'IS NULL'].map((o) => `<option ${o === w.op ? 'selected' : ''}>${o}</option>`).join('')}</select><input aria-label="Value" placeholder="value" data-w="${i}" data-f="val" value="${esc(w.val)}"><input aria-label="Then" placeholder="then" data-w="${i}" data-f="then" value="${esc(w.then)}"></div>`).join('')}<button type="button" class="an-btn sm" data-add="1">+ WHEN</button><label>ELSE<input data-c="els" value="${esc(c.els)}"></label>`;
+    if (c.tab === 'case') b = `${c.whens.map((w, i) => `<div class="an-when"><select aria-label="Column" data-w="${i}" data-f="col">${opt(w.col)}</select><select aria-label="Condition" data-w="${i}" data-f="op">${['=', '<>', '>', '>=', '<', '<=', 'LIKE', 'IS NULL'].map((o) => `<option ${o === w.op ? 'selected' : ''}>${o}</option>`).join('')}</select><input aria-label="Value" placeholder="value" data-w="${i}" data-f="val" value="${esc(w.val)}"><input aria-label="Then" placeholder="then" data-w="${i}" data-f="then" value="${esc(w.then)}"></div>`).join('')}<button type="button" class="sm" data-add="1">+ WHEN</button><label>ELSE<input data-c="els" value="${esc(c.els)}"></label>`;
     if (c.tab === 'window') b = `<label>Function<select data-c="fn" data-re="1">${fns.map((x) => `<option ${x === c.fn ? 'selected' : ''}>${x}</option>`).join('')}</select></label>${NO_ARG.has(c.fn) || c.fn === 'NTILE' ? '' : `<label>Column<select data-c="arg">${opt(c.arg)}</select></label>`}${['NTILE', 'LAG', 'LEAD', 'NTH_VALUE'].includes(c.fn) ? `<label>${c.fn === 'NTILE' ? 'Number of groups' : 'Offset'}<input data-c="n" type="number" min="1" value="${esc(c.n)}"></label>` : ''}<label>Partition by<select data-c="part">${opt(c.part, 'No partition')}</select></label><label>Order by<select data-c="ord">${opt(c.ord, 'No order')}</select></label><label>Direction<select data-c="dir"><option ${c.dir === 'DESC' ? 'selected' : ''}>DESC</option><option ${c.dir === 'ASC' ? 'selected' : ''}>ASC</option></select></label><label>Frame<select data-c="frame">${[['', 'Default'], ['ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW', 'Running, from the first row'], ['ROWS BETWEEN 6 PRECEDING AND CURRENT ROW', 'Last 7 rows'], ['ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING', 'All rows in the partition']].map(([v, n]) => `<option value="${v}" ${v === c.frame ? 'selected' : ''}>${n}</option>`).join('')}</select></label><p class="faint">Anything else, such as PERCENTILE_CONT, goes in the Expression tab.</p>`;
     if (c.tab === 'expr') b = `<label>SQL expression<textarea data-c="expr">${esc(c.expr)}</textarea></label>`;
-    return `<div class="an-seg">${([['case', 'CASE WHEN'], ['window', 'Window function'], ['expr', 'Expression']] as const).map(([k, n]) => `<button type="button" class="${c.tab === k ? 'on' : ''}" data-tab="${k}">${n}</button>`).join('')}</div><label>Column name<input id="an-k-alias" data-c="alias" value="${esc(c.alias)}"></label>${b}<pre class="an-prev" id="an-k-prev">${esc(specExpr(c, kind))}</pre>`;
+    return `<div class="an-seg segmented">${([['case', 'CASE WHEN'], ['window', 'Window function'], ['expr', 'Expression']] as const).map(([k, n]) => `<button type="button" class="view-btn ${c.tab === k ? 'active' : ''}" data-tab="${k}">${n}</button>`).join('')}</div><label>Column name<input id="an-k-alias" data-c="alias" value="${esc(c.alias)}"></label>${b}<pre class="an-prev" id="an-k-prev">${esc(specExpr(c, kind))}</pre>`;
   };
   void openDialog({
-    title: `${old ? 'Edit' : 'Add'} computed column`, wide: true, ok: 'Apply', body: `<div class="an-form" id="an-k">${body()}</div>`, focus: '#an-k-alias',
+    title: `${old ? 'Edit' : 'Add'} computed column`, wide: true, ok: 'Apply', body: `<div class="an-form form-stack" id="an-k">${body()}</div>`, focus: '#an-k-alias',
     bind: (root) => {
       const form = root.querySelector<HTMLElement>('#an-k');
       if (!form) return;
@@ -343,7 +343,7 @@ function calcDialog(edit: number): void {
 function subDialog(): void {
   const t = tab(), m = modelOf(t);
   void openDialog({
-    title: 'Add a subquery', ok: 'Add to builder', wide: true, body: '<div class="an-form"><label>Name<input id="an-s-name" value="sub1"></label><label>SELECT query<textarea id="an-s-sql" placeholder="SELECT id, COUNT(*) AS n FROM ..."></textarea></label></div>',
+    title: 'Add a subquery', ok: 'Add to builder', wide: true, body: '<div class="an-form form-stack"><label>Name<input id="an-s-name" value="sub1"></label><label>SELECT query<textarea id="an-s-sql" placeholder="SELECT id, COUNT(*) AS n FROM ..."></textarea></label></div>',
     onOk: async (root) => {
       const name = root.querySelector<HTMLInputElement>('#an-s-name')?.value.trim() ?? '', sql = root.querySelector<HTMLTextAreaElement>('#an-s-sql')?.value.trim() ?? '';
       if (!/^[A-Za-z_]\w*$/.test(name)) return 'Give it a name, using letters, digits and _.';
@@ -364,7 +364,7 @@ function filterDialog(): void {
   const t = tab(), m = modelOf(t), p = m.parts;
   const rows: [string, string][] = [['where', 'WHERE'], ['group', 'GROUP BY'], ['having', 'HAVING'], ['order', 'ORDER BY']];
   void openDialog({
-    title: 'Filters and grouping', ok: 'Apply', body: `<div class="an-form">${rows.map(([k, n]) => `<label>${n}<input id="an-p-${k}" value="${esc((p as Record<string, unknown>)[k] ?? '')}"></label>`).join('')}<p class="faint">Subqueries work here too, such as id IN (SELECT ...).</p></div>`,
+    title: 'Filters and grouping', ok: 'Apply', body: `<div class="an-form form-stack">${rows.map(([k, n]) => `<label>${n}<input id="an-p-${k}" value="${esc((p as Record<string, unknown>)[k] ?? '')}"></label>`).join('')}<p class="faint">Subqueries work here too, such as id IN (SELECT ...).</p></div>`,
     onOk: (root) => {
       record(t);
       for (const [k] of rows) {

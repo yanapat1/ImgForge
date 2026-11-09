@@ -9,26 +9,26 @@ import { A, api, tableKey } from './state.js';
 export async function openCatalog(conn: string, db: string, schema: string, table: string): Promise<void> {
   A.catalog = { conn, db, schema, table };
   const w = $req('an-work');
-  w.innerHTML = '<div class="an-empty">Loading…</div>';
+  w.innerHTML = '<div class="an-empty empty">Loading…</div>';
   try {
     const info = await api.describe(conn, db, schema, table);
     A.info.set(tableKey(conn, db, schema, table), info);
-  } catch (e) { w.innerHTML = `<div class="an-empty">${esc(errText(e))}</div>`; return; }
+  } catch (e) { w.innerHTML = `<div class="an-empty empty">${esc(errText(e))}</div>`; return; }
   renderCatalog();
 }
 
 export function renderCatalog(): void {
   const w = $req('an-work'), c = A.catalog;
-  if (!c) { w.innerHTML = '<div class="an-empty">Click a table in the object explorer to see its columns and descriptions.</div>'; return; }
+  if (!c) { w.innerHTML = '<div class="an-empty empty">Click a table in the object explorer to see its columns and descriptions.</div>'; return; }
   const info = A.info.get(tableKey(c.conn, c.db, c.schema, c.table));
   if (!info) { void openCatalog(c.conn, c.db, c.schema, c.table); return; }
   const missing = info.columns.filter((x) => !x.description).length;
   const from: Record<string, string> = { database: 'Database', user: 'You', ai: 'AI, check it' };
-  w.innerHTML = `<div class="an-scroll"><h2 class="an-h2">${esc(c.schema ? `${c.schema}.${c.table}` : c.table)}</h2><div class="faint">${esc(c.db)} · about ${info.rows.toLocaleString()} rows · ${info.columns.length} columns${info.sampled ? ` · fields sampled from ${info.sampled} documents` : ''} · ${missing ? `${missing} without a description` : 'all described'}</div>` +
-    `<div class="an-toolbar an-plain"><button type="button" class="an-btn sm" data-act="cat-query">Open in Query</button></div>` +
+  w.innerHTML = `<div class="an-scroll"><h2 class="sec-title">${esc(c.schema ? `${c.schema}.${c.table}` : c.table)}</h2><div class="faint">${esc(c.db)} · about ${info.rows.toLocaleString()} rows · ${info.columns.length} columns${info.sampled ? ` · fields sampled from ${info.sampled} documents` : ''} · ${missing ? `${missing} without a description` : 'all described'}</div>` +
+    `<div class="an-toolbar toolbar an-plain"><button type="button" class="sm" data-act="cat-query">Open in Query</button></div>` +
     `<label class="an-tdesc">Table description<input id="an-tdoc" data-col="" value="${esc(info.description)}" placeholder="What is this table for?"></label>` +
-    `<table class="an-doc"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th style="width:100%">Description, also read by the AI</th><th>From</th></tr></thead><tbody>${info.columns.map((x) => `<tr><td class="an-mono">${esc(x.name)}</td><td class="faint an-mono">${esc(x.type)}</td><td class="an-key">${esc(x.key)}</td><td><input class="an-desc${x.description ? '' : ' miss'}" data-col="${esc(x.name)}" aria-label="Description of ${esc(x.name)}" value="${esc(x.description)}" placeholder="Add a description"></td><td class="faint">${esc(from[x.from ?? ''] ?? '')}</td></tr>`).join('')}</tbody></table>` +
-    (info.keys.length ? `<h3 class="an-h3">Relationships</h3><table class="an-doc"><tbody>${info.keys.map((k) => `<tr><td class="an-mono">${esc(k.column)}</td><td>→</td><td class="an-mono">${esc(k.schema ? `${k.schema}.` : '')}${esc(k.table)}.${esc(k.to)}</td></tr>`).join('')}</tbody></table>` : '') + '</div>';
+    `<table class="an-doc list-table"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th style="width:100%">Description, also read by the AI</th><th>From</th></tr></thead><tbody>${info.columns.map((x) => `<tr><td class="an-mono">${esc(x.name)}</td><td class="faint an-mono">${esc(x.type)}</td><td class="an-key">${esc(x.key)}</td><td><input class="an-desc${x.description ? '' : ' miss'}" data-col="${esc(x.name)}" aria-label="Description of ${esc(x.name)}" value="${esc(x.description)}" placeholder="Add a description"></td><td class="faint">${esc(from[x.from ?? ''] ?? '')}</td></tr>`).join('')}</tbody></table>` +
+    (info.keys.length ? `<h3 class="sec-label">Relationships</h3><table class="an-doc list-table"><tbody>${info.keys.map((k) => `<tr><td class="an-mono">${esc(k.column)}</td><td>→</td><td class="an-mono">${esc(k.schema ? `${k.schema}.` : '')}${esc(k.table)}.${esc(k.to)}</td></tr>`).join('')}</tbody></table>` : '') + '</div>';
 }
 
 export function catalogChange(t: HTMLInputElement): boolean {

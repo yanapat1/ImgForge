@@ -1,11 +1,12 @@
 ---
 title: Catalog, Scripts, Analyze, Dashboards, History
-summary: what each page of the Data Analysis rail does
+summary: the page layout (header, activity bar, Objects panel) and what each workspace of Data Analysis does
 core: true
 ---
+- **Layout**: the same header as every page (Dataset Visualizer, Sessions · Data · Analysis, settings, theme), the session name next to the links. On the left an activity bar: Query, Catalog, Scripts, Analyze, Dashboards, History, and at its bottom the button that shows or hides the **Objects** panel (connections, databases, tables). The look follows the UI sheet (Settings › Appearance › Open the UI sheet).
 - **Catalog**: one table's columns, types, keys and relationships. Descriptions the user writes stay in this app and you read them, so better descriptions give better answers.
 - **Scripts**: named command boxes kept with the session. Coming back shows them; nothing runs until Run all, and changes confirm first.
-- **Temp tables** live on the session's connection and show with a ⏱ mark in the object explorer. They go when the user closes the session, or 15 minutes after the page is gone. A refresh loses nothing. After a server restart, rerun the script.
+- **Temp tables** live on the session's connection and show with a ⏱ mark in the Objects panel. They go when the user closes the session, or 15 minutes after the page is gone. A refresh loses nothing. After a server restart, rerun the script.
 - **Analyze** works on the open tab's last result: Profile, Statistic tests, Data quality, Pivot.
 - **Dashboards**: add tools, drag fields onto a chart, drag a widget to swap places. Charts read the last result, so they need a run after the session reopens.
 - **History** keeps every run's text, searchable, and Open puts it in a new tab.

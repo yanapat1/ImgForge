@@ -4,6 +4,9 @@
    activity bar in layout.css; .chip, .count-badge and .empty in components.css; .fld / input.txt in settings.css.
    Tokens only (tokens.css), so every look and palette applies. */
 
+/* the hidden attribute always hides: a part's own display (flex, grid) must not bring it back */
+[hidden]:not([hidden=until-found]) { display: none !important; }
+
 /* ---------------------------------------------------------------- header: brand link + page links */
 .app-header a.brand { color: inherit; text-decoration: none; }
 .hdr-nav { display: flex; gap: 2px; align-self: stretch; align-items: stretch; margin-left: calc(-1 * var(--s2)); }
@@ -41,8 +44,14 @@
 button.danger-btn { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 650; }
 button.danger-btn .ico { color: var(--on-danger); }
 button.danger-btn:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); filter: brightness(1.08); }
-button.sm { height: 26px; padding: 0 var(--s2); gap: 5px; font-size: var(--fs-xs); }
-button.sm .ico { width: 14px; height: 14px; }
+/* a link that looks like a button (a download, a page): the same box as a plain button */
+a.btn { display: inline-flex; align-items: center; gap: 7px; height: var(--control-h); padding: 0 var(--s3); white-space: nowrap; font-weight: 550;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); color: var(--text); text-decoration: none;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease); }
+a.btn:hover { background: var(--surface-3); border-color: var(--border-hover); }
+:is(button, a.btn).sm { height: 26px; padding: 0 var(--s2); gap: 5px; font-size: var(--fs-xs); }
+:is(button, a.btn).sm .ico { width: 14px; height: 14px; }
+input.txt.sm { height: 26px; padding: 0 var(--s2); font-size: var(--fs-xs); }
 .icon-btn.xs { width: 22px; height: 22px; min-height: 0; padding: 0; font-size: var(--fs-sm); }
 .icon-btn.xs .ico { width: 13px; height: 13px; }
 
@@ -59,8 +68,23 @@ button.sm .ico { width: 14px; height: 14px; }
 .badge.solid { border-color: transparent; background: var(--surface-3); }
 .badge.solid.warn { background: var(--highlight-soft); }
 .badge.solid.danger { background: var(--danger-soft); }
+/* the kind of a SQL statement: read, temp (makes a temp table), write (changes data, always confirmed) */
+.badge.temp { color: var(--highlight); }
+.badge.solid.temp { background: var(--highlight-soft); }
+.badge.write { color: var(--danger-text); }
+.badge.solid.write { background: var(--danger-soft); }
+.pill:empty { display: none; }                         /* a pill waiting for its text is not drawn */
 .pill.warn { background: var(--highlight-soft); border-color: transparent; color: var(--highlight); }
 .pill.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok-text); }
+
+/* ---------------------------------------------------------------- a form: labels above their fields, one per row */
+.form-stack { display: grid; gap: var(--s3); }
+.form-stack label { display: grid; gap: 5px; font-size: var(--fs-sm); color: var(--text-muted); }
+.form-stack label.check { display: flex; color: var(--text); }
+.form-stack :is(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea) { width: 100%; min-width: 0; height: var(--control-h);
+  padding: 0 var(--s2); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.form-stack textarea { height: auto; min-height: 96px; padding: 6px var(--s2); font-family: var(--mono); resize: vertical; }
+.form-stack :is(input, select, textarea):focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* ---------------------------------------------------------------- one-line feedback */
 .status-line { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); min-height: 22px; color: var(--text-muted); }
@@ -98,10 +122,12 @@ button.sm .ico { width: 14px; height: 14px; }
   border-bottom: 1px solid var(--border-strong); }
 .list-table td { padding: 6px var(--s2); border-bottom: 1px solid var(--border); vertical-align: top; }
 .list-table tr[hidden] { display: none; }
+.list-table .nowrap, .data-grid .nowrap { white-space: nowrap; }
 
-/* ---------------------------------------------------------------- a tile: a titled box of content on a grid */
-.tile { padding: var(--s3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); font-size: var(--fs-sm); min-width: 0; }
-.tile h4 { margin: 0 0 var(--s1); font-size: var(--fs-sm); font-weight: 650; display: flex; align-items: center; gap: var(--s2); }
-.tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s3); }
+/* ---------------------------------------------------------------- a mini card: a titled box of content on a grid (a column
+   profile, a dashboard item). Not .tile, which is the clickable choice tile of Settings and the home (settings.css). */
+.mini-card { padding: var(--s3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); font-size: var(--fs-sm); min-width: 0; }
+.mini-card h4 { margin: 0 0 var(--s1); font-size: var(--fs-sm); font-weight: 650; display: flex; align-items: center; gap: var(--s2); }
+.mini-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s3); }
 .sec-title { margin: 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.01em; }
 .sec-label { margin: var(--s4) 0 var(--s2); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }

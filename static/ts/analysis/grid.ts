@@ -7,7 +7,7 @@ import { toast } from '../core/toast.js';
 import { api } from './state.js';
 import type { ResultInfo } from './state.js';
 
-const ROW = 26, PAGE = 200, HEAD = 34, OVERSCAN = 8;
+const ROW = 28, PAGE = 200, HEAD = 32, OVERSCAN = 8;              // ROW / HEAD: the kit's .data-grid row heights
 
 interface Grid {
   host: HTMLElement; res: ResultInfo; total: number; pages: Map<number, unknown[][]>; loading: Set<number>;
@@ -18,8 +18,8 @@ let G: Grid | null = null;
 
 const fmt = (v: unknown): string => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toLocaleString('en-US', { maximumFractionDigits: 6 })) : String(v));
 const cellHTML = (v: unknown, r: number, c: number, cur: boolean): string =>
-  v === null || v === undefined ? `<td class="an-null${cur ? ' cur' : ''}" data-r="${r}" data-c="${c}">NULL</td>`
-    : v === '' ? `<td class="an-null${cur ? ' cur' : ''}" data-r="${r}" data-c="${c}">(empty text)</td>`
+  v === null || v === undefined ? `<td class="an-null null${cur ? ' cur' : ''}" data-r="${r}" data-c="${c}">NULL</td>`
+    : v === '' ? `<td class="an-null null${cur ? ' cur' : ''}" data-r="${r}" data-c="${c}">(empty text)</td>`
       : `<td class="${typeof v === 'number' ? 'n' : ''}${cur ? ' cur' : ''}" data-r="${r}" data-c="${c}">${esc(fmt(v))}</td>`;
 
 function autoWidth(name: string): number { return Math.min(260, Math.max(84, Math.round(name.length * 8 + 34))); }
@@ -54,7 +54,7 @@ function paint(g: Grid): void {
   let html = '';
   for (let i = top; i < end; i++) {
     const r = rowAt(g, i);
-    if (!r) { void load(g, Math.floor(i / PAGE)); html += `<tr style="height:${ROW}px"><td colspan="${g.res.columns.length}" class="an-null">…</td></tr>`; continue; }
+    if (!r) { void load(g, Math.floor(i / PAGE)); html += `<tr style="height:${ROW}px"><td colspan="${g.res.columns.length}" class="an-null null">…</td></tr>`; continue; }
     html += `<tr style="height:${ROW}px">${r.map((v, c) => cellHTML(v, i, c, g.cell?.r === i && g.cell.c === c)).join('')}</tr>`;
   }
   body.innerHTML = `<tr style="height:${top * ROW}px" aria-hidden="true"></tr>${html}<tr style="height:${Math.max(0, g.total - end) * ROW}px" aria-hidden="true"></tr>`;
@@ -89,10 +89,10 @@ export function mountGrid(host: HTMLElement, res: ResultInfo): void {
   const widths = res.columns.map(autoWidth);
   const g: Grid = { host, res, total: res.rows, pages: new Map(), loading: new Set(), sort: null, desc: false, q: '', widths, cell: null, gen: 0 };
   G = g;
-  host.innerHTML = `<div class="an-gbar"><input class="an-search" id="an-gfilter" aria-label="Filter these rows" placeholder="Filter these rows"><span class="an-gcount faint"></span><span class="grow"></span>` +
-    `<button type="button" class="an-btn sm" data-act="copy-col">Copy column</button><button type="button" class="an-btn sm" data-act="copy-row">Copy row</button><a class="an-btn sm" href="${esc(api.exportUrl(res.id))}" download>Export</a></div>` +
+  host.innerHTML = `<div class="an-gbar toolbar"><input class="txt sm" id="an-gfilter" aria-label="Filter these rows" placeholder="Filter these rows"><span class="an-gcount faint"></span><span class="grow"></span>` +
+    `<button type="button" class="sm" data-act="copy-col">Copy column</button><button type="button" class="sm" data-act="copy-row">Copy row</button><a class="btn sm" href="${esc(api.exportUrl(res.id))}" download>Export</a></div>` +
     `<div id="an-cell" class="an-cell" hidden></div>` +
-    `<div class="an-gridbox" tabindex="0"><table class="an-grid" style="width:${widths.reduce((a, b) => a + b, 0)}px">${head(g)}<tbody class="an-rows"></tbody></table></div>`;
+    `<div class="an-gridbox" tabindex="0"><table class="an-grid data-grid" style="width:${widths.reduce((a, b) => a + b, 0)}px">${head(g)}<tbody class="an-rows"></tbody></table></div>`;
   host.querySelector('.an-gridbox')?.addEventListener('scroll', () => { requestAnimationFrame(() => paint(g)); }, { passive: true });
   host.querySelector<HTMLInputElement>('#an-gfilter')?.addEventListener('input', (e) => {
     g.q = (e.target as HTMLInputElement).value;
@@ -123,7 +123,7 @@ export function gridClick(t: Element): boolean {
     const bar = g.host.querySelector<HTMLElement>('#an-cell');
     if (bar) {
       bar.hidden = false;
-      bar.innerHTML = `<b>${esc(g.res.columns[c] ?? '')}</b><span>${v === null || v === undefined ? 'NULL' : v === '' ? '(empty text)' : esc(fmt(v))}</span><button type="button" class="an-btn sm" data-act="copy-cell">Copy value</button>`;
+      bar.innerHTML = `<b>${esc(g.res.columns[c] ?? '')}</b><span>${v === null || v === undefined ? 'NULL' : v === '' ? '(empty text)' : esc(fmt(v))}</span><button type="button" class="sm" data-act="copy-cell">Copy value</button>`;
     }
     return true;
   }

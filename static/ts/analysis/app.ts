@@ -3,13 +3,13 @@
 
 import { uuid } from '../core/uuid.js';
 import { errText } from '../core/api.js';
-import { hasSessions, zoneOn } from '../core/auth.js';
+import { zoneOn } from '../core/auth.js';
 import { $req, esc, icon } from '../core/dom.js';
-import { dataUrl, homeUrl } from '../core/nav.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import { openSettings } from '../settings/dialog.js';
 import { mountUserMenu } from '../views/usermenu.js';
+import { appHeader } from '../core/header.js';
 import { A_ACTIONS, analyzeChange, renderAnalyze } from './analyze.js';
 import { mountDock } from './dock.js';
 import { catalogChange, openCatalog, renderCatalog } from './catalog.js';
@@ -25,21 +25,22 @@ const WS: [Workspace, string, string][] = [
   ['query', 'search', 'Query'], ['catalog', 'db', 'Catalog'], ['scripts', 'text', 'Scripts'], ['analyze', 'bars', 'Analyze'], ['dash', 'grid', 'Dashboards'], ['history', 'list', 'History'],
 ];
 const CHIP: Record<string, string> = { mssql: 'MS', postgres: 'PG', mongo: 'MG' };
-export const chip = (kind: string): string => `<span class="an-chip ${esc(kind)}" title="${esc(kind)}">${CHIP[kind] ?? kind.toUpperCase()}</span>`;
+const TONE: Record<string, string> = { mssql: 'accent', postgres: 'ok', mongo: 'alt' };
+/** The source of a table or tab in a few letters (kit .badge): readable without its colour. */
+export const chip = (kind: string): string => `<span class="badge ${TONE[kind] ?? ''}" title="${esc(kind)}">${CHIP[kind] ?? kind.toUpperCase()}</span>`;
 const SECTIONS: [string, string][] = [['table', 'Tables'], ['view', 'Views'], ['system', 'System Tables'], ['file', 'FileTables'], ['external', 'External Tables'], ['graph', 'Graph Tables']];
 
 export function render(): void {
   const root = $req('analysis');
   if (!root.querySelector('.an-main')) {
-    root.innerHTML = `<header class="an-zonebar"><a class="an-brand" href="${esc(hasSessions() ? homeUrl() : dataUrl())}">Data Platform</a><nav class="an-zones" aria-label="Zones">` +
-      (hasSessions() ? `<a href="${esc(homeUrl())}">Sessions</a>` : '') + `<a href="${esc(dataUrl())}">Data Center</a><a class="on" aria-current="page">Data Analysis</a></nav><span class="grow"></span>` +
-      `<span class="an-sess" id="an-sess"></span><button type="button" class="icon-btn ghost" data-act="theme" aria-label="Switch light / dark theme">${icon('sun')}</button><button type="button" class="icon-btn ghost" data-act="settings" aria-label="Settings">${icon('gear')}</button><span id="an-user"></span></header>` +
-      `<div class="an-main"><nav class="an-rail" id="an-rail" aria-label="Workspaces"></nav><aside class="an-explorer" id="an-explorer" aria-label="Object explorer"></aside><main class="an-work" id="an-work"></main></div>`;
-    mountUserMenu($req('an-user'));
+    // the same header as every page (core/header.ts); the session name sits after the links, like the visualizer's dataset
+    root.innerHTML = appHeader({ page: 'analysis', cls: 'an-header', actionsId: 'an-hact' }).replace('<span class="grow"></span>', '<div class="ds-info"><span class="pill name"><b id="an-sess"></b></span></div>') +
+      `<div class="an-main"><nav class="an-rail activity-bar" id="an-rail" aria-label="Workspaces"></nav><aside class="an-explorer left-panel" id="an-explorer" aria-label="Object explorer"></aside><main class="an-work" id="an-work"></main></div>`;
+    mountUserMenu($req('an-hact'));
   }
   $req('an-sess').textContent = A.name;
-  $req('an-rail').innerHTML = WS.map(([k, ic, t], i) => `<button type="button" class="${A.ws === k ? 'on' : ''}" data-act="ws" data-k="${k}" aria-label="${t}" title="${t} · Alt+${i + 1}"${A.ws === k ? ' aria-current="page"' : ''}>${icon(ic)}</button>`).join('') +
-    `<span class="grow"></span><button type="button" class="${A.explorer ? 'on' : ''}" data-act="explorer" aria-label="Object explorer" title="${A.explorer ? 'Close' : 'Open'} object explorer">${icon('folder')}</button>`;
+  $req('an-rail').innerHTML = WS.map(([k, ic, t], i) => `<button type="button" class="act${A.ws === k ? ' active' : ''}" data-act="ws" data-k="${k}" aria-label="${t}" title="${t} · Alt+${i + 1}"${A.ws === k ? ' aria-current="page"' : ''}>${icon(ic)}</button>`).join('') +
+    `<button type="button" class="act an-rail-end${A.explorer ? ' active' : ''}" data-act="explorer" aria-pressed="${A.explorer}" aria-label="Object explorer" title="${A.explorer ? 'Close' : 'Open'} object explorer">${icon('layers')}</button>`;
   const main = document.querySelector<HTMLElement>('.an-main');
   main?.classList.toggle('noexp', !A.explorer);
   renderTree();
@@ -60,7 +61,7 @@ const hit = (t: { schema: string; name: string }): boolean => !A.filter || `${t.
 function renderTree(): void {
   const el = $req('an-explorer');
   let h = '';
-  if (!A.sources.length) h = `<p class="an-empty">No database connection yet. Add a PostgreSQL, SQL Server or MongoDB connection in Settings.</p><button type="button" class="an-btn sm" data-act="settings-conn">Add connection</button>`;
+  if (!A.sources.length) h = `<p class="an-empty empty">No database connection yet. Add a PostgreSQL, SQL Server or MongoDB connection in Settings.</p><button type="button" class="sm" data-act="settings-conn">Add connection</button>`;
   for (const s of A.sources) {
     const k = `c|${s.id}`;
     h += row(k, `${chip(s.kind)}<span class="lbl"><b>${esc(s.name)}</b></span>`, 4);
@@ -86,11 +87,11 @@ function renderTree(): void {
   }
   if (A.temps.length) {
     h += `<div class="an-thead">Temp tables <span class="faint">· removed when you leave</span></div>`;
-    h += A.temps.map((t) => `<div class="an-tn temp"><span class="an-chip tp">⏱</span><span class="lbl">${esc(t.name)}</span><span class="faint an-n">${esc(CHIP[t.source] ?? '')}</span></div>`).join('');
+    h += A.temps.map((t) => `<div class="an-tn temp"><span class="badge warn dashed">⏱</span><span class="lbl">${esc(t.name)}</span><span class="faint an-n">${esc(CHIP[t.source] ?? '')}</span></div>`).join('');
   }
   const scroll = el.querySelector('.an-tree')?.scrollTop ?? 0;
-  el.innerHTML = `<div class="an-ph">Object explorer<span class="grow"></span><button type="button" class="pb" data-act="refresh-tree" aria-label="Refresh" title="Refresh">⟳</button><button type="button" class="pb" data-act="explorer" aria-label="Close object explorer" title="Close">×</button></div>` +
-    `<input class="an-search" id="an-tfind" aria-label="Find a table" placeholder="Find table" value="${esc(A.filter)}"><div class="an-tree">${h}</div>`;
+  el.innerHTML = `<div class="side-head"><h2>Objects</h2><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="refresh-tree" aria-label="Refresh" title="Refresh">${icon('refresh')}</button><button type="button" class="icon-btn ghost xs" data-act="explorer" aria-label="Close object explorer" title="Close">${icon('x')}</button></div>` +
+    `<div class="an-tfind"><input class="txt" id="an-tfind" aria-label="Find a table" placeholder="Find table or collection" value="${esc(A.filter)}"></div><div class="an-tree">${h}</div>`;
   const t = el.querySelector('.an-tree');
   if (t) t.scrollTop = scroll;
 }
@@ -151,10 +152,10 @@ export function queryTable(el: HTMLElement): void {
 // ---------------------------------------------------------------- history
 async function renderHistory(): Promise<void> {
   const w = $req('an-work');
-  w.innerHTML = '<div class="an-empty">Loading…</div>';
-  try { A.history = (await api.history()).history; } catch (e) { w.innerHTML = `<div class="an-empty">${esc(errText(e))}</div>`; return; }
-  w.innerHTML = `<div class="an-toolbar"><b>History</b><span class="grow"></span><input class="an-search" id="an-hfind" style="margin:0;width:240px" aria-label="Search history" placeholder="Search name or query"></div>` +
-    `<div class="an-scroll"><table class="an-doc" id="an-hist"><thead><tr><th>Time</th><th style="width:100%">Query</th><th>Result</th><th>Took</th><th>Type</th><th></th></tr></thead><tbody>${A.history.map((h, i) => `<tr data-h="${esc(`${h.name} ${h.sql}`.toLowerCase())}"><td class="num">${esc(new Date(h.at).toLocaleTimeString())}</td><td><b>${esc(h.name || 'Query')}</b><pre class="an-hq">${esc(h.sql)}</pre>${h.error ? `<div class="an-err">${esc(h.error)}</div>` : ''}</td><td class="num">${h.status === 'done' ? `${(h.rows ?? 0).toLocaleString()} rows` : esc(h.status)}</td><td class="num">${h.ms !== null ? `${(h.ms / 1000).toFixed(2)} s` : ''}</td><td><span class="an-tag ${esc(h.kind)}">${h.kind === 'write' ? 'change' : esc(h.kind)}</span></td><td><button type="button" class="an-btn sm" data-act="hist-open" data-i="${i}">Open</button></td></tr>`).join('') || '<tr><td colspan="6" class="an-empty">Your queries appear here after they run.</td></tr>'}</tbody></table></div>`;
+  w.innerHTML = '<div class="an-empty empty">Loading…</div>';
+  try { A.history = (await api.history()).history; } catch (e) { w.innerHTML = `<div class="an-empty empty">${esc(errText(e))}</div>`; return; }
+  w.innerHTML = `<div class="an-toolbar toolbar"><b>History</b><span class="grow"></span><input class="txt" id="an-hfind" style="margin:0;width:240px" aria-label="Search history" placeholder="Search name or query"></div>` +
+    `<div class="an-scroll"><table class="an-doc list-table" id="an-hist"><thead><tr><th>Time</th><th style="width:100%">Query</th><th>Result</th><th>Took</th><th>Type</th><th></th></tr></thead><tbody>${A.history.map((h, i) => `<tr data-h="${esc(`${h.name} ${h.sql}`.toLowerCase())}"><td class="num nowrap">${esc(new Date(h.at).toLocaleTimeString())}</td><td><b>${esc(h.name || 'Query')}</b><pre class="an-hq">${esc(h.sql)}</pre>${h.error ? `<div class="an-err">${esc(h.error)}</div>` : ''}</td><td class="num nowrap">${h.status === 'done' ? `${(h.rows ?? 0).toLocaleString()} rows` : esc(h.status)}</td><td class="num nowrap">${h.ms !== null ? `${(h.ms / 1000).toFixed(2)} s` : ''}</td><td><span class="badge solid ${esc(h.kind)}">${h.kind === 'write' ? 'change' : esc(h.kind)}</span></td><td><button type="button" class="sm" data-act="hist-open" data-i="${i}">Open</button></td></tr>`).join('') || '<tr><td colspan="6" class="an-empty empty">Your queries appear here after they run.</td></tr>'}</tbody></table></div>`;
 }
 
 // ---------------------------------------------------------------- saving
@@ -281,17 +282,24 @@ function bind(root: HTMLElement): void {
       document.querySelectorAll<HTMLElement>('#an-hist tbody tr').forEach((r) => { r.hidden = !(r.dataset['h'] ?? '').includes(q); });
     }
   });
+  // Ctrl+Enter runs the query: caught on the way down, before the SQL editor adds a new line for it
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key !== 'Enter' || A.ws !== 'query' || document.documentElement.dataset['screen'] !== 'analysis') return;
+    if (document.querySelector('.ui-dlg-wrap')) return;               // a dialog's own Enter
+    e.preventDefault();
+    e.stopPropagation();
+    void runQuery().catch((err: unknown) => toast(errText(err), 'err'));
+  }, true);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && A.layout.max) { A.layout.max = ''; applyLayout(); return; }
     if (A.ws === 'query' && builderKey(e)) return;
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && A.ws === 'query') { e.preventDefault(); void runQuery().catch((err: unknown) => toast(errText(err), 'err')); return; }
     if (e.altKey && /^[1-9]$/.test(e.key)) { const w = WS[Number(e.key) - 1]; if (w) { e.preventDefault(); A.ws = w[0]; render(); } }
   });
 }
 
 export async function start(): Promise<void> {
   const root = $req('analysis');
-  if (!zoneOn('analysis')) { root.innerHTML = '<p class="an-empty">This install has no Data Analysis zone.</p>'; return; }
+  if (!zoneOn('analysis')) { root.innerHTML = '<p class="an-empty empty">This install has no Data Analysis zone.</p>'; return; }
   bind(root);
   try { Object.assign(A.layout, JSON.parse(localStorage.getItem('dataviz.analysis.layout') ?? '{}')); } catch { /* a convenience only */ }
   const [{ sources }, { sessions }] = await Promise.all([api.sources(), api.sessions()]);

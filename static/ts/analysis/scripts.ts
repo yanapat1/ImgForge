@@ -18,14 +18,14 @@ const cur = (): Script | undefined => A.scripts[A.script];
 export async function renderScripts(reload = true): Promise<void> {
   const w = $req('an-work');
   if (reload) {
-    try { A.scripts = (await api.scripts()).scripts; } catch (e) { w.innerHTML = `<div class="an-empty">${esc(errText(e))}</div>`; return; }
+    try { A.scripts = (await api.scripts()).scripts; } catch (e) { w.innerHTML = `<div class="an-empty empty">${esc(errText(e))}</div>`; return; }
     if (!A.scripts.length) A.scripts = [{ id: uuid(), name: 'command1', position: 0, connection: A.sources[0]?.id ?? null, database: A.sources[0]?.database || null, body: '' }];
   }
   const s = cur() ?? A.scripts[0];
   if (!s) return;
-  w.innerHTML = `<div class="an-toolbar"><input class="an-sel" id="an-sname" aria-label="Command name" value="${esc(s.name)}"><button type="button" class="an-btn pri" data-act="script-run"${running ? ' disabled' : ''}>${icon('play')}Run all</button>` +
-    `<select class="an-sel" id="an-sconn" aria-label="Connection"><option value="">Choose a connection</option>${A.sources.map((x) => `<option value="${esc(x.id)}" ${x.id === s.connection ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` +
-    `<input class="an-sel" id="an-sdb" aria-label="Database" placeholder="Database" value="${esc(s.database ?? '')}"><span class="grow"></span><span class="pill" id="an-sprog"></span></div>` +
+  w.innerHTML = `<div class="an-toolbar toolbar"><input class="txt" id="an-sname" aria-label="Command name" value="${esc(s.name)}"><button type="button" class="primary" data-act="script-run"${running ? ' disabled' : ''}>${icon('play')}Run all</button>` +
+    `<select id="an-sconn" aria-label="Connection"><option value="">Choose a connection</option>${A.sources.map((x) => `<option value="${esc(x.id)}" ${x.id === s.connection ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` +
+    `<input class="txt" id="an-sdb" aria-label="Database" placeholder="Database" value="${esc(s.database ?? '')}"><span class="grow"></span><span class="pill" id="an-sprog"></span></div>` +
     `<div class="an-scr"><div class="an-scrl">${A.scripts.map((x, i) => `<button type="button" class="an-cmd ${i === A.script ? 'on' : ''}" data-act="script-open" data-i="${i}"><span class="lbl">${esc(x.name)}</span></button>`).join('')}<button type="button" class="an-cmd faint" data-act="script-new">+ New command box</button><button type="button" class="an-cmd faint" data-act="script-del">Delete this box</button><p class="faint an-note">When you come back to this session, your commands are here. Nothing runs until you press Run all.</p></div>` +
     `<textarea class="an-sbody" id="an-sbody" spellcheck="false" aria-label="Commands" placeholder="SELECT * INTO #recent FROM dbo.Orders;&#10;SELECT * FROM #recent;">${esc(s.body)}</textarea></div>`;
 }
@@ -60,7 +60,7 @@ async function runAll(): Promise<void> {
     const writes = list.some((x) => x.kind === 'write');
     const ok = await openDialog({
       title: `Confirm ${list.length} statement${list.length > 1 ? 's' : ''} in “${s.name}”`, wide: true, okClass: writes ? 'danger-btn' : 'primary', onOk: () => null, ok: `Run ${list.length} statement${list.length > 1 ? 's' : ''}`,
-      body: `<div class="an-confirm">${list.map((x) => `<div class="an-cs"><span class="an-tag ${x.kind}">${x.kind === 'write' ? 'change' : 'temp'}</span><code>${esc(x.sql)}</code></div>`).join('')}</div>`,
+      body: `<div class="an-confirm">${list.map((x) => `<div class="an-cs"><span class="badge solid ${x.kind}">${x.kind === 'write' ? 'change' : 'temp'}</span><code>${esc(x.sql)}</code></div>`).join('')}</div>`,
     });
     if (!ok) return;
   }

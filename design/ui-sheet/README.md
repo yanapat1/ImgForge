@@ -20,4 +20,4 @@ rules in `base.css`, `layout.css`, `components.css` and `settings.css`.
 Page header · activity bar · side panel · buttons (default, primary, ghost, danger, sm, icon, icon xs) · segmented
 choice · inputs (select, text, number, range, check, labelled field) · tabs (page and panel size) · toolbar · pills,
 chips, badges, count badge · feedback (status line, hint line, notice, dialog, toast, Undo toast) · tables (class table,
-list table, data grid) · totals strip, tiles, empty state · foundations (type scale, spacing, radius, shadow, colour).
+list table, data grid) · totals strip, mini cards, empty state · foundations (type scale, spacing, radius, shadow, colour).

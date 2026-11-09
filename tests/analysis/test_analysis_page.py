@@ -2,7 +2,10 @@
 
 from urllib.parse import urlsplit
 
+import os
 import re
+
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -63,7 +66,7 @@ def test_query_loop(server, target, pg):  # noqa: F811
         assert page.locator('#an-rc .an-grid td.an-null').first.inner_text() == 'NULL'
 
         # scrolling far loads later rows, no page holds them all
-        page.locator('.an-gridbox').evaluate('e => { e.scrollTop = 26 * 480 }')
+        page.locator('.an-gridbox').evaluate('e => { e.scrollTop = 28 * 480 }')     # 28 px rows (kit .data-grid, grid.ts ROW)
         page.wait_for_selector('#an-rc .an-grid td:text-is("481")', timeout=10000)
         assert page.locator('#an-rc .an-grid tbody tr').count() < 120
 
@@ -327,3 +330,74 @@ def test_plain_http_without_random_uuid(server, target):  # noqa: F811
         assert re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', uid), uid
         browser.close()
     assert not errors, errors
+
+
+@pytest.mark.skipif(not os.environ.get('DATAVIZ_SCREENSHOTS'), reason='DATAVIZ_SCREENSHOTS=<dir> saves the pictures')
+def test_screenshots_of_every_workspace(server, target):  # noqa: F811
+    """Pictures of each workspace in dark and light, wide and narrow, beside the Data Center, to compare with the UI
+    sheet (?ui). Not a check by itself: the other tests check behaviour; this is for looking."""
+    shots = os.environ['DATAVIZ_SCREENSHOTS']
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        for theme in ('dark', 'light'):
+            page = browser.new_page(viewport={'width': 1500, 'height': 900})
+            page.add_init_script(f'localStorage.setItem("theme", "{theme}")')
+            page.goto(f'{server}/?data')
+            page.wait_for_selector('.dc-header', timeout=20000)
+            page.wait_for_timeout(600)
+            page.screenshot(path=f'{shots}/dc-{theme}.png')
+            page.goto(f'{server}/?analysis')
+            page.wait_for_selector('.an-main', timeout=20000)
+            page.select_option('#an-conn', target['conn'])
+            page.wait_for_function("document.querySelector('#an-db option:nth-child(2)')", timeout=10000)
+            page.select_option('#an-db', target['db'])
+            page.wait_for_selector('#an-sql .cm-content')
+            type_sql(page, 'SELECT id, total, note FROM public.orders ORDER BY id')
+            page.keyboard.press('Control+Enter')
+            page.wait_for_selector('#an-rc .an-grid td', timeout=20000)
+            page.wait_for_timeout(600)
+            page.screenshot(path=f'{shots}/an-query-{theme}.png')
+            for k in ('catalog', 'scripts', 'analyze', 'dash', 'history'):
+                page.click(f'.an-rail [data-k="{k}"]')
+                page.wait_for_timeout(900)
+                page.screenshot(path=f'{shots}/an-{k}-{theme}.png')
+            page.set_viewport_size({'width': 400, 'height': 860})
+            page.click('.an-rail [data-k="query"]')
+            page.wait_for_timeout(600)
+            page.screenshot(path=f'{shots}/an-query-{theme}-narrow.png')
+            assert page.evaluate('document.documentElement.scrollWidth - innerWidth') <= 0
+            page.close()
+        browser.close()
+
+
+def test_analysis_styles_follow_the_ui_sheet():
+    """The page is built from the UI sheet's parts (css/kit.css): analysis.css only lays it out. No hand-written colours
+    or font sizes, and none of the page's old look-alike parts come back."""
+    root = Path(__file__).resolve().parents[2]
+    css = (root / 'static/css/analysis.css').read_text(encoding='utf-8')
+    body = re.sub(r'/\*.*?\*/', '', css, flags=re.S)
+    assert not re.search(r'#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(', body), 'colours come from tokens only'
+    assert not re.search(r'font-size:\s*\d|font:[^;]*\b\d+(\.\d+)?px', body), 'font sizes come from --fs-* tokens'
+    ts = '\n'.join(p.read_text(encoding='utf-8') for p in (root / 'static/ts/analysis').glob('*.ts'))
+    for old in ('an-btn', 'an-sel', 'an-zonebar', 'an-zones', 'an-brand', 'an-chip', 'an-tag', 'class="pb"', 'an-search', 'Data Platform'):
+        assert old not in ts, f'{old}: use the UI sheet part instead'
+
+
+def test_analysis_has_the_same_header_as_the_data_center(server):  # noqa: F811
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        heads = {}
+        for screen, ready in (('data', '.dc-header'), ('analysis', '.an-main')):
+            page.goto(f'{server}/?{screen}')
+            page.wait_for_selector(ready, timeout=20000)
+            h = page.locator('.app-header:visible').first
+            heads[screen] = {'brand': h.locator('.brand h1').inner_text(),
+                             'links': [a.strip() for a in h.locator('.hdr-nav a').all_inner_texts()],
+                             'on': h.locator('.hdr-nav a.on').inner_text().strip(),
+                             'actions': sorted(h.locator('.header-actions [data-act]').evaluate_all('a => a.map(x => x.dataset.act)'))}
+        browser.close()
+    assert heads['data']['brand'] == heads['analysis']['brand'] == 'Dataset Visualizer'
+    assert [x.split('\n')[0] for x in heads['data']['links']] == [x.split('\n')[0] for x in heads['analysis']['links']]
+    assert heads['data']['on'].startswith('Data') and heads['analysis']['on'] == 'Analysis'
+    assert {'settings', 'theme'} <= set(heads['analysis']['actions']) and {'settings', 'theme'} <= set(heads['data']['actions'])
