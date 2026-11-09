@@ -9,8 +9,7 @@ import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import type { CustomSpec, FoundModel, ModelEmbed, LabelModelEntry, ModelApi, ModelBrowse, ModelDraft, ModelFamily, ModelForm, ModelFormat, ModelItem, ModelSpec,
   ServingEntry, SetAction, SetChange } from '../types-settings.js';
-import { refreshStatus } from '../views/controls.js';
-import { modelsChanged } from '../views/model.js';
+import { hooks } from '../core/hooks.js';
 import { SET, renderSettings } from './dialog.js';
 import { dd, fmtBytes, formOf, rowAttr, setDisabled, statusHTML, tagc } from './forms.js';
 import { confirmDialog } from '../views/dialog.js';
@@ -465,8 +464,8 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
     let saved: ModelItem;
     try { saved = await postJSON<ModelItem>('api/models', payload()); } catch (e) { f.saveStatus = { kind: 'err', text: errText(e) }; renderSettings(); return; }
     await loadModelsData();
-    void modelsChanged();
-    if (onDataset()) void refreshStatus();         // the plot's feature list (My models) follows
+    void hooks.modelsChanged?.();
+    if (onDataset()) void hooks.refreshStatus?.();         // the plot's feature list (My models) follows
     SET.view = 'list';
     SET.form = null;
     renderSettings();
@@ -494,7 +493,7 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
         });
       }
       await loadModelsData();
-      void modelsChanged();
+      void hooks.modelsChanged?.();
       renderSettings();
     } catch (e) { el.innerHTML = statusHTML({ kind: 'err', text: errText(e) }); setDisabled(b, false); }
   },
@@ -507,7 +506,7 @@ export const MODEL_ACTIONS: Record<string, SetAction> = {
       title: `Removed the model “${m.name}”`, url: `api/models/${encodeURIComponent(m.id)}`,
       hide: () => { SET.models = SET.models.filter((x) => x.id !== m.id); renderSettings(); },
       restore: reload,
-      after: async () => { await reload(); void modelsChanged(); if (onDataset()) void refreshStatus(); },
+      after: async () => { await reload(); void hooks.modelsChanged?.(); if (onDataset()) void hooks.refreshStatus?.(); },
     });
   },
 };

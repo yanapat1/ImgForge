@@ -3,6 +3,7 @@
 | File | Main exports |
 |---|---|
 | `dom.js` | `$` (getElementById), `esc` (HTML escape), `icon(name)` + `ICONS` (sprite URL), `rgba`, `mixHex` (blend two colours), `fmtEta`, `sleep`, `syncRanges` (slider fill), `isTypingTarget` (global keys skip inputs). No app state. |
+| `hooks.js` | What shared code asks of the visualizer screen without importing it (theme repaint, status refresh, models changed, display marks): `viz/boot.ts` fills it; elsewhere each hook is unset and does nothing. |
 | `keys.js` | The **?** shortcut sheet: one list of each screen's keys (`registerKeys` adds the label page's mapped hotkeys), `bindKeyHelp` (main.ts). |
 | `defer-delete.js` | `deferDelete({title, url, hide, restore, after})`: remove with Undo: the item goes at once, the DELETE is sent after 8 s (or with keepalive when the page closes). Sessions, labeling sessions, models, connections. |
 | `format.js` | The one copy of the small formatters: `timeAgo` / `toMs` (Data Center re-exports them), `fmtCount`, `pct1`, and `saveFile(blob or text, name)` (every download). |

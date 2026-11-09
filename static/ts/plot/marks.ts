@@ -1,5 +1,6 @@
 // Overlays on the plot: the hovered / picked cards' dots, crosshairs and distance lines between picks.
 
+import { MAX_DIST_PICKS } from '../settings/forms.js';
 import type * as P from 'plotly.js';
 import type { DistancesPayload } from '../types.js';
 import type { PlotDiv } from '../types-plot.js';
@@ -93,7 +94,7 @@ export function pcaLabels(): Array<Partial<P.Annotations>> {
 
 // 2+ picked cards: a line between every pair of their dots, labelled with the distance in the current
 // feature space (the 2D map distorts distances, the features do not). Dots are numbered like the cards.
-export const MAX_DIST_PICKS = 8;
+export { MAX_DIST_PICKS };
 
 interface DistanceMarks { shapes: Array<Partial<P.Shape>>; annotations: Array<Partial<P.Annotations>> }
 

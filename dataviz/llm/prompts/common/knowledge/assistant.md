@@ -37,3 +37,4 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
 - **App-wide**: press **?** (not while typing) for the keyboard shortcuts of the page on screen (the labeling page
   lists the user's own hotkeys). Removing a session, a labeling session, a model or a connection is undone with the
   **Undo** button on the message that follows (about 8 s); after that it is gone.
+- **Parts of the product (zones)**: core, Data Center, Data Analysis, Visualizer, Labeling. An install can hold only some of them (for example Data Center + Data Analysis, without the Visualizer and its GPU libraries): an admin builds it with `ZONES=datacenter,analysis` in `.env` / `--build-arg ZONES=...`, or picks them at start with `DATAVIZ_ZONES`. Pages and tools of a zone that is not installed do not exist; say so instead of suggesting them.

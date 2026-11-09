@@ -1,0 +1,2 @@
+# Data Center (with core)
+av==19.0.1           # video → frames (datacenter/video.py): FFmpeg decoding, threaded, keyframe seeks

@@ -49,6 +49,6 @@ Details are in each folder's README.
 - `core/auth.ts` loads the signed-in user once (`loadMe`, `ME`, `isAdmin`) with their prefs (`pref`, `setPrefs`,
   `rememberPref`: theme / look / palette, `label_settings`, `homeTab`, `homeScope`, PUT `api/me/prefs` debounced).
   `userKey(k)` suffixes every browser-storage key that holds a user's data with the user id.
-- `main.ts` boots in this order: wait for the server → on `/login` only `views/login.ts` → `loadMe()` → the screen.
+- `main.ts` boots in this order: wait for the server → on `/login` only `views/login.ts` → `loadMe()` → the screen. Each zone's screen is a dynamic import (`label/app.ts`, `datacenter/app.ts`, `analysis/app.ts`, `viz/boot.ts` for `/s/<id>/`), so an install without that zone needs none of its files; shared code reaches the visualizer through `core/hooks.ts`, never a static import (`tests/zones/test_install.py`).
 - Roles (`my_role`: viewer < labeler < owner) only hide what the server would refuse anyway: the home cards' actions,
   the label page (`L.readOnly`: no tools, no saves, a "View only" banner), the visualizer (`html[data-role=viewer]`).

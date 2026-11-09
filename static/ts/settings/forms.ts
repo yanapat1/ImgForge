@@ -6,11 +6,13 @@ import { $req, esc, icon } from '../core/dom.js';
 import { tagFieldHTML, tagState } from '../core/tag-field.js';
 import { lookName, PALETTES, paletteName, themeMode, THEME } from '../core/theme.js';
 import type { PaletteSpec } from '../core/theme.js';
-import { MAX_DIST_PICKS } from '../plot/marks.js';
 import type { BrowseResult, ConnDraft, ConnItem, ConnKind, ConnTestResult, DatasetItem, EmbeddingsSummary, FolderEntry, LocalForm, S3Form, SectionId, SetForm, StatusLine, TagFields, UnionForm,
   UnionPart, YoloInfo } from '../types-settings.js';
 import { SET } from './dialog.js';
 import { timeAgo } from '../core/format.js';
+
+/** Display › Distances: the most boxes the plot joins with distance lines (plot/marks.ts reads it from here). */
+export const MAX_DIST_PICKS = 8;
 
 /** `el.dataset[k]` as a string ('' when the attribute is missing). */
 export const dd = (el: HTMLElement, k: string): string => el.dataset[k] ?? '';

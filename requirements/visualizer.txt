@@ -1,0 +1,17 @@
+# Dataset Visualizer (with core + datacenter): features, projections, curation, models. The GPU libraries are here.
+scipy==1.17.1
+scikit-learn==1.9.0
+cleanlab==2.9.0              # Find issues › Label issues: cleanlab on k-fold out-of-fold class probabilities
+umap-learn==0.5.12
+pacmap==0.9.1
+opentsne==1.0.4
+plotly==6.7.0
+opencv-python==5.0.0.93
+torch==2.14.1
+transformers==5.17.0
+ultralytics==8.4.174         # YOLO backbone features and YOLO models
+# models (Settings › Models + the Model tab): each runtime is imported only when a model of that kind is used
+onnxruntime-gpu==1.30.0      # ONNX models (falls back to CPU)
+openvino==2026.4.1           # OpenVINO models
+safetensors          # .safetensors weights
+rfdetr==1.11.2               # RF-DETR models (rfdetr_plus for xlarge / 2xlarge)

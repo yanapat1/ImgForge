@@ -5,13 +5,8 @@ import type { ColorScale } from '../types.js';
 import { $req, rgba } from './dom.js';
 import { pref, rememberPref } from './auth.js';
 import { S, meta } from './state.js';
-import { invalidateHover, renderPlot } from '../plot/render.js';
 import { renderSettings } from '../settings/dialog.js';
-import { renderGallery } from '../views/gallery.js';
-import { buildClassFilter, curTab, syncClassFilter } from '../views/layout.js';
-import { invalidateEval, renderEval } from '../views/eval.js';
-import { invalidateModel, renderModel } from '../views/model.js';
-import { invalidateStats, renderClassTable, renderStats } from '../views/stats.js';
+import { hooks } from './hooks.js';
 
 export type ThemeName = 'dark' | 'light';
 /** CSS tokens (css/tokens.css) resolved for the current theme; what Plotly needs as literal colours. */
@@ -268,17 +263,7 @@ function applyTheme(): void {
   DIFF_STYLE = diffFor(THEME);
   ORIGIN_COLORS = ORIGIN[THEME.name];
   if (!S.meta) return;
-  invalidateHover();                     // hover text carries the outlier colour
-  buildClassFilter();
-  syncClassFilter();
-  if (S.view) renderPlot();
-  renderGallery();
-  invalidateStats();
-  if (curTab === 'stats') { renderClassTable(); renderStats(); }
-  invalidateModel();
-  if (curTab === 'model') renderModel();
-  invalidateEval();
-  if (curTab === 'eval') renderEval();
+  void hooks.repaint?.();                // the visualizer redraws its plot, gallery and open tab (viz/boot.ts)
   if (!$req('settings').classList.contains('hidden')) renderSettings();
   window.dispatchEvent(new CustomEvent('theme-changed'));     // views/compare.ts redraws its charts and chips
 }

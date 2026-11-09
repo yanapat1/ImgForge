@@ -8,13 +8,12 @@ import { setBar, waitJob } from '../core/jobs.js';
 import { vizUrl } from '../core/nav.js';
 import * as dcApi from '../datacenter/api.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
-import { updateMarks } from '../plot/marks.js';
 import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, EmbeddingsSummary, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
   SectionId, SetAction, SetChange, SetState, TagFields, UnionForm } from '../types-settings.js';
 import { connDefaults, connEditable, connKind, connTestText, dd, defaultAlias, fillWorkspaceSec, formOf, renderAppearanceSec, renderConnsSec, renderDatasetsSec, renderPlotSec,
   renderWorkspaceSec, rowAttr, SECTIONS, setDisabled, statusHTML, UNION_MAX, unionInput, VIZ_TASKS } from './forms.js';
 import { LAB_ACTIONS, labCancelRec, labInput, labKeydown, loadLabSettings, renderLabelingSec } from './labeling.js';
-import { saveSettings } from '../views/controls.js';
+import { hooks } from '../core/hooks.js';
 import { loadModelsData, MODEL_ACTIONS, MODEL_CHANGES, renderModelsSec } from './models.js';
 import { LLM_ACTIONS, LLM_CHANGES, llmInput, loadLlmData, renderLlmSec } from './llm.js';
 import { ACCOUNT_ACTIONS, accFile, accInput, renderAccountSec } from './account.js';
@@ -54,7 +53,7 @@ export async function openSettings(sec: SectionId = 'datasets', opts: OpenSettin
   if (NEEDS_SESSION.has(sec) && !hasSession()) sec = 'labeling';
   if (sec === 'users' && !isAdmin()) sec = 'account';
   if (!secInstalled(sec)) sec = 'connections';
-  $req('hover-tip').classList.add('hidden');
+  $('hover-tip')?.classList.add('hidden');       // the plot's hover tip (visualizer screen only)
   box.classList.remove('hidden');
   SET.solo = !!opts.solo;
   box.classList.toggle('solo', SET.solo);
@@ -521,7 +520,7 @@ const SET_CHANGES: Record<string, SetChange> = {
   'lds-task': () => renderSettings(),
   'mode-pick': () => document.querySelectorAll('.radio-card').forEach((c) => c.classList.toggle('sel', !!c.querySelector<HTMLInputElement>('input')?.checked)),
   'unit-pick': () => renderSettings(),             // the folder-classes switch shows for "one point per image" only
-  'dist-toggle': (el) => { if (el instanceof HTMLInputElement) $req<HTMLInputElement>('show-dist').checked = el.checked; updateMarks(); saveSettings(); },
+  'dist-toggle': (el) => { if (el instanceof HTMLInputElement) $req<HTMLInputElement>('show-dist').checked = el.checked; void hooks.displayChanged?.(); },
   ...MODEL_CHANGES,
   ...LLM_CHANGES,
   ...USERS_CHANGES,
@@ -609,8 +608,10 @@ export function bindSettings(): void {
     if (e.key === 'Escape') { e.stopPropagation(); closeSettings(); return; }
     trapTab($req('settings'), e);                 // keep focus inside the dialog
   });
-  $req('btn-settings').onclick = () => openSettings('datasets');
+  const gear = $('btn-settings');                 // the visualizer's activity bar: not in an install without it
+  if (gear) gear.onclick = () => openSettings('datasets');
   const homeBtn = $('home-settings');
   if (homeBtn) homeBtn.onclick = () => openSettings('datasets');
-  $req('btn-theme').onclick = () => setTheme(THEME.name === 'dark' ? 'light' : 'dark');
+  const themeBtn = $('btn-theme');                // the visualizer's activity bar
+  if (themeBtn) themeBtn.onclick = () => setTheme(THEME.name === 'dark' ? 'light' : 'dark');
 }

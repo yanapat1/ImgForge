@@ -28,11 +28,20 @@ WORKDIR /workspace/scripts/image-tools
 # (uv 0.13.1, the image already pulled here, pinned by digest so the existing layer cache still matches)
 COPY --from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 /uv /usr/local/bin/uv
 
+# ZONES: which parts of the product this image holds (dataviz/zones.py). Empty = every zone. An analyst image:
+#   docker compose build --build-arg ZONES=datacenter,analysis      (or ZONES=... in .env)
+# installs only core + those zones' requirements (no torch / GPU libraries) and leaves the other zones' files out.
+ARG ZONES=
 COPY requirements.txt .
-RUN uv pip install --system --no-cache -r requirements.txt
+COPY requirements/ requirements/
+RUN if [ -z "$ZONES" ]; then uv pip install --system --no-cache -r requirements.txt; \
+    else for z in core $(echo "$ZONES" | tr ',' ' '); do echo "-r $PWD/requirements/$z.txt"; done > /tmp/zones.txt \
+      && uv pip install --system --no-cache -r /tmp/zones.txt; fi
 
 COPY . .
 COPY --from=frontend /build/static/js static/js
+RUN if [ -n "$ZONES" ]; then DATAVIZ_ZONES="$ZONES" python -m dataviz.zones prune; fi
+ENV DATAVIZ_ZONES=${ZONES}
 
 ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/workspace/.hf_cache \

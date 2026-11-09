@@ -115,6 +115,7 @@
 <!-- SIGN-IN PAGE (/login): markup owned by js/views/login.js -->
 <div id="login" class="login-only"></div>
 
+<!-- zone:visualizer -->
 <header class="app-header viz-only">
   <a id="brand-home" class="brand" href="./" title="All sessions" aria-label="Back to all sessions">
     <svg class="ico brand-back" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg>
@@ -139,6 +140,7 @@
   <span id="job-queued" class="muted"></span>
 </div>
 
+<!-- /zone:visualizer -->
 <!-- shown until the server answers and (visualizer) the dataset index is ready; main.js hides it on the other screens -->
 <div id="startup" class="startup delayed">
   <div class="startup-box panel" role="status" aria-live="polite">
@@ -151,6 +153,7 @@
   </div>
 </div>
 
+<!-- zone:visualizer: the plot page; the server leaves this out when the install has no visualizer (server/static.py) -->
 <main class="viz-only">
   <!-- activity bar (VS Code style): each icon switches the left panel AND the right panel; the active icon collapses the left panel -->
   <nav id="activity" class="activity-bar" role="tablist" aria-orientation="vertical" aria-label="Views">
@@ -971,6 +974,7 @@
   <div class="vw-menu-foot muted">Shift + right-click: the browser's own menu</div>
 </div>
 
+<!-- /zone:visualizer -->
 <!-- settings: sessions (local folders, S3 / RustFS), connections, appearance, plot, workspace.
      The Sessions home opens it in "solo" mode (class solo: no section nav) to create / edit one session. -->
 <div id="settings" class="modal hidden">

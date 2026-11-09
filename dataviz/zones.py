@@ -126,3 +126,81 @@ def bucket_session_finders(cfg=None):
 def route_modules(cfg=None):
     chosen = selected(cfg)
     return [importlib.import_module(f'dataviz.server.routes.{name}') for name, zone in ROUTES if zone in chosen]
+
+
+# ---------------------------------------------------------------------------------------------------- what an install holds
+# The files that only a zone uses, so an install without that zone can leave them out: `python -m dataviz.zones prune`
+# deletes them (the Docker image does it for ZONES=datacenter,analysis). A row's zones are the ones that need it: the
+# file goes only when none of them is installed. tests/zones/test_install.py checks that the kept code never imports a
+# pruned file at load time and that a pruned copy starts and serves its pages.
+#
+# Frontend rows name the TypeScript source under static/ts/; the built static/js/ copy (.js and .js.map) goes with it.
+# Most of dataviz/labeling stays in every install: the Data Center reuses its sinks, writers, media, formats and projects.
+VIZ = ('visualizer',)
+VIZ_OR_LABEL = ('visualizer', 'labeling')
+FILES = (
+    # backend
+    ('dataviz/state.py', VIZ), ('dataviz/visualizer_boot.py', VIZ), ('dataviz/core/workers.py', VIZ),
+    ('dataviz/server/binary.py', VIZ), ('dataviz/llm/tools/visual.py', VIZ),
+    ('dataviz/llm/prompts/visual/', VIZ), ('dataviz/llm/prompts/skills/visual/', VIZ),
+    *((f'dataviz/data/{m}.py', VIZ) for m in ('curation', 'compare', 'diff', 'imgstats', 'promote', 'shift', 'stress',
+                                               'indexer', 'views', 'union', 'reuse', 'live', 'patching', 'bucket_sessions')),
+    *((f'dataviz/server/routes/{m}.py', VIZ) for m, z in ROUTES if z == 'visualizer'),
+    ('dataviz/ml/', VIZ_OR_LABEL), ('dataviz/models/', VIZ_OR_LABEL), ('dataviz/server/models.py', VIZ_OR_LABEL),
+    *((f'dataviz/server/routes/{m}.py', ('labeling',)) for m, z in ROUTES if z == 'labeling'),
+    *((f'dataviz/labeling/{m}.py', ('labeling',)) for m in ('export', 'importers', 'bucket_sessions')),
+    # frontend (static/ts and its build in static/js)
+    ('static/ts/viz/', VIZ), ('static/ts/plot/', VIZ),
+    *((f'static/ts/views/{m}.ts', VIZ) for m in (
+        'assistant', 'box-editor', 'chart-util', 'compare', 'compare-shift', 'compare-stress', 'compare-viewer', 'controls',
+        'curation', 'eval', 'ev-util', 'explore-bind', 'filter-bar', 'gallery', 'image-grid', 'layout', 'modal',
+        'model-images', 'model', 'pick-bar', 'preview', 'stat-chip', 'stats', 'viewer')),
+    *((f'static/ts/core/{m}.ts', VIZ) for m in ('live', 'compare-core', 'cmp-keys')),
+    *((f'static/css/{m}.css', VIZ) for m in ('curation', 'compare', 'compare-shift')),
+)
+
+
+def prunable(cfg=None):
+    """The paths (relative to the app folder) this install can leave out: no zone of theirs is installed."""
+    chosen = set(selected(cfg))
+    out = []
+    for path, need in FILES:
+        if chosen.isdisjoint(need):
+            out.append(path)
+            if path.startswith('static/ts/'):
+                js = 'static/js/' + path.removeprefix('static/ts/')
+                out += [js] if js.endswith('/') else [js[:-3] + '.js', js[:-3] + '.js.map']
+    return out
+
+
+def prune(root, cfg=None):
+    """Delete the files of the zones this install leaves out, under the app folder `root`. Returns what went."""
+    import shutil
+    from pathlib import Path
+    root, gone = Path(root), []
+    for rel in prunable(cfg):
+        p = root / rel
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.is_file():
+            p.unlink()
+        else:
+            continue
+        gone.append(rel)
+    return gone
+
+
+if __name__ == '__main__':                                  # python -m dataviz.zones prune [--root <app folder>]
+    import argparse
+    from pathlib import Path
+    ap = argparse.ArgumentParser(prog='python -m dataviz.zones', description='Leave out the files of zones this install '
+                                 'does not have (DATAVIZ_ZONES or `zones:` in config.yaml).')
+    ap.add_argument('command', choices=['prune', 'list'])
+    ap.add_argument('--root', default=str(Path(__file__).resolve().parent.parent), help='the app folder (default: this one)')
+    a = ap.parse_args()
+    print(f'zones: {", ".join(selected())}')
+    if a.command == 'list':
+        print('\n'.join(prunable()) or 'nothing to leave out')
+    else:
+        gone = prune(a.root)
+        print(f'removed {len(gone)} paths' + ''.join(f'\n  {g}' for g in gone))

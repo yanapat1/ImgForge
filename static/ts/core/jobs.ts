@@ -3,7 +3,7 @@
 import type { Job, JobsPayload } from '../types.js';
 import { getJSON, isStatus } from './api.js';
 import { $req, fmtEta } from './dom.js';
-import { refreshStatus } from '../views/controls.js';
+import { hooks } from './hooks.js';
 
 /** Progress bar fill: determinate when the job knows its total, else an indeterminate stripe. */
 export function setBar(fillEl: HTMLElement, job: { total?: number | undefined; pct?: number | null | undefined } | null | undefined): void {
@@ -27,7 +27,7 @@ export async function pollJobs(): Promise<void> {
     const { jobs, active } = await getJSON<JobsPayload>('api/jobs');
     renderJobsBar(jobs, active);
     if (active.length) delay = 600;
-    if (prevActive && !active.length) void refreshStatus();   // something finished: update ✓ marks
+    if (prevActive && !active.length) void hooks.refreshStatus?.();   // something finished: update ✓ marks
     prevActive = active.length;
   } catch (e) {
     if (isStatus(e, 401)) return;                // signed out: api() is taking the page to the sign-in page

@@ -140,15 +140,16 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | change colours / theme | `static/css/tokens.css`, `static/css/palettes.css` for the named palettes (+ `ui.palette` / `ui.palette_light` in `config.yaml`) |
 | change plot behaviour (lasso, pan, zoom) | `static/ts/plot/interactions.ts` |
 | change what the plot draws | `static/ts/plot/render.ts`, overlays in `plot/marks.ts` |
+| install fewer zones (an analyst image without the visualizer) | `dataviz/zones.py` (`ZONES`, `FILES`), `requirements/<zone>.txt`, Docker `--build-arg ZONES=datacenter,analysis`; checks in `tests/zones/test_install.py` |
 | add a settings section | `static/ts/settings/forms.ts` (renderer) + `dialog.ts` (`SECTIONS`, actions) |
 | support another model format / family | `dataviz/models/runners.py` (`load_runner`), allowed combos: `models/registry.py` `MATRIX`; page form: `static/ts/settings/models.ts` |
 | add a finding / chart to the Evaluation tab | `dataviz/models/insights.py` (`findings()` rules, `dataset_insights()`), `static/ts/views/eval.ts` |
 | add a chart to the Model tab | `dataviz/models/evaluate.py` (numbers), `static/ts/views/model.ts` (`renderCharts`), a card in `index.html` `#tab-model` |
-| change text search (prompt, tokenizer, k) | `dataviz/ml/features.py` `TextEncoder` / `prompt()`, `state.py` `text_search()`; page: `static/ts/main.ts` (`#text-search`) |
+| change text search (prompt, tokenizer, k) | `dataviz/ml/features.py` `TextEncoder` / `prompt()`, `state.py` `text_search()`; page: `static/ts/viz/boot.ts` + `views/controls.ts` (`#text-search`) |
 | change train / val leakage detection | `dataviz/data/curation.py` `_leak_items` (`leak_sim`); splits: `models.split_source` → `models/splits.py` |
 | change the model A-vs-B compare | `dataviz/models/insights.py` `compare()`, `static/ts/views/eval.ts` (`loadCompare` / `renderCompare`) |
 | change how an embeddings row looks (card, hover tip, dialog) or add a preview kind | `static/ts/views/preview.ts`, row dialog `views/modal.ts` `openRow`; server: `dataviz/data/embedding_source.py` (`PREVIEW_COLS`, MIME types), `routes/samples.py` `/api/preview` |
-| hide or show a control per session kind | `dataviz/server/deps.py` `capabilities()` → `html.no-boxes` (`static/ts/main.ts`) hides every `.needs-boxes` element (`static/css/states.css`) |
+| hide or show a control per session kind | `dataviz/server/deps.py` `capabilities()` → `html.no-boxes` (`static/ts/viz/boot.ts`) hides every `.needs-boxes` element (`static/css/states.css`) |
 | change the image browser (no selection) | `static/ts/views/image-grid.ts`; server lists / thumbnails: `dataviz/server/routes/samples.py` (`/api/images`, `/api/img/*`) |
 | change the image viewer (box toggles, right-click copy) | `static/ts/views/viewer.ts`, the dialog around it `views/modal.ts` |
 | change the box editor in the visualizer | `static/ts/views/box-editor.ts`; ops + save path: `dataviz/data/curation.py` (`apply_ops` `set_box` / `add`, `Curation.edit`) |

@@ -80,6 +80,18 @@ def _static_imports(path, root):
     return out
 
 
+_ZONE_BLOCK = re.compile(r'<!-- zone:(\w+)\b.*?-->.*?<!-- /zone:\1 -->\n?', re.S)
+_STYLESHEET = re.compile(r'<link rel="stylesheet" href="static/([^"?]+)[^"]*">\n?')
+
+
+def _for_install(html, root):
+    """The page of this install: the markup of a zone it leaves out (<!-- zone:x --> ... <!-- /zone:x -->) goes, and so
+    does a stylesheet whose file is not on the server (a pruned install, dataviz/zones.py prune), so nothing 404s."""
+    from .. import zones
+    html = _ZONE_BLOCK.sub(lambda m: m.group(0) if zones.on(m.group(1)) else '', html)
+    return _STYLESHEET.sub(lambda m: m.group(0) if (root / m.group(1)).is_file() else '', html)
+
+
 def render_index(static_dir, prefix=''):
     """index.html with every static URL stamped ?h=<content hash>, an import map so all modules (nested imports
     included) are fetched under their hashed URL, and <link rel=modulepreload> for the whole static import graph of
@@ -89,7 +101,7 @@ def render_index(static_dir, prefix=''):
     sprite's <use href>): '../../' for the visualizer under /s/<id>/, so every session shares one browser cache of
     /static/ instead of downloading the page code again per dataset. '' for the home and login pages."""
     root = static_dir.resolve()
-    html = (root / 'index.html').read_text(encoding='utf-8')
+    html = _for_install((root / 'index.html').read_text(encoding='utf-8'), root)
 
     def stamp(m):
         f = root / m.group(2).removeprefix('static/')     # the URL is static/<rel>, the file is <static_dir>/<rel>
