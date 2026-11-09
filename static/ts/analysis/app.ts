@@ -1,6 +1,7 @@
 // The Data Analysis page (?analysis): the zone header, the icon rail, the object explorer and one workspace at a time.
 // Markup is rebuilt per change, listeners are one delegated set on the root. Query lives in query.ts.
 
+import { uuid } from '../core/uuid.js';
 import { errText } from '../core/api.js';
 import { hasSessions, zoneOn } from '../core/auth.js';
 import { $req, esc, icon } from '../core/dom.js';
@@ -300,7 +301,7 @@ export async function start(): Promise<void> {
   A.sid = s.id;
   A.name = s.name;
   const st = s.state as { tabs?: Partial<Tab>[]; active?: number };
-  A.tabs = (st.tabs ?? []).map((t) => ({ ...newTab(t.name ?? 'Query', t.sql ?? '', t.conn ?? null, t.db ?? null), id: t.id ?? crypto.randomUUID(), model: t.model ?? null, typed: t.typed ?? !!t.sql }));
+  A.tabs = (st.tabs ?? []).map((t) => ({ ...newTab(t.name ?? 'Query', t.sql ?? '', t.conn ?? null, t.db ?? null), id: t.id ?? uuid(), model: t.model ?? null, typed: t.typed ?? !!t.sql }));
   if (!A.tabs.length) A.tabs = [newTab('query 1', '', A.sources[0]?.id ?? null, A.sources[0]?.database || null)];
   A.active = Math.min(st.active ?? 0, A.tabs.length - 1);
   A.aiRows = !!(s.state as { ai_rows?: boolean }).ai_rows;

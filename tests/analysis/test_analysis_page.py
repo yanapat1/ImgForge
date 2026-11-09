@@ -2,6 +2,8 @@
 
 from urllib.parse import urlsplit
 
+import re
+
 import psycopg
 import pytest
 
@@ -297,5 +299,31 @@ def test_workspaces(server, target):  # noqa: F811
         page.click('.an-rail [data-k="scripts"]')
         page.wait_for_selector('.an-cmd:has-text("3 temp with doc")', timeout=20000)
         page.wait_for_selector('.an-tn.temp:has-text("recent")', timeout=20000)      # a refresh loses nothing
+        browser.close()
+    assert not errors, errors
+
+
+def test_plain_http_without_random_uuid(server, target):  # noqa: F811
+    """A server opened over plain http at its address is not a secure context: the browser has no crypto.randomUUID.
+    The page must still start and make new query tabs, scripts and dashboards (core/uuid.ts)."""
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 950})
+        page.add_init_script('Object.defineProperty(Crypto.prototype, "randomUUID", {value: undefined, configurable: true})')
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        assert page.evaluate('typeof crypto.randomUUID') == 'undefined'
+        assert page.locator('.status-line.err').count() == 0
+        page.click('[data-act="tab-new"]')
+        ids = page.evaluate("[...new Set([...document.querySelectorAll('.an-tab[data-act=qtab]')].map(b => b.textContent))].length")
+        assert ids >= 2
+        page.click('.an-rail [data-k="scripts"]')
+        page.wait_for_timeout(500)
+        page.click('.an-rail [data-k="dash"]')
+        page.wait_for_timeout(500)
+        uid = page.evaluate("import('./static/js/core/uuid.js').then(m => m.uuid())")
+        assert re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', uid), uid
         browser.close()
     assert not errors, errors

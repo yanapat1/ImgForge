@@ -1,6 +1,7 @@
 // Dashboards: a blank board of widgets. Drag a field from the last result onto a chart, drag a widget to swap places,
 // and pick its width. Numbers come from the saved result; a chart says so when its result has gone and needs a new run.
 
+import { uuid } from '../core/uuid.js';
 import { errText } from '../core/api.js';
 import { $, $req, esc } from '../core/dom.js';
 import { toast } from '../core/toast.js';
@@ -60,7 +61,7 @@ export async function renderDash(reload = true): Promise<void> {
   const w = $req('an-work');
   if (reload) {
     D.boards = (await api.dashboards()).dashboards;
-    if (!D.boards.length) D.boards = [{ id: crypto.randomUUID(), name: 'Dashboard', layout: [] }];
+    if (!D.boards.length) D.boards = [{ id: uuid(), name: 'Dashboard', layout: [] }];
   }
   const b = board(), r = currentResult();
   if (!b) return;
@@ -72,7 +73,7 @@ export async function renderDash(reload = true): Promise<void> {
   await Promise.all(b.layout.map(fill));
 }
 
-const mk = (kind: Widget['kind'], title: string, o: Partial<Widget> = {}): Widget => ({ id: crypto.randomUUID(), kind, title, x: '', y: '', agg: 'sum', span: kind === 'kpi' ? 3 : 6, ...o });
+const mk = (kind: Widget['kind'], title: string, o: Partial<Widget> = {}): Widget => ({ id: uuid(), kind, title, x: '', y: '', agg: 'sum', span: kind === 'kpi' ? 3 : 6, ...o });
 
 export const D_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
   'd-add': (el) => {
@@ -87,7 +88,7 @@ export const D_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   'd-sel': (el) => { D.sel = el.dataset['id'] ?? ''; return renderDash(false); },
   'd-rm': (el) => { const b = board(); if (b) b.layout = b.layout.filter((x) => x.id !== el.dataset['id']); save(); return renderDash(false); },
   'd-clear': () => { const b = board(); if (b) b.layout = []; save(); return renderDash(false); },
-  'd-new': async () => { const n = await promptDialog({ title: 'New dashboard', label: 'Name', value: 'Dashboard', ok: 'Create' }); if (n) { D.boards.push({ id: crypto.randomUUID(), name: n, layout: [] }); D.cur = D.boards.length - 1; save(); await renderDash(false); } },
+  'd-new': async () => { const n = await promptDialog({ title: 'New dashboard', label: 'Name', value: 'Dashboard', ok: 'Create' }); if (n) { D.boards.push({ id: uuid(), name: n, layout: [] }); D.cur = D.boards.length - 1; save(); await renderDash(false); } },
   'd-rename': async () => { const b = board(); if (!b) return; const n = await promptDialog({ title: 'Rename dashboard', label: 'Name', value: b.name, ok: 'Rename' }); if (n) { b.name = n; save(); await renderDash(false); } },
   'd-auto': async () => {
     const b = board(), r = currentResult();
@@ -105,7 +106,7 @@ export const D_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
 
 /** The assistant's draft: added to the open board, or a new one. */
 export function addCharts(charts: { kind: string; title: string; x?: string; y?: string; agg?: string }[]): void {
-  if (!D.boards.length) D.boards = [{ id: crypto.randomUUID(), name: 'Dashboard', layout: [] }];
+  if (!D.boards.length) D.boards = [{ id: uuid(), name: 'Dashboard', layout: [] }];
   const b = board();
   if (!b) return;
   for (const c of charts) b.layout.push(mk(c.kind as Widget['kind'], c.title, { x: c.x ?? '', y: c.y ?? '', agg: c.agg ?? 'sum' }));

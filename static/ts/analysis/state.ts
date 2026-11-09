@@ -1,6 +1,7 @@
 // The Data Analysis page's state and its calls to /api/analysis/*. One query tab = one SQL text with its own connection,
 // database and last run; tabs are saved with the session, results stay on the server until the session closes.
 
+import { uuid } from '../core/uuid.js';
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 
 export interface Source { id: string; name: string; kind: 'postgres' | 'mssql' | 'mongo'; host: string; database: string }
@@ -67,7 +68,7 @@ export const tab = (): Tab => A.tabs[A.active] as Tab;
 export const sourceOf = (id: string | null): Source | undefined => A.sources.find((s) => s.id === id);
 export const tableKey = (conn: string, db: string, schema: string, table: string): string => `${conn}|${db}|${schema}|${table}`;
 export const newTab = (name: string, sql = '', conn: string | null = null, db: string | null = null): Tab =>
-  ({ id: crypto.randomUUID(), name, sql, conn, db, run: null, result: 0, rt: 'results', plan: null, dirty: false, model: null, typed: !!sql, notDrawn: false, undo: [], redo: [], view: { z: 1, x: 0, y: 0 }, joinStep: 0, joinStats: {} });
+  ({ id: uuid(), name, sql, conn, db, run: null, result: 0, rt: 'results', plan: null, dirty: false, model: null, typed: !!sql, notDrawn: false, undo: [], redo: [], view: { z: 1, x: 0, y: 0 }, joinStep: 0, joinStats: {} });
 
 export const api = {
   sources: () => getJSON<{ sources: Source[] }>(`${P}/sources`),

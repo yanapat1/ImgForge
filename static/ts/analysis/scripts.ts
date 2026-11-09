@@ -1,6 +1,7 @@
 // Scripts: named command boxes kept with the session, such as "3 temp with doc". Coming back to a session shows them;
 // nothing runs until Run all. A statement that is not a plain read asks first, like everywhere else.
 
+import { uuid } from '../core/uuid.js';
 import { errText } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
@@ -18,7 +19,7 @@ export async function renderScripts(reload = true): Promise<void> {
   const w = $req('an-work');
   if (reload) {
     try { A.scripts = (await api.scripts()).scripts; } catch (e) { w.innerHTML = `<div class="an-empty">${esc(errText(e))}</div>`; return; }
-    if (!A.scripts.length) A.scripts = [{ id: crypto.randomUUID(), name: 'command1', position: 0, connection: A.sources[0]?.id ?? null, database: A.sources[0]?.database || null, body: '' }];
+    if (!A.scripts.length) A.scripts = [{ id: uuid(), name: 'command1', position: 0, connection: A.sources[0]?.id ?? null, database: A.sources[0]?.database || null, body: '' }];
   }
   const s = cur() ?? A.scripts[0];
   if (!s) return;
@@ -86,7 +87,7 @@ export const S_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   'script-open': (el) => { A.script = Number(el.dataset['i']); return renderScripts(false); },
   'script-new': async () => {
     const c = cur();
-    A.scripts.push({ id: crypto.randomUUID(), name: `command${A.scripts.length + 1}`, position: A.scripts.length, connection: c?.connection ?? null, database: c?.database ?? null, body: '' });
+    A.scripts.push({ id: uuid(), name: `command${A.scripts.length + 1}`, position: A.scripts.length, connection: c?.connection ?? null, database: c?.database ?? null, body: '' });
     A.script = A.scripts.length - 1;
     await renderScripts(false);
     save();
