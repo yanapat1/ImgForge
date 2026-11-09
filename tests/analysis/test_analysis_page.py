@@ -65,6 +65,13 @@ def test_query_loop(server, target, pg):  # noqa: F811
         assert '500' in page.locator('#an-sum').inner_text()
         assert page.locator('#an-rc .an-grid td.an-null').first.inner_text() == 'NULL'
 
+        # after a run the server version pill shows: Layout stays with its buttons, the pane headers stay one line
+        page.wait_for_selector('.an-ver')
+        lay = page.locator('.an-lay').bounding_box()
+        assert lay['height'] < 40, lay
+        for head in page.locator('.an-sqlhead').all():
+            assert head.bounding_box()['height'] <= 36
+
         # scrolling far loads later rows, no page holds them all
         page.locator('.an-gridbox').evaluate('e => { e.scrollTop = 28 * 480 }')     # 28 px rows (kit .data-grid, grid.ts ROW)
         page.wait_for_selector('#an-rc .an-grid td:text-is("481")', timeout=10000)
@@ -288,6 +295,7 @@ def test_workspaces(server, target):  # noqa: F811
         # Scripts: named boxes, confirm for a temp table, the temp table appears with its mark
         page.click('.an-rail [data-k="scripts"]')
         page.wait_for_selector('#an-sbody', timeout=20000)
+        assert page.locator('#an-work .an-toolbar').bounding_box()['height'] < 60   # one row: name, Run all, connection, database
         page.select_option('#an-sconn', target['conn'])
         page.fill('#an-sdb', target['db'])
         page.fill('#an-sname', '3 temp with doc')

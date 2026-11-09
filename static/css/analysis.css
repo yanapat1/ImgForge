@@ -55,6 +55,13 @@ main.an-work { grid-template-columns: none; }
 .an-sqlhead { display: flex; gap: var(--s2); align-items: center; min-width: 0; height: 34px; padding: 0 var(--s3); flex: none;
   border-bottom: 1px solid var(--border); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
 .an-sqlhead .lbl, .an-sqlhead .faint { text-transform: none; letter-spacing: 0; font-weight: normal; }
+.an-sqlhead { white-space: nowrap; }
+.an-sqlhead .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* toolbars: a text box keeps its own width (input.txt is 100% wide in forms); Layout and its buttons wrap as one */
+.an-toolbar input.txt { flex: 0 1 200px; width: 200px; min-width: 0; margin: 0; }
+.an-toolbar #an-hfind { flex-basis: 240px; width: 240px; }
+.an-lay { display: inline-flex; align-items: center; gap: var(--s2); flex: none; font-size: var(--fs-sm); }
+.an-ver { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-sql { flex: 1; min-height: 0; overflow: auto; }
 .an-sql .cm-editor { height: 100%; }
 .an-spv, .an-sph { background: var(--border); touch-action: none; }

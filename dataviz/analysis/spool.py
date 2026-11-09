@@ -149,16 +149,31 @@ def _json(v):
     return v
 
 
+EXACT_DISTINCT = 20_000_000   # cells (rows x columns): up to here stats() counts distinct values exactly
+
+
 def stats(path):
     """Per column: type, NULL count, distinct estimate, min, max and (numbers) mean, computed once by the caller."""
     with _connect() as c:
         rows = c.execute('SELECT column_name, column_type, min, max, approx_unique, avg, null_percentage, count '
                          'FROM (SUMMARIZE SELECT * FROM read_parquet(?))', [str(path)]).fetchall()
+        # approx_unique is a HyperLogLog guess: 507 distinct in 500 rows, a unique id at 495. Exact counts are cheap at
+        # result-spool sizes, a batch of columns per pass (one pass over 1500 columns runs out of memory); past
+        # EXACT_DISTINCT cells the guess stays, capped at the non-NULL count.
+        exact = None
+        n = rows[0][7] if rows else 0
+        if n and n * len(rows) <= EXACT_DISTINCT:
+            exact = []
+            for i in range(0, len(rows), 64):
+                cols = ', '.join(f'count(DISTINCT {_q(r[0])})' for r in rows[i:i + 64])
+                exact += c.execute(f'SELECT {cols} FROM read_parquet(?)', [str(path)]).fetchone()
     out = {}
-    for name, typ, mn, mx, distinct, avg, null_pct, count in rows:
+    for i, (name, typ, mn, mx, distinct, avg, null_pct, count) in enumerate(rows):
         numeric = typ.split('(')[0] in NUMERIC
-        out[name] = {'type': typ, 'nulls': round(float(null_pct or 0) * count / 100), 'null_pct': float(null_pct or 0),
-                     'distinct': int(distinct or 0), 'min': mn, 'max': mx, 'numeric': numeric,
+        nulls = round(float(null_pct or 0) * count / 100)
+        distinct = exact[i] if exact is not None else min(int(distinct or 0), count - nulls)
+        out[name] = {'type': typ, 'nulls': nulls, 'null_pct': float(null_pct or 0),
+                     'distinct': int(distinct), 'min': mn, 'max': mx, 'numeric': numeric,
                      'mean': float(avg) if numeric and avg is not None else None}
     return out
 

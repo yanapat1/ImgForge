@@ -119,3 +119,12 @@ def test_chart_and_pivot(data):
 def test_quality(data):
     q = stats.quality(data)
     assert q['checks'][0] == {'rule': 'No duplicate rows', 'ok': True, 'rows': 0}
+
+
+def test_profile_distinct_is_exact(tmp_path):
+    # SUMMARIZE's approx_unique said 507 distinct for 500 rows and 495 for a unique id
+    p = tmp_path / 'd.parquet'
+    spool.Spool(p).write(['id', 'total', 'note'], [[[i, i * 1.5, 'even' if i % 2 == 0 else None] for i in range(1, 501)]], 1000)
+    got = {c['name']: c for c in stats.profile(p)['columns']}
+    assert (got['id']['distinct'], got['total']['distinct'], got['note']['distinct']) == (500, 500, 1)
+    assert 'looks like an ID' in got['id']['note'] and 'one value only' in got['note']['note']

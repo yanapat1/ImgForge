@@ -154,7 +154,7 @@ async function renderHistory(): Promise<void> {
   const w = $req('an-work');
   w.innerHTML = '<div class="an-empty empty">Loading…</div>';
   try { A.history = (await api.history()).history; } catch (e) { w.innerHTML = `<div class="an-empty empty">${esc(errText(e))}</div>`; return; }
-  w.innerHTML = `<div class="an-toolbar toolbar"><b>History</b><span class="grow"></span><input class="txt" id="an-hfind" style="margin:0;width:240px" aria-label="Search history" placeholder="Search name or query"></div>` +
+  w.innerHTML = `<div class="an-toolbar toolbar"><b>History</b><span class="grow"></span><input class="txt" id="an-hfind" aria-label="Search history" placeholder="Search name or query"></div>` +
     `<div class="an-scroll"><table class="an-doc list-table" id="an-hist"><thead><tr><th>Time</th><th style="width:100%">Query</th><th>Result</th><th>Took</th><th>Type</th><th></th></tr></thead><tbody>${A.history.map((h, i) => `<tr data-h="${esc(`${h.name} ${h.sql}`.toLowerCase())}"><td class="num nowrap">${esc(new Date(h.at).toLocaleTimeString())}</td><td><b>${esc(h.name || 'Query')}</b><pre class="an-hq">${esc(h.sql)}</pre>${h.error ? `<div class="an-err">${esc(h.error)}</div>` : ''}</td><td class="num nowrap">${h.status === 'done' ? `${(h.rows ?? 0).toLocaleString()} rows` : esc(h.status)}</td><td class="num nowrap">${h.ms !== null ? `${(h.ms / 1000).toFixed(2)} s` : ''}</td><td><span class="badge solid ${esc(h.kind)}">${h.kind === 'write' ? 'change' : esc(h.kind)}</span></td><td><button type="button" class="sm" data-act="hist-open" data-i="${i}">Open</button></td></tr>`).join('') || '<tr><td colspan="6" class="an-empty empty">Your queries appear here after they run.</td></tr>'}</tbody></table></div>`;
 }
 
