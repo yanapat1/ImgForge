@@ -35,7 +35,10 @@ function pageAction(a: UiAction): UiResult {
 }
 
 export function mountDock(): void {
-  const emptyHTML = (): string => `<div class="dc-ai-hello"><span class="ai-mark" aria-hidden="true">${icon('gem')}</span><b>Ask about your data.</b><p class="faint">I read your tables and statistics. I see real rows only if you allow it on the Query toolbar. Changes wait for your OK.</p><div class="dc-ai-sugg">${SUGGEST.map((s) => `<button type="button" class="ct-choice" data-ca="suggest" data-q="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
+  // the same markup as the other pages' welcome (views/dock-page.ts): mark | text column; a suggestion is sent as is (data-ca="say")
+  const emptyHTML = (): string => `<div class="dc-ai-hello"><span class="ai-mark" aria-hidden="true">${icon('gem')}</span><div>` +
+    '<b>Ask about your data.</b><p class="faint">I read your tables and statistics. I see real rows only if you allow it on the Query toolbar (Let AI read sample rows). Changes wait for your OK.</p>' +
+    `<div class="dc-ai-sugg">${SUGGEST.map((s) => `<button type="button" class="ct-choice" data-ca="say" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div></div></div>`;
   setDockHost({
     id: 'ai-analysis',
     label: () => 'Data Analysis',

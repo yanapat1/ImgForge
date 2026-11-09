@@ -464,6 +464,10 @@ def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
             page.goto(f'{server}/?analysis')
             page.wait_for_selector('.an-main', timeout=20000)
             page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=10000)
+            # the welcome: the mark beside one text column (not each part squeezed into its own column)
+            hello = page.locator('#ai-dock .dc-ai-hello > div')
+            hello.wait_for(timeout=10000)
+            assert hello.bounding_box()['width'] > 250
             dock = page.locator('#ai-dock').bounding_box()
             for sel in ('#analysis', '.an-header', '.an-work'):
                 b = page.locator(sel).bounding_box()
@@ -475,6 +479,13 @@ def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
             assert abs(b['x'] + b['width'] - rail['x']) <= 1
             page.set_viewport_size({'width': 800, 'height': 800})        # below 900 px the dock is a sheet: the page is full width
             assert page.locator('#analysis').bounding_box()['width'] == 800
+            # a suggestion is sent as the user's message and answered
+            page.set_viewport_size({'width': 1400, 'height': 900})
+            page.click('#ai-dock [data-dock="open"]')
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=10000)
+            page.click('#ai-dock .dc-ai-sugg button >> nth=0')
+            page.wait_for_selector('#ai-dock :text("What tables do I have about customers?")', timeout=10000)
+            page.wait_for_selector('#ai-dock :text("fake model")', timeout=20000)
             browser.close()
     finally:
         fake.should_exit = True
