@@ -10,6 +10,7 @@ import { diffLines, type DiffOp } from '../core/linediff.js';
 import { render, saveTabs } from './app.js';
 import { currentResult } from './analyze.js';
 import { addCharts } from './dash.js';
+import { editorText } from './query.js';
 import { A, newTab, tab } from './state.js';
 import type { UiAction, UiResult } from '../types-chat.js';
 
@@ -18,8 +19,8 @@ const EDITOR_CHARS = 20000;
 const DIFF_MAX_LINES = 3000, DIFF_SHOW = 400, CONTEXT = 2;
 
 function editorScope(): Record<string, unknown> {
-  const t = tab();
-  return { tab_name: t.name, sql: t.sql.slice(0, EDITOR_CHARS), sql_truncated: t.sql.length > EDITOR_CHARS, last_error: t.run?.error ? t.run.error.slice(0, 1000) : null };
+  const t = tab(), sql = editorText();
+  return { tab_name: t.name, sql: sql.slice(0, EDITOR_CHARS), sql_truncated: sql.length > EDITOR_CHARS, last_error: t.run?.error ? t.run.error.slice(0, 1000) : null };
 }
 
 /** The diff's lines as HTML; long unchanged runs fold to their first and last lines. */

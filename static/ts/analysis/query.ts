@@ -90,14 +90,17 @@ async function mountEditor(t: Tab): Promise<void> {
   const v = await vendor();
   if (editorTab !== t.id || !$('an-sql')) return;
   host.innerHTML = '';
+  const id = t.id;
   const made = await v.createEditor(host, {
     text: t.sql, lang: 'sql',
     onChange: (text) => {
-      if (text === t.sql) return;
-      const wasTyped = t.typed && t.dirty;
-      t.sql = text;
-      t.dirty = true;
-      t.typed = true;
+      // by id, not the captured object: the tab list can be rebuilt (a reloaded session) while this editor lives
+      const cur = A.tabs.find((x) => x.id === id);
+      if (!cur || text === cur.sql) return;
+      const wasTyped = cur.typed && cur.dirty;
+      cur.sql = text;
+      cur.dirty = true;
+      cur.typed = true;
       saveTabs();
       markStale();
       if (!wasTyped) renderBuilder();
@@ -105,7 +108,11 @@ async function mountEditor(t: Tab): Promise<void> {
   });
   if (editorTab === t.id) editor = made; else made.destroy();
 }
-document.addEventListener('an-sql-changed', () => { editor?.setText(tab().sql); markStale(); });
+// only into the open tab's own editor: while a new tab's editor is still loading, the old one must not get its text
+document.addEventListener('an-sql-changed', () => { if (editorTab === tab().id) editor?.setText(tab().sql); markStale(); });
+
+/** What the user sees in the editor now (the assistant is sent this, never an older copy). */
+export const editorText = (): string => (editor && editorTab === tab().id ? editor.getText() : tab().sql);
 
 function markStale(): void {
   const n = $('an-stale');

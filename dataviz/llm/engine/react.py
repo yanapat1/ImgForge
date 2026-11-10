@@ -200,10 +200,11 @@ def history(messages):
 _WORD = re.compile(r'[a-z0-9]+')
 
 
-def pick_tools(all_tools, question, n=SMALL_TOOLS):
+def pick_tools(all_tools, question, n=SMALL_TOOLS, keep=()):
     """A small model gets only the tools that match the request (by name / description words), plus the control
-    and lookup tools: fewer choices, fewer wrong calls."""
-    always = {'ask_user', 'cannot_do', 'list_buckets', 'list_folder', 'search', 'view_state', 'read_docs', 'use_skill'}
+    and lookup tools and the role's own `keep` (roles.Role.always): fewer choices, fewer wrong calls."""
+    always = {'ask_user', 'cannot_do', 'list_buckets', 'list_folder', 'search', 'view_state', 'read_docs', 'use_skill',
+              *keep}
     words = set(_WORD.findall(question.lower()))
     scored = []
     for t in all_tools.values():
@@ -232,7 +233,7 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     tset = tools.for_role(domains, opts['mode'], extra=plugin)
     if opts['profile'] == 'small':
         q = ' '.join(x.get('text', '') for x in msgs[-1]['parts'] if 'text' in x)
-        tset = pick_tools(tset, q)
+        tset = pick_tools(tset, q, keep=role.always)
     sk = prompting.skills(role.name, user_skills)
     scope_text = roles.SCOPES[role.name](user, scope)
     system = prompting.build(role.name, tools_catalog=tools.catalog(tset), scope_text=scope_text, mode=opts['mode'],

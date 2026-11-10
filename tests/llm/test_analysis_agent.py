@@ -107,10 +107,29 @@ def _ctx(scope):
     return Ctx(user=ALICE, role='analysis', scope={'page': 'analysis', 'session': 's1', 'connection': 'c1', **scope}, skills={})
 
 
-def test_scope_line_says_the_editor_holds_sql_not_the_sql(prefs):
-    line = roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': 'SELECT 1\nFROM secret_t', 'last_error': 'boom'})
-    assert '2 lines of SQL and its last run failed' in line and 'secret_t' not in line
-    assert 'The editor is empty' in roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': ''})
+def test_scope_inlines_short_editor_sql_and_says_it_is_current(prefs):
+    line = roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': 'SELECT 1\nFROM t', 'tab_name': 'q1',
+                                        'last_error': 'boom'})
+    assert "tab 'q1'" in line and '```sql\nSELECT 1\nFROM t\n```' in line and 'last run failed: boom' in line
+    assert 'earlier messages may describe an older editor' in line
+    fence = roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': "SELECT '```'"})
+    assert fence.count('```') == 2                          # a fence in the SQL cannot close the prompt's block
+    assert 'The editor is empty now' in roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': ''})
+
+
+def test_scope_points_to_read_editor_for_long_sql(prefs):
+    long_sql = 'SELECT a\nFROM secret_t\n' + '-- x\n' * 600
+    line = roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': long_sql})
+    assert 'read_editor shows it' in line and 'secret_t' not in line
+    cut = roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': 'SELECT 1', 'sql_truncated': True})
+    assert 'read_editor shows it' in cut
+
+
+def test_a_small_model_keeps_read_editor(prefs):
+    from dataviz.llm.engine import react
+    role = roles.get('analysis')
+    picked = react.pick_tools(tools.for_role(role.domains, 'ask'), 'hello there', keep=role.always)
+    assert {'read_editor', 'list_sources', 'search_catalog'} <= set(picked)
 
 
 def test_read_editor_returns_the_text_syntax_and_error(prefs):

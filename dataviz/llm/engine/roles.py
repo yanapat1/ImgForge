@@ -25,6 +25,7 @@ class Role:
     needs_session: bool
     zone: str                       # the zone that brings this specialist: without it, it does not exist
     screen: str                     # the page navigate opens for it
+    always: tuple = ()              # tools a small model keeps whatever the question's words (react.pick_tools)
 
 
 ROLES = {
@@ -33,7 +34,7 @@ ROLES = {
     'visual': Role('visual', 'Visualizer', ('visual', 'web', 'common', 'control', 'plugin'), 'assistant', True,
                    'visualizer', 'viz'),
     'analysis': Role('analysis', 'Data Analysis', ('analysis', 'web', 'common', 'control', 'plugin'), 'data_center', False,
-                     'analysis', 'analysis'),
+                     'analysis', 'analysis', always=('read_editor', 'list_sources', 'search_catalog')),
 }
 
 
@@ -173,6 +174,9 @@ def visual_scope(user, scope):
     return 'The visualizer shows:\n' + '\n'.join(rows) if rows else 'The visualizer state is empty.'
 
 
+INLINE_SQL = 1500                   # editor SQL up to this many characters is in the prompt itself (no read_editor step)
+
+
 def analysis_scope(user, scope):
     """What the page has open: the connection and database, the provider's syntax, the last result."""
     from ...analysis import service
@@ -183,12 +187,19 @@ def analysis_scope(user, scope):
     if rid:
         out.append(f'The open tab\'s last result is {rid!r}.')
     sql = str(scope.get('sql') or '')
+    failed = f' Its last run failed: {str(scope["last_error"])[:300]}' if scope.get('last_error') else ''
     if sql.strip():
         n = sql.count('\n') + 1
-        out.append(f'The editor holds {n} line{"s" if n > 1 else ""} of SQL'
-                   + (' and its last run failed' if scope.get('last_error') else '') + ' (read_editor shows it).')
+        if len(sql) <= INLINE_SQL and not scope.get('sql_truncated'):
+            tab_name = str(scope.get('tab_name') or '')[:80]
+            out.append(f'The editor{f" (tab {tab_name!r})" if tab_name else ""} holds this SQL now:\n```sql\n'
+                       f'{sql.replace("```", chr(39) * 3)}\n```{failed}')
+        else:
+            out.append(f'The editor holds {n} line{"s" if n > 1 else ""} of SQL now (read_editor shows it).{failed}')
     elif scope.get('page') == 'analysis':
-        out.append('The editor is empty.')
+        out.append('The editor is empty now.')
+    if scope.get('page') == 'analysis':
+        out.append('This is the page as of this message: earlier messages may describe an older editor.')
     if scope.get('rows_ok'):
         out.append('The user allowed row samples for this session.')
     else:

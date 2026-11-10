@@ -737,6 +737,13 @@ def test_the_assistant_reads_the_editor_and_shows_its_sql_before_apply(server, t
             new.locator('[data-ca="ui-apply"][data-mode="new_tab"]').click()
             page.wait_for_function(f"document.querySelectorAll('.an-tab').length === {tabs + 1}", timeout=5000)
             assert page.locator('#an-sql .cm-content').inner_text().strip() == fix
+            # type in that new tab, then go back: each message carries the text of the tab on screen, never an older copy
+            type_sql(page, 'SELECT 2')
+            events[1] = {**events[1], 'id': 'u3'}
+            page.fill('#ai-analysis-q', 'and this one')
+            page.keyboard.press('Enter')
+            page.wait_for_function(f'() => document.querySelectorAll("#ai-dock .ct-uiw").length >= 3', timeout=10000)
+            assert sent[-1]['scope']['sql'] == 'SELECT 2', sent[-1]['scope']
             assert not errors, errors
             browser.close()
     finally:
