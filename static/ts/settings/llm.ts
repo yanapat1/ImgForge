@@ -197,14 +197,26 @@ function featuresHTML(llm: LlmConfig): string {
     groups + '</div>';
 }
 
-const kTok = (v: number): string => `≤ ${Math.round(v / 1000)}k tokens per request · typical 2–15k`;
+const fmtTok = (v: number): string => (v >= 1e6 ? `${+(v / 1e6).toFixed(2)}M` : `${Math.round(v / 1000)}k`);
+const kTok = (v: number): string => `≤ ${fmtTok(v)} tokens per request`;
+const SOURCE: Record<string, string> = { api: 'reported by the provider', table: 'from the built-in model list', manual: 'set on the provider card' };
+/** 4k steps up to 200k, 16k above: the slider stays usable for a 1M-token model */
+const stepOf = (max: number): number => (max > 200000 ? 16000 : 4000);
 
 function budgetHTML(llm: LlmConfig): string {
-  const v = (llm.budget && llm.budget.max_input_tokens) || 100000;
+  const lim = llm.limits ?? { context: null, ceiling: 100000, source: null };
+  const saved = llm.budget?.max_input_tokens, auto = saved === undefined || saved === 'auto';
+  const max = Math.max(8000, lim.ceiling), v = auto ? max : Math.min(Number(saved) || max, max);
+  const min = 8000 + ((max - 8000) % stepOf(max));            // the steps end exactly on the model's maximum
+  const size = lim.context
+    ? `This model takes ${fmtTok(lim.context)} tokens (${SOURCE[lim.source ?? ''] ?? 'detected'}); up to ${fmtTok(lim.ceiling)} leaves room for its answer.`
+    : 'This model\'s size is not known, so the limit stays at 100k: enter its Model context on the provider card (Advanced) to go higher.';
   return '<div class="form-card"><div class="step-head">Token budget</div>' +
-    '<div class="lab-row"><span>Largest request sent to the model<span class="muted">older chat turns and images are dropped first; 100k is the hard cap</span></span>' +
-    `<span class="lab-range"><input type="range" min="8000" max="100000" step="4000" value="${esc(v)}" data-llm-budget aria-label="Token budget">` +
-    `<output id="llm-budget-out">${esc(kTok(v))}</output></span></div></div>`;
+    `<div class="lab-row"><span>Largest request sent to the model<span class="muted">older chat turns and images are dropped first; chats are compacted at 80%</span></span>` +
+    `<span class="lab-range"><input type="range" min="${min}" max="${max}" step="${stepOf(max)}" value="${esc(v)}" data-llm-budget aria-label="Token budget"${auto ? ' disabled' : ''}>` +
+    `<output id="llm-budget-out">${esc(kTok(v))}</output></span></div>` +
+    `<label class="check"><input type="checkbox" data-act-change="llm-budget-auto" ${auto ? 'checked' : ''}> Auto: the model's maximum (follows the model you pick)</label>` +
+    `<p class="sec-note">${esc(size)} A bigger budget keeps more of a long chat, and every step of an answer sends it again.</p></div>`;
 }
 
 // ---------------------------------------------------------------- form (3 steps)
@@ -304,6 +316,7 @@ function renderForm(f: LlmForm): string {
     '<span class="help">how this model writes box coordinates</span></label>' +
     fld('Timeout (s)', 'llm.timeout_s', p.timeout_s, { type: 'number', extra: 'min="5" max="600" step="5"' }) +
     fld('Max output tokens', 'llm.max_output_tokens', p.max_output_tokens, { type: 'number', extra: 'min="64" max="32768" step="64"' }) +
+    fld('Model context (tokens)', 'llm.context_window', p.context_window ?? '', { type: 'number', ph: 'detect', extra: 'min="1000" max="2000000" step="1000"', help: 'empty = ask the provider; set it when the size is not detected' }) +
     fld('Temperature', 'llm.temperature', p.temperature, { type: 'number', extra: 'min="0" max="2" step="0.1"', help: 'low = factual, repeatable answers' }) +
     '</div></details>';
   const s3 = `<div class="sec-actions"><button class="primary" data-act="llm-test-form" ${st.s2 ? '' : 'disabled'}>${icon('plug')}Test connection</button>` +
@@ -447,6 +460,13 @@ export const LLM_ACTIONS: Record<string, SetAction> = {
 };
 
 export const LLM_CHANGES: Record<string, SetChange> = {
+  'llm-budget-auto': async (el) => {
+    const on = el instanceof HTMLInputElement && el.checked;
+    const range = $req('settings-body').querySelector<HTMLInputElement>('[data-llm-budget]');
+    try { SET.llm = await put({ budget: { max_input_tokens: on ? 'auto' : Number(range?.value) || 100000 } }); } catch (e) { toast(errText(e), 'err'); await loadLlmData(); }
+    changed();
+    renderSettings();
+  },
   'llm-cap': () => {
     formOf('llm').capsTouched = true;
     const model = $req('settings-body').querySelector<HTMLElement>('[data-f="llm.model"]');

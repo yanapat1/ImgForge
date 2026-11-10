@@ -1,6 +1,7 @@
 """
 Token estimates and the per-request budget: `fit()` trims a request (old turns, old images, then the context
-images) until its estimate is under min(the Settings budget, 100k), or refuses it. Estimates, not tokenizers: text
+images) until its estimate is under the run's limit, or refuses it. The limit is `effective()`: the Settings budget
+(a number, or 'auto') kept under the model's own context window less room for its answer (`ceiling()`). Estimates, not tokenizers: text
 is ~3.5 characters per token, images follow each provider's published formula, so the page can show "≈ N in".
 """
 
@@ -8,7 +9,7 @@ import io
 import math
 
 from .providers import LLMError
-from .store import MAX_BUDGET
+from .store import ABS_MAX, DEFAULT_BUDGET, MAX_BUDGET  # noqa: F401 - MAX_BUDGET: old importers
 
 CHARS_PER_TOKEN = 3.5
 AUDIO_TOKENS_PER_S = 32                 # gemini's published rate; openai's audio is in the same range
@@ -63,11 +64,34 @@ def estimate(kind, system, msgs):
 
 
 def cap(budget):
+    """Sanity bounds of a limit that effective() already fitted to the model (None / junk: the default)."""
     try:
         b = int(budget)
     except (TypeError, ValueError):
-        b = MAX_BUDGET
-    return max(1000, min(b, MAX_BUDGET))
+        b = DEFAULT_BUDGET
+    return max(1000, min(b, ABS_MAX))
+
+
+def ceiling(p):
+    """The most input tokens this model takes with room left for its answer; DEFAULT_BUDGET when its size is
+    unknown (the provider cannot say, no table entry, no Model context on its card)."""
+    from .providers import model_limits
+    ctx = model_limits(p).get('context') if p else None
+    if not ctx:
+        return DEFAULT_BUDGET
+    room = max(int((p or {}).get('max_output_tokens') or 2048), 4096)
+    return max(4000, min(ABS_MAX, int(ctx * 0.98) - room))
+
+
+def effective(setting, p):
+    """The input limit of one request: the user's number kept under the model's ceiling, or the ceiling ('auto')."""
+    c = ceiling(p)
+    if setting in (None, 'auto'):
+        return c
+    try:
+        return max(1000, min(int(setting), c))
+    except (TypeError, ValueError):
+        return c
 
 
 def _strip_media(m):

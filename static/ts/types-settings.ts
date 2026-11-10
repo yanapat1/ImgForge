@@ -243,6 +243,7 @@ export type PresetKey = 'openai' | 'anthropic' | 'gemini' | 'vllm' | 'ollama' | 
 export type LlmProvider = {
   id: string; name: string; kind: string; base_url: string; model: string;
   vision?: boolean; audio?: boolean; box_format?: string; timeout_s?: number; max_output_tokens?: number; temperature?: number;
+  context_window?: number | null;
   verified_at?: number | null; verify?: { ms?: number } | null; last_error?: string | null;
   has_key?: boolean; key_env?: boolean; api_key_masked?: string | null;
 };
@@ -251,12 +252,15 @@ export interface LlmConfig {
   providers: LlmProvider[];
   active: string | null;
   features: Record<string, boolean>;
-  budget?: { max_input_tokens?: number };
+  budget?: { max_input_tokens?: number | 'auto' };
+  limits?: { context: number | null; ceiling: number; source: 'manual' | 'api' | 'table' | null };
 }
 export type LlmDraft = {
   id?: string;
   name: string; kind: string; base_url: string; model: string; api_key: string; vision: boolean; audio: boolean;
   box_format: string; timeout_s: number | string; max_output_tokens: number | string; temperature: number | string;
+  /** the model's context window when its provider cannot say ('' = detect it) */
+  context_window?: number | string | null;
 };
 /** What is POSTed as a provider: trimmed strings, no api_key when blank (= keep the stored key). */
 export type LlmPayload = Omit<LlmDraft, 'api_key'> & { api_key?: string };

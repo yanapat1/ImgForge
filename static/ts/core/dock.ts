@@ -122,7 +122,8 @@ function syncSid(): void {
 
 function ringHTML(): string {
   const ctx = D.chat?.lastCtx() ?? null;           // the chat on screen: live while it answers, its last answer's after a reload
-  const budget = ctx?.limit || LLM.budget?.max_input_tokens || 100000;
+  const set = LLM.budget?.max_input_tokens, ceil = LLM.limits?.ceiling || 100000;
+  const budget = ctx?.limit || (typeof set === 'number' ? Math.min(set, ceil) : ceil);
   const pct = ctx == null ? null : Math.min(100, Math.round((ctx.used / budget) * 100));
   const c = 94.25;                                    // 2πr, r = 15
   const tip = pct == null ? 'Context used: shown after the first answer' : `Context used: ${pct}% of ${Math.round(budget / 1000)}k tokens · older messages are compacted at 80% (or type /compact)`;

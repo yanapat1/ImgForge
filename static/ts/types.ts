@@ -41,7 +41,10 @@ export interface JobsPayload { jobs: Job[]; active: Job[] }
 export interface LLMProviderInfo {
   id: string; name: string; kind: string; model: string; vision: boolean; audio: boolean;
 }
-export interface LLMBudget { max_input_tokens: number; [k: string]: unknown }
+/** max_input_tokens: a number, or 'auto' = the model's maximum (llm/budget.py effective). */
+export interface LLMBudget { max_input_tokens: number | 'auto'; [k: string]: unknown }
+/** The active model's size: its context window (null = unknown), the input limit it allows, where that came from. */
+export interface LLMLimits { context: number | null; ceiling: number; source: 'manual' | 'api' | 'table' | null }
 /** Server part of the assistant's switchboard. */
 export interface LLMStatePayload {
   connected: boolean;
@@ -49,6 +52,7 @@ export interface LLMStatePayload {
   features: Record<string, boolean>;   // effective switches (switch on AND connected AND capability)
   switches: Record<string, boolean>;   // what the user switched on in Settings
   budget: LLMBudget;
+  limits?: LLMLimits;
 }
 /** Client-side LLM state (core/llm.ts `LLM`). */
 export interface LLMState extends LLMStatePayload { loaded: boolean }

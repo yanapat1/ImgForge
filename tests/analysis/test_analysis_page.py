@@ -501,9 +501,9 @@ def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
 
 def test_long_answer_options_wrap_inside_the_dock(server):  # noqa: F811
     """An ask_user option is a sentence the model wrote: it wraps in the dock instead of running past its right side."""
-    from test_page_smoke import _post, _put
     from test_llm import fake_app
     from test_models import _serve
+    from test_page_smoke import _post, _put
     fake, url = _serve(fake_app())
     long_opt = 'Use the monthly revenue table joined to the customer segments, grouped by region and product line, ' * 2
     events = [{'type': 'meta', 'run_id': 'r1', 'model': 'm', 'provider': 'p', 'mode': 'ask'},
@@ -533,6 +533,38 @@ def test_long_answer_options_wrap_inside_the_dock(server):  # noqa: F811
                 first = page.locator('#ai-dock .ct-choice').first.bounding_box()
                 assert first['height'] > 40                  # wrapped onto several lines
                 assert page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
+            browser.close()
+    finally:
+        fake.should_exit = True
+
+
+def test_token_budget_reaches_the_model_size(server):  # noqa: F811
+    """Settings › AI assistant: Auto (the model's maximum) by default, the slider goes up to the model's own size,
+    and turning Auto off saves a number."""
+    from test_llm import fake_app
+    from test_models import _serve
+    from test_page_smoke import _post, _put
+    fake, url = _serve(fake_app())
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
+                                                  'model': 'gpt-x', 'context_window': 400000})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1400, 'height': 900})
+            page.goto(f'{server}/?analysis')
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=20000)
+            page.click('#ai-dock [data-dock="settings"]')
+            rng = page.locator('#settings-body [data-llm-budget]')
+            rng.wait_for(timeout=10000)
+            ceiling = int(400000 * 0.98) - 4096
+            assert rng.get_attribute('max') == str(ceiling) and rng.is_disabled()
+            assert 'This model takes 400k tokens (set on the provider card)' in page.locator('#settings-body').inner_text()
+            page.locator('#settings-body [data-act-change="llm-budget-auto"]').uncheck()
+            page.wait_for_function("!document.querySelector('#settings-body [data-llm-budget]').disabled", timeout=5000)
+            cfg = _put(f'{server}/api/llm/config', {})
+            assert cfg['budget']['max_input_tokens'] == ceiling and cfg['limits']['ceiling'] == ceiling
             browser.close()
     finally:
         fake.should_exit = True
@@ -788,7 +820,7 @@ def test_the_assistant_reads_the_editor_and_shows_its_sql_before_apply(server, t
             events[1] = {**events[1], 'id': 'u3'}
             page.fill('#ai-analysis-q', 'and this one')
             page.keyboard.press('Enter')
-            page.wait_for_function(f'() => document.querySelectorAll("#ai-dock .ct-uiw").length >= 3', timeout=10000)
+            page.wait_for_function('() => document.querySelectorAll("#ai-dock .ct-uiw").length >= 3', timeout=10000)
             assert sent[-1]['scope']['sql'] == 'SELECT 2', sent[-1]['scope']
             assert not errors, errors
             browser.close()

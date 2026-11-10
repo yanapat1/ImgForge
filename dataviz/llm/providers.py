@@ -1178,6 +1178,93 @@ def list_models(p):
     return sorted({i for i in ids if i})
 
 
+# Context windows when the provider's API does not say (OpenAI has no such field). First match wins, so the longer
+# prefixes come first. The provider card's "Model context" overrides all of it.
+MODEL_CONTEXT = (
+    ('claude-haiku-4-5', 200_000), ('claude-3', 200_000), ('claude-sonnet-4-5', 200_000), ('claude-opus-4-5', 200_000),
+    ('claude-opus-4-1', 200_000), ('claude-opus-4-0', 200_000), ('claude-sonnet-4-0', 200_000), ('claude-', 1_000_000),
+    ('gpt-4.1', 1_047_576), ('gpt-4o', 128_000), ('gpt-4-turbo', 128_000), ('gpt-5', 400_000), ('o1', 200_000),
+    ('o3', 200_000), ('o4', 200_000), ('gemini-1.5-pro', 2_097_152), ('gemini-', 1_048_576),
+)
+_LIMIT_KEYS = ('context_length', 'max_model_len', 'context_window', 'max_context_length', 'max_input_tokens')
+_limits = {}                    # (kind, base_url, model) -> the answer of model_limits (unknown included: asked once)
+_limits_lock = threading.Lock()
+
+
+def _int(v):
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 1000 else None
+
+
+def _compat_context(p, c, h):
+    """An OpenAI-compatible server's own number: its /models entry (OpenRouter context_length, vLLM max_model_len,
+    Groq context_window, LM Studio max_context_length, llama.cpp meta.n_ctx_train), else Ollama's /api/show."""
+    r = c.get('/models', headers=h, timeout=5.0)
+    if r.status_code < 400:
+        data = r.json()
+        for m in (data.get('data') if isinstance(data, dict) else data) or []:
+            if isinstance(m, dict) and m.get('id') == p['model']:
+                n = next((_int(m.get(k)) for k in _LIMIT_KEYS if _int(m.get(k))), None) \
+                    or _int((m.get('meta') or {}).get('n_ctx_train'))
+                if n:
+                    return n, _int(m.get('max_completion_tokens'))
+                break                           # listed without a size (Ollama): ask its own API below
+    base = str(p.get('base_url') or '').rstrip('/')
+    if base.endswith('/v1'):                    # Ollama answers OpenAI on /v1 and its own API at the root
+        r = c.post(base[:-3] + '/api/show', headers=h, json={'model': p['model']}, timeout=5.0)
+        if r.status_code < 400:
+            d = r.json()
+            m = re.search(r'(?m)^\s*num_ctx\s+(\d+)', str(d.get('parameters') or ''))
+            if m:
+                return _int(m.group(1)), None
+            info = d.get('model_info') or {}
+            return next((_int(v) for k, v in info.items() if k.endswith('.context_length') and _int(v)), None), None
+    return None, None
+
+
+def model_limits(p):
+    """{'context', 'output', 'source'}: the model's context window and output cap, from the provider card
+    ('manual'), the provider's own API ('api') or MODEL_CONTEXT ('table'); None where unknown. Asked once per model
+    and remembered; never raises (a provider that cannot say is simply unknown)."""
+    manual = _int(p.get('context_window'))
+    if manual:
+        return {'context': manual, 'output': None, 'source': 'manual'}
+    key = (p.get('kind'), str(p.get('base_url') or ''), str(p.get('model') or ''))
+    hit = _limits.get(key)
+    if hit is not None:
+        return hit
+    kind, model = key[0], key[2]
+    ctx = out = None
+    try:
+        if kind in ('gemini', 'anthropic', 'openai_compat') and model:
+            c, h = _client(p), _headers(p)
+            if kind == 'gemini':
+                r = c.get(f'/models/{model}', headers=h, timeout=5.0)
+                if r.status_code < 400:
+                    d = r.json()
+                    ctx, out = _int(d.get('inputTokenLimit')), _int(d.get('outputTokenLimit'))
+            elif kind == 'anthropic':
+                r = c.get(f'/v1/models/{model}', headers=h, timeout=5.0)
+                if r.status_code < 400:
+                    d = r.json()
+                    ctx, out = _int(d.get('max_input_tokens')), _int(d.get('max_tokens'))
+            else:
+                ctx, out = _compat_context(p, c, h)
+    except (httpx.HTTPError, LLMError, ValueError, TypeError, AttributeError):
+        ctx = out = None
+    src = 'api' if ctx else None
+    if not ctx:
+        ctx = next((n for pre, n in MODEL_CONTEXT if model.lower().startswith(pre)), None)
+        src = 'table' if ctx else None
+    got = {'context': ctx, 'output': out, 'source': src}
+    with _limits_lock:
+        _limits[key] = got
+    return got
+
+
 def red_jpeg(size=32):
     from PIL import Image
     buf = io.BytesIO()

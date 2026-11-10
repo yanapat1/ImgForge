@@ -312,6 +312,33 @@ def test_agent_routes(client, monkeypatch, svc):
     assert client.get('/api/llm/agent/data/catalog').json()['chat'] == {'mode': 'plan', 'provider_id': p['id']}
 
 
+def test_the_run_limit_follows_the_model_and_the_setting(client, monkeypatch, svc):
+    """Auto (the default): the model's own maximum; a number: kept under it; the page is told both."""
+    import json as _json
+    from dataviz.llm import providers
+    providers._limits.clear()
+    p = _connect(client, ['data_center'])
+    s, u = client.ctx.llm, client.user
+    s.upsert({**p, 'context_window': 64000}, u)                     # the card's Model context (gpt-x is not in the table)
+    s.record_test(p['id'], {'ok': True}, u)
+    assert s.load(u)['budget'] == {'max_input_tokens': 'auto'}
+    lim = client.get('/api/llm/state').json()['limits']
+    assert lim == {'context': 64000, 'ceiling': int(64000 * 0.98) - 4096, 'source': 'manual'}
+
+    def limit_of_a_turn():
+        script(monkeypatch, ('ok', []))
+        r = client.post('/api/llm/agent/data/chat', json={'messages': [{'role': 'user', 'text': 'hi'}], 'scope': {},
+                                                          'ephemeral': True, 'session_id': None})
+        return next(e for e in map(_json.loads, r.text.splitlines()) if e['type'] == 'meta')['limit']
+    assert limit_of_a_turn() == lim['ceiling']
+    client.put('/api/llm/config', json={'budget': {'max_input_tokens': 20000}})
+    assert limit_of_a_turn() == 20000
+    client.put('/api/llm/config', json={'budget': {'max_input_tokens': 900000}})       # more than the model takes
+    assert limit_of_a_turn() == lim['ceiling']
+    s.upsert({**s.provider(p['id'], u), 'context_window': ''}, u)                      # cleared: detect again
+    assert 'context_window' not in s.provider(p['id'], u)
+
+
 def test_web_key_is_stored_encrypted(client):
     s, u = client.ctx.llm, client.user
     assert s.web_key(u) == '' and s.set_web_key('brv-123', u) == {'has_key': True} and s.web_key(u) == 'brv-123'

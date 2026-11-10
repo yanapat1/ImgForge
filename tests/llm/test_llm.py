@@ -293,10 +293,10 @@ def test_budget_fit():
     assert all('jpeg' not in x for m in msgs[:-1] for x in m['parts'])           # older images omitted
     assert any(x.get('text') == budget.OMITTED for m in msgs[:-1] for x in m['parts'])
     assert 'jpeg' in msgs[-1]['parts'][-1] and msgs[-1]['parts'][0] == {'text': 'ctx'}
-    # the hard cap: a 500k budget is still 100k
-    assert budget.cap(500000) == 100000
+    # cap keeps sanity bounds only (the model's own size is applied by budget.effective)
+    assert budget.cap(500000) == 500000 and budget.cap(10 ** 9) == budget.ABS_MAX and budget.cap(None) == 100000
     with pytest.raises(LLMError):
-        budget.fit('openai', 'sys', [], [{'role': 'user', 'parts': [{'text': 'x' * 400000}]}], 500000)
+        budget.fit('openai', 'sys', [], [{'role': 'user', 'parts': [{'text': 'x' * 400000}]}], 100000)
     # context images are downscaled, then dropped, before giving up
     big = jpeg_bytes(2048, 2048)
     msgs, est = budget.fit('anthropic', 's', [{'jpeg': big}], [{'role': 'user', 'parts': [{'text': 'q'}]}], 1000)
@@ -477,3 +477,81 @@ def test_clean_filter_matches_filter_js(tmp_path):
         f"const s = {json.dumps(spec)};\nassert.deepEqual(normalizeFilter(s), s);\nconsole.log('ok');\n")
     r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and r.stdout.strip() == 'ok', r.stderr
+
+
+# ---------------------------------------------------------------- the model's own context window
+def _mock(monkeypatch, routes):
+    """providers._client answers from `routes` {(method, path): json | status int}; returns the calls made."""
+    import httpx
+
+    from dataviz.llm import providers
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        got = routes.get((req.method, req.url.path), 404)
+        return httpx.Response(got, json={}) if isinstance(got, int) else httpx.Response(200, json=got)
+    monkeypatch.setattr(providers, '_client', lambda p: httpx.Client(transport=httpx.MockTransport(handler),
+                                                                    base_url=p['base_url']))
+    providers._limits.clear()
+    return calls
+
+
+def test_model_limits_from_each_provider(monkeypatch):
+    from dataviz.llm import providers
+    calls = _mock(monkeypatch, {
+        ('GET', '/v1beta/models/gemini-x'): {'inputTokenLimit': 1048576, 'outputTokenLimit': 65536},
+        ('GET', '/v1/models/claude-x'): {'id': 'claude-x', 'max_input_tokens': 1000000, 'max_tokens': 128000},
+        ('GET', '/router/models'): {'data': [{'id': 'other'}, {'id': 'qwen', 'context_length': 131072}]},
+        ('GET', '/vllm/v1/models'): {'data': [{'id': 'llama', 'max_model_len': 32768}]},
+        ('GET', '/ollama/v1/models'): {'data': [{'id': 'qwen3:8b'}]},
+        ('POST', '/ollama/api/show'): {'parameters': 'temperature 0.7\nnum_ctx                        40960',
+                                       'model_info': {'qwen3.context_length': 131072}},
+        ('GET', '/cpp/v1/models'): {'data': [{'id': 'm', 'meta': {'n_ctx_train': 8192}}]},
+    })
+    g = {'kind': 'gemini', 'base_url': 'https://g/v1beta', 'model': 'gemini-x', 'api_key': 'k'}
+    assert providers.model_limits(g) == {'context': 1048576, 'output': 65536, 'source': 'api'}
+    assert providers.model_limits({'kind': 'anthropic', 'base_url': 'https://a', 'model': 'claude-x', 'api_key': 'k'}) == \
+        {'context': 1000000, 'output': 128000, 'source': 'api'}
+    assert providers.model_limits({'kind': 'openai_compat', 'base_url': 'https://h/router', 'model': 'qwen'})['context'] == 131072
+    assert providers.model_limits({'kind': 'openai_compat', 'base_url': 'https://h/vllm/v1', 'model': 'llama'})['context'] == 32768
+    assert providers.model_limits({'kind': 'openai_compat', 'base_url': 'https://h/ollama/v1', 'model': 'qwen3:8b'})['context'] == 40960
+    assert providers.model_limits({'kind': 'openai_compat', 'base_url': 'https://h/cpp/v1', 'model': 'm'})['context'] == 8192
+    n = len(calls)
+    providers.model_limits(g)                                   # remembered: no second request
+    assert len(calls) == n
+
+
+def test_model_limits_fall_back_to_the_table_then_unknown(monkeypatch):
+    from dataviz.llm import providers
+    _mock(monkeypatch, {})                                      # every request: 404
+    assert providers.model_limits({'kind': 'openai', 'base_url': 'https://o/v1', 'model': 'gpt-4o-mini', 'api_key': 'k'}) == \
+        {'context': 128000, 'output': None, 'source': 'table'}
+    assert providers.model_limits({'kind': 'anthropic', 'base_url': 'https://a', 'model': 'claude-haiku-4-5', 'api_key': 'k'})['context'] == 200000
+    assert providers.model_limits({'kind': 'openai_compat', 'base_url': 'https://h/v1', 'model': 'my-model'}) == \
+        {'context': None, 'output': None, 'source': None}
+    # a manual Model context wins; a provider that cannot be reached is unknown, never an error
+    assert providers.model_limits({'kind': 'openai_compat', 'base_url': 'https://h/v1', 'model': 'x', 'context_window': 64000}) == \
+        {'context': 64000, 'output': None, 'source': 'manual'}
+    import httpx
+
+    def boom(req):
+        raise httpx.ConnectError('down')
+    monkeypatch.setattr(providers, '_client', lambda p: httpx.Client(transport=httpx.MockTransport(boom), base_url=p['base_url']))
+    providers._limits.clear()
+    assert providers.model_limits({'kind': 'gemini', 'base_url': 'https://g', 'model': 'gemini-2.5-pro', 'api_key': 'k'})['source'] == 'table'
+
+
+def test_effective_limit_follows_the_model(monkeypatch):
+    from dataviz.llm import budget
+    _mock(monkeypatch, {})
+    big = {'kind': 'openai_compat', 'base_url': 'https://h/v1', 'model': 'x', 'context_window': 1000000, 'max_output_tokens': 8192}
+    small = {**big, 'context_window': 32768}
+    assert budget.ceiling(big) == 980000 - 8192 and budget.effective('auto', big) == budget.ceiling(big)
+    assert budget.effective(500000, big) == 500000
+    assert budget.effective(500000, small) == budget.ceiling(small) == int(32768 * 0.98) - 8192    # clamped to the model
+    unknown = {'kind': 'openai_compat', 'base_url': 'https://h/v1', 'model': 'mystery'}
+    assert budget.effective('auto', unknown) == 100000 and budget.effective(None, None) == 100000
+    from dataviz.llm.store import LLMStore
+    assert [LLMStore._budget(v) for v in ('auto', None, 'junk', 50000, 10 ** 9, 10)] == \
+        ['auto', 'auto', 'auto', 50000, budget.ABS_MAX, 4000]

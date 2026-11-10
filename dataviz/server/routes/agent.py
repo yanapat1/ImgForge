@@ -43,7 +43,7 @@ from fastapi.responses import StreamingResponse
 from ...auth import access, deps, tiers
 from ...auth import context as auth_context
 from ...core import logging as vlog
-from ...llm import prompting, providers, tools
+from ...llm import budget, prompting, providers, tools
 from ...llm import sessions as chat_sessions
 from ...llm.engine import confirm, react, roles, summarize, uiwait
 from ...llm.engine.events import ENDS
@@ -231,7 +231,7 @@ def router(state, ctx):
         a = _assets(user, role.name)
         forced = [str(s) for s in body.get('skills') or [] if isinstance(s, str)][:3]
         roles_on = {k: store().on(v.feature) for k, v in roles.ROLES.items()}
-        limit = cfg['budget']['max_input_tokens']
+        limit = budget.effective(cfg['budget']['max_input_tokens'], p)      # the user's number, under the model's size
 
         def build(msgs, summary_):
             r_ = react.prepare(user, role, p, react.history(msgs), scope, opts, state=st, app=ctx,
@@ -355,7 +355,7 @@ def router(state, ctx):
         cfg = store().load()
         p = pick_provider(active, body, (cfg.get('chat') or {}).get(role.name) or {})
         try:
-            info = summarize.compact(user, sid, p, cfg['budget']['max_input_tokens'], keep=summarize.KEEP_MANUAL,
+            info = summarize.compact(user, sid, p, budget.effective(cfg['budget']['max_input_tokens'], p), keep=summarize.KEEP_MANUAL,
                                      focus=focus)
         except (chat_sessions.SessionError, summarize.CompactError) as e:
             raise HTTPException(e.status, str(e))

@@ -6,6 +6,9 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   `/effort low|medium|high`, `/think off|low|medium|high`, `/web off|public|technical|full`, `/skills`,
   `/skill <name>`, `/sessions`, `/new`, `/rename`, `/delete`, `/cost`, `/compact [focus]`, `/export`, `/prompts`,
   `/plugins`, `/help`.
+- **Token budget** (Settings › AI assistant): the largest request sent to the model. Auto (the default) = the model's own
+  maximum, detected from the provider (or the provider card's Model context in Advanced; 100k when unknown); a number
+  is kept under it. Bigger keeps more of a long chat, but each step of an answer sends it again.
 - **Context compaction**: past 80% of the input budget (Settings › AI assistant) or 40 messages, older messages
   fold into one summary (goal, preferences, app state, work done with numbers and ids, open tasks); the model reads
   it + the last 3 exchanges ("Context compacted · view summary" line). `/compact [focus]` does it now. The page

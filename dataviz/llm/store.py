@@ -5,7 +5,7 @@ PostgreSQL (the format db/legacy.py imports llm.json into):
     app.llm_providers    one row per provider, private to its owner: config = the provider minus id / name /
                          kind / api_key (base_url, model, vision, ..., verified_at, verify, last_error),
                          secrets = Fernet-encrypted {api_key}
-    app.llm_user_config  per user: active_provider_id, features {key: bool}, budget {max_input_tokens}
+    app.llm_user_config  per user: active_provider_id, features {key: bool}, budget {max_input_tokens: int | 'auto'}
 
 Every method acts for one user (a user dict; None = the signed-in user, context.user()). API keys are
 write-only: the page only ever sees `has_key`. `api_key: env:NAME` (read the server's environment variable at
@@ -37,9 +37,11 @@ FEATURES = {
 }
 # answered in the ◆ panel (their buttons elsewhere open it), so they also need `assistant`
 PANEL = ('dataset_qa', 'explain_eval', 'ask_selection', 'label_check', 'report', 'auto_tag')
-MAX_BUDGET = 100_000            # hard cap on estimated input tokens per request (asked for: never more than 100k)
+DEFAULT_BUDGET = 100_000        # the input limit when the model's own context window is unknown
+ABS_MAX = 2_000_000             # no model takes more; a saved number is clamped to this
+MAX_BUDGET = DEFAULT_BUDGET     # the old name (some importers still use it)
 _FIELDS = ('name', 'kind', 'base_url', 'model', 'vision', 'audio', 'box_format', 'timeout_s', 'max_output_tokens',
-           'temperature', 'agent_profile')
+           'temperature', 'agent_profile', 'context_window')
 PROFILES = ('auto', 'small', 'large')       # agent profile: small (<= 14B) gets a shorter prompt and fewer tools
 ROLES = ('data', 'visual', 'analysis')      # the ◆ agents (llm/engine/roles.py)
 CHAT_KEYS = {'mode': ('ask', 'auto', 'plan'), 'effort': ('low', 'medium', 'high'),
@@ -90,10 +92,13 @@ class LLMStore:
 
     @staticmethod
     def _budget(v):
+        """'auto' (the model's maximum, budget.effective) or a number of input tokens."""
+        if v in (None, '', 'auto'):
+            return 'auto'
         try:
-            return max(4000, min(MAX_BUDGET, int(v)))
+            return max(4000, min(ABS_MAX, int(v)))
         except (TypeError, ValueError):
-            return MAX_BUDGET
+            return 'auto'
 
     # ------------------------------------------------------------ storage
     def load(self, user=None):
@@ -200,8 +205,12 @@ class LLMStore:
             out['timeout_s'] = num('timeout_s', 120, 5, 600)
             out['max_output_tokens'] = num('max_output_tokens', 2048, 64, 32768, int)
             out['temperature'] = num('temperature', 0.2, 0, 2)
+            cw = out.get('context_window')         # empty = detect it (providers.model_limits)
+            out['context_window'] = None if cw in (None, '', 0) else int(num('context_window', 0, 1000, ABS_MAX, int))
         except (TypeError, ValueError):
-            raise ValueError('timeout, max output tokens and temperature must be numbers') from None
+            raise ValueError('timeout, max output tokens, temperature and model context must be numbers') from None
+        if out['context_window'] is None:
+            out.pop('context_window')
         if any(out.get(k) != old.get(k) for k in _RETEST):
             out.pop('verified_at', None)
             out.pop('verify', None)
@@ -358,8 +367,18 @@ class LLMStore:
         return {
             'connected': connected,
             'provider': {k: p.get(k) for k in ('id', 'name', 'kind', 'model', 'vision', 'audio')} if p else None,
-            'features': on, 'switches': data['features'], 'budget': data['budget'],
+            'features': on, 'switches': data['features'], 'budget': data['budget'], 'limits': self.limits(p),
         }
+
+    @staticmethod
+    def limits(p):
+        """What the page shows about the active model's size: {context, ceiling, source} (budget.ceiling)."""
+        from . import budget
+        from .providers import model_limits
+        if not p:
+            return {'context': None, 'ceiling': DEFAULT_BUDGET, 'source': None}
+        m = model_limits(p)
+        return {'context': m['context'], 'ceiling': budget.ceiling(p), 'source': m['source']}
 
     def on(self, feature, user=None):
         return self.state(user)['features'].get(feature, False)
@@ -368,5 +387,6 @@ class LLMStore:
         data = self.load(user)
         return {'providers': [self.public(p) for p in data['providers']], 'active': data['active'],
                 'features': data['features'], 'budget': data['budget'], 'chat': data['chat'],
+                'limits': self.limits(self.provider(data=data)),
                 'web': self.clean_web(data['web']),
                 'catalog': {k: {'where': w, 'needs': n} for k, (w, n) in FEATURES.items()}}

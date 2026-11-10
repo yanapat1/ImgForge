@@ -89,8 +89,9 @@ def router(state, ctx):
             raise HTTPException(403, f'AI feature "{feature}" is off (Settings › AI assistant)')
         return s.active()
 
-    def limit():
-        return store().load()['budget']['max_input_tokens']
+    def limit(p=None):
+        """The input limit for provider p (the active one if None): the Settings budget under the model's own size."""
+        return budget.effective(store().load()['budget']['max_input_tokens'], p or store().active())
 
     def session(need_role='viewer'):
         """The State of the visualizer session this request is bound to (/s/<id>/), the caller's role high enough."""
@@ -223,7 +224,7 @@ def router(state, ctx):
             history.append({'role': 'assistant' if m.get('role') == 'assistant' else 'user', 'parts': parts})
         system = CHAT_SYSTEM + ('\n\n' + REPORT_TASK if task == 'report' else '')
         with _llm_errors():
-            msgs, est = budget.fit(p['kind'], system, ctx_parts, history, limit())
+            msgs, est = budget.fit(p['kind'], system, ctx_parts, history, limit(p))
 
         def gen():
             t0 = time.perf_counter()
@@ -257,7 +258,7 @@ def router(state, ctx):
             raise HTTPException(400, 'the last message must be the user\'s')
         scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
         user = auth_context.user()          # captured now: the stream runs in another thread
-        lim = limit()
+        lim = limit(p)
         with _llm_errors():
             prep = agent.prepare(user, p, msgs_in, scope, lim)
 
@@ -297,7 +298,7 @@ def router(state, ctx):
         if len(ids) > MAX_CHECK:
             raise HTTPException(400, f'check at most {MAX_CHECK} boxes at a time ({len(ids)} selected)')
         with _llm_errors():
-            return tasks.label_check(p, st, ids, limit())
+            return tasks.label_check(p, st, ids, limit(p))
 
     def issue_types(st):
         cur = ctx.curation(st)
@@ -315,7 +316,7 @@ def router(state, ctx):
             raise HTTPException(400, 'describe what to show')
         tags = sorted(context._tags(st))
         with _llm_errors():
-            res = tasks.nl_filter(p, text[:2000], st.classes, tags, issue_types(st), limit())
+            res = tasks.nl_filter(p, text[:2000], st.classes, tags, issue_types(st), limit(p))
         return {'spec': res['spec'], 'explain': res['explain'], 'usage': res['usage']}
 
     @r.post('/api/llm/tag')
@@ -333,7 +334,7 @@ def router(state, ctx):
         else:
             raise HTTPException(400, "scope is 'all' or 'selection'")
         vocab = body.get('vocab') if isinstance(body.get('vocab'), list) else None
-        fn = tasks.auto_tag_job(p, st, names, vocab, limit())    # p, limit: resolved now (jobs have no user)
+        fn = tasks.auto_tag_job(p, st, names, vocab, limit(p))    # p, limit: resolved now (jobs have no user)
         job = ctx.jobs.submit(f'llm-tag:{st.tag}', f'◆ auto-tag {len(names)} images', fn, lane='io', public_result=True)
         return {'job_id': job.id}
 
@@ -344,7 +345,7 @@ def router(state, ctx):
         screen = body.get('screen') if body.get('screen') in ('viz', 'label') else 'viz'
         classes = body.get('classes') if isinstance(body.get('classes'), list) else []
         with _llm_errors():
-            res = tasks.voice(p, wav, screen, classes, limit())
+            res = tasks.voice(p, wav, screen, classes, limit(p))
         return {'transcript': res['transcript'], 'action': res['action'], 'args': res['args'], 'usage': res['usage']}
 
     # ------------------------------------------------------------ label page
@@ -414,7 +415,7 @@ def router(state, ctx):
         existing = [names.get(a['class_id'], '?') for a in st.live_annotations(m['id'], task['id'])
                     if a['geometry_type'] == 'bbox']
         with _llm_errors():
-            return tasks.label_assist(p, task, image, sheets, question[:2000], limit(), prelabel=prelabel,
+            return tasks.label_assist(p, task, image, sheets, question[:2000], limit(p), prelabel=prelabel,
                                       existing=existing)
 
     @r.post('/api/llm/label/{pid}/assist', dependencies=[Depends(LABEL_VIEWER)])
