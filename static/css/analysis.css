@@ -211,6 +211,16 @@ main.an-work { grid-template-columns: none; }
 .an-legend i { display: inline-block; width: 12px; height: 12px; margin-right: 4px; border-radius: 2px; vertical-align: -1px; }
 .an-legend i.ok { background: var(--err-tp); }
 .an-legend i.cut { background: var(--danger-soft); border: 1px solid var(--danger); }
+.an-legend i.use { background: transparent; border: 3px solid var(--accent); border-radius: 50%; }
+.an-venn-all { max-width: 640px; }
+.an-venn .an-vc { fill: var(--accent); fill-opacity: .14; stroke: var(--border-strong); stroke-width: 1.2; }
+.an-venn .an-vc.cut { stroke: var(--danger); stroke-dasharray: 4 3; }
+.an-venn .an-vg { stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
+.an-venn .vn { fill: var(--text); font-weight: 650; }
+.an-venn .an-vj { cursor: pointer; }
+.an-venn .an-vj circle { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+.an-venn .an-vj:hover circle, .an-venn .an-vj:focus-visible circle { fill: var(--accent-soft); }
+.an-venn .an-vj:focus { outline: none; }
 .an-flow { display: grid; gap: var(--s2); margin-top: var(--s3); }
 .an-fr { display: grid; grid-template-columns: 150px 1fr 76px; gap: var(--s2); align-items: center; font-size: var(--fs-sm); }
 

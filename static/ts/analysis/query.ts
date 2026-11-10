@@ -8,7 +8,7 @@ import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, render, renderTree, saveTabs } from './app.js';
 import { B_ACTIONS, fitView, renderBuilder, syncFromSql } from './builder.js';
 import { mountGrid } from './grid.js';
-import { countJoin, joinsHtml } from './joins.js';
+import { countAll, countJoin, joinsHtml } from './joins.js';
 import { A, api, newTab, sourceOf, tab } from './state.js';
 import type { RunState, Statement, Tab } from './state.js';
 import type { EditorHandle, EditorModule } from '../types-editor.js';
@@ -234,6 +234,7 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   },
   'join-step': (el) => { tab().joinStep = Number(el.dataset['i']); renderQuery(); },
   'join-count': async (el) => { await countJoin(Number(el.dataset['i'])); renderQuery(); },
+  'join-count-all': async () => { await countAll(); renderQuery(); },
   layout: (el) => {
     const L = A.layout, k = el.dataset['k'];
     L.max = k === 'only' ? 'res' : '';

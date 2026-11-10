@@ -5,6 +5,8 @@ the cost is one scan of each table.
 
     query(model, index, dialect)   -> the SQL, read-only by construction
     summary(row)                   -> {a_rows, b_rows, matched_a, matched_b, a_keys, b_keys, matched_keys, fan_out, kept}
+    overview(model, dialect)       -> (the SQL, the key column of each table): the whole query in one count
+    overview_summary(row, keys)    -> {rows, used: {table id: distinct keys the query keeps}, key: {table id: column}}
 """
 
 from . import querymodel
@@ -44,3 +46,38 @@ def summary(row, join_type):
     return {'a_rows': a_rows, 'b_rows': b_rows, 'matched_a': matched_a, 'matched_b': matched_b, 'lost_a': lost_a, 'lost_b': lost_b,
             'a_keys': a_keys, 'b_keys': b_keys, 'matched_keys': matched_keys, 'joined': joined, 'kept': kept,
             'fan_out': joined > max(matched_a, matched_b)}
+
+
+def keys_of(group):
+    """The join key of each table: the column of the first join it is in (the one its pair counts use too)."""
+    out = {}
+    for j in group['joins']:
+        for side in ('a', 'b'):
+            out.setdefault(j[side][0], j[side][1])
+    return out
+
+
+def overview(model, dialect):
+    """One read-only query over the builder's whole join tree and its WHERE: the rows it keeps, and per table how many
+    distinct join keys reach the result (how much of each table the query really uses). GROUP BY / HAVING are left
+    out: these are the rows that go into the select. -> (sql, {table id: key column})."""
+    groups = [g for g in querymodel._groups(model) if g['joins']]
+    if not groups:
+        raise ValueError('add a join in the Visual builder first')
+    g = max(groups, key=lambda x: len(x['joins']))
+    if any(t.get('kind') in ('remote', 'cte') for t in g['tables']):
+        raise ValueError('the join overview needs tables or plain subqueries')
+    d = querymodel._d(dialect)
+    keys = keys_of(g)
+    by_id = {t['id']: t for t in g['tables']}
+    cols = ['COUNT(*) AS n'] + [
+        f'COUNT(DISTINCT {querymodel._quote(querymodel._alias(by_id[tid]), d)}.{querymodel._quote(col, d)}) AS u{i}'
+        for i, (tid, col) in enumerate(keys.items())]
+    where = (model.get('parts') or {}).get('where')
+    sql = 'SELECT ' + ', '.join(cols) + '\n' + '\n'.join(querymodel.from_lines(g, d)) + (f'\nWHERE {where}' if where else '')
+    return sql, keys
+
+
+def overview_summary(row, keys):
+    vals = [int(x or 0) for x in row]
+    return {'rows': vals[0], 'used': {tid: vals[i + 1] for i, tid in enumerate(keys)}, 'key': dict(keys)}

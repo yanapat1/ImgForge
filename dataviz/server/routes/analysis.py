@@ -101,6 +101,10 @@ def router(state, ctx):
     def joins(body: dict = Body(...), user=me):
         return _call(service.join_stats, user, body.get('connection'), body.get('database'), body.get('model') or {}, body.get('index'))
 
+    @r.post('/joins/overview')
+    def joins_overview(body: dict = Body(...), user=me):
+        return _call(service.join_overview, user, body.get('connection'), body.get('database'), body.get('model') or {})
+
     @r.post('/model/generate')
     def generate(body: dict = Body(...), user=me):
         return _call(service.generate_sql, user, body.get('model') or {}, body.get('dialect'))

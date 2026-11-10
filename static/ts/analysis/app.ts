@@ -362,6 +362,11 @@ function bind(root: HTMLElement): void {
     e.stopPropagation();
     void runQuery().catch((err: unknown) => toast(errText(err), 'err'));
   }, true);
+  root.addEventListener('keydown', (e) => {          // a join's numbered dot in the Joins picture (an SVG <g>)
+    if ((e.key !== 'Enter' && e.key !== ' ') || !(e.target instanceof SVGElement) || !e.target.classList.contains('an-vj')) return;
+    e.preventDefault();
+    e.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
   root.addEventListener('keydown', (e) => {
     if (!(e.target instanceof HTMLElement) || !e.target.classList.contains('an-expsz')) return;
     const d = ({ ArrowLeft: -20, ArrowRight: 20 } as Record<string, number>)[e.key];

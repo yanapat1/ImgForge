@@ -34,6 +34,8 @@ export interface Join { a: [string, string]; b: [string, string]; type: 'INNER' 
 export interface Calc { alias: string; t: string; kind: string; expr: string; spec?: unknown }
 export interface Parts { where?: string; group?: string; having?: string; order?: string; top?: number; distinct?: boolean; parsed?: boolean }
 export interface Model { tables: MTable[]; joins: Join[]; calc: Calc[]; parts: Parts; locked: string[]; adv: string; cte?: { name: string; sql: string }[] }
+/** The whole query at once (POST /joins/overview): its rows, and the join keys of each table that reach it. */
+export interface JoinOverview { rows: number; used: Record<string, number>; key: Record<string, string> }
 export interface JoinStats { a_rows: number; b_rows: number; matched_a: number; matched_b: number; lost_a: number; lost_b: number; a_keys: number; b_keys: number; matched_keys: number; joined: number; kept: number; fan_out: boolean }
 export interface Parsed extends Model { error?: string; statement?: string; loose?: string[]; output?: string[] }
 
@@ -56,7 +58,10 @@ export interface Tab {
   id: string; name: string; sql: string; conn: string | null; db: string | null;
   run: RunState | null; result: number; rt: 'results' | 'joins' | 'cost' | 'messages'; plan: Plan | null; dirty: boolean;
   model: Model | null; typed: boolean; notDrawn: boolean; undo: string[]; redo: string[]; view: { z: number; x: number; y: number };
+  /** -1 = All tables (the default with 2+ joins), else one join's two circles */
   joinStep: number; joinStats: Record<string, JoinStats>;
+  /** the overview and the model it was counted for (joins, tables, WHERE): stale once they change */
+  joinAll: { sig: string; data: JoinOverview } | null;
 }
 export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean; viz: boolean; exp: number }
 export type Workspace = 'query' | 'catalog' | 'scripts' | 'analyze' | 'dash' | 'history';
@@ -85,7 +90,7 @@ export const tab = (): Tab => A.tabs[A.active] as Tab;
 export const sourceOf = (id: string | null): Source | undefined => A.sources.find((s) => s.id === id);
 export const tableKey = (conn: string, db: string, schema: string, table: string): string => `${conn}|${db}|${schema}|${table}`;
 export const newTab = (name: string, sql = '', conn: string | null = null, db: string | null = null): Tab =>
-  ({ id: uuid(), name, sql, conn, db, run: null, result: 0, rt: 'results', plan: null, dirty: false, model: null, typed: !!sql, notDrawn: false, undo: [], redo: [], view: { z: 1, x: 0, y: 0 }, joinStep: 0, joinStats: {} });
+  ({ id: uuid(), name, sql, conn, db, run: null, result: 0, rt: 'results', plan: null, dirty: false, model: null, typed: !!sql, notDrawn: false, undo: [], redo: [], view: { z: 1, x: 0, y: 0 }, joinStep: -1, joinStats: {}, joinAll: null });
 
 export const api = {
   sources: () => getJSON<{ sources: Source[] }>(`${P}/sources`),
@@ -103,6 +108,7 @@ export const api = {
   runState: (id: string) => getJSON<RunState>(`${P}/run/${id}`),
   stop: (id: string) => postJSON<RunState>(`${P}/run/${id}/stop`, {}),
   joinStats: (connection: string, database: string | null, model: Model, index: number) => postJSON<JoinStats>(`${P}/joins`, { connection, database, model, index }),
+  joinOverview: (connection: string, database: string | null, model: Model) => postJSON<JoinOverview>(`${P}/joins/overview`, { connection, database, model }),
   parseModel: (connection: string, sql: string) => postJSON<Parsed>(`${P}/model/parse`, { connection, sql }),
   generate: async (model: Model, dialect: string) => (await postJSON<{ sql: string }>(`${P}/model/generate`, { model, dialect })).sql,
   explain: (conn: string, db: string | null, sql: string) => postJSON<Plan>(`${P}/explain`, { session: A.sid, connection: conn, database: db, sql }),

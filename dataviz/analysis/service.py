@@ -587,6 +587,32 @@ def join_stats(user, cid, database, model, index):
     return joins.summary(rows[0], j['type'])
 
 
+def join_overview(user, cid, database, model):
+    """Every table of the builder's joins at once: the rows the query keeps and the join keys of each table it
+    uses. Asked for by the user (Count all), because it reads their database; one query, read-only."""
+    _use(user)
+    conn = _conn(user, cid)
+    if conn['kind'] == 'mongo':
+        raise AnalysisError('join counts work on SQL databases')
+    try:
+        sql, keys = joins.overview(model, _dialect(conn))
+    except (KeyError, IndexError, TypeError) as e:
+        raise AnalysisError(f'the builder\'s joins cannot be counted: {e}') from None
+    except ValueError as e:
+        raise AnalysisError(str(e)) from None
+    if any(x['kind'] != classify.READ for x in classify.classify(sql, conn['kind'])):
+        raise AnalysisError('the builder\'s filter is not a plain read: run it from the editor')
+    a = adapters.adapter(conn, database, _cfg().get('statement_timeout_s', 0))
+    try:
+        _, batches = a.run(sql, read=True)
+        rows = [r for b in batches for r in b]
+    except Exception as e:  # noqa: BLE001
+        raise AnalysisError(_clean(e, conn)) from None
+    finally:
+        a.close()
+    return joins.overview_summary(rows[0], keys)
+
+
 def generate_sql(user, model, dialect):
     _use(user)
     if dialect not in adapters.ADAPTERS:

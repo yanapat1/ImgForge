@@ -321,6 +321,29 @@ def _groups(model):
     return list(groups.values())
 
 
+def from_lines(group, d):
+    """The FROM line and one JOIN ... ON line per join of a group (a join between two tables already in adds AND
+    to the later one's line). The builder's SELECT and the Joins overview count share it."""
+    by_id = {t['id']: t for t in group['tables']}
+    lines = ['FROM ' + _ref(group['tables'][0], d)]
+    done, pending = {group['tables'][0]['id']}, list(group['joins'])
+    line_of = {group['tables'][0]['id']: 0}             # the FROM / JOIN line that brought each table in
+    while pending:
+        i = next((n for n, j in enumerate(pending) if j['a'][0] in done or j['b'][0] in done), 0)
+        j = pending.pop(i)
+        left, right = by_id[j['a'][0]], by_id[j['b'][0]]
+        cond = f'{_quote(_alias(left), d)}.{_quote(j["a"][1], d)} = {_quote(_alias(right), d)}.{_quote(j["b"][1], d)}'
+        if j['a'][0] in done and j['b'][0] in done:
+            at = max(line_of[j['a'][0]], line_of[j['b'][0]])
+            lines[at] += f'\n  AND {cond}'
+            continue
+        new = right if j['a'][0] in done else left
+        done.add(new['id'])
+        line_of[new['id']] = len(lines)
+        lines.append(f'{"INNER" if j["type"] == "INNER" else j["type"] + " OUTER"} JOIN {_ref(new, d)}\n  ON {cond}')
+    return lines
+
+
 def _one_select(group, model, d, solo, default_top):
     by_id = {t['id']: t for t in group['tables']}
     parts = model.get('parts') or {} if solo else {}
@@ -339,22 +362,7 @@ def _one_select(group, model, d, solo, default_top):
             items.append(f'{c["expr"]} AS {_quote(c["alias"], d)}')
     top = parts.get('top', default_top)
     head = 'SELECT ' + ('DISTINCT ' if parts.get('distinct') else '') + (f'TOP ({int(top)}) ' if d == 'tsql' and top else '')
-    lines = [head + (',\n       '.join(items) or '*'), 'FROM ' + _ref(group['tables'][0], d)]
-    done, pending = {group['tables'][0]['id']}, list(group['joins'])
-    line_of = {group['tables'][0]['id']: 1}             # the FROM / JOIN line that brought each table in
-    while pending:
-        i = next((n for n, j in enumerate(pending) if j['a'][0] in done or j['b'][0] in done), 0)
-        j = pending.pop(i)
-        left, right = by_id[j['a'][0]], by_id[j['b'][0]]
-        cond = f'{_quote(_alias(left), d)}.{_quote(j["a"][1], d)} = {_quote(_alias(right), d)}.{_quote(j["b"][1], d)}'
-        if j['a'][0] in done and j['b'][0] in done:
-            at = max(line_of[j['a'][0]], line_of[j['b'][0]])
-            lines[at] += f'\n  AND {cond}'
-            continue
-        new = right if j['a'][0] in done else left
-        done.add(new['id'])
-        line_of[new['id']] = len(lines)
-        lines.append(f'{"INNER" if j["type"] == "INNER" else j["type"] + " OUTER"} JOIN {_ref(new, d)}\n  ON {cond}')
+    lines = [head + (',\n       '.join(items) or '*'), *from_lines(group, d)]
     for key, word in (('where', 'WHERE'), ('group', 'GROUP BY'), ('having', 'HAVING'), ('order', 'ORDER BY')):
         if parts.get(key):
             lines.append(f'{word} {parts[key]}')

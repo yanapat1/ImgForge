@@ -347,3 +347,30 @@ def test_export_writes_a_file_per_format_and_only_for_its_owner(an):
     with pytest.raises(AnalysisError) as e:
         an.s.export_result({'id': 'someone-else'}, res['id'], 'csv')
     assert e.value.status == 404
+
+
+def test_join_overview_counts_the_whole_query_in_one_go(an):
+    """Three tables in a chain: the rows the query keeps and how many keys of each table reach it (hand-computed)."""
+    with psycopg.connect(an.url, autocommit=True) as c:
+        c.execute('CREATE TABLE public.ja (id int)')
+        c.execute('INSERT INTO public.ja VALUES (1), (2), (3), (4), (5)')
+        c.execute('CREATE TABLE public.jb (a_id int, c_id int)')
+        c.execute('INSERT INTO public.jb VALUES (1, 10), (1, 11), (2, 10), (3, 12), (9, 10)')
+        c.execute('CREATE TABLE public.jc (id int)')
+        c.execute('INSERT INTO public.jc VALUES (10), (11), (13)')
+
+    def model(kind='INNER', where=None):
+        return {'tables': [{'id': t, 'schema': 'public', 'name': f'j{t}', 'alias': t, 'kind': 'table'} for t in 'abc'],
+                'joins': [{'a': ['a', 'id'], 'b': ['b', 'a_id'], 'type': kind}, {'a': ['b', 'c_id'], 'b': ['c', 'id'], 'type': kind}],
+                'parts': {'where': where} if where else {}}
+    got = an.s.join_overview(an.user, an.cid, an.db, model())
+    assert got == {'rows': 3, 'used': {'a': 2, 'b': 2, 'c': 2}, 'key': {'a': 'id', 'b': 'a_id', 'c': 'id'}}
+    # a, b: (1,10) (1,11) (2,10) (3,12) (4,-) (5,-); c keeps 10 and 11
+    assert an.s.join_overview(an.user, an.cid, an.db, model('LEFT'))['used'] == {'a': 5, 'b': 3, 'c': 2}
+    assert an.s.join_overview(an.user, an.cid, an.db, model(where='"a"."id" <> 1')) == \
+        {'rows': 1, 'used': {'a': 1, 'b': 1, 'c': 1}, 'key': {'a': 'id', 'b': 'a_id', 'c': 'id'}}
+    from dataviz.analysis.service import AnalysisError
+    with pytest.raises(AnalysisError, match='add a join'):
+        an.s.join_overview(an.user, an.cid, an.db, {'tables': model()['tables'], 'joins': []})
+    with pytest.raises(AnalysisError, match='not a plain read'):
+        an.s.join_overview(an.user, an.cid, an.db, model(where='1=1; DELETE FROM public.ja'))

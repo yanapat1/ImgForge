@@ -583,6 +583,45 @@ def test_token_budget_reaches_the_model_size(server):  # noqa: F811
         fake.should_exit = True
 
 
+def test_joins_show_every_table_of_the_query(server, target):  # noqa: F811
+    """A query with two joins: Joins opens on All tables; Count all draws one circle per table with the keys the query
+    uses, and a join's numbered dot opens that join's own two circles."""
+    with psycopg.connect(target['url'], autocommit=True) as c:
+        c.execute('CREATE TABLE public.buyers (id int, region int)')
+        c.execute('INSERT INTO public.buyers SELECT i, i % 3 FROM generate_series(1, 40) i')
+        c.execute('CREATE TABLE public.regions (id int, name text)')
+        c.execute("INSERT INTO public.regions VALUES (0, 'north'), (1, 'south'), (7, 'none')")
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 950})
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+        page.select_option('#an-conn', target['conn'])
+        type_sql(page, 'SELECT o.id, b.region, r.name FROM public.orders AS o\n'
+                       'JOIN public.buyers AS b ON o.id = b.id\nJOIN public.regions AS r ON b.region = r.id')
+        page.keyboard.press('Control+Enter')
+        page.wait_for_selector('#an-rc .an-grid td', timeout=20000)
+        page.click('#an-rtabs [data-k="joins"]')
+        page.wait_for_selector('#an-rc [data-act="join-count-all"]', timeout=10000)
+        assert page.locator('#an-rc .an-steps button.primary').inner_text() == 'All tables'
+        page.click('#an-rc [data-act="join-count-all"]')
+        svg = page.locator('#an-rc svg.an-venn-all')
+        svg.wait_for(timeout=20000)
+        text = page.locator('#an-rc').inner_text()
+        # orders 1..500 x buyers 1..40 -> 40 rows; regions 0 and 1 match (2 of 3 keys), so 27 buyers rows remain
+        assert '27\nrows the query keeps' in text or '27 rows the query keeps' in text.replace('\n', ' '), text
+        assert svg.locator('.an-vj').count() == 2 and svg.locator('.an-vc').count() == 3 and svg.locator('.an-vc.cut').count() == 3
+        assert page.locator('#an-rc table tr:has-text("regions")').inner_text().split() == ['regions', '3', '3', '2', '67%']
+        box, rc = svg.bounding_box(), page.locator('#an-rc').bounding_box()
+        assert box['x'] + box['width'] <= rc['x'] + rc['width'] + 1
+        svg.locator('.an-vj').nth(1).click()
+        page.wait_for_selector('#an-rc svg.an-venn:not(.an-venn-all)', timeout=10000)   # counted already: no second ask
+        assert not errors, errors
+        browser.close()
+
+
 def test_favorites(server, target):  # noqa: F811
     """Star a table, keep it across a reload, put it in a category, query it from there, then remove it all."""
     errors = []
