@@ -492,6 +492,45 @@ def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
         fake.should_exit = True
 
 
+def test_long_answer_options_wrap_inside_the_dock(server):  # noqa: F811
+    """An ask_user option is a sentence the model wrote: it wraps in the dock instead of running past its right side."""
+    from test_page_smoke import _post, _put
+    from test_llm import fake_app
+    from test_models import _serve
+    fake, url = _serve(fake_app())
+    long_opt = 'Use the monthly revenue table joined to the customer segments, grouped by region and product line, ' * 2
+    events = [{'type': 'meta', 'run_id': 'r1', 'model': 'm', 'provider': 'p', 'mode': 'ask'},
+              {'type': 'ask', 'question': 'Which data?', 'options': [long_opt.strip(), 'Short one']},
+              {'type': 'done', 'usage': {'in': 1, 'out': 1}}]
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1', 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1400, 'height': 900})
+            page.route('**/api/llm/agent/analysis/chat', lambda r: r.fulfill(
+                status=200, content_type='application/x-ndjson', body=''.join(json.dumps(e) + '\n' for e in events)))
+            page.add_init_script("localStorage.setItem('dataviz.dock', JSON.stringify({state: 'open', width: 320}))")
+            page.goto(f'{server}/?analysis')
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=20000)
+            page.fill('#ai-analysis-q', 'show me revenue')
+            page.keyboard.press('Enter')
+            page.wait_for_selector('#ai-dock .ct-choice >> nth=0', timeout=10000)
+            for width in (1400, 900):                       # the narrowest dock, and the sheet
+                page.set_viewport_size({'width': width, 'height': 900})
+                dock = page.locator('#ai-dock .dock-panel').bounding_box()
+                for b in page.locator('#ai-dock .ct-choice').all():
+                    box = b.bounding_box()
+                    assert box['x'] + box['width'] <= dock['x'] + dock['width'] + 0.5, (width, box, dock)
+                first = page.locator('#ai-dock .ct-choice').first.bounding_box()
+                assert first['height'] > 40                  # wrapped onto several lines
+                assert page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
+            browser.close()
+    finally:
+        fake.should_exit = True
+
+
 def test_favorites(server, target):  # noqa: F811
     """Star a table, keep it across a reload, put it in a category, query it from there, then remove it all."""
     errors = []

@@ -203,8 +203,10 @@
 
 /* ask / cannot / plan / page action */
 .ct-ask p { margin: 0 0 6px; }
-.ct-choices { display: flex; flex-wrap: wrap; gap: 6px; }
-.chat .ct-choice { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: var(--fs-sm); font-weight: 500; }
+/* an option is a sentence the model wrote: it wraps inside the dock instead of running past its right side */
+.ct-choices { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.chat .ct-choice { min-height: 28px; height: auto; max-width: 100%; padding: 4px 12px; border-radius: 14px; background: var(--surface-2);
+  font-size: var(--fs-sm); font-weight: 500; line-height: 1.35; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .chat .ct-choice.other { border-style: dashed; color: var(--text-muted); background: transparent; }
 .ct-cannot { border: 1px solid var(--danger-line); border-radius: var(--r-md); background: var(--surface-2); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .ct-cannot .h { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
@@ -354,8 +356,9 @@
 /* ---- hosts: the Data Center drawer (datacenter/ai.ts) and the visualizer's AI tab (views/assistant.ts) */
 .dr-main > .dc-chat { flex: 1; min-height: 0; }
 .dc-ai-hello { display: flex; gap: 10px; align-items: flex-start; font-size: var(--fs-sm); max-width: 680px; align-self: center; }
+.dc-ai-hello > div { min-width: 0; }
 .dc-ai-hello p { margin: 2px 0 8px; }
-.dc-ai-sugg { display: flex; flex-wrap: wrap; gap: 6px; }
+.dc-ai-sugg { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .tchip.danger { border-color: var(--danger-line); color: var(--danger-text); }
 #ai-side > .chat { flex: 1; min-height: 0; }
 
