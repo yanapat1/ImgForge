@@ -1,7 +1,9 @@
 # Data Analysis (with core + datacenter): one SQL parser for T-SQL / PostgreSQL / DuckDB (safety gate, builder),
-# result files + fast statistics, MongoDB, statistic tests and forecasts (scipy; the forecast models need no other library)
+# result files + fast statistics, MongoDB, statistic tests and forecasts (scipy; the forecast models need no other library),
+# Excel export (xlsxwriter: pure Python, streams rows; DuckDB's own Excel writer is a download at run time)
 sqlglot==30.29.0
 duckdb==2.0.0
 pyarrow==26.0.1
 pymongo==4.19.0
 scipy==1.17.1
+xlsxwriter==3.2.9

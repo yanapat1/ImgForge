@@ -329,3 +329,21 @@ def test_a_forecast_reads_the_saved_result_and_the_model_gets_no_history(an):
     assert 'history' not in ai and ai['forecast'] and size(ai) <= 4000
     with pytest.raises(AnalysisError):
         an.s.forecast({'id': 'someone-else'}, res['id'], 'day', 'v')
+
+
+def test_export_writes_a_file_per_format_and_only_for_its_owner(an):
+    from pathlib import Path
+
+    from dataviz.analysis.service import AnalysisError
+    res = go(an, 'SELECT id, total, note FROM public.orders ORDER BY id')['results'][0]
+    path, name, media, temp = an.s.export_result(an.user, res['id'], 'parquet')
+    assert not temp and name.endswith('.parquet') and path == Path(an.s.result_path(an.user, res['id']))
+    path, name, media, temp = an.s.export_result(an.user, res['id'], 'CSV')
+    assert temp and name == f'result-{res["id"][:8]}.csv' and media.startswith('text/csv')
+    assert path.read_text().splitlines()[:2] == ['id,total,note', '1,1.50,']
+    path.unlink()
+    with pytest.raises(AnalysisError, match='unknown export format'):
+        an.s.export_result(an.user, res['id'], 'pdf')
+    with pytest.raises(AnalysisError) as e:
+        an.s.export_result({'id': 'someone-else'}, res['id'], 'csv')
+    assert e.value.status == 404

@@ -110,7 +110,7 @@ export const api = {
     getJSON<Page>(`${P}/results/${rid}/page?${qs({ offset, limit, sort, desc: desc ? 1 : 0, q })}`),
   stats: (rid: string) => getJSON<Stats>(`${P}/results/${rid}/stats`),
   histogram: (rid: string, column: string, bins = 12) => getJSON<{ kind: string; counts: number[]; labels?: string[]; lo?: number; hi?: number }>(`${P}/results/${rid}/histogram?${qs({ column, bins })}`),
-  exportUrl: (rid: string) => `${P}/results/${rid}/export`,
+  exportUrl: (rid: string, format = 'parquet') => `${P}/results/${rid}/export?format=${encodeURIComponent(format)}`,
   profile: (rid: string) => getJSON<Profile>(`${P}/results/${rid}/profile`),
   test: (rid: string, kind: string, a: string, b: string) => postJSON<TestResult>(`${P}/results/${rid}/test`, { kind, a, b }),
   suggest: async (rid: string) => (await getJSON<{ tests: { kind: string; a: string; b: string | null; label: string }[] }>(`${P}/results/${rid}/suggest`)).tests,

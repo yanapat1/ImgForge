@@ -625,6 +625,29 @@ def result_path(user, rid):
     return _result(user, rid)['path']
 
 
+def export_result(user, rid, fmt='parquet'):
+    """(file, download name, media type, temporary?) of a result in one of spool.FORMATS. Parquet is the spool file
+    itself; another format is written next to it and the caller deletes it once it is sent."""
+    path = Path(_result(user, rid)['path'])
+    fmt = str(fmt or 'parquet').lower()
+    if fmt not in spool.FORMATS:
+        raise AnalysisError(f'unknown export format {fmt!r}: {", ".join(spool.FORMATS)}')
+    ext, media, _ = spool.FORMATS[fmt]
+    name = f'result-{rid[:8]}.{ext}'
+    if fmt == 'parquet':
+        return path, name, media, False
+    out = path.with_name(f'{path.stem}-{uuid.uuid4().hex[:8]}.{ext}')
+    try:
+        spool.export(path, fmt, out)
+    except ValueError as e:
+        out.unlink(missing_ok=True)
+        raise AnalysisError(str(e)) from None
+    except Exception:
+        out.unlink(missing_ok=True)
+        raise
+    return out, name, media, True
+
+
 def profile(user, rid):
     r = _result(user, rid)
     if r.get('profile') is None:

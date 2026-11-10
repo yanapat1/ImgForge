@@ -86,6 +86,19 @@ def test_query_loop(server, target, pg):  # noqa: F811
         page.wait_for_function("document.querySelector('.an-gcount').textContent.startsWith('250 of 500')", timeout=10000)
         page.fill('#an-gfilter', '')
 
+        # Export: pick the format; the file is that format, and the last one used comes first next time
+        page.click('#an-rc [data-act="export"]')
+        page.wait_for_selector('#an-menu [data-m="xlsx"]')
+        assert page.locator('#an-menu [data-m]').count() == 9
+        with page.expect_download() as dl:
+            page.click('#an-menu [data-m="csv"]')
+        assert dl.value.suggested_filename.endswith('.csv')
+        assert Path(dl.value.path()).read_text().splitlines()[0] == 'id,total,note'
+        page.click('#an-rc [data-act="export"]')
+        page.wait_for_selector('#an-menu [data-m]')
+        assert page.locator('#an-menu [data-m]').first.get_attribute('data-m') == 'csv'
+        page.keyboard.press('Escape')
+
         # a change asks first, and Cancel leaves the data alone
         type_sql(page, 'DELETE FROM public.orders WHERE id = 1')
         page.wait_for_selector('#an-stale:not([hidden])')

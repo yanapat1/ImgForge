@@ -205,3 +205,133 @@ def duplicate_rows(path):
         total = c.execute('SELECT count(*) FROM read_parquet(?)', [str(path)]).fetchone()[0]
         distinct = c.execute('SELECT count(*) FROM (SELECT DISTINCT * FROM read_parquet(?))', [str(path)]).fetchone()[0]
     return total - distinct
+
+
+# ---------------------------------------------------------------- export
+# format -> (file extension, media type, row limit or None). Parquet is the spool file itself; csv / tsv / json / jsonl
+# are written by DuckDB (streamed, no Python loop); the others from batches of rows.
+FORMATS = {
+    'parquet': ('parquet', 'application/vnd.apache.parquet', None),
+    'csv': ('csv', 'text/csv; charset=utf-8', None),
+    'tsv': ('tsv', 'text/tab-separated-values; charset=utf-8', None),
+    'xlsx': ('xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 1_048_575),
+    'json': ('json', 'application/json', None),
+    'jsonl': ('jsonl', 'application/x-ndjson', None),
+    'yaml': ('yaml', 'application/yaml; charset=utf-8', None),
+    'md': ('md', 'text/markdown; charset=utf-8', 100_000),
+    'html': ('html', 'text/html; charset=utf-8', 100_000),
+}
+BATCH = 10_000
+XLSX_CELL = 32_767                      # Excel's longest text in one cell
+_COPY = {'csv': "(FORMAT csv, HEADER true)", 'tsv': "(FORMAT csv, HEADER true, DELIMITER '\t')",
+         'json': '(FORMAT json, ARRAY true)', 'jsonl': '(FORMAT json, ARRAY false)'}
+
+
+def _rows(c, path):
+    cur = c.execute('SELECT * FROM read_parquet(?)', [str(path)])
+    while True:
+        batch = cur.fetchmany(BATCH)
+        if not batch:
+            return
+        yield batch
+
+
+def _scalar(v):
+    """A value for text formats: dates as ISO text, decimals as numbers, bytes as hex, NaN / inf as null."""
+    v = _json(v)
+    if isinstance(v, float) and (v != v or v in (float('inf'), float('-inf'))):
+        return None
+    return v
+
+
+def _xlsx(c, path, out, names):
+    import xlsxwriter
+    wb = xlsxwriter.Workbook(str(out), {'constant_memory': True, 'strings_to_numbers': False,
+                                        'strings_to_formulas': False, 'strings_to_urls': False})
+    ws = wb.add_worksheet('result')
+    bold, when = wb.add_format({'bold': True}), wb.add_format({'num_format': 'yyyy-mm-dd hh:mm:ss'})
+    day, clock = wb.add_format({'num_format': 'yyyy-mm-dd'}), wb.add_format({'num_format': 'hh:mm:ss'})
+    for j, n in enumerate(names):
+        ws.write_string(0, j, n, bold)
+    i = 0
+    for batch in _rows(c, path):
+        for row in batch:
+            i += 1
+            for j, v in enumerate(row):
+                if v is None:
+                    continue
+                if isinstance(v, bool):
+                    ws.write_boolean(i, j, v)
+                elif isinstance(v, (int, float, decimal.Decimal)):
+                    f = float(v)
+                    if f == f and abs(f) != float('inf'):
+                        ws.write_number(i, j, f)
+                elif isinstance(v, dt.datetime):
+                    ws.write_datetime(i, j, v.replace(tzinfo=None), when)
+                elif isinstance(v, dt.date):
+                    ws.write_datetime(i, j, dt.datetime(v.year, v.month, v.day), day)
+                elif isinstance(v, dt.time):
+                    ws.write_datetime(i, j, v.replace(tzinfo=None), clock)
+                else:                       # text stays text: never a formula or a link (a cell can start with =)
+                    ws.write_string(i, j, str(_json(v))[:XLSX_CELL])
+    wb.close()
+
+
+def _md_cell(v):
+    v = _scalar(v)
+    return '' if v is None else str(v).replace('\\', '\\\\').replace('|', '\\|').replace('\r', '').replace('\n', '<br>')
+
+
+def _text(c, path, out, names, fmt, limit, total):
+    import html
+    import json
+    with open(out, 'w', encoding='utf-8', newline='\n') as f:
+        if fmt == 'md':
+            f.write('| ' + ' | '.join(_md_cell(n) for n in names) + ' |\n|' + '---|' * len(names) + '\n')
+        elif fmt == 'html':
+            f.write('<!doctype html>\n<meta charset="utf-8">\n<table>\n<thead><tr>'
+                    + ''.join(f'<th>{html.escape(n)}</th>' for n in names) + '</tr></thead>\n<tbody>\n')
+        n = 0
+        for batch in _rows(c, path):
+            if limit and n >= limit:
+                break
+            if limit:
+                batch = batch[:limit - n]
+            n += len(batch)
+            if fmt == 'yaml':               # one flow mapping per row: JSON is valid YAML, and far faster to write
+                lines = ['- ' + json.dumps(dict(zip(names, map(_scalar, r))), ensure_ascii=False, default=str) for r in batch]
+            elif fmt == 'md':
+                lines = ['| ' + ' | '.join(_md_cell(v) for v in r) + ' |' for r in batch]
+            else:
+                lines = ['<tr>' + ''.join(f'<td>{"" if (s := _scalar(v)) is None else html.escape(str(s))}</td>' for v in r)
+                         + '</tr>' for r in batch]
+            f.write('\n'.join(lines) + '\n')
+        if fmt == 'yaml' and not n:
+            f.write('[]\n')
+        if fmt == 'html':
+            f.write('</tbody>\n</table>\n')
+        if limit and total > n:
+            note = f'The first {n:,} of {total:,} rows: export CSV or Parquet for all of them.'
+            f.write(f'\n{note}\n' if fmt == 'md' else f'<p>{html.escape(note)}</p>\n')
+
+
+def export(path, fmt, out):
+    """Write the result at `path` to `out` in `fmt` (FORMATS). ValueError for an unknown format, or a result over
+    the format's row limit when the format cannot cut it (Excel)."""
+    if fmt not in FORMATS:
+        raise ValueError(f'unknown format {fmt!r}: {", ".join(FORMATS)}')
+    _, _, limit = FORMATS[fmt]
+    with _connect() as c:
+        if fmt in _COPY:
+            dest = str(out).replace("'", "''")          # a server-made path; COPY takes no parameter for it
+            c.execute(f"COPY (SELECT * FROM read_parquet(?)) TO '{dest}' {_COPY[fmt]}", [str(path)])
+            return out
+        names = _names(c, path)
+        total = c.execute('SELECT count(*) FROM read_parquet(?)', [str(path)]).fetchone()[0]
+        if fmt == 'xlsx':
+            if total > limit:
+                raise ValueError(f'Excel holds {limit:,} rows and this result has {total:,}: export CSV or Parquet')
+            _xlsx(c, path, out, names)
+        else:
+            _text(c, path, out, names, fmt, limit, total)
+    return out

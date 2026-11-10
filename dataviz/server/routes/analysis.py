@@ -3,8 +3,11 @@ The Data Analysis zone's API (/api/analysis/*): thin over analysis/service.py, w
 on the caller's own connections and sessions.
 """
 
+from pathlib import Path
+
 from fastapi import APIRouter, Body, Depends
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException
 
 from ...analysis import service
@@ -144,9 +147,11 @@ def router(state, ctx):
                      body.get('horizon'), body.get('group'))
 
     @r.get('/results/{rid}/export')
-    def export(rid: str, user=me):
-        return FileResponse(_call(service.result_path, user, rid), filename=f'result-{rid[:8]}.parquet',
-                            media_type='application/octet-stream')
+    def export(rid: str, format: str = 'parquet', user=me):  # noqa: A002 - the query parameter's name
+        """The result as a file: parquet, csv, tsv, xlsx, json, jsonl, yaml, md or html (analysis/spool.FORMATS)."""
+        path, name, media, temp = _call(service.export_result, user, rid, format)
+        return FileResponse(path, filename=name, media_type=media,
+                            background=BackgroundTask(Path(path).unlink, missing_ok=True) if temp else None)
 
     @r.get('/sessions/{sid}/history')
     def history(sid: str, user=me):

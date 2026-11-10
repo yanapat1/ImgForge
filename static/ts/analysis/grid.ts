@@ -2,8 +2,9 @@
 // so a million rows scroll like ten. Sort and filter run on the saved result on the server: no new query reaches the
 // user's database. Column widths are the user's; a click on a cell shows its full value.
 
-import { copyText, esc } from '../core/dom.js';
+import { copyText, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
+import { menuHead, openMenu } from './menu.js';
 import { api } from './state.js';
 import type { ResultInfo } from './state.js';
 
@@ -90,7 +91,7 @@ export function mountGrid(host: HTMLElement, res: ResultInfo): void {
   const g: Grid = { host, res, total: res.rows, pages: new Map(), loading: new Set(), sort: null, desc: false, q: '', widths, cell: null, gen: 0 };
   G = g;
   host.innerHTML = `<div class="an-gbar toolbar"><input class="txt sm" id="an-gfilter" aria-label="Filter these rows" placeholder="Filter these rows"><span class="an-gcount faint"></span><span class="grow"></span>` +
-    `<button type="button" class="sm" data-act="copy-col">Copy column</button><button type="button" class="sm" data-act="copy-row">Copy row</button><a class="btn sm" href="${esc(api.exportUrl(res.id))}" download>Export</a></div>` +
+    `<button type="button" class="sm" data-act="copy-col">Copy column</button><button type="button" class="sm" data-act="copy-row">Copy row</button><button type="button" class="sm" data-act="export" aria-haspopup="menu">${icon('download')}Export</button></div>` +
     `<div id="an-cell" class="an-cell" hidden></div>` +
     `<div class="an-gridbox" tabindex="0"><table class="an-grid data-grid" style="width:${widths.reduce((a, b) => a + b, 0)}px">${head(g)}<tbody class="an-rows"></tbody></table></div>`;
   host.querySelector('.an-gridbox')?.addEventListener('scroll', () => { requestAnimationFrame(() => paint(g)); }, { passive: true });
@@ -129,7 +130,40 @@ export function gridClick(t: Element): boolean {
   }
   const act = t.closest<HTMLElement>('[data-act]')?.dataset['act'];
   if (act === 'copy-cell' || act === 'copy-row' || act === 'copy-col') { void copy(g, act); return true; }
+  if (act === 'export') { exportMenu(g, t.closest<HTMLElement>('[data-act="export"]') as HTMLElement); return true; }
   return false;
+}
+
+// ---------------------------------------------------------------- export: pick the format (analysis/spool.FORMATS)
+const FORMATS: Array<{ k: string; label: string; ic: string; max?: number }> = [
+  { k: 'csv', label: 'CSV', ic: 'file' }, { k: 'xlsx', label: 'Excel (.xlsx)', ic: 'grid', max: 1_048_575 },
+  { k: 'parquet', label: 'Parquet', ic: 'db' }, { k: 'json', label: 'JSON', ic: 'file' }, { k: 'jsonl', label: 'JSON Lines', ic: 'list' },
+  { k: 'tsv', label: 'TSV (tab-separated)', ic: 'file' }, { k: 'yaml', label: 'YAML', ic: 'file' },
+  { k: 'md', label: 'Markdown table', ic: 'text', max: 100_000 }, { k: 'html', label: 'HTML table', ic: 'globe', max: 100_000 },
+];
+const LAST_FMT = 'dataviz.analysis.export';
+
+function exportMenu(g: Grid, from: HTMLElement): void {
+  let last = '';
+  try { last = localStorage.getItem(LAST_FMT) ?? ''; } catch { /* a convenience only */ }
+  const order = [...FORMATS].sort((a, b) => Number(b.k === last) - Number(a.k === last));
+  const n = g.res.rows;
+  const html = menuHead(`Export ${n.toLocaleString()} row${n === 1 ? '' : 's'} as`) + order.map((f) => {
+    const over = f.max !== undefined && n > f.max;
+    // Excel cannot hold more rows; Markdown / HTML would only take the first part: say so before the download
+    const why = over ? (f.k === 'xlsx' ? `Excel holds ${f.max?.toLocaleString()} rows` : `only the first ${f.max?.toLocaleString()} rows`) : '';
+    return `<button type="button" role="menuitem" data-m="${f.k}"${over && f.k === 'xlsx' ? ' disabled' : ''}${why ? ` title="${esc(why)}"` : ''}>` +
+      `${icon(f.ic)}<span class="lbl">${esc(f.label)}${why ? ` <span class="faint">· ${esc(why)}</span>` : ''}</span></button>`;
+  }).join('');
+  openMenu(html, from, (k) => {
+    try { localStorage.setItem(LAST_FMT, k); } catch { /* a convenience only */ }
+    const a = document.createElement('a');
+    a.href = api.exportUrl(g.res.id, k);
+    a.download = '';
+    document.body.append(a);
+    a.click();
+    a.remove();
+  });
 }
 
 async function copy(g: Grid, act: string): Promise<void> {

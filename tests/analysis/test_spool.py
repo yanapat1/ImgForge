@@ -117,3 +117,53 @@ def test_a_million_rows_page_quickly(tmp_path):
     t = time.time()
     got = spool.page(s.path, offset=900000, limit=100, sort='b', desc=True)
     assert got['total'] == 1000000 and time.time() - t < 3
+
+
+# ---------------------------------------------------------------- export formats
+ROWS = [[1, 1.5, 'plain', dt.date(2026, 1, 2), dt.datetime(2026, 1, 2, 3, 4, 5), decimal.Decimal('2.50'), True],
+        [2, None, 'a, "quoted"\nnew line | pipe <b>', None, None, None, False],
+        [3, -0.25, 'ünïcødé 中文 =SUM(A1)', dt.date(2026, 12, 31), None, decimal.Decimal('-1'), None]]
+COLS = ['id', 'x', 'note', 'day', 'at', 'money', 'ok']
+
+
+def test_every_export_format_reads_back(tmp_path):
+    import csv
+    import json
+    import zipfile
+
+    import yaml
+    p, _ = make(tmp_path, COLS, ROWS)
+    out = {f: spool.export(p, f, tmp_path / f'o.{f}') for f in spool.FORMATS if f != 'parquet'}
+    rows = list(csv.reader(open(out['csv'], encoding='utf-8', newline='')))
+    assert rows[0] == COLS and rows[2][2] == 'a, "quoted"\nnew line | pipe <b>' and rows[2][1] == ''
+    assert list(csv.reader(open(out['tsv'], encoding='utf-8', newline=''), delimiter='\t'))[3][2] == 'ünïcødé 中文 =SUM(A1)'
+    js = json.load(open(out['json'], encoding='utf-8'))
+    assert len(js) == 3 and js[0]['id'] == 1 and js[1]['x'] is None and js[2]['note'].startswith('ünïcødé')
+    assert [json.loads(x)['id'] for x in open(out['jsonl'], encoding='utf-8')] == [1, 2, 3]
+    y = yaml.safe_load(open(out['yaml'], encoding='utf-8'))
+    assert y[0]['day'] == '2026-01-02' and y[0]['money'] == 2.5 and y[1]['note'] == ROWS[1][2] and y[2]['ok'] is None
+    md = open(out['md'], encoding='utf-8').read().splitlines()
+    assert md[0] == '| ' + ' | '.join(COLS) + ' |' and len(md) == 5 and 'line \\| pipe' in md[3] and '<br>' in md[3]
+    page = open(out['html'], encoding='utf-8').read()
+    assert page.count('<tr>') == 4 and '&lt;b&gt;' in page and '<b>' not in page
+    with zipfile.ZipFile(out['xlsx']) as z:
+        sheet = z.read('xl/worksheets/sheet1.xml').decode()
+    assert sheet.count('<row ') == 4 and '<f>' not in sheet, 'text that starts with = stays text, never a formula'
+
+
+def test_export_limits(tmp_path):
+    p, _ = make(tmp_path, ['a'], [[i] for i in range(30)], size=10)
+    with pytest.raises(ValueError, match='unknown format'):
+        spool.export(p, 'pdf', tmp_path / 'o.pdf')
+    old = spool.FORMATS
+    try:
+        spool.FORMATS = {**old, 'xlsx': (*old['xlsx'][:2], 20), 'md': (*old['md'][:2], 10)}
+        with pytest.raises(ValueError, match='Excel holds 20 rows'):
+            spool.export(p, 'xlsx', tmp_path / 'o.xlsx')
+        md = open(spool.export(p, 'md', tmp_path / 'o.md'), encoding='utf-8').read()
+        assert md.count('\n| ') == 10 and 'The first 10 of 30 rows' in md
+    finally:
+        spool.FORMATS = old
+    (tmp_path / 'e').mkdir()
+    empty, _ = make(tmp_path / 'e', ['a'], [])
+    assert open(spool.export(empty, 'yaml', tmp_path / 'e.yaml'), encoding='utf-8').read() == '[]\n'
