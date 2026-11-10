@@ -2,6 +2,7 @@
 
 from urllib.parse import urlsplit
 
+import json
 import os
 import re
 
@@ -679,3 +680,64 @@ def test_builder_cards(server, target):  # noqa: F811
         page.wait_for_function("document.querySelector('#an-sql .cm-content').innerText.includes('AS integer')", timeout=10000)
         browser.close()
     assert not errors, errors
+
+
+def test_the_assistant_reads_the_editor_and_shows_its_sql_before_apply(server, target):  # noqa: F811
+    """The chat is sent the editor's SQL; a set_editor_query proposal shows the SQL and the diff against the editor,
+    Apply puts it in the editor and Ctrl+Z there brings the user's text back; Apply in a new tab keeps it."""
+    from test_page_smoke import _post, _put
+    from test_llm import fake_app
+    from test_models import _serve
+    fake, url = _serve(fake_app())
+    sent, fix = [], 'SELECT *\nFROM public.orders\nLIMIT 5'
+    events = [{'type': 'meta', 'run_id': 'r1', 'model': 'm', 'provider': 'p', 'mode': 'ask'},
+              {'type': 'ui_action', 'id': 'u1', 'action': 'set_editor_query', 'label': 'LIMIT 5 instead of TOP',
+               'args': {'sql': fix, 'mode': 'replace', 'note': 'LIMIT 5 instead of TOP'}, 'applied': False},
+              {'type': 'text', 'text': 'It waits for Apply.'}, {'type': 'done', 'usage': {'in': 1, 'out': 1}}]
+
+    def chat(route):
+        sent.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/x-ndjson', body=''.join(json.dumps(e) + '\n' for e in events))
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1', 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1500, 'height': 900})
+            errors = []
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.route('**/api/llm/agent/analysis/chat', chat)
+            page.goto(f'{server}/?analysis')
+            page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+            mine = 'SELECT TOP 5 *\nFROM public.orders'
+            type_sql(page, mine)
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=10000)
+            page.fill('#ai-analysis-q', 'fix my sql')
+            page.keyboard.press('Enter')
+            card = page.locator('#ai-dock .ct-uiw')
+            card.wait_for(timeout=10000)
+            assert sent[0]['scope']['sql'] == mine and sent[0]['scope']['sql_truncated'] is False
+            diff = card.locator('.ct-diff').inner_text()
+            assert '- SELECT TOP 5 *' in diff and '+ SELECT *' in diff and '+ LIMIT 5' in diff
+            assert card.locator('pre.ct-sql').text_content() == fix          # folded under the diff
+            card.locator('.ct-ui [data-ca="ui-apply"]').click()
+            page.wait_for_function(f"document.querySelector('#an-sql .cm-content').innerText.trim() === {json.dumps(fix)}", timeout=5000)
+            assert card.locator('.ct-okc').count() == 1                # applied: no second Apply
+            page.locator('#an-sql .cm-content').click()
+            page.keyboard.press('Control+z')
+            page.wait_for_function(f"document.querySelector('#an-sql .cm-content').innerText.trim() === {json.dumps(mine)}", timeout=5000)
+            # a second proposal, applied in a new tab: the user's tab keeps its text
+            events[1] = {**events[1], 'id': 'u2'}
+            page.fill('#ai-analysis-q', 'again')
+            page.keyboard.press('Enter')
+            new = page.locator('#ai-dock .ct-uiw').last
+            new.locator('[data-ca="ui-apply"][data-mode="new_tab"]').wait_for(timeout=10000)
+            tabs = page.locator('.an-tab').count()
+            new.locator('[data-ca="ui-apply"][data-mode="new_tab"]').click()
+            page.wait_for_function(f"document.querySelectorAll('.an-tab').length === {tabs + 1}", timeout=5000)
+            assert page.locator('#an-sql .cm-content').inner_text().strip() == fix
+            assert not errors, errors
+            browser.close()
+    finally:
+        fake.should_exit = True

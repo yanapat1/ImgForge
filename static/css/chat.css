@@ -225,6 +225,21 @@
 .ct-ui-l { color: var(--text); font-weight: 600; }
 .ct-ui.applied { background: var(--surface-2); border-color: var(--border); }
 .ct-ui .ct-okc { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 600; }
+/* a page action with a body (the Analysis SQL proposal): the row, then the SQL / the diff against the editor */
+.ct-uiw { border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
+.ct-uiw.applied { border-color: var(--border); }
+.ct-uiw > .ct-ui { border: 0; border-radius: 0; }
+.ct-uid { border-top: 1px solid var(--border); }
+.ct-uid > summary { padding: 4px 10px; cursor: pointer; font-size: var(--fs-xs); color: var(--text-muted); }
+.ct-uid pre { margin: 0; padding: 6px 10px; max-height: 320px; overflow: auto; font: var(--fs-xs)/1.5 var(--mono); white-space: pre; background: var(--surface-2); }
+.ct-diff > span { display: block; min-width: max-content; }
+.ct-diff .d-add, .ct-uid summary .d-add { color: var(--ok-text); }
+.ct-diff .d-del, .ct-uid summary .d-del { color: var(--danger-text); }
+.ct-diff .d-add { background: var(--ok-soft); }
+.ct-diff .d-del { background: var(--danger-soft); }
+.ct-diff .d-fold { color: var(--text-faint); font-style: italic; }
+.ct-uin { padding: 4px 10px; border-top: 1px solid var(--border); font-size: var(--fs-xs); }
+.ct-uif { display: flex; justify-content: flex-end; gap: 6px; padding: 4px 8px; border-top: 1px solid var(--border); }
 
 /* notices, footer */
 .ct-notice { display: flex; align-items: flex-start; gap: 7px; font-size: var(--fs-xs); color: var(--text-muted); }

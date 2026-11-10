@@ -124,6 +124,60 @@ def _ui_ok(ctx, a):
     return dict(a), None
 
 
+EDITOR_CHARS = 20000
+
+
+def _editor(ctx):
+    s = ctx.scope or {}
+    sql = str(s.get('sql') or '')
+    return sql, s
+
+
+def _kind(ctx, cid):
+    return next((x['kind'] for x in _call(_svc().sources, ctx.user) if x['id'] == cid), None)
+
+
+def _read_editor(ctx, a):
+    sql, s = _editor(ctx)
+    cid = s.get('connection')
+    kind = _kind(ctx, cid) if cid else None
+    from ...analysis.sqlfix import NAMES
+    from ...analysis.classify import DIALECTS
+    out = {'tab': s.get('tab_name') or '', 'connection': cid, 'database': s.get('database'),
+           'syntax': NAMES.get(DIALECTS.get(kind, kind), kind) if kind else None, 'sql': sql,
+           'lines': sql.count('\n') + 1 if sql else 0, 'truncated': bool(s.get('sql_truncated')),
+           'last_error': s.get('last_error') or None}
+    return out, f'→ {out["lines"]} lines' + (' (last run failed)' if out['last_error'] else '') if sql else '→ the editor is empty'
+
+
+def _check_sql(ctx, a):
+    sql = a.get('sql') or _editor(ctx)[0]
+    if not str(sql).strip():
+        raise ToolError('nothing to check: the editor is empty; pass sql')
+    cid, db = _target(ctx, a)
+    kind = _kind(ctx, cid)
+    if kind is None:
+        raise ToolError(f'unknown connection {cid!r}: list_sources shows them')
+    from ...analysis import sqlfix
+    try:
+        got = sqlfix.check(sql, kind, a.get('from_syntax') or None)
+    except ValueError as e:
+        raise ToolError(str(e)) from None
+    final = got['fixed'] or sql
+    if not got['errors'] and kind != 'mongo':      # the database itself confirms the names, without running anything
+        from ...analysis import classify
+        if all(x['kind'] == classify.READ for x in classify.classify(final, kind)):
+            try:
+                _svc().explain_for_ai(ctx.user, _sid(ctx), cid, db, final)
+                got['database_check'] = 'ok: the database accepted it (EXPLAIN, not run)'
+            except Exception as e:                  # the database's own words are the most useful hint
+                got['database_check'] = f'error: {str(e)[:500]}'
+        else:
+            got['database_check'] = 'skipped: not a plain read'
+    n = len(got['errors'])
+    return got, f'→ {n} errors' if n else '→ fixed' if got['fixed'] else '→ ok'
+
+
 def _ui_run(ctx, a):
     return {'ok': True}, 'shown on the page'
 
@@ -173,8 +227,19 @@ register(Tool('set_column_description', 'Save what a column means, after the use
 register(Tool('run_change', 'Change data or structure, or make a temp table. The user confirms it first, in every mode.',
               _obj({'sql': S('the statements'), **CONN}, ['sql']), True, _change, lambda b, a: a.get('sql', '')[:200],
               domain='analysis', ctx=True, risk='danger'))
-register(Tool('set_editor_query', 'Page action: put a query in the SQL editor so the user can read and run it.',
-              _obj({'sql': S('the query')}, ['sql']), False, _ui_run, lambda b, a: 'Put this query in the editor', check=_ui_ok, **_U))
+register(Tool('read_editor', 'The SQL in the user\'s editor on the open tab, its syntax and the last run\'s error. Call it '
+                             'when the user means "my query" or "this SQL".', _obj({}), False, _read_editor, **_R))
+register(Tool('check_sql', 'Check SQL (default: the editor\'s) against the connection\'s syntax: syntax errors with line and '
+                           'column, a fixed version when it was written for another database, what changed, and the '
+                           'database\'s own check (EXPLAIN, a read is never run). Show a fix with set_editor_query.',
+              _obj({'sql': S('the SQL; empty = the editor\'s'), 'from_syntax': S('the syntax it was written in, if known: postgres, tsql, mysql, oracle ...'),
+                    **CONN}), False, _check_sql, **_R))
+register(Tool('set_editor_query', 'Page action: put a query in the SQL editor. The user sees the SQL and what changed against '
+                                  'the editor before Apply; Ctrl+Z in the editor undoes it.',
+              _obj({'sql': S('the whole query, in this database\'s syntax'), 'mode': E('replace = the open tab, new_tab = a new tab', ['replace', 'new_tab']),
+                    'note': S('one line: what you wrote or fixed')}, ['sql']), False, _ui_run,
+              lambda b, a: a.get('note') or ('Open this query in a new tab' if a.get('mode') == 'new_tab' else 'Put this query in the editor'),
+              check=_ui_ok, **_U))
 register(Tool('build_dashboard', 'Page action: add charts from the last result to the dashboard.',
               _obj({'charts': {'type': 'array', 'description': 'the charts to add', 'items': {'type': 'object', 'properties': {
                   'kind': E('chart; forecast = a line with its forecast band, x the date', ['bar', 'line', 'table', 'kpi', 'forecast']),

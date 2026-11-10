@@ -182,6 +182,13 @@ def analysis_scope(user, scope):
     out = [f'Connection {cid!r} ({kind}), database {db!r}.' if cid else 'No connection is chosen on the page.']
     if rid:
         out.append(f'The open tab\'s last result is {rid!r}.')
+    sql = str(scope.get('sql') or '')
+    if sql.strip():
+        n = sql.count('\n') + 1
+        out.append(f'The editor holds {n} line{"s" if n > 1 else ""} of SQL'
+                   + (' and its last run failed' if scope.get('last_error') else '') + ' (read_editor shows it).')
+    elif scope.get('page') == 'analysis':
+        out.append('The editor is empty.')
     if scope.get('rows_ok'):
         out.append('The user allowed row samples for this session.')
     else:

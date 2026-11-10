@@ -12,7 +12,7 @@
 // The shapes are in static/ts/types-editor.ts (the page's side of the contract).
 
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory } from '@codemirror/commands';
 import {
   bracketMatching, foldGutter, foldKeymap, HighlightStyle, indentOnInput, LanguageSupport, StreamLanguage, syntaxHighlighting, syntaxTree,
 } from '@codemirror/language';
@@ -189,7 +189,8 @@ export async function createEditor(host: HTMLElement, o: EditorOpts): Promise<Ed
     setText: (text) => {
       if (text === view.state.doc.toString()) return;
       const top = view.scrollDOM.scrollTop;
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+      // one undo step of its own: Ctrl+Z brings back exactly the text before (not merged with typing just before)
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, annotations: isolateHistory.of('full'), userEvent: 'input.replace' });
       view.scrollDOM.scrollTop = top;
     },
     setReadOnly: (b) => view.dispatch({ effects: ro.reconfigure([EditorState.readOnly.of(b), EditorView.editable.of(!b)]) }),

@@ -1,5 +1,7 @@
 """The Analysis assistant knows the user's own categories: the scope line names them (and stays out when there are
-none), list_favorites returns a category's tables under the result cap, and the analysis prompts name only real tools."""
+none), list_favorites returns a category's tables under the result cap, and the analysis prompts name only real tools.
+It reads the editor's SQL (read_editor), checks and fixes it for the connection (check_sql), and proposes SQL with
+set_editor_query, which waits for the user's Apply in ask mode."""
 
 import re
 from pathlib import Path
@@ -87,7 +89,7 @@ def test_analysis_prompts_name_only_real_tools():
     for f in files:
         for tok in re.findall(r'`([a-z]+_[a-z_]+)`', f.read_text()):
             if tok.endswith(('_favorites', '_catalog', '_table', '_query', '_result', '_rows', '_test', '_user',
-                             '_description', '_change', '_dashboard', '_sources', '_docs')):
+                             '_description', '_change', '_dashboard', '_sources', '_docs', '_editor', '_sql')):
                 assert tok in names, f'{f.name}: `{tok}` is not a tool'
 
 
@@ -98,3 +100,51 @@ def test_analysis_prompt_stays_small(prefs):
                         scope_text=roles.analysis_scope(ALICE, {'connection': 'c1', 'database': 'db'}),
                         mode='ask', effort='medium', pages_text=roles.other_pages('analysis'))
     assert 'Your categories' in s and budget.text_tokens(s) < 9000, budget.text_tokens(s)
+
+
+# ---------------------------------------------------------------- the editor's SQL
+def _ctx(scope):
+    return Ctx(user=ALICE, role='analysis', scope={'page': 'analysis', 'session': 's1', 'connection': 'c1', **scope}, skills={})
+
+
+def test_scope_line_says_the_editor_holds_sql_not_the_sql(prefs):
+    line = roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': 'SELECT 1\nFROM secret_t', 'last_error': 'boom'})
+    assert '2 lines of SQL and its last run failed' in line and 'secret_t' not in line
+    assert 'The editor is empty' in roles.analysis_scope(ALICE, {'page': 'analysis', 'connection': 'c1', 'sql': ''})
+
+
+def test_read_editor_returns_the_text_syntax_and_error(prefs):
+    got, summary = tools.REGISTRY['read_editor'].run(_ctx({'sql': 'SELECT a\nFROM t', 'tab_name': 'q1',
+                                                          'last_error': 'relation "t" does not exist', 'sql_truncated': True}), {})
+    assert got['sql'] == 'SELECT a\nFROM t' and got['lines'] == 2 and got['syntax'] == 'PostgreSQL'
+    assert got['truncated'] and got['tab'] == 'q1' and 'failed' in summary
+    assert tools.REGISTRY['read_editor'].run(_ctx({}), {})[1] == '→ the editor is empty'
+
+
+def test_check_sql_fixes_the_editor_text_and_asks_the_database(prefs, monkeypatch):
+    asked = []
+    monkeypatch.setattr(service, 'explain_for_ai', lambda u, sid, cid, db, sql: asked.append(sql) or {'top': []})
+    got, summary = tools.REGISTRY['check_sql'].run(_ctx({'sql': 'SELECT TOP 5 [a] FROM t'}), {})
+    assert got['fixed'] == 'SELECT "a" FROM t LIMIT 5' and summary == '→ fixed'
+    assert asked == ['SELECT "a" FROM t LIMIT 5'] and got['database_check'].startswith('ok')
+
+
+def test_check_sql_reports_the_database_error_and_skips_writes(prefs, monkeypatch):
+    def boom(*a):
+        raise service.AnalysisError('column "zz" does not exist')
+    monkeypatch.setattr(service, 'explain_for_ai', boom)
+    got, _ = tools.REGISTRY['check_sql'].run(_ctx({}), {'sql': 'SELECT zz FROM t'})
+    assert got['ok'] and 'zz' in got['database_check']
+    got, _ = tools.REGISTRY['check_sql'].run(_ctx({}), {'sql': 'DELETE FROM t'})
+    assert got['database_check'].startswith('skipped')
+    with pytest.raises(tools.ToolError, match='empty'):
+        tools.REGISTRY['check_sql'].run(_ctx({'sql': ' '}), {})
+
+
+def test_set_editor_query_is_a_ui_proposal_with_its_note(prefs):
+    t = tools.REGISTRY['set_editor_query']
+    assert t.risk == 'ui' and set(t.schema['properties']) >= {'sql', 'mode', 'note'}
+    assert t.preview(None, {'sql': 'x', 'note': 'fixed LIMIT'}) == 'fixed LIMIT'
+    assert t.preview(None, {'sql': 'x', 'mode': 'new_tab'}) == 'Open this query in a new tab'
+    names = tools.for_role(roles.get('analysis').domains, 'plan')
+    assert 'read_editor' in names and 'check_sql' in names and 'set_editor_query' not in names

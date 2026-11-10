@@ -211,3 +211,21 @@ def test_ui_result_route_and_stream(client, monkeypatch, svc):  # noqa: F811
     r = client.post('/api/llm/agent/data/chat', json={'text': 'hi', 'ui_ack': True})
     assert r.status_code == 200 and json.loads(r.text.splitlines()[-1])['type'] == 'done'
     assert r.headers.get('content-encoding') != 'gzip', 'a gzipped stream holds the events back'
+
+
+# ---------------------------------------------------------------- the Analysis editor
+def test_analysis_reads_the_editor_and_proposes_sql_for_apply(monkeypatch):
+    from dataviz.analysis import service
+    monkeypatch.setattr(service, 'sources', lambda user: [{'id': 'c1', 'name': 'DB', 'kind': 'mssql'}])
+    monkeypatch.setattr(service, 'user_prefs', lambda user: {})
+    fix = {'sql': 'SELECT TOP 3 a FROM t', 'mode': 'replace', 'note': 'LIMIT → TOP for SQL Server'}
+    seen = script(monkeypatch, ('', [('read_editor', {})]), ('', [('set_editor_query', fix)]), ('Waiting for Apply.', []))
+    run = react.prepare(ALICE, 'analysis', OPENAI, react.history([{'role': 'user', 'text': 'fix my sql'}]),
+                        {'page': 'analysis', 'session': 's1', 'connection': 'c1', 'sql': 'SELECT a FROM t LIMIT 3'},
+                        react.options({'mode': 'ask'}, OPENAI))
+    run.ctx.ui_ack = True
+    evs = drive(run)
+    assert 'SELECT a FROM t LIMIT 3' in results(seen)[0]['content']
+    ui = [e for e in evs if e['type'] == 'ui_action']
+    assert len(ui) == 1 and not ui[0]['applied'] and ui[0]['args'] == fix and ui[0]['label'] == fix['note']
+    assert 'Apply' in results(seen, 2)[0]['content']          # the model is told it waits for the user

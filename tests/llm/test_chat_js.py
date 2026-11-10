@@ -212,3 +212,42 @@ def test_stream_ndjson_js(tmp_path):
     (tmp_path / 't.mjs').write_text(STREAM_SCRIPT)
     r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and r.stdout.strip() == 'ok', r.stderr + r.stdout
+
+
+DIFF_TS = ROOT / 'static' / 'ts' / 'core' / 'linediff.ts'
+DIFF_SCRIPT = r"""
+import assert from 'node:assert/strict';
+import { diffLines } from './linediff.mjs';
+
+const sides = (ops) => [ops.filter((o) => o.t !== '+').map((o) => o.s), ops.filter((o) => o.t !== '-').map((o) => o.s)];
+assert.deepEqual(diffLines(['a', 'b'], ['a', 'b']), [{ t: ' ', s: 'a' }, { t: ' ', s: 'b' }], 'identical');
+assert.deepEqual(diffLines([], ['x']), [{ t: '+', s: 'x' }], 'insert into empty');
+assert.deepEqual(diffLines(['SELECT *', 'FROM t', 'LIMIT 10'], ['SELECT TOP 10 *', 'FROM t']),
+  [{ t: '-', s: 'SELECT *' }, { t: '+', s: 'SELECT TOP 10 *' }, { t: ' ', s: 'FROM t' }, { t: '-', s: 'LIMIT 10' }]);
+// random texts: both sides always come back, and the edit count is minimal for a known case
+let seed = 7;
+const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+for (let i = 0; i < 2000; i++) {
+  const mk = () => Array.from({ length: rnd(14) }, () => 'abcd'[rnd(4)]);
+  const a = mk(), b = mk(), [x, y] = sides(diffLines(a, b));
+  assert.deepEqual(x, a); assert.deepEqual(y, b);
+}
+assert.equal(diffLines(['a', 'b', 'c', 'd'], ['a', 'x', 'c', 'd']).filter((o) => o.t !== ' ').length, 2);
+assert.equal(diffLines(['a', 'b', 'c'], ['x', 'y', 'z'], 2), null, 'gives up past maxD');
+console.log('ok');
+"""
+
+
+def test_line_diff_js(tmp_path):
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('node is not installed')
+    esbuild = ROOT / 'node_modules' / '.bin' / 'esbuild'
+    if not esbuild.exists():
+        pytest.skip('run `npm install` to get esbuild')
+    b = subprocess.run([str(esbuild), str(DIFF_TS), '--format=esm', '--platform=neutral',
+                        f'--outfile={tmp_path / "linediff.mjs"}'], capture_output=True, text=True, timeout=60)
+    assert b.returncode == 0, b.stderr
+    (tmp_path / 't.mjs').write_text(DIFF_SCRIPT)
+    r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and r.stdout.strip() == 'ok', r.stderr + r.stdout

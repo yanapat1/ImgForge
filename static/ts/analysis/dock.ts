@@ -6,24 +6,97 @@ import { dockHooks, refreshDock, setDockHost, withNav } from '../core/dock.js';
 import { esc, icon } from '../core/dom.js';
 import { llmOn } from '../core/llm.js';
 import { openSettings } from '../settings/dialog.js';
-import { render } from './app.js';
+import { diffLines, type DiffOp } from '../core/linediff.js';
+import { render, saveTabs } from './app.js';
 import { currentResult } from './analyze.js';
 import { addCharts } from './dash.js';
-import { A, tab } from './state.js';
+import { A, newTab, tab } from './state.js';
 import type { UiAction, UiResult } from '../types-chat.js';
+
+/** the editor text the assistant is sent with each message (read_editor shows it; longer is cut and says so) */
+const EDITOR_CHARS = 20000;
+const DIFF_MAX_LINES = 3000, DIFF_SHOW = 400, CONTEXT = 2;
+
+function editorScope(): Record<string, unknown> {
+  const t = tab();
+  return { tab_name: t.name, sql: t.sql.slice(0, EDITOR_CHARS), sql_truncated: t.sql.length > EDITOR_CHARS, last_error: t.run?.error ? t.run.error.slice(0, 1000) : null };
+}
+
+/** The diff's lines as HTML; long unchanged runs fold to their first and last lines. */
+function diffHTML(ops: DiffOp[]): string {
+  const out: string[] = [];
+  let shown = 0;
+  for (let i = 0; i < ops.length && shown < DIFF_SHOW;) {
+    const op = ops[i] as DiffOp;
+    if (op.t !== ' ') { out.push(`<span class="d-${op.t === '+' ? 'add' : 'del'}">${op.t} ${esc(op.s)}</span>`); i++; shown++; continue; }
+    let j = i;
+    while (j < ops.length && (ops[j] as DiffOp).t === ' ') j++;
+    const run = ops.slice(i, j), keepHead = i === 0 ? 0 : CONTEXT, keepTail = j === ops.length ? 0 : CONTEXT;
+    if (run.length > keepHead + keepTail + 1) {
+      run.slice(0, keepHead).forEach((o) => out.push(`<span>  ${esc(o.s)}</span>`));
+      out.push(`<span class="d-fold">⋯ ${run.length - keepHead - keepTail} unchanged lines</span>`);
+      run.slice(run.length - keepTail).forEach((o) => out.push(`<span>  ${esc(o.s)}</span>`));
+    } else run.forEach((o) => out.push(`<span>  ${esc(o.s)}</span>`));
+    shown += Math.min(run.length, keepHead + keepTail + 1);
+    i = j;
+  }
+  if (shown >= DIFF_SHOW) out.push('<span class="d-fold">⋯ more changes: see SQL</span>');
+  return out.join('\n');
+}
+
+// the dock re-renders a turn while it streams: the diff of a proposal is kept until the editor text changes
+const bodies = new Map<string, { cur: string; html: string }>();
+
+/** set_editor_query's card body: what changes against the editor, the SQL itself, and the other way to apply it. */
+function uiBody(a: UiAction, ref: string): string {
+  if (a.action !== 'set_editor_query') return '';
+  const sql = String(a.args['sql'] ?? ''), newTabMode = a.args['mode'] === 'new_tab';
+  const cur = a.applied || newTabMode ? '' : tab().sql;
+  const key = `${a.id}|${a.applied ? 1 : 0}|${newTabMode ? 1 : 0}`, hit = bodies.get(key);
+  if (hit && hit.cur === cur) return hit.html;
+  const lines = sql.split('\n').length;
+  let changes = '';
+  if (cur.trim()) {
+    const a1 = cur.split('\n'), b1 = sql.split('\n');
+    const ops = a1.length > DIFF_MAX_LINES || b1.length > DIFF_MAX_LINES ? null : diffLines(a1, b1);
+    if (!ops) changes = '<div class="ct-dim ct-uin">Too large to compare: see the SQL.</div>';
+    else {
+      const add = ops.filter((o) => o.t === '+').length, del = ops.filter((o) => o.t === '-').length;
+      changes = add + del === 0 ? '<div class="ct-dim ct-uin">Same as the editor.</div>'
+        : `<details class="ct-uid" open><summary>Changes against the editor <span class="d-add">+${add}</span> <span class="d-del">−${del}</span></summary><pre class="ct-diff">${diffHTML(ops)}</pre></details>`;
+    }
+  }
+  const html = `<details class="ct-uid"${changes || a.applied ? '' : ' open'}><summary>SQL · ${lines} line${lines > 1 ? 's' : ''}</summary><pre class="ct-sql">${esc(sql)}</pre></details>${changes}` +
+    `<div class="ct-uif">${a.applied ? '' : `<button type="button" class="ghost ct-mini" data-ca="ui-apply" data-mode="${newTabMode ? 'replace' : 'new_tab'}" ${ref}>${newTabMode ? 'Put in this tab instead' : 'Apply in a new tab'}</button>`}` +
+    `<button type="button" class="ghost ct-mini" data-ca="ui-copy" data-copy-of="pre.ct-sql">Copy</button></div>`;
+  if (bodies.size > 60) bodies.delete(bodies.keys().next().value as string);
+  bodies.set(key, { cur, html });
+  return html;
+}
 
 const SUGGEST = ['What tables do I have about customers?', 'Why is this query slow?', 'Explain the last result in plain words'];
 
 function pageAction(a: UiAction): UiResult {
   if (a.action === 'set_editor_query') {
-    const t = tab();
-    t.sql = String(a.args['sql'] ?? '');
-    t.dirty = true;
-    t.typed = true;
+    const sql = String(a.args['sql'] ?? '');
+    if (!sql.trim()) return { ok: false, detail: 'the query is empty' };
+    let replaced = 0;
+    if (a.args['mode'] === 'new_tab') {
+      const cur = tab();
+      A.tabs.push(newTab(`AI ${A.tabs.length + 1}`, sql, cur.conn, cur.db));
+      A.active = A.tabs.length - 1;
+    } else {
+      const t = tab();
+      replaced = t.sql ? t.sql.split('\n').length : 0;
+      t.sql = sql;
+      t.dirty = true;
+      t.typed = true;
+    }
     A.ws = 'query';
     render();
     document.dispatchEvent(new CustomEvent('an-sql-changed'));
-    return { ok: true };
+    saveTabs();
+    return { ok: true, result: a.args['mode'] === 'new_tab' ? { tab: tab().name } : { replaced_lines: replaced, undo: 'Ctrl+Z in the editor' } };
   }
   if (a.action === 'build_dashboard') {
     addCharts((a.args['charts'] ?? []) as { kind: string; title: string; x?: string; y?: string; agg?: string }[]);
@@ -49,8 +122,9 @@ export function mountDock(): void {
         role: 'analysis',
         inputId: 'ai-analysis-q',
         placeholder: 'Ask about your data…  / for commands',
-        scope: () => ({ page: 'analysis', session: A.sid, connection: tab().conn, database: tab().db, result: currentResult()?.id ?? null, rows_ok: A.aiRows }),
+        scope: () => ({ page: 'analysis', session: A.sid, connection: tab().conn, database: tab().db, result: currentResult()?.id ?? null, rows_ok: A.aiRows, ...editorScope() }),
         onUiAction: withNav(pageAction),
+        uiBody,
         onEvent: hk.onEvent,
         onDone: hk.onDone,
         onUpdate: () => refreshDock(),
