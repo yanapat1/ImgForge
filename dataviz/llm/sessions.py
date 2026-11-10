@@ -356,7 +356,9 @@ def append(user, sid, role, text_, trace=None, usage=None, meta=None, page=None)
     uid = _uid(user)
     if role not in ('user', 'assistant'):
         raise SessionError('role must be user or assistant', 400)
-    usage = {k: int((usage or {}).get(k) or 0) for k in ('in', 'out')} if usage else {}
+    # in / out: billed tokens (summed on the chat); ctx / limit: the context the answer ended at (the page's ring)
+    usage = ({k: int((usage or {}).get(k) or 0) for k in ('in', 'out')}
+             | {k: int(usage[k]) for k in ('ctx', 'limit') if isinstance(usage.get(k), (int, float))}) if usage else {}
     with db.begin() as c:
         s = _live(c, uid, sid, lock=True)
         seq = (c.execute(text('SELECT max(seq) FROM app.llm_messages WHERE session_id = :s'), {'s': s.id}).scalar()
@@ -546,14 +548,14 @@ def compact_trace(events):
     """The events of one turn -> the list stored with the answer: meta (model, mode, effort), the thinking as one
     item (cut to THINKING_MAX), one 'tool' item per call (start + end merged), one 'confirm' per confirmation (with
     its outcome), search, skill, the last todo, ui_action, ask, cannot, plan_proposal, a retry count, notices,
-    error, done. Dropped: ping, step, text (the text is the message itself), session."""
+    error, done. Dropped: ping, step, text (the text is the message itself), session, context."""
     out, tools_, confirms = [], {}, {}
     think, think_item, todo_item, retry_item = [], None, None, None
     for ev in events or []:
         if not isinstance(ev, dict):
             continue
         t = ev.get('type')
-        if t in ('ping', 'step', 'text', 'session', None):
+        if t in ('ping', 'step', 'text', 'session', 'context', None):
             continue
         if t == 'meta':
             out.append({'type': 'meta', **{k: ev.get(k) for k in ('model', 'provider', 'mode', 'effort')}})

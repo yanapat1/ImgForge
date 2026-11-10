@@ -437,16 +437,21 @@ def events(run):
     p = run.provider
     if (run.ctx.web_cfg or {}).get('ask_before'):
         run.native_web = False                  # every query is confirmed: the provider's own cannot be
+    cap = budget.cap(run.limit)
+    kind = p['kind']
     yield {'type': 'meta', 'run_id': run.run_id, 'role': run.role.name, 'model': p.get('model'),
            'provider': p.get('name'), 'kind': p.get('kind'), 'mode': run.mode, 'effort': run.effort,
            'think': run.think, 'web': run.web, 'profile': run.profile, 'max_steps': run.max_steps, 'in_est': run.est,
-           'tools': len(run.tools)}
+           'tools': len(run.tools), 'limit': cap}
+    # the context of the NEXT provider call, for the page's ring: our estimate before a call, the provider's own
+    # count once it answered (usage below is the turn's billed sum over every step, which is not a context size)
+    ctx_now = run.est
+    yield {'type': 'context', 'used': ctx_now, 'limit': cap, 'exact': False}
+    spec_tokens = None                          # the tool specs' share: run.system has no specs (counted once)
     st = {'retries': 0, 'ans': None}
     usage = {'in': 0, 'out': 0}
     t0 = time.perf_counter()
     repeats, changed, verified = {}, False, False
-    cap = budget.cap(run.limit)
-    kind = p['kind']
 
     def done(steps):
         if not usage['in']:
@@ -454,16 +459,23 @@ def events(run):
         for k in ('in', 'out'):                 # what the consults of this turn used
             usage[k] += run.ctx.sub_usage.get(k, 0)
             run.ctx.sub_usage[k] = 0
-        return {'type': 'done', 'usage': dict(usage), 'ms': round((time.perf_counter() - t0) * 1000), 'steps': steps}
+        return {'type': 'done', 'usage': dict(usage), 'ms': round((time.perf_counter() - t0) * 1000), 'steps': steps,
+                'ctx': ctx_now, 'limit': cap}
 
     for step in range(1, run.max_steps + 1):
         if run.cancel.is_set():
             yield {'type': 'notice', 'level': 'info', 'text': 'Stopped.'}
             yield done(step - 1)
             return
-        if step > 1 and not compact.fit(kind, run.system, run.msgs, cap):
-            yield {'type': 'error', 'detail': 'the tool results grew over the token budget: ask for less at once'}
-            return
+        if step > 1:
+            if spec_tokens is None:
+                spec_tokens = budget.text_tokens(json.dumps([t.spec() for t in run.tools.values()]))
+            ok, est = compact.fit(kind, run.system, run.msgs, cap - spec_tokens)
+            if not ok:
+                yield {'type': 'error', 'detail': 'the tool results grew over the token budget: ask for less at once'}
+                return
+            ctx_now = est + spec_tokens
+            yield {'type': 'context', 'used': ctx_now, 'limit': cap, 'exact': False}
         yield {'type': 'step', 'n': step, 'max': run.max_steps}
         yield from _step(run, st, step)
         ans = st['ans']
@@ -474,6 +486,9 @@ def events(run):
         u = ans['usage'] or {}
         usage['in'] += int(u.get('in') or 0)
         usage['out'] += int(u.get('out') or 0)
+        if u.get('in'):
+            ctx_now = int(u['in'])
+            yield {'type': 'context', 'used': ctx_now, 'limit': cap, 'exact': True}
         text, calls = ans['text'].strip(), ans['calls']
         if run.cancel.is_set():
             yield {'type': 'notice', 'level': 'info', 'text': 'Stopped.'}

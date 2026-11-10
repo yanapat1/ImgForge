@@ -3,7 +3,10 @@ The one NDJSON protocol of every ◆ chat (POST /api/llm/agent/<role>/chat): one
 static/ts/core/chat.ts renders it; the session store keeps a compacted copy as the turn's trace.
 
     meta          {run_id, role, model, provider, kind, mode, effort, think, web, profile, max_steps, in_est, tools,
-                   session_id?, title?, removed?}           the saved chat's fields: added by the chat route
+                   limit, session_id?, title?, removed?}    the saved chat's fields: added by the chat route
+    context       {used, limit, exact}                       the next provider call's input tokens (the page's
+                                                             context ring): after meta and each step; exact = the
+                                                             provider's own count, else our estimate
     session       {session_id, title, removed}               right after meta (saved chats): removed = the chat the
                                                              limit soft-deleted for this one {id, title,
                                                              last_opened_at} or null
@@ -30,10 +33,11 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
     notice        {level, text}
     ping          {}                                         keep-alive while waiting for a confirmation
     error         {detail}                                   ends the turn
-    done          {usage: {in, out}, ms, steps}              ends the turn
+    done          {usage: {in, out}, ms, steps, ctx, limit}  ends the turn; usage = billed over every step,
+                                                             ctx = the last step's context
 """
 
 ENDS = ('done', 'error')
-TYPES = ('meta', 'session', 'step', 'thinking', 'thinking_end', 'text', 'tool_start', 'tool_end', 'skill', 'search', 'todo',
+TYPES = ('meta', 'context', 'session', 'step', 'thinking', 'thinking_end', 'text', 'tool_start', 'tool_end', 'skill', 'search', 'todo',
          'ui_action', 'confirm', 'confirmed', 'ask', 'cannot', 'plan_proposal', 'retry', 'consult', 'compact', 'notice', 'ping', 'error',
          'done')

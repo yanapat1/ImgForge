@@ -30,4 +30,6 @@ A specialist exists only when its zone is installed (`engine/roles.py` `Role.zon
 One mosaic image instead of N crops; full images ≤ 1024 px; summaries as text tables; the exemplar sheet goes
 first and is flagged for prompt caching (Anthropic `cache_control`; OpenAI / Gemini cache identical prefixes
 automatically); `fit()` runs before every call and the chat reports the estimate (`meta.in_est`) and the provider's
-usage (`done.usage`, our estimate when a server reports none).
+usage (`done.usage`, billed over every step; our estimate when a server reports none). The context ring follows
+`context {used, limit, exact}` events (after meta, after each step's tool results, and the provider's count once a
+step answered); `done.ctx` is saved with the answer's usage so a reopened chat shows it.

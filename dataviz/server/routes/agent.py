@@ -305,8 +305,8 @@ def router(state, ctx):
                         del texts[step_at:]     # the failed attempt's streamed text is shown struck out, not kept
                     elif t == 'notice' and ev.get('text') == 'Stopped.':
                         stopped = True
-                    elif t == 'done':
-                        usage = ev.get('usage')
+                    elif t == 'done':           # + the context the turn ended at: a reopened chat's ring
+                        usage = {**(ev.get('usage') or {}), **{k: ev[k] for k in ('ctx', 'limit') if ev.get(k)}}
                     elif t == 'todo':
                         todo = ev.get('items')
                     trace.append(ev)

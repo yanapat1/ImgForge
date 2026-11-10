@@ -79,7 +79,6 @@ const D = {
   jobs: new Map<string, { label: string; pct: number | null; done: boolean; ok: boolean }>(),
   pending: 0,
   tasksOpen: true,
-  inEst: null as number | null,
   navTo: null as string | null,              // the agent navigated: go there when its turn has ended
   ready: false,                              // the remembered chat was opened (or there was none): sid changes count
   sid: null as string | null,                // the chat this dock shows (what CURRENT holds)
@@ -122,8 +121,9 @@ function syncSid(): void {
 // ---------------------------------------------------------------- markup
 
 function ringHTML(): string {
-  const budget = LLM.budget?.max_input_tokens || 100000;
-  const pct = D.inEst == null ? null : Math.min(100, Math.round((D.inEst / budget) * 100));
+  const ctx = D.chat?.lastCtx() ?? null;           // the chat on screen: live while it answers, its last answer's after a reload
+  const budget = ctx?.limit || LLM.budget?.max_input_tokens || 100000;
+  const pct = ctx == null ? null : Math.min(100, Math.round((ctx.used / budget) * 100));
   const c = 94.25;                                    // 2πr, r = 15
   const tip = pct == null ? 'Context used: shown after the first answer' : `Context used: ${pct}% of ${Math.round(budget / 1000)}k tokens · older messages are compacted at 80% (or type /compact)`;
   return `<span class="dock-ring${pct != null && pct >= 80 ? ' hot' : ''}" title="${esc(tip)}" aria-label="${esc(tip)}"><svg viewBox="0 0 36 36" aria-hidden="true">` +
@@ -358,11 +358,8 @@ export function dockEvent(ev: ChatEvent): void {
     case 'meta':
       D.running = true; D.steps = []; D.driving = []; D.pending = 0;
       for (const [k, j] of D.jobs) if (j.done) D.jobs.delete(k);
-      if (typeof ev['in_est'] === 'number') D.inEst = ev['in_est'];
       break;
-    case 'compact':
-      if (ev['state'] === 'done' && typeof ev['after'] === 'number') D.inEst = null;    // the next meta says how much is left
-      break;
+    case 'context': case 'compact': break;          // the ring reads the chat's turns (lastCtx): only repaint
     case 'todo':
       D.steps = (Array.isArray(ev['items']) ? ev['items'] : []).map((x) => {
         const r = (typeof x === 'object' && x !== null ? x : {}) as Record<string, unknown>;
@@ -399,9 +396,8 @@ function drive(label: string): void {
   D.driving = [...D.driving, l].slice(-3);
 }
 
-export function dockDone(t: AiTurn): void {
+export function dockDone(): void {
   D.running = false;
-  if (t.usage?.in) D.inEst = t.usage.in;
   D.pending = D.chat?.pending() ?? 0;
   syncSid();
   const sid = D.chat?.sessionId();

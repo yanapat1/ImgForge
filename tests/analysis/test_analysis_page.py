@@ -487,6 +487,13 @@ def test_the_assistant_dock_sits_beside_the_page(server):  # noqa: F811
             page.click('#ai-dock .dc-ai-sugg button >> nth=0')
             page.wait_for_selector('#ai-dock :text("What tables do I have about customers?")', timeout=10000)
             page.wait_for_selector('#ai-dock :text("fake model")', timeout=20000)
+            # the context ring shows the answer's context (the provider's count: 21 tokens of 100k), and the same
+            # after a reload (it is saved with the answer), not "shown after the first answer"
+            ring = '#ai-dock .dock-ring'
+            page.wait_for_function(f"document.querySelector({json.dumps(ring)}).title.startsWith('Context used: 0% of 100k')", timeout=10000)
+            page.reload()
+            page.wait_for_selector('#ai-dock :text("fake model")', timeout=20000)
+            page.wait_for_function(f"document.querySelector({json.dumps(ring)}).title.startsWith('Context used: 0% of 100k')", timeout=10000)
             browser.close()
     finally:
         fake.should_exit = True

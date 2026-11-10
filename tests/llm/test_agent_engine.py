@@ -47,7 +47,7 @@ def start(text, role='data', scope=None, provider=OPENAI, **body):
 
 
 def visible(evs):
-    return [e for e in evs if e['type'] not in ('step', 'ping')]
+    return [e for e in evs if e['type'] not in ('step', 'ping', 'context')]
 
 
 def types(evs):
@@ -77,6 +77,36 @@ def test_read_tool_then_answer(monkeypatch, svc):
     assert evs[-1]['steps'] == 2 and evs[-1]['usage'] == {'in': 20, 'out': 4}
     sysp = seen[0]['system']
     assert 'You are ◆' in sysp and 'Data assistant' in sysp and '## Mode\n**ask**' in sysp and '`list_buckets`' in sysp
+
+
+def test_context_events_follow_each_step_and_done_has_the_last_not_the_sum(monkeypatch, svc):
+    """The ring shows the context of the next call: our estimate after meta and after the tool results, the
+    provider's own count once a step answered. done.usage stays the billed sum over the steps."""
+    script(monkeypatch, ('', [('list_buckets', {})]), ('', [('list_buckets', {'q': 'x'})]), ('Done.', []))
+    run = start('how many buckets?')
+    evs = drain(run)
+    ctx = [e for e in evs if e['type'] == 'context']
+    assert evs[0]['type'] == 'meta' and evs[0]['limit'] == run.limit and evs[1]['type'] == 'context'
+    assert ctx[0] == {'type': 'context', 'used': run.est, 'limit': run.limit, 'exact': False}
+    assert [e['exact'] for e in ctx] == [False, True, False, True, False, True]      # estimate, then each step's count
+    assert ctx[2]['used'] > run.est                         # the tool result made the next request bigger
+    done = evs[-1]
+    assert done['ctx'] == 10 and done['limit'] == run.limit and done['usage'] == {'in': 30, 'out': 6}
+
+
+def test_compact_fit_counts_down_instead_of_again(monkeypatch):
+    from dataviz.llm import budget
+    from dataviz.llm.engine import compact
+    big = 'x' * 4000
+    msgs = [{'role': 'user', 'parts': [{'text': 'q'}]}]
+    for i in range(6):
+        msgs.append({'role': 'assistant', 'parts': [{'tool_call': {'id': str(i), 'name': 't', 'args': {}}}]})
+        msgs.append({'role': 'tool', 'parts': [{'tool_result': {'id': str(i), 'name': 't', 'content': big}}]})
+    full = compact.estimate('openai', 'sys', msgs)
+    ok, est = compact.fit('openai', 'sys', msgs, full - 2000)
+    assert ok and est == compact.estimate('openai', 'sys', msgs) and est <= full - 2000      # the running total is exact
+    assert compact.fit('openai', 'sys', msgs, 10) == (False, compact.estimate('openai', 'sys', msgs))
+    assert budget.text_tokens(big) > 1000
 
 
 def test_step_limit_is_50_at_most(monkeypatch, svc):

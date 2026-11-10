@@ -167,6 +167,8 @@ export interface ChatHandle {
   modelLabel: () => string;
   /** the last finished answer's usage */
   lastUsage: () => { in: number; out: number; ms: number | null } | null;
+  /** the context the chat on screen is at (the newest answer's latest step; live while one streams), null if unknown */
+  lastCtx: () => { used: number; limit: number } | null;
   /** the saved chat on screen (null before the first message) */
   sessionId: () => string | null;
   /** open a saved chat (quiet: no toast / focus; false when it is gone) */
@@ -390,6 +392,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       m?.model ? `<code>${esc(shortModel(m.model))}</code>` : '',
       t.step ? `step ${t.step.n}/${t.step.max || '?'}` : '',
       inN ? `in ${t.usage?.in ? '' : '~'}${fmtK(inN)}` : '',
+      t.ctx ? `<span title="context of the latest step / the limit">ctx ${fmtK(t.ctx.used)}/${fmtK(t.ctx.limit)}</span>` : '',
       out ? `out ${est ? '~' : ''}${fmtK(out)}` : '',
       out && secs > 0.5 ? `${(out / secs).toFixed(out / secs < 10 ? 1 : 0)} tok/s` : '',
     ].filter(Boolean);
@@ -772,6 +775,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (!t.blocks.some((b) => b.k === 'text') && m.text && !t.err) t = { ...t, blocks: [...t.blocks, { k: 'text', text: m.text, step: t.step?.n ?? 0 }] };
     const u = recOf(m.usage);
     if (!t.usage && (u['in'] != null || u['out'] != null)) t = { ...t, usage: { in: num(u['in']), out: num(u['out']) } };
+    if (!t.ctx && typeof u['ctx'] === 'number' && typeof u['limit'] === 'number' && u['limit'] > 0) t = { ...t, ctx: { used: u['ctx'], limit: u['limit'] } };
     return reduce(t, { type: 'x_expire' });
   }
 
@@ -1561,6 +1565,15 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     modelLabel,
     lastUsage: () => {
       for (let i = C.turns.length - 1; i >= 0; i--) { const t = C.turns[i]; if (t && t.role === 'ai' && t.usage) return { ...t.usage, ms: t.ms }; }
+      return null;
+    },
+    lastCtx: () => {
+      for (let i = C.turns.length - 1; i >= 0; i--) {
+        const t = C.turns[i];
+        if (!t || t.role !== 'ai') continue;
+        if (t.ctx) return t.ctx;
+        if (t.blocks.some((b) => b.k === 'compact' && b.state === 'done') || t.status === 'streaming') return null;   // compacted / not measured yet
+      }
       return null;
     },
     sessionId: () => C.sid,

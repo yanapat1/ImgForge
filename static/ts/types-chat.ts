@@ -122,6 +122,8 @@ export interface AiTurn {
   step: { n: number; max: number } | null;
   meta: TurnMeta | null;
   usage: { in: number; out: number } | null;
+  /** the input tokens of this turn's latest provider call and the run's limit (context events): the context ring */
+  ctx: { used: number; limit: number } | null;
   ms: number | null;
   steps: number | null;
   err: string | null;

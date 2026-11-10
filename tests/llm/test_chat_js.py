@@ -144,6 +144,14 @@ assert.equal(ct.blocks.length, 1);
 assert.deepEqual([ct.blocks[0].state, ct.blocks[0].turns, ct.blocks[0].after, ct.blocks[0].covered], ['done', 36, 700, 36]);
 assert.match(ct.blocks[0].summary, /bad trucks/);
 assert.equal(turnText(ct), '', 'the summary is not part of the answer text');
+// the context ring: each context event replaces the last, done keeps the last step's (not the summed usage)
+let cx = run([{ type: 'meta', run_id: 'r9' }, { type: 'context', used: 3000, limit: 100000, exact: false }]);
+assert.deepEqual(cx.ctx, { used: 3000, limit: 100000 });
+cx = run([{ type: 'context', used: 5200, limit: 100000, exact: true }, { type: 'done', usage: { in: 8200, out: 40 }, ctx: 5200, limit: 100000 }], cx);
+assert.deepEqual([cx.ctx, cx.usage.in], [{ used: 5200, limit: 100000 }, 8200]);
+assert.equal(run([{ type: 'done', usage: { in: 1, out: 1 } }], cx).ctx.used, 5200, 'an old done without ctx keeps it');
+assert.equal(run([{ type: 'compact', state: 'done', turns: 3 }], cx).ctx, null, 'compacted: unknown until the next call');
+assert.equal(run([{ type: 'context', used: 'x', limit: 0 }]).ctx, null);
 assert.equal(parseCommand('hello /mode'), null);
 assert.deepEqual(['ask', 'auto', 'plan'].map(nextMode), ['auto', 'plan', 'ask']);
 const now = new Date(2026, 9, 29, 12);

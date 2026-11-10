@@ -30,7 +30,7 @@ export const cycle = <T>(list: readonly T[], v: T): T => list[(list.indexOf(v) +
 
 /** A new, empty answer. `t0` is performance.now() when it started (0 in tests and resumed traces). */
 export function newTurn(t0 = 0, kind: string | null = null): AiTurn {
-  return { role: 'ai', status: 'streaming', blocks: [], step: null, meta: null, usage: null, ms: null, steps: null, err: null, t0, resumed: false, kind };
+  return { role: 'ai', status: 'streaming', blocks: [], step: null, meta: null, usage: null, ctx: null, ms: null, steps: null, err: null, t0, resumed: false, kind };
 }
 
 /** The user message an approved plan becomes (the same text as dataviz/llm/engine/planner.py approved_message). */
@@ -190,8 +190,12 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
     case 'compact': {             // the older messages were folded into the chat's summary (start, then done)
       const kept = b.filter((x) => !(x.k === 'compact' && x.state === 'start'));
       const state = ev['state'] === 'start' ? 'start' : ev['state'] === 'failed' ? 'failed' : 'done';
-      return { ...t, blocks: [...kept, { k: 'compact', state, auto: ev['auto'] !== false, summary: str(ev['summary']), before: num(ev['before']),
+      return { ...t, ...(state === 'done' ? { ctx: null } : {}), blocks: [...kept, { k: 'compact', state, auto: ev['auto'] !== false, summary: str(ev['summary']), before: num(ev['before']),
         after: num(ev['after']), turns: num(ev['turns']), covered: numOrNull(ev['covered']) }] };
+    }
+    case 'context': {             // the next provider call's input size (the dock's ring follows it while the turn runs)
+      const used = numOrNull(ev['used']), limit = numOrNull(ev['limit']);
+      return used != null && limit ? { ...t, ctx: { used, limit } } : t;
     }
     case 'notice': {
       const text = str(ev['text']);
@@ -201,7 +205,9 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
       return { ...t, status: 'error', err: str(ev['detail']) || 'The assistant failed.' };
     case 'done': {
       const u = recOf(ev['usage']);
-      return { ...t, status: t.status === 'streaming' ? 'done' : t.status, usage: { in: num(u['in']), out: num(u['out']) }, ms: numOrNull(ev['ms']), steps: numOrNull(ev['steps']) };
+      const used = numOrNull(ev['ctx']), limit = numOrNull(ev['limit']);
+      return { ...t, status: t.status === 'streaming' ? 'done' : t.status, usage: { in: num(u['in']), out: num(u['out']) }, ms: numOrNull(ev['ms']), steps: numOrNull(ev['steps']),
+        ctx: used != null && limit ? { used, limit } : t.ctx };
     }
     // ---- page-only
     case 'x_stopped':
