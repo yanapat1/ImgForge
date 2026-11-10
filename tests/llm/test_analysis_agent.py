@@ -96,10 +96,10 @@ def test_analysis_prompts_name_only_real_tools():
 def test_analysis_prompt_stays_small(prefs):
     prefs['p'] = favs(40, 300)
     r = roles.get('analysis')
-    s = prompting.build('analysis', tools_catalog=tools.catalog(tools.for_role(r.domains, 'ask')),
+    s = prompting.build('analysis', tools_catalog=tools.risk_card(tools.for_role(r.domains, 'ask')),
                         scope_text=roles.analysis_scope(ALICE, {'connection': 'c1', 'database': 'db'}),
                         mode='ask', effort='medium', pages_text=roles.other_pages('analysis'))
-    assert 'Your categories' in s and budget.text_tokens(s) < 9000, budget.text_tokens(s)
+    assert 'Your categories' in s and budget.text_tokens(s) < 6500, budget.text_tokens(s)      # 40 categories, 300 tables
 
 
 # ---------------------------------------------------------------- the editor's SQL

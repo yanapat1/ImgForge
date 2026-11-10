@@ -187,6 +187,21 @@ def catalog(tools=None):
     return '\n'.join(rows)
 
 
+RISK_LINE = (('read', 'Run at once (read-only)'), ('change', 'Changes (confirmed as the mode says)'),
+             ('danger', 'Always confirmed by the user'), ('ui', 'Page actions (Apply button, or applied in auto)'),
+             ('run', 'Page runs (they start work; confirmed in ask)'), ('control', 'Turn control'))
+
+
+def risk_card(tools):
+    """What the native tool specs do not say: which tools run at once and which wait for the user, one line per
+    kind. The names, arguments and descriptions already reach the model as the provider's tool definitions, so the
+    system prompt does not repeat them (tools.catalog is still the table the CLI and SKILL.md show)."""
+    by = {}
+    for t in tools.values():
+        by.setdefault(t.risk, []).append(f'`{t.name}`')
+    return '\n'.join(f'- {label}: {", ".join(by[k])}' for k, label in RISK_LINE if by.get(k))
+
+
 def _who(t, ctx_or_user):
     """A ctx tool gets the agent context; a user tool gets the user (from a ctx, or as given)."""
     if t.ctx:

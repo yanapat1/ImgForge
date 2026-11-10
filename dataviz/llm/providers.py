@@ -27,6 +27,7 @@ import time
 import httpx
 
 from ..core import logging as vlog
+from .prompting import plain, split
 from .store import resolve_key
 
 _log = vlog.get_logger('llm')
@@ -257,9 +258,19 @@ def _anthropic_body(p, system, msgs, stream, max_tokens, tools=None):
             elif 'wav' in x:
                 raise LLMError('Claude has no audio input: turn voice off for this provider')
         out.append({'role': m['role'], 'content': content})
+    # the conversation so far is read from the cache on the next step of the loop: a breakpoint on its last block
+    # (thinking blocks take none). With the stable system part and the exemplar sheet: 3 of the 4 Claude allows.
+    for blk in reversed(out[-1]['content'] if out else []):
+        if blk.get('type') in ('text', 'image', 'tool_result', 'tool_use'):
+            blk['cache_control'] = {'type': 'ephemeral'}
+            break
     body = {'model': p['model'], 'max_tokens': _max_tokens(p, max_tokens), 'messages': out}
     if system:
-        body['system'] = [{'type': 'text', 'text': system, 'cache_control': {'type': 'ephemeral'}}]
+        stable, dynamic = split(system)
+        # the stable part (rules, knowledge, tools) is cached across steps and messages; what changes per message
+        # (mode, the clock, where the user is) comes after the breakpoint so it never invalidates it
+        body['system'] = [{'type': 'text', 'text': stable, 'cache_control': {'type': 'ephemeral'}}] + \
+            ([{'type': 'text', 'text': dynamic}] if dynamic.strip() else [])
     if p.get('temperature') is not None:
         body['temperature'] = min(1.0, float(p['temperature']))       # anthropic: 0..1
     if stream:
@@ -355,6 +366,8 @@ def _request(p, system, msgs, stream, json_mode=False, max_tokens=None, tools=No
     """(path, body, headers) of a generate request for this provider. tools: [{name, description, parameters}]."""
     kind = p.get('kind')
     h = _headers(p)
+    if kind != 'anthropic' and system:
+        system = plain(system)          # these cache an identical prefix on their own: one text, stable part first
     if kind in ('openai', 'openai_compat'):
         return '/chat/completions', _openai_body(p, system, msgs, stream, json_mode, max_tokens, tools=tools), h
     if kind == 'anthropic':

@@ -349,3 +349,33 @@ def test_web_key_is_stored_encrypted(client):
     assert b'brv-123' not in bytes(raw)
     s.set_web_key('', u)
     assert s.web_key(u) == ''
+
+
+def test_the_prompt_starts_with_a_part_that_never_changes_in_a_chat(svc):
+    """Rules, knowledge, skills and the tool card come first and stay byte-identical between messages (the provider
+    caches them); the mode, the clock and where the user is come after the marker."""
+    a = start('first', scope={'bucket': 'b1', 'path': 'x'})
+    b = start('second', scope={'bucket': 'b1', 'path': 'y/z'}, mode='auto')
+    sa, da = prompting.split(a.system)
+    sb, db = prompting.split(b.system)
+    assert sa == sb and da != db and '## Mode' in da and '## Now' in da and '## Mode' not in sa
+    assert '## Tools\n- Run at once (read-only): `list_buckets`' in sa
+    assert '| tool | kind |' not in a.system, 'the tools reach the model as native specs, not as a second table'
+    assert 'image datasets' in sa and prompting.app_intro() in sa
+
+
+def test_provider_bodies_cache_the_stable_part_and_the_history():
+    system = 'RULES' + prompting.DYNAMIC + 'NOW 12:00'
+    msgs = [{'role': 'user', 'parts': [{'text': 'q'}]},
+            {'role': 'assistant', 'parts': [{'tool_call': {'id': 'c1', 'name': 't', 'args': {}}}]},
+            {'role': 'tool', 'parts': [{'tool_result': {'id': 'c1', 'name': 't', 'content': 'r'}}]}]
+    body = providers._anthropic_body({'model': 'claude-x'}, system, msgs, True, 1024)
+    assert [b['text'] for b in body['system']] == ['RULES', 'NOW 12:00']
+    assert 'cache_control' in body['system'][0] and 'cache_control' not in body['system'][1]
+    assert body['messages'][-1]['content'][-1]['cache_control'] == {'type': 'ephemeral'}
+    marks = sum(1 for m in body['messages'] for c in m['content'] if 'cache_control' in c) + 1
+    assert marks <= 4
+    oa = providers._openai_body({'model': 'gpt-x', 'kind': 'openai'}, prompting.plain(system), msgs, True, False, 1024)
+    assert oa['messages'][0]['content'] == 'RULES\n\nNOW 12:00'
+    _, oa2, _ = providers._request({'kind': 'openai', 'model': 'gpt-x', 'api_key': 'k', 'base_url': 'http://x/v1'}, system, msgs, True)
+    assert '<!-- dynamic -->' not in oa2['messages'][0]['content']

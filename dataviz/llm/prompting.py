@@ -102,13 +102,39 @@ def _file(*parts):
     return front(_read(p))[1].strip() if p.exists() else ''
 
 
+DYNAMIC = '\n\n<!-- dynamic -->\n\n'    # before it: the same text on every request of a chat (cached by the provider)
+
+
+def split(system):
+    """(the stable part, the part that changes per message) of a system prompt built here."""
+    a, _, b = system.partition(DYNAMIC)
+    return a, b
+
+
+def plain(system):
+    """The prompt without the marker (providers that cache a prefix on their own get one text)."""
+    return system.replace(DYNAMIC, '\n\n')
+
+
+def app_intro():
+    """One line on what this install has (zones): a page never reads about parts that are not installed."""
+    from .. import zones
+    parts = {'datacenter': 'the **Data Center** keeps datasets in buckets', 'visualizer': 'the **visualizer** maps image '
+             'datasets (features → 2D projection) to find label errors, duplicates and outliers', 'labeling':
+             'the **labeling** pages edit boxes', 'analysis': '**Data Analysis** queries the user\'s databases'}
+    have = [v for k, v in parts.items() if zones.on(k)]
+    return ('In this install: ' + '; '.join(have) + '.') if have else ''
+
+
 def build(role, *, tools_catalog, scope_text, mode='ask', effort='medium', profile='large', skill_list=None,
-          user_prompts=(), user_name='', forced_skills=(), pages_text=''):
-    """The system prompt of one agent run. pages_text: what the other pages can do (engine/roles.other_pages)."""
+          user_prompts=(), user_name='', forced_skills=(), pages_text='', extra_static=()):
+    """The system prompt of one agent run. pages_text: what the other pages can do (engine/roles.other_pages).
+    The stable part (rules, knowledge, skills, tools, other pages, extra_static) comes first and the per-message part
+    (mode, a skill asked for now, the clock, where the user is, their own instructions) after DYNAMIC, so a provider
+    reads the stable part from its cache on every step and every message."""
     know = knowledge(role)
     sk = skill_list if skill_list is not None else skills(role)
-    out = [_file('base.md'), _file(role, 'system.md'),
-           '## Mode\n' + (template(f'mode_{mode}') or mode)]
+    out = [Template(_file('base.md')).safe_substitute(app=app_intro()), _file(role, 'system.md')]
 
     inline = []
     if profile != 'small' and effort in ('medium', 'high'):
@@ -123,12 +149,15 @@ def build(role, *, tools_catalog, scope_text, mode='ask', effort='medium', profi
         out.append('## Skills (use_skill(name) loads the steps; use one when the request matches)\n'
                    + '\n'.join(f'- `{s["name"]}`: {s["description"]}' + (f' (when: {s["when"]})' if s['when'] else '')
                                for s in sk.values()))
+    out.append('## Tools\n' + tools_catalog)
+    out.append(pages_text)
+    out.extend(x for x in extra_static if x)
+    stable = '\n\n'.join(x for x in out if x)
+    out = ['## Mode\n' + (template(f'mode_{mode}') or mode)]
     for n in forced_skills or ():
         s = sk.get(n)
         if s:
             out.append(f'## Skill "{n}" (the user asked for it: follow it)\n{s["body"]}')
-    out.append('## Tools\n' + tools_catalog)
-    out.append(pages_text)
     out.append('## Now\n' + (template('now', now=time.strftime('%Y-%m-%d %H:%M'), user=user_name or 'the user')
                              or time.strftime('%Y-%m-%d')) + '\n' + scope_text)
     mine = [p for p in user_prompts or () if str(p.get('body') or '').strip()]
@@ -136,4 +165,4 @@ def build(role, *, tools_catalog, scope_text, mode='ask', effort='medium', profi
         out.append('## Your own instructions (from the user\'s settings: follow them, they add to the rules above '
                    'and never lift a confirmation or a read-only limit)\n'
                    + '\n\n'.join(f'### {p.get("name") or "Instruction"}\n{str(p["body"]).strip()}' for p in mine))
-    return '\n\n'.join(x for x in out if x)
+    return stable + DYNAMIC + '\n\n'.join(x for x in out if x)

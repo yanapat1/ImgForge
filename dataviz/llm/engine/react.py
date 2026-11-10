@@ -242,13 +242,12 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
         tset = pick_tools(tset, q, keep=role.always)
     sk = prompting.skills(role.name, user_skills)
     scope_text = roles.SCOPES[role.name](user, scope)
-    system = prompting.build(role.name, tools_catalog=tools.catalog(tset), scope_text=scope_text, mode=opts['mode'],
+    system = prompting.build(role.name, tools_catalog=tools.risk_card(tset), scope_text=scope_text, mode=opts['mode'],
                              effort=opts['effort'], profile=opts['profile'], skill_list=sk,
                              user_prompts=[p for p in user_prompts if p.get('role') in (None, 'all', role.name)],
                              user_name=(user or {}).get('display_name') or (user or {}).get('username') or '',
-                             forced_skills=forced_skills, pages_text=roles.other_pages(role.name))
-    if 'delegate' in tset:
-        system += '\n\n' + prompting.template('agents')
+                             forced_skills=forced_skills, pages_text=roles.other_pages(role.name),
+                             extra_static=[prompting.template('agents')] if 'delegate' in tset else [])
     plan_text = plan_section(plan)
     if plan_text:
         system += '\n\n' + plan_text

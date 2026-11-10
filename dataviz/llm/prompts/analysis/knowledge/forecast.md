@@ -1,7 +1,7 @@
 ---
 title: Forecast
 summary: Analyze › Forecast and the dashboard Forecast widget: a measure over time forecast ahead, with its range, its tested accuracy and the unusual steps
-core: true
+high: true
 ---
 - **Where**: Analyze › Forecast works on the open tab's last result. Pick **Date** (a date or time column; dates kept as text work too), **Value** (a number, or Count of rows), **Per step** (sum, avg, count, min, max), **Step** (Pick for me, hour, day, week, month, quarter, year), **Steps ahead** (empty = 24 hours, 14 days, 8 weeks, 6 months, 4 quarters, 3 years; at most 120) and **One per** (a category column: one forecast per group, the 12 largest). Then Forecast. You run the same with `forecast`.
 - **Pick for me** chooses the step from the span of the dates: hours under 4 days, days under 2 years, weeks under 3 years, months beyond.
