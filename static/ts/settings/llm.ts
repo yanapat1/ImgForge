@@ -216,7 +216,17 @@ function budgetHTML(llm: LlmConfig): string {
     `<span class="lab-range"><input type="range" min="${min}" max="${max}" step="${stepOf(max)}" value="${esc(v)}" data-llm-budget aria-label="Token budget"${auto ? ' disabled' : ''}>` +
     `<output id="llm-budget-out">${esc(kTok(v))}</output></span></div>` +
     `<label class="check"><input type="checkbox" data-act-change="llm-budget-auto" ${auto ? 'checked' : ''}> Auto: the model's maximum (follows the model you pick)</label>` +
-    `<p class="sec-note">${esc(size)} A bigger budget keeps more of a long chat, and every step of an answer sends it again.</p></div>`;
+    `<p class="sec-note">${esc(size)} A bigger budget keeps more of a long chat, and every step of an answer sends it again.</p></div>` +
+    agentsHTML(llm);
+}
+
+function agentsHTML(llm: LlmConfig): string {
+  const a = llm.budget?.agents ?? { on: false, model: '' };
+  return '<div class="form-card"><div class="step-head">Sub-agents</div>' +
+    `<label class="lab-row"><span>Let the assistant use sub-agents<span class="muted">it splits big look-ups across helper agents, each in its own context, and reads only their answers. Long tasks need less context; small questions cost a little more. Also <code>/agents on|off</code> in the chat.</span></span>` +
+    `<input type="checkbox" class="switch" data-act-change="llm-agents" ${a.on ? 'checked' : ''} aria-label="Sub-agents"></label>` +
+    `<label class="fld">Sub-agent model<input type="text" data-act-change="llm-agents-model" value="${esc(a.model)}" placeholder="same as the chat" ${a.on ? '' : 'disabled'}>` +
+    '<span class="help">a cheaper model of the same provider for the helpers (empty = the chat\'s model)</span></label></div>';
 }
 
 // ---------------------------------------------------------------- form (3 steps)
@@ -459,7 +469,15 @@ export const LLM_ACTIONS: Record<string, SetAction> = {
   'llm-all-off': () => setFeatures(Object.fromEntries(Object.keys(FEATS).map((k) => [k, false]))),
 };
 
+async function setAgents(v: { on?: boolean; model?: string }): Promise<void> {
+  try { SET.llm = await put({ budget: { agents: v } }); } catch (e) { toast(errText(e), 'err'); await loadLlmData(); }
+  changed();
+  renderSettings();
+}
+
 export const LLM_CHANGES: Record<string, SetChange> = {
+  'llm-agents': (el) => setAgents({ on: el instanceof HTMLInputElement && el.checked }),
+  'llm-agents-model': (el) => setAgents({ model: el instanceof HTMLInputElement ? el.value.trim() : '' }),
   'llm-budget-auto': async (el) => {
     const on = el instanceof HTMLInputElement && el.checked;
     const range = $req('settings-body').querySelector<HTMLInputElement>('[data-llm-budget]');

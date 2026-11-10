@@ -68,6 +68,7 @@ COMMANDS = [
     ('rename', '<title>', 'rename this chat', None),
     ('delete', '', 'delete this chat', None),
     ('cost', '', 'tokens used by this chat', None),
+    ('agents', 'on|off', 'sub-agents for big look-ups: they save context on long tasks, small questions cost a little more', None),
     ('compact', '[focus]', 'summarise the older messages to free context (it also happens on its own at 80%)', None),
     ('export', '', 'download this chat as Markdown', None),
     ('prompts', '', 'your own instructions and skills (Settings)', None),
@@ -227,6 +228,8 @@ def router(state, ctx):
             w = web_cfg['level']
         opts_in['web'] = WEB_LEVELS.get(w, 0) if isinstance(w, str) else w
         opts_in['web'] = min(int(opts_in['web'] or 0), _max_web())
+        agents_cfg = cfg['budget']['agents']                # Settings › AI assistant › Sub-agents (or /agents)
+        opts_in['agents'] = agents_cfg['on']
         opts = react.options(opts_in, p)
         a = _assets(user, role.name)
         forced = [str(s) for s in body.get('skills') or [] if isinstance(s, str)][:3]
@@ -240,6 +243,7 @@ def router(state, ctx):
             r_.ctx.web_cfg = web_cfg
             r_.ctx.ui_ack = body.get('ui_ack') is True
             r_.ctx.roles_on = roles_on
+            r_.ctx.sub_model = agents_cfg['model']
             return r_
         try:
             run = build(msgs_run, summary)

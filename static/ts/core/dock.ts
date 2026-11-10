@@ -370,7 +370,8 @@ export function dockEvent(ev: ChatEvent): void {
       break;
     case 'ui_action': drive(String(ev['label'] || ev['action'] || '')); break;
     case 'tool_start':
-      if (ev['name'] === 'consult') {
+      if (ev['name'] === 'delegate') drive('Sub-agents are looking it up');
+      else if (ev['name'] === 'consult') {
         const pg = (typeof ev['args'] === 'object' && ev['args'] !== null ? (ev['args'] as Record<string, unknown>)['page'] : '') as string;
         drive(`Asking the ${PAGE_NAME[pg] ?? 'other page'}`);
       } else if (ev['risk'] !== 'read' && ev['risk'] !== 'control') drive(String(ev['summary'] || ev['name'] || ''));

@@ -91,6 +91,12 @@ class LLMStore:
         self.root = root                     # unused (kept for old callers): everything is in the database
 
     @staticmethod
+    def _agents(v):
+        """Sub-agents: on (off by default: they spend tokens) and their model ('' = the chat's own)."""
+        v = v if isinstance(v, dict) else {}
+        return {'on': v.get('on') is True, 'model': str(v.get('model') or '').strip()[:200]}
+
+    @staticmethod
     def _budget(v):
         """'auto' (the model's maximum, budget.effective) or a number of input tokens."""
         if v in (None, '', 'auto'):
@@ -121,7 +127,7 @@ class LLMStore:
         feats = data['features'] if isinstance(data['features'], dict) else {}
         data['features'] = {k: bool(feats.get(k, False)) for k in FEATURES}
         b = data['budget'] if isinstance(data['budget'], dict) else {}
-        data['budget'] = {'max_input_tokens': self._budget(b.get('max_input_tokens'))}
+        data['budget'] = {'max_input_tokens': self._budget(b.get('max_input_tokens')), 'agents': self._agents(b.get('agents'))}
         if data['active'] and not any(p['id'] == data['active'] for p in data['providers']):
             data['active'] = None
         return data
@@ -279,6 +285,8 @@ class LLMStore:
                     data['features'][k] = bool(v)
         if isinstance(body.get('budget'), dict) and 'max_input_tokens' in body['budget']:
             data['budget']['max_input_tokens'] = self._budget(body['budget']['max_input_tokens'])
+        if isinstance(body.get('budget'), dict) and isinstance(body['budget'].get('agents'), dict):
+            data['budget']['agents'] = self._agents({**data['budget']['agents'], **body['budget']['agents']})
         if body.get('active') and self.provider(body['active'], data=data):
             data['active'] = body['active']
         if isinstance(body.get('chat'), dict):

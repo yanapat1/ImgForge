@@ -93,7 +93,7 @@ const DEFAULT_COMMANDS = [
   ['web', 'off|public|technical|full', 'web search level'], ['skills', '', 'list the skills'], ['skill', '<name>', 'use a skill for the next message'],
   ['sessions', '', 'open the chat history'], ['new', '', 'start a new chat'], ['clear', '', 'start a new chat'],
   ['resume', '<search>', 'open an earlier chat'], ['rename', '<title>', 'rename this chat'], ['delete', '', 'delete this chat'],
-  ['cost', '', 'tokens used by this chat'], ['compact', '[focus]', 'summarise older messages to free context'], ['export', '', 'download this chat as Markdown'],
+  ['cost', '', 'tokens used by this chat'], ['agents', 'on|off', 'sub-agents for big look-ups'], ['compact', '[focus]', 'summarise older messages to free context'], ['export', '', 'download this chat as Markdown'],
   ['prompts', '', 'your own instructions and skills (Settings)'], ['plugins', '', 'installed plugins (Settings)'], ['help', '', 'list the commands'],
 ].map(([name, args, description]) => ({ name: name ?? '', args: args ?? '', description: description ?? '' }));
 
@@ -317,7 +317,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   // ---- the activity dropdown: one per answer, every step (thinking, reads, searches, skills, retries, the words
   // said between tool calls) as one row of the same shape; its header says what the model is doing right now.
   type Step = { b: Block; bi: number };
-  const isStep = (b: Block): boolean => b.k === 'think' || (b.k === 'tools' && b.read) || b.k === 'search' || b.k === 'skill' ||
+  const isStep = (b: Block): boolean => b.k === 'think' || (b.k === 'tools' && b.read) || b.k === 'search' || b.k === 'skill' || b.k === 'agent' ||
     b.k === 'retry' || (b.k === 'notice' && b.level === 'info');
   const shortModel = (m: string | null | undefined): string => (m ? m.split('/').pop() || m : 'the model');
   const firstLine = (text: string): string => text.trim().split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? '';
@@ -351,6 +351,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         return actRow(key, icon(b.blocked ? 'shield' : 'globe'), b.blocked ? 'Search blocked' : 'Searched', `<q>${esc(b.query)}</q> · ${esc(info)}`, '', body, `k-search${b.blocked ? ' warn' : ''}`);
       }
       case 'skill': return actRow(null, icon('layers'), 'Loaded skill', `<b>${esc(b.name)}</b>`, '', null, 'k-skill');
+      case 'agent': return actRow(key, okIcon(b.ok), 'Sub-agent', esc(firstLine(b.task)), esc([plural(b.steps, 'step'), b.tokens ? `${fmtK(b.tokens)} tokens` : ''].filter(Boolean).join(' · ')),
+        () => `<div class="ct-act-text">${esc(b.task)}</div>${b.tools.length ? `<div class="ct-dim">Used ${b.tools.map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : ''}`, `k-agent${b.ok ? '' : ' bad'}`);
       case 'retry': return actRow(key, icon('refresh'), `Retry ${b.attempt}/${b.max}`, esc(firstLine(b.reason)), `${esc(String(b.waitS))} s`,
         () => `<div class="ct-act-text">${esc(b.reason)}</div>`, 'k-retry warn');
       case 'notice': return actRow(key, icon('circle'), 'Note', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-note');
@@ -466,7 +468,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'text': return lastText && t.status === 'streaming'
         ? `<div class="ct-md streaming">${mdLive(b.text)}</div>` : `<div class="ct-md">${md(b.text)}</div>`;
       case 'tools': return cardHTML(b, ti, bi);
-      case 'think': case 'search': case 'skill': return '';                    // rows of the activity dropdown
+      case 'think': case 'search': case 'skill': case 'agent': return '';      // rows of the activity dropdown
       case 'todo': {
         const done = b.items.filter((x) => /done|complete/.test(x.state)).length;
         return `<div class="ct-todo"><div class="ct-lbl">Checklist · ${done}/${b.items.length}</div><ul>${b.items.map((x) => {
@@ -1175,6 +1177,19 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         if (C.sid) void deleteSessions({ ids: [C.sid] }); else newChat();
         break;
       case 'cost': note(costText()); break;
+      case 'agents': {
+        const want = arg.trim().toLowerCase();
+        if (want !== 'on' && want !== 'off') {
+          void getJSON<{ budget?: { agents?: { on?: boolean } } }>('api/llm/config')
+            .then((c) => note(`Sub-agents are **${c.budget?.agents?.on ? 'on' : 'off'}**. \`/agents on\` lets the assistant split big look-ups across helper agents (each in its own context: long tasks need less, small questions cost a little more); \`/agents off\` stops it.`))
+            .catch((e: unknown) => note(errText(e)));
+          break;
+        }
+        sendJSON('PUT', 'api/llm/config', { budget: { agents: { on: want === 'on' } } })
+          .then(() => { note(`Sub-agents **${want}** for your next messages.`); window.dispatchEvent(new CustomEvent('llm-changed')); })
+          .catch((e: unknown) => note(errText(e)));
+        break;
+      }
       case 'compact': void compactNow(arg); break;
       case 'export':
         if (!C.turns.some((e) => e.role === 'user' || e.role === 'ai')) { note('Nothing to export yet.'); break; }

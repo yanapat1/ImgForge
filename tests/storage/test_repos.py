@@ -297,7 +297,7 @@ def test_rows_written_by_the_legacy_importer_are_read_back(pg, tmp_path):
     assert reg.find_local(local, admin['id'])['id'] == 'd4'
 
     data = LLMStore().load(admin)
-    assert data['active'] == 'p1' and data['features']['assistant'] and data['budget'] == {'max_input_tokens': 20000}
+    assert data['active'] == 'p1' and data['features']['assistant'] and data['budget']['max_input_tokens'] == 20000
     p = data['providers'][0]
     assert p['api_key'] == 'sk-old-key-123' and p['model'] == 'gpt-x' and p['kind'] == 'openai' and p['name'] == 'GPT'
     assert LLMStore().state(admin)['connected']

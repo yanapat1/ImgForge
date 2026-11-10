@@ -150,6 +150,9 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
       if (!name || (lb?.k === 'skill' && lb.name === name)) return t;
       return { ...t, blocks: [...b, { k: 'skill', name }] };
     }
+    case 'agent':
+      return { ...t, blocks: [...b, { k: 'agent', task: str(ev['task']), ok: ev['ok'] !== false, steps: num(ev['steps']),
+        tools: arr(ev['tools']).map((x) => str(x)).filter(Boolean), tokens: num(ev['in']) + num(ev['out']) }] };
     case 'search': {
       const results = arr(ev['results']).map(recOf).map((r) => ({ title: str(r['title']) || str(r['url']), url: str(r['url']) })).filter((r) => r.url);
       return { ...t, blocks: [...b, { k: 'search', query: str(ev['query']), engine: str(ev['engine']), results, blocked: !!ev['blocked'],

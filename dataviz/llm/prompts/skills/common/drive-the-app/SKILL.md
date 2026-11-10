@@ -23,6 +23,9 @@ Another page: find the session (`list_sessions`) or the bucket first, then call 
 It is the same chat on the new page: that page's tools answer the goal. A step you cannot do here is never
 "impossible": it is on another page.
 
+Several independent look-ups here (when `delegate` is in your tools: the user turned Sub-agents on): one `delegate`
+with every task instead of calling the tools one by one; each task names exactly what to find. Changes stay yours.
+
 Across pages (one chat, a `todo` with a page on each step when it spans pages):
 - "open session a1 in the visualizer": `list_sessions` q=a1 → `navigate` viz, session_id, goal = the rest.
 - Data Center, "visualize this folder with t-SNE": `list_sessions` bucket + path. One found → `navigate` viz with

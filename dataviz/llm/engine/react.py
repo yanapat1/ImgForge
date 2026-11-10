@@ -103,7 +103,8 @@ class Ctx:
     limit: int = None               # the run's input budget
     cancel: object = None           # the run's stop event (a consult stops with it)
     depth: int = 0                  # 1 inside a consult: no consult of a consult
-    sub_usage: dict = field(default_factory=lambda: {'in': 0, 'out': 0})   # tokens of consults, added to the turn
+    sub_usage: dict = field(default_factory=lambda: {'in': 0, 'out': 0})   # tokens of consults / sub-agents, added to the turn
+    sub_model: str = ''             # the sub-agents' model (same provider); '' = the run's own
 
 
 @dataclass
@@ -153,7 +154,10 @@ def options(body, provider):
         web = 0
     profile = profile_of(provider)
     steps = min(MAX_STEPS, e['steps'], SMALL_STEPS if profile == 'small' else MAX_STEPS)
-    return {'mode': mode, 'effort': effort, 'think': think, 'web': web, 'profile': profile, 'max_steps': steps}
+    # sub-agents (tools/agents.py delegate): only when the user switched them on, never for a small model
+    agents = body.get('agents') is True and profile != 'small'
+    return {'mode': mode, 'effort': effort, 'think': think, 'web': web, 'profile': profile, 'max_steps': steps,
+            'agents': agents}
 
 
 SUMMARY_HEAD = '## Earlier in this chat (summary)'
@@ -231,6 +235,8 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     plugin = [t for t in plugin_tools if getattr(t, 'roles', None) in (None, (), role.name)
               or role.name in (getattr(t, 'roles', None) or ())]
     tset = tools.for_role(domains, opts['mode'], extra=plugin)
+    if not opts.get('agents'):
+        tset.pop('delegate', None)
     if opts['profile'] == 'small':
         q = ' '.join(x.get('text', '') for x in msgs[-1]['parts'] if 'text' in x)
         tset = pick_tools(tset, q, keep=role.always)
@@ -241,6 +247,8 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
                              user_prompts=[p for p in user_prompts if p.get('role') in (None, 'all', role.name)],
                              user_name=(user or {}).get('display_name') or (user or {}).get('username') or '',
                              forced_skills=forced_skills, pages_text=roles.other_pages(role.name))
+    if 'delegate' in tset:
+        system += '\n\n' + prompting.template('agents')
     plan_text = plan_section(plan)
     if plan_text:
         system += '\n\n' + plan_text

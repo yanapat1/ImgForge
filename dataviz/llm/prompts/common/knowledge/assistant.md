@@ -6,6 +6,11 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   `/effort low|medium|high`, `/think off|low|medium|high`, `/web off|public|technical|full`, `/skills`,
   `/skill <name>`, `/sessions`, `/new`, `/rename`, `/delete`, `/cost`, `/compact [focus]`, `/export`, `/prompts`,
   `/plugins`, `/help`.
+- **Sub-agents** (Settings › AI assistant › Sub-agents, or `/agents on|off`; off by default): the assistant may split
+  big read-only look-ups across helper agents (`delegate`, up to 4 at once), each in its own context; only their
+  answers enter the chat, so long tasks need less context, while small questions cost a little more. Each helper
+  shows as a "Sub-agent" row with its steps and tokens; an optional cheaper Sub-agent model can run them. Never on
+  small (<= 14B) models.
 - **Token budget** (Settings › AI assistant): the largest request sent to the model. Auto (the default) = the model's own
   maximum, detected from the provider (or the provider card's Model context in Advanced; 100k when unknown); a number
   is kept under it. Bigger keeps more of a long chat, but each step of an answer sends it again.

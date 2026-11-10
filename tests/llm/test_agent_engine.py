@@ -321,7 +321,7 @@ def test_the_run_limit_follows_the_model_and_the_setting(client, monkeypatch, sv
     s, u = client.ctx.llm, client.user
     s.upsert({**p, 'context_window': 64000}, u)                     # the card's Model context (gpt-x is not in the table)
     s.record_test(p['id'], {'ok': True}, u)
-    assert s.load(u)['budget'] == {'max_input_tokens': 'auto'}
+    assert s.load(u)['budget']['max_input_tokens'] == 'auto'
     lim = client.get('/api/llm/state').json()['limits']
     assert lim == {'context': 64000, 'ceiling': int(64000 * 0.98) - 4096, 'source': 'manual'}
 

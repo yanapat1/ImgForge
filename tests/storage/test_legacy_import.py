@@ -185,7 +185,7 @@ def test_import_everything(pg, ws):
     assert b'sk-LLMSECRET' not in bytes(p['secrets']) and crypto.decrypt_json(p['secrets']) == {'api_key': 'sk-LLMSECRET'}
     cfg = _all('SELECT * FROM app.llm_user_config')[0]
     assert cfg['user_id'] == admin['id'] and cfg['active_provider_id'] == 'p1'
-    assert cfg['features'] == {'assistant': True} and cfg['budget'] == {'max_input_tokens': 50000}
+    assert cfg['features'] == {'assistant': True} and cfg['budget']['max_input_tokens'] == 50000
     ms = {m['id']: m for m in _all('SELECT * FROM app.models')}
     assert ms['mod1']['config']['api'] == {'preset': 'generic', 'url': 'http://x'}
     assert ms['mod1']['config']['created'] == '2024-01-01 10:00:00' and 'name' not in ms['mod1']['config']

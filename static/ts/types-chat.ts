@@ -99,6 +99,8 @@ export type Block =
   | { k: 'tools'; read: boolean; items: ToolItem[] }
   | { k: 'search'; query: string; engine: string; results: Array<{ title: string; url: string }>; blocked: boolean; reasons: string[]; level: string | null }
   | { k: 'skill'; name: string }
+  /** a sub-agent of delegate finished (its own steps stay on the server) */
+  | { k: 'agent'; task: string; ok: boolean; steps: number; tools: string[]; tokens: number }
   | { k: 'todo'; items: Array<{ text: string; state: string }> }
   | { k: 'confirm'; id: string; actions: ConfirmAction[]; state: ConfirmState; results: ConfirmResult[]; timeoutS: number; t0: number }
   | { k: 'ask'; question: string; options: string[]; answered: boolean }

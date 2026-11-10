@@ -170,8 +170,7 @@ CONSULT_NOTE = ('(Asked by the assistant on the {here} page, for the user. Answe
 def _consult(ctx, a):
     """Another page's specialist answers one question, read-only, on the server: its tools and steps stay in its
     own run, only the answer comes back (no page change, no extra tools in this prompt)."""
-    from ..engine import react, roles
-    from ..providers import LLMError
+    from ..engine import roles, subrun
     target = 'visual' if a['page'] == 'viz' else 'data'
     _need_zone(a['page'])
     if getattr(ctx, 'depth', 0):
@@ -198,41 +197,12 @@ def _consult(ctx, a):
             raise ToolError(f'session {sid!r} is still being indexed: try again in a moment, or navigate there')
     here = roles.SCREEN_LABEL.get((ctx.scope or {}).get('page') or ('viz' if ctx.role == 'visual' else 'data'), 'other')
     q = f'{a["question"].strip()[:1500]}\n\n{CONSULT_NOTE.format(here=here)}'
-    opts = react.options({'mode': 'ask', 'effort': 'low', 'web': 0}, ctx.provider)
-    opts['max_steps'] = min(opts['max_steps'], CONSULT_STEPS)
-    sub = react.prepare(ctx.user, target, ctx.provider, react.history([{'role': 'user', 'text': q}]), {}, opts,
-                        state=state, app=ctx.app, limit=ctx.limit)
-    sub.tools = {k: t for k, t in sub.tools.items() if (t.risk == 'read' and k != 'consult') or k == 'cannot_do'}
-    sub.ctx.depth = 1
-    if getattr(ctx, 'cancel', None) is not None:
-        sub.cancel = ctx.cancel
-        sub.ctx.cancel = ctx.cancel
-    texts, used, steps, cannot = [], [], 0, None
-    try:
-        evs = list(react.events(sub))
-    except LLMError as e:
-        raise ToolError(f'the {SCREEN_LABEL[a["page"]]} assistant failed: {str(e)[:300]}') from None
-    for ev in evs:
-        t = ev.get('type')
-        if t == 'step':
-            steps, texts = ev.get('n', steps), []
-        elif t == 'text':
-            texts.append(str(ev.get('text') or ''))
-        elif t == 'tool_start':
-            used.append(ev.get('name'))
-        elif t == 'cannot':
-            cannot = ev.get('reason')
-        elif t == 'error':
-            raise ToolError(f'the {SCREEN_LABEL[a["page"]]} assistant failed: {str(ev.get("detail"))[:300]}')
-        elif t == 'done':
-            u = ev.get('usage') or {}
-            for k in ('in', 'out'):
-                ctx.sub_usage[k] = ctx.sub_usage.get(k, 0) + int(u.get(k) or 0)
-    answer = ''.join(texts).strip() or (f'cannot: {cannot}' if cannot else '(no answer)')
-    if len(answer) > CONSULT_CHARS:
-        answer = answer[:CONSULT_CHARS] + '…'
-    tools_used = sorted({n for n in used if n})
-    ctx.events.append({'type': 'consult', 'page': a['page'], 'steps': steps, 'tools': tools_used, 'ok': not cannot})
+    got = subrun.run_sub(ctx, target, q, state=state, steps=CONSULT_STEPS, chars=CONSULT_CHARS,
+                         label=f'{SCREEN_LABEL[a["page"]]} assistant')
+    for k in ('in', 'out'):
+        ctx.sub_usage[k] = ctx.sub_usage.get(k, 0) + got['usage'][k]
+    answer, tools_used, steps = got['answer'], got['tools'], got['steps']
+    ctx.events.append({'type': 'consult', 'page': a['page'], 'steps': steps, 'tools': tools_used, 'ok': got['ok']})
     return ({'page': a['page'], 'answer': answer, 'tools_used': tools_used},
             f'→ {SCREEN_LABEL[a["page"]]} answered ({steps} step{"" if steps == 1 else "s"})')
 
