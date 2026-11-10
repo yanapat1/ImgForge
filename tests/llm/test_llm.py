@@ -16,6 +16,13 @@ pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 OPENAI_KEY, ANTHROPIC_KEY, GEMINI_KEY = 'sk-openai-secret-123', 'sk-ant-secret-456', 'AIza-gemini-secret-789'
 REPLY = {'text': 'Hello there, this is the fake model.'}     # what the fake models answer to a non-test prompt
+
+
+@pytest.fixture(autouse=True)
+def _default_reply():
+    """Tests here set REPLY; other test files serve fake_app too and expect its default answer."""
+    yield
+    REPLY['text'] = 'Hello there, this is the fake model.'
 SEEN = {}                                                    # last request body per kind
 
 
