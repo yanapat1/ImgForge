@@ -223,6 +223,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     `<div class="chat-log" id="${uid}-log" role="log" aria-live="polite" aria-relevant="additions"></div>` +
     `<div class="chat-hist hidden" id="${uid}-hist" role="dialog" aria-label="Chat history"></div>` +
     '<div class="chat-composer">' +
+    `<button type="button" class="chat-jump" data-ca="jump" hidden>${icon('chev-d')}<span>Jump to latest</span></button>` +
     '<div class="chat-forced hidden"></div>' +
     '<div class="chat-hint" aria-live="polite" hidden></div>' +
     `<textarea id="${esc(inputId)}" rows="1" placeholder="${esc(opts.placeholder || 'Ask or tell…  / for commands')}" aria-label="Message the assistant" ` +
@@ -231,7 +232,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     '<button type="button" class="primary icon-btn chat-send" data-ca="send"></button></div></div>';
   const q = <T extends Element = HTMLElement>(sel: string): T => root.querySelector<T>(sel) as T;
   const headEl = q('.chat-head'), logEl = q('.chat-log'), histEl = q('.chat-hist'), chipsEl = q('.chat-chips'),
-    hintEl = q('.chat-hint'), sendEl = q<HTMLButtonElement>('.chat-send'), forcedEl = q('.chat-forced');
+    hintEl = q('.chat-hint'), sendEl = q<HTMLButtonElement>('.chat-send'), forcedEl = q('.chat-forced'), jumpEl = q<HTMLButtonElement>('.chat-jump');
   const ta = q<HTMLTextAreaElement>('textarea');
   const modelPop = document.createElement('div');
   modelPop.id = `${uid}-model`;
@@ -580,21 +581,54 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     return live.html + md(text.slice(cut + 2));
   }
 
+  // Follow mode: the log keeps to the newest message while it grows, until the user scrolls up; then it stays where
+  // it is and "Jump to latest" floats over the composer (it says "New reply" when more came in meanwhile).
+  // Following again: scroll back to the end, press the button, or send a message.
   const nearBottom = (): boolean => logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
   const toBottom = (): void => { logEl.scrollTop = logEl.scrollHeight; };
+  const S = { follow: true, fresh: false, top: 0 };
+  function renderJump(): void {
+    jumpEl.hidden = S.follow;
+    jumpEl.classList.toggle('fresh', S.fresh);
+    const t = S.fresh ? 'New reply' : 'Jump to latest';
+    const span = jumpEl.querySelector('span');
+    if (span && span.textContent !== t) span.textContent = t;
+  }
+  function setFollow(v: boolean): void {
+    const fresh = v ? false : S.fresh;
+    if (v === S.follow && fresh === S.fresh) return;
+    S.follow = v;
+    S.fresh = fresh;
+    renderJump();
+  }
+  /** back to the newest message and following it (a send, a new / opened chat, the button) */
+  function follow(smooth = false): void {
+    setFollow(true);
+    if (smooth && logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight > 4) logEl.scrollTo({ top: logEl.scrollHeight, behavior: 'smooth' });
+    else toBottom();
+  }
+  // a scroll up (wheel, drag, keys, touch) leaves follow mode; reaching the end again re-enters it. Content that
+  // shrinks clamps the log at its end, so a fold never counts as the user scrolling away.
+  logEl.addEventListener('scroll', () => {
+    const top = logEl.scrollTop;
+    if (nearBottom()) setFollow(true);
+    else if (top < S.top - 1) setFollow(false);
+    S.top = top;
+  }, { passive: true });
 
   function renderLog(): void {
     const has = C.turns.length > 0;
     logEl.innerHTML = has ? C.turns.map(entryHTML).join('') : emptyHTML();
     logEl.classList.toggle('is-empty', !has);
-    toBottom();
+    if (S.follow) toBottom();
   }
 
   /** Show turns from index `from` on (pushed at the end): appended to the log, the earlier ones stay as they are. */
   function appendLog(from: number): void {
     if (from === 0 || logEl.classList.contains('is-empty') || logEl.querySelectorAll(':scope > .chat-turn').length !== from) { renderLog(); return; }
     logEl.insertAdjacentHTML('beforeend', C.turns.slice(from).map((e, k) => entryHTML(e, from + k)).join(''));
-    toBottom();
+    if (S.follow) toBottom();
+    else if (!S.fresh) { S.fresh = true; renderJump(); }
   }
 
   // a turn the user is selecting text in is not replaced (that would drop the selection mid-copy): it is held and
@@ -625,7 +659,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       held.add(i);
       return;
     }
-    const stick = nearBottom();
+    const stick = S.follow;
+    const h0 = logEl.scrollHeight;
     // the open activity list scrolls on its own: keep its place, or follow the newest step when it was at the end
     const list = el.querySelector<HTMLElement>('.ct-act-list');
     const listTop = list ? list.scrollTop : 0, listEnd = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 24;
@@ -635,6 +670,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const next = logEl.querySelector<HTMLElement>(`.chat-turn[data-ti="${i}"] .ct-act-list`);
     if (next) next.scrollTop = listEnd ? next.scrollHeight : listTop;
     if (stick) toBottom();
+    else if (!S.fresh && i === C.live && logEl.scrollHeight > h0) { S.fresh = true; renderJump(); }
   }
 
   function scheduleTurn(i: number): void {
@@ -767,6 +803,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     C.open.clear();
     C.picks.clear();
     C.edits.clear();
+    setFollow(true);
     renderAll();
     void peekLimit();
     ta.focus();
@@ -802,6 +839,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       C.blocked = null;
       C.open.clear();
       closeHist();
+      setFollow(true);
       renderAll();
       if (!quiet) ta.focus();
       return true;
@@ -1006,6 +1044,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const ac = new AbortController();
     C.busy = ac;
     C.blocked = null;
+    setFollow(true);
     renderSend();
     C.turns.push({ role: 'user', text, label: o.label ?? null, voice: false });
     C.turns.push(newTurn(performance.now(), o.kind ?? null));
@@ -1365,6 +1404,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (C.busy) return;
     const text = ta.value.trim();
     if (!text) return;
+    follow();
     ta.value = '';
     autosize();
     void send(text);
@@ -1377,6 +1417,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const id = el.dataset['id'] ?? '';
     switch (el.dataset['ca']) {
       case 'send': submit(); break;
+      case 'jump': follow(true); break;
       case 'stop': stop(); break;
       case 'fold': {
         const key = el.dataset['key'] ?? '';

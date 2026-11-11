@@ -392,3 +392,15 @@
 .chat .ct-compact-l { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .chat .ct-compact-b { padding: var(--s2) var(--s3); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r);
   font-size: var(--fs-xs); color: var(--text-muted); max-height: 360px; overflow-y: auto; }
+
+/* ---- "Jump to latest": floats over the composer while the user reads older messages (ts/core/chat.ts follow mode) */
+.chat-composer { position: relative; }
+.chat .chat-jump { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 2; height: 28px; padding: 0 12px;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-muted); box-shadow: var(--shadow-2);
+  font-weight: 600; white-space: nowrap; }
+.chat .chat-jump[hidden] { display: none; }
+.chat .chat-jump:hover { color: var(--text); border-color: var(--accent-line); }
+.chat .chat-jump.fresh { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.chat .chat-jump.fresh .ico { color: inherit; }
+@media (prefers-reduced-motion: no-preference) { .chat .chat-jump:not([hidden]) { animation: chat-jump-in var(--t-fast, 0.15s) var(--ease, ease-out); } }
+@keyframes chat-jump-in { from { opacity: 0; transform: translate(-50%, 4px); } }

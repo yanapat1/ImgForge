@@ -40,6 +40,9 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   skills, retries); its header says what the model is doing now. It opens by itself while the answer runs and folds
   to "Worked 12s · 3 tools" when it is done (a click on its header keeps it open or closed). Change cards and
   questions to the user stay in the answer.
+- **Scrolling**: the chat follows the newest message while an answer streams. Scrolling up stops that, so older
+  messages can be read in peace; a "Jump to latest" button (it reads "New reply" when more arrived meanwhile) or
+  scrolling back to the end follows again. Sending a message always jumps to the end.
 - **Your own instructions and skills**: Settings › Prompts & Skills (per account; added to, never replacing, the
   built-in rules). **Plugins** add skills, prompts and web (HTTP) tools.
 - **Web search** levels: off, public only, technical, full; organisation "special words" are never sent.
