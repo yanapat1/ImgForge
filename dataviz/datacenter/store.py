@@ -1269,12 +1269,14 @@ class S3View:
         except Exception:  # noqa: BLE001
             return None
 
-    def pull(self, dest, progress=None, cancelled=None, workers=16, rel='', mirror=False):
+    def pull(self, dest, progress=None, cancelled=None, workers=16, rel='', mirror=False, listed=None):
         """Download every object below the prefix (below its folder `rel` only, written to dest/rel) into folder
         `dest` ("load into local"): an object replaces the local file of the same name unless that file is unchanged
         (same size, and the mtime every download sets to the object's LastModified). Local files S3 does not have
         are kept, unless `mirror`: then, once the listing completed, they are removed (`removed`). Downloads start
         while the (parallel) listing runs; an object of BIG bytes or more is fetched in parallel ranges.
+        listed(key, size, last_modified): called for every object listed (the download's manifest,
+        datacenter/cloudiff.Manifest).
         -> {downloaded, skipped, bytes (downloaded), size (of every object), failed, total, removed}."""
         progress = progress or (lambda *a, **k: None)
         stop = cancelled or (lambda: False)
@@ -1346,6 +1348,8 @@ class S3View:
                     size, lm = int(o.get('Size') or 0), o.get('LastModified')
                     n['size'] += size
                     ts = lm.timestamp() if lm is not None else None
+                    if listed is not None:
+                        listed(k, size, ts)
                     if _unchanged(dest / k, size, ts):
                         n['skipped'] += 1
                         n['done'] += 1

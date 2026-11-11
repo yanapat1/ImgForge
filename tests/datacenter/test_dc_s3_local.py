@@ -249,3 +249,79 @@ def test_reload_lists_s3_again(dc, s3_server, s3_bucket):
     client.put_object(Bucket=bucket, Key='new/a.jpg', Body=jpeg_bytes())
     assert 'new' not in {e['name'] for e in _ls(c, bid)['entries']}      # the listing is kept for a minute
     assert 'new' in {e['name'] for e in _ls(c, bid, refresh=1)['entries']}
+
+
+def _compare(c, bid, path='', verify=False, **kw):
+    r = c.post(f'/api/dc/buckets/{bid}/compare', json={'path': path, 'verify': verify})
+    assert r.status_code == 200, r.text
+    j = wait_job(c, r.json()['job_id'])
+    assert j['status'] == 'done', j
+    g = c.get(f'/api/dc/buckets/{bid}/compare', params={'path': path, 'limit': 1000, **kw})
+    assert g.status_code == 200, g.text
+    return g.json()
+
+
+def test_compare_the_local_copy_with_the_cloud(dc, s3_server, s3_bucket):
+    """Every file of a downloaded folder against S3: what the user added, deleted or edited here, and what S3 added,
+    changed or removed since the download; verify compares the bytes (MD5 = a single-part ETag); paging + filters."""
+    import os
+    c = dc
+    bid, client, bucket = _link(c, s3_server, s3_bucket)
+    assert c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats'}).json()['ready'] is False
+    r = c.post(f'/api/dc/buckets/{bid}/compare', json={'path': 'cats'})
+    assert r.status_code == 400 and 'nothing of' in r.json()['detail']          # nothing downloaded yet
+    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
+    same = _compare(c, bid, 'cats')
+    assert same['counts']['same'] == 3 and same['total'] == 3
+
+    time.sleep(3.2)                                     # past the download's end (and the clock slack)
+    root = next(x for x in c.get('/api/dc/buckets').json() if x['id'] == bid)
+    local = os.path.join(c.ctx.cfg['storage']['data_root'], '.s3')
+    copy = next(os.path.join(local, d) for d in os.listdir(local))
+    with open(os.path.join(copy, 'cats', 'im0.jpg'), 'ab') as f:         # edited here
+        f.write(b'x')
+    os.remove(os.path.join(copy, 'cats', 'im1.jpg'))                     # deleted here
+    with open(os.path.join(copy, 'cats', 'mine.txt'), 'w') as f:         # added here
+        f.write('note')
+    client.put_object(Bucket=bucket, Key='cats/im2.jpg', Body=jpeg_bytes() + b'v2')   # changed in S3
+    client.put_object(Bucket=bucket, Key='cats/new.jpg', Body=jpeg_bytes())           # new in S3
+    got = _compare(c, bid, 'cats')
+    st = {x['path']: x['status'] for x in got['rows']}
+    assert st == {'cats/im0.jpg': 'edited_local', 'cats/im1.jpg': 'deleted_local', 'cats/mine.txt': 'added_local',
+                  'cats/im2.jpg': 'changed_cloud', 'cats/new.jpg': 'new_cloud'}, st
+    assert got['counts']['same'] == 0 and got['total'] == 5 and got['complete'] and root['kind'] == 's3'
+    # rows come by status (what the user did first), then path; filters and paging
+    assert [x['status'] for x in got['rows']][:3] == ['added_local', 'deleted_local', 'edited_local']
+    f = c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'status': 'new_cloud,changed_cloud'}).json()
+    assert [x['path'] for x in f['rows']] == ['cats/new.jpg', 'cats/im2.jpg'] and f['matched'] == 2
+    p = c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'offset': 4, 'limit': 1}).json()
+    assert p['matched'] == 5 and len(p['rows']) == 1 and p['offset'] == 4
+    assert c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'q': 'mine'}).json()['matched'] == 1
+    assert c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'status': 'nope'}).status_code == 400
+
+    # an S3 deletion after the download; a file re-saved with the same bytes reads as same with verify
+    client.delete_object(Bucket=bucket, Key='cats/new.jpg')
+    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])   # update
+    time.sleep(3.2)
+    client.delete_object(Bucket=bucket, Key='cats/im2.jpg')
+    os.utime(os.path.join(copy, 'cats', 'im1.jpg'))                       # touched, same bytes
+    got = _compare(c, bid, 'cats', verify=True)
+    st = {x['path']: (x['status'], x.get('verified')) for x in got['rows']}
+    assert st['cats/im2.jpg'][0] == 'removed_cloud' and st['cats/im1.jpg'] == ('same', 'match'), st
+    assert st['cats/im0.jpg'][0] == 'same'                                   # the update took S3's version
+    assert got['verify'] is True
+    # the ◆ assistant reads the same comparison (read-only tool); refresh compares again
+    from dataviz.llm import tools
+    out, line = tools.run(c.user, 'compare_s3_local', {'bucket': bid, 'path': 'cats', 'status': ['removed_cloud']})
+    assert [f['path'] for f in out['files']] == ['cats/im2.jpg'] and out['counts']['removed_cloud'] == 1
+    assert 'in S3' in line and tools.TOOLS['compare_s3_local'].kind == 'read'
+    out, _ = tools.run(c.user, 'compare_s3_local', {'bucket': 'zoo', 'path': 'cats', 'refresh': True})
+    assert out['total'] == got['total'] and not out['verify']
+
+
+def test_compare_needs_an_s3_link(dc, tmp_path):
+    c = dc
+    (tmp_path / 'm').mkdir()
+    b = c.post('/api/dc/buckets', json={'name': 'm', 'kind': 'managed'}).json()
+    r = c.post(f"/api/dc/buckets/{b['id']}/compare", json={'path': ''})
+    assert r.status_code == 400 and 'S3 link' in r.json()['detail']

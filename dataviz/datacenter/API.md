@@ -38,6 +38,9 @@ create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_buck
 update_bucket(user, bid, name=None, mode=None)                 -> Bucket (+ job_id when switched to local)
 fetch_local(user, bid, paths, mirror=False)                    -> {job_id, paths, result}   # stream: download folders (again = update)
 check_local(user, bid)                                         -> {job_id}   # compare the downloaded folders with S3
+compare_cloud(user, bid, path='', verify=False)                -> {job_id, path}   # local copy vs S3, file by file
+compare_result(user, bid, path='', status=None, q='', offset=0, limit=200)   -> {ready, running, counts, rows ...}
+    # status: added_local deleted_local edited_local both new_cloud changed_cloud removed_cloud same (cloudiff.py)
 drop_local(user, bid, paths)                                   -> {removed}  # delete their local copy
 sync(user, bid)                                                -> {job_id, result}   # s3 + mode local: (re)pull
     # result {downloaded, skipped (unchanged), bytes, failed: [{path, error}] (first 50), total}
@@ -189,6 +192,8 @@ All routes are under `/api/dc`. JSON goes in and out; errors are `{detail}`. Per
 | POST | `/api/dc/buckets/{bid}/sync` | sync |
 | POST | `/api/dc/buckets/{bid}/local` `{paths, mirror}` | fetch_local (data.manage) |
 | POST | `/api/dc/buckets/{bid}/local/check` | check_local (data.manage) |
+| POST | `/api/dc/buckets/{bid}/compare` | compare_cloud `{path, verify?}` -> {job_id, path} (a viewer may: read-only) |
+| GET | `/api/dc/buckets/{bid}/compare` | compare_result `?path&status=a,b&q&offset&limit` -> summary + one page of files |
 | POST | `/api/dc/buckets/{bid}/local/remove` `{paths}` | drop_local (data.manage) |
 | GET | `/api/dc/buckets/{bid}/export?path=` | export (a streamed zip) |
 | GET | `/api/dc/buckets/{bid}/export/check?path=` | export_check |

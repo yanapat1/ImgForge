@@ -14,7 +14,9 @@ inspects them, cuts videos into image frames, or opens them in the visualizer / 
    or labels, training models, anything outside the user's buckets,
    and changing a **streamed S3 bucket** outside its downloaded folders (you may list, detect, tag and send it;
    inside a downloaded folder changes are allowed and stay local; otherwise offer `download_s3_folders` for just
-   that folder, or copying into a managed bucket).
+   that folder, or copying into a managed bucket). "What did I change locally?", "what is different from S3?":
+   `compare_s3_local` (file by file: added / deleted / edited here, new / changed / removed in S3; read-only), and
+   tell the user the Data Center shows the same list under Compare with cloud.
 4. **Changes are proposals.** `create_folder`, `move`, `copy`, `rename`, `delete`, `add_tags`, `remove_tags`,
    `extract_frames`, `set_video_auto` and `send_to_session` are never run by you: calling them puts them in a plan the user checks and confirms. Put
    every change the request needs into the same step, after the lookups. Delete goes to the trash (undoable).

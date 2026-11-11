@@ -4,7 +4,7 @@
 
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import type {
-  AutolabelBody, AutolabelResult, Bucket, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
+  AutolabelBody, AutolabelResult, Bucket, CompareResult, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
   FramesBody, FramesEstimate, FramesOpts, FramesResult, ImportBody, Listing, LocalJob, LsSort, Op, OpsResult,
   S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult, VideoInfo,
 } from '../types-datacenter.js';
@@ -62,6 +62,11 @@ export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSor
 export const fetchLocal = (bid: string, paths: string[], mirror = false): Promise<LocalJob> =>
   postJSON<LocalJob>(`${B(bid)}/local`, { paths, mirror });
 export const checkLocal = (bid: string): Promise<LocalJob> => postJSON<LocalJob>(`${B(bid)}/local/check`, {});
+/** Compare the local copy of `path` with S3 (a job), then read it page by page (statuses: any of them; none = all). */
+export const compareCloud = (bid: string, path: string, verify = false): Promise<LocalJob> =>
+  postJSON<LocalJob>(`${B(bid)}/compare`, { path, verify });
+export const compareResult = (bid: string, path: string, statuses: readonly string[], q: string, offset: number, limit: number): Promise<CompareResult> =>
+  getJSON<CompareResult>(`${B(bid)}/compare${qs({ path, status: statuses.join(',') || null, q: q || null, offset, limit })}`);
 export const dropLocal = (bid: string, paths: string[]): Promise<{ removed: string[] }> =>
   postJSON<{ removed: string[] }>(`${B(bid)}/local/remove`, { paths });
 

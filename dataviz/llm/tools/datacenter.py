@@ -234,6 +234,41 @@ def _s3_check(user, a):
     return res, f'{b["name"]}: comparing the downloaded folders with S3 (a job)'
 
 
+COMPARE_WAIT_S = 90
+
+
+def _s3_compare(user, a):
+    """Compare (or re-compare) the local copy of a folder with S3 and read one page of the files."""
+    import time
+    b = resolve_bucket(user, a['bucket'])
+    svc = _svc()
+    path = a.get('path') or ''
+    sts = [s for s in (a.get('status') or []) if s]
+    cur = svc.compare_result(user, b['id'], path, sts, '', 0, 1)
+    if a.get('refresh') or not (cur['ready'] or cur['running']):
+        svc.compare_cloud(user, b['id'], path, verify=bool(a.get('verify')))
+    t0 = time.time()
+    while True:
+        got = svc.compare_result(user, b['id'], path, sts, a.get('q') or '', a.get('offset') or 0,
+                                 min(int(a.get('limit') or MAX_LIST), MAX_LIST))
+        if not got['running'] or time.time() - t0 > COMPARE_WAIT_S:
+            break
+        time.sleep(0.25)
+    if not got['ready']:
+        return {'path': got['path'], 'running': got['running'],
+                'note': 'still comparing: call again in a moment'}, f'{b["name"]}: comparing with S3…'
+    keep = ('path', 'counts', 'total', 'matched', 'offset', 'finished_at', 'verify', 'complete', 'running')
+    out = {k: got.get(k) for k in keep}
+    out['files'] = [{'path': r['path'], 'status': r['status'], **({'verified': r['verified']} if r.get('verified') else {}),
+                     'local_size': (r['local'] or {}).get('size'), 'cloud_size': (r['cloud'] or {}).get('size')}
+                    for r in got.get('rows') or []]
+    out['statuses'] = got['labels']
+    c = got['counts']
+    mine = sum(c[k] for k in ('added_local', 'deleted_local', 'edited_local', 'both'))
+    cloud = sum(c[k] for k in ('new_cloud', 'changed_cloud', 'removed_cloud'))
+    return out, f'{b["name"]}/{path}: {mine} changed here, {cloud} in S3, {c["same"]} same'
+
+
 def _s3_drop(user, a):
     b = resolve_bucket(user, a['bucket'])
     res = _svc().drop_local(user, b['id'], a['paths'])
@@ -475,6 +510,18 @@ _add(Tool('download_s3_folders', 'Download folders (or files) of a STREAMED S3 b
 _add(Tool('check_s3_local', 'Compare the downloaded folders of a streamed S3 bucket with S3 now: new / changed / '
                             'removed files per folder (a job; list_folder then shows local_copy.state outdated).',
           _obj({'bucket': BUCKET}, ['bucket']), False, _s3_check, s3_ok=True))
+_add(Tool('compare_s3_local', 'File by file, the local copy of a folder of an S3 bucket against S3 (a streamed link\'s '
+                              'downloaded folder, or a bucket loaded into local): what the user added, deleted or '
+                              'edited here, and what is new, changed or removed in S3 since the download. Read-only. '
+                              'Reuses the last comparison unless refresh; verify also compares the bytes (MD5 vs '
+                              'ETag; slow). The user sees the same in the Data Center (Compare with cloud).',
+          _obj({'bucket': BUCKET, 'path': PATH,
+                'status': {'type': 'array', 'items': {'type': 'string', 'enum': ['added_local', 'deleted_local',
+                           'edited_local', 'both', 'new_cloud', 'changed_cloud', 'removed_cloud', 'same']},
+                           'description': 'only these statuses (none: every file, the changes first)'},
+                'q': S('only paths containing this'), 'offset': I('first file'), 'limit': I('files (max 50)', 1, 50),
+                'refresh': B('compare again now'), 'verify': B('with refresh: also compare the contents')},
+               ['bucket']), False, _s3_compare, s3_ok=True))
 _add(Tool('remove_local_copy', 'Delete the downloaded copy of folders of a streamed S3 bucket (S3 is not touched; they '
                                'stream again). Only whole downloaded folders (or folders holding them).',
           _obj({'bucket': BUCKET, 'paths': A('downloaded folders')}, ['bucket', 'paths']), True, _s3_drop,

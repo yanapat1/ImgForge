@@ -64,6 +64,20 @@ export interface LocalRow {
 }
 export interface LocalJob { job_id: number | null; paths?: string[] }
 
+/** One file of a local copy compared with S3 (dataviz/datacenter/cloudiff.py) */
+export type CompareStatus = 'added_local' | 'deleted_local' | 'edited_local' | 'both' | 'new_cloud' | 'changed_cloud' | 'removed_cloud' | 'same';
+export interface CompareRow {
+  path: string; status: CompareStatus; local: { size: number; mtime: number } | null; cloud: { size: number; mtime: number } | null;
+  /** with Verify contents: the bytes match S3 (match), differ, or cannot be checked (a multipart upload) */
+  verified?: 'match' | 'differ' | 'multipart';
+}
+/** GET /api/dc/buckets/{bid}/compare: ready false until the folder was compared once */
+export interface CompareResult {
+  ready: boolean; running: boolean; path: string; labels: Record<CompareStatus, string>;
+  counts?: Record<CompareStatus, number>; total?: number; finished_at?: number | null; verify?: boolean; complete?: boolean;
+  matched?: number; offset?: number; rows?: CompareRow[];
+}
+
 /** An S3 link is streamed (read-only) or loaded into an editable local folder (re-synced on demand). */
 export type S3Mode = 'stream' | 'local';
 

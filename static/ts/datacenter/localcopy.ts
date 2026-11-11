@@ -117,7 +117,13 @@ export async function checkNow(bid: string): Promise<void> {
 /** The strip lines of a streamed bucket: offline banner, still listing, this folder's local copy. */
 export function localStrip(): string {
   const L = D.listing, bid = D.bid ?? '';
-  if (!L || !streamed(bucketOf(bid))) return '';
+  const b = bucketOf(bid);
+  if (L && b?.kind === 's3' && b.local_ready) {       // the whole bucket loaded into local: compare it with S3
+    return `<div class="dc-strip-row dc-localrow"><span class="lbl">${icon('hdd')}<b>Local copy of S3</b></span>` +
+      `<span class="muted">${b.synced_at ? `synced ${esc(timeAgo(b.synced_at))}` : ''}</span><span class="grow"></span>` +
+      `<button type="button" class="ghost sm" data-act="compare-cloud">${icon('cloud')}Compare with cloud</button></div>`;
+  }
+  if (!L || !streamed(b)) return '';
   const out: string[] = [];
   if (L.offline) {
     out.push(`<div class="dc-banner" role="status">${icon('warn-c')}<span><b>S3 is unreachable.</b> Showing only the downloaded folders` +
@@ -133,7 +139,8 @@ export function localStrip(): string {
     out.push(`<div class="dc-strip-row dc-localrow${old ? ' old' : ''}"><span class="lbl">${icon(old ? 'refresh' : 'hdd')}<b>${old ? 'S3 differs from this folder' : 'Local copy'}</b></span>` +
       (L.writable ? '<span class="faint">editable · changes stay local</span>' : '') +
       `<span class="muted">${old && diffText(h) ? `${esc(diffText(h))} · ` : ''}${when}${h.bytes ? ` · ${fmtSize(h.bytes)}` : ''}${h.path !== D.path ? ` · in ${esc(h.path || 'the whole bucket')}` : ''}</span><span class="grow"></span>` +
-      (L.offline ? '' : `<button type="button" class="ghost sm" data-act="check-local">${icon('refresh')}Check for updates</button>` +
+      (L.offline ? '' : `<button type="button" class="ghost sm" data-act="compare-cloud" title="Every file: what you changed here and what changed in S3">${icon('cloud')}Compare with cloud</button>` +
+        `<button type="button" class="ghost sm" data-act="check-local">${icon('refresh')}Check for updates</button>` +
         `<button type="button" class="${old ? 'primary' : 'ghost'} sm" data-act="update-local">${icon('download')}Update</button>`) + '</div>');
   }
   return out.join('');

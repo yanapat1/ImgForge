@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import db, zones
 from ..auth import tiers as vtiers
-from . import formats, s3dir, s3list, store, tags as vtags, video
+from . import cloudiff, formats, s3dir, s3list, store, tags as vtags, video
 from .store import DCError
 
 __all__ = ['DCError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
@@ -630,8 +630,13 @@ def sync(user, bid):
         before = _videos_in(dest) if auto else None
         view = _s3(r)
         try:
-            res = view.pull(dest, job.progress if job is not None else None,
-                            (lambda: job.cancelled.is_set()) if job is not None else None)
+            with cloudiff.Manifest(_manifest(r), '') as m:     # what S3 held: Compare with cloud reads it
+                res = view.pull(dest, job.progress if job is not None else None,
+                                (lambda: job.cancelled.is_set()) if job is not None else None, listed=m.add)
+                if job is not None and job.cancelled.is_set():
+                    raise _Stopped
+        except _Stopped:
+            pass
         finally:
             view.close()
         if job is None or not job.cancelled.is_set():
@@ -1624,10 +1629,16 @@ def fetch_local(user, bid, paths, mirror=False):
                 def prog(d=None, t=None, stage=None, extra=None, p=p, i=i):
                     if job is not None:
                         job.progress(d, t, f'{p or "all"} ({i + 1}/{len(rels)}): {stage}' if stage else None, extra)
-                if p and view.what(p) == 'file':
-                    res = _fetch_file(view, dest, p)
-                else:
-                    res = view.pull(dest, prog, cancelled, rel=p, mirror=mirror)
+                try:
+                    with cloudiff.Manifest(_manifest(r), p) as m:     # what S3 held: Compare with cloud reads it
+                        if p and view.what(p) == 'file':
+                            res = _fetch_file(view, dest, p, m.add)
+                        else:
+                            res = view.pull(dest, prog, cancelled, rel=p, mirror=mirror, listed=m.add)
+                        if cancelled():
+                            raise _Stopped
+                except _Stopped:
+                    pass
                 for k in ('downloaded', 'skipped', 'bytes', 'removed'):
                     out[k] += res[k]
                 out['failed'] += res['failed']
@@ -1658,10 +1669,20 @@ def fetch_local(user, bid, paths, mirror=False):
                                   public_result=True, owner=user['id']).id, 'paths': rels, 'result': None}
 
 
-def _fetch_file(view, dest, rel):
+class _Stopped(Exception):
+    """A cancelled download: its manifest rows are dropped (what it listed is not the whole folder)."""
+
+
+def _manifest(r):
+    return cloudiff.manifest_path(store.data_root(_cfg()), r.id)
+
+
+def _fetch_file(view, dest, rel, listed=None):
     """Download one object as a pull would (mtime = its LastModified, so it reads as unchanged later)."""
     h = view.client.head_object(Bucket=view.bucket, Key=view.key(rel))
     size, lm = int(h.get('ContentLength') or 0), h.get('LastModified')
+    if listed is not None:
+        listed(rel, size, lm.timestamp() if lm is not None else None)
     dst = os.path.join(dest, rel)
     if store._unchanged(dst, size, lm.timestamp() if lm is not None else None):
         return {'downloaded': 0, 'skipped': 1, 'bytes': 0, 'size': size, 'removed': 0, 'failed': [], 'total': 1}
@@ -1758,6 +1779,76 @@ def check_local(user, bid):
     return {'job_id': _check_job(user, r)}
 
 
+# ---------------------------------------------------------------- local copy vs. the cloud (datacenter/cloudiff.py)
+def _compare_targets(r, rel):
+    """(dest, [(folder, end of its download)]) to compare for `rel` of an S3 link with a local copy."""
+    if r.local_copy:                                  # the whole bucket loaded into local (mode local)
+        return r.local_root, [(rel, _epoch(r.synced_at) or 0.0)]
+    rows = _local_rows(r.id)
+    c = _cover(rows, rel)
+    picked = [c] if c is not None else [x for p, x in rows.items() if not rel or p.startswith(rel + '/')]
+    if not picked:
+        raise DCError(f'nothing of “{rel or r.name}” is downloaded: there is no local copy to compare with S3')
+    if any(x['state'] == 'fetching' or not x['fetched_at'] for x in picked):
+        raise DCError('a download of this folder is still running: compare when it is done', 409)
+    return _local_root(r), [(rel if c is not None else x['path'], float(x['fetched_at'])) for x in picked]
+
+
+def _compare_file(r, rel):
+    return cloudiff.db_path(store.data_root(_cfg()), r.id, rel)
+
+
+def compare_cloud(user, bid, path='', verify=False):
+    """Compare the local copy of folder `path` of an S3 link with S3: every file added, deleted or edited here,
+    and new, changed or removed in S3 since the download. verify: also compare the bytes (MD5 against the ETag).
+    A dc-lane job dc-compare:<bid>:<hash> -> {job_id, path}; compare_result reads it."""
+    r = _row(user, bid)
+    if r.link != 's3':
+        raise DCError('only an S3 link has a cloud copy to compare with')
+    rel = store.clean_rel(path)
+    dest, targets = _compare_targets(r, rel)
+    out = _compare_file(r, rel)
+    key = f'dc-compare:{r.id}:{out.stem}'
+    if _busy(key):
+        raise DCError('this folder is being compared already', 409)
+
+    def fn(job=None):
+        cancelled = (lambda: job.cancelled.is_set()) if job is not None else None
+        prog = (lambda n, stage: job.progress(n, None, stage)) if job is not None else None
+        view = _s3(r)
+        try:
+            return {'path': rel, **cloudiff.run(view, dest, targets, out, verify=bool(verify), cancelled=cancelled,
+                                                progress=prog, manifest=_manifest(r))}
+        finally:
+            view.close()
+
+    jobs = _jobs()
+    if jobs is None:
+        return {'job_id': None, 'path': rel, 'result': fn()}
+    return {'job_id': jobs.submit(key, f'compare {rel or r.name} with S3', fn, lane=LANE, public_result=True,
+                                  owner=user['id']).id, 'path': rel, 'result': None}
+
+
+def compare_result(user, bid, path='', status=None, q='', offset=0, limit=200):
+    """The last comparison of `path` -> {ready, running, path, counts, total, finished_at, verify, complete,
+    matched, offset, rows: [{path, status, local: {size, mtime}, cloud: {size, mtime}, verified?}]}; ready false
+    when it was never compared. status: one status or several, comma-separated."""
+    r = _row(user, bid)
+    if r.link != 's3':
+        raise DCError('only an S3 link has a cloud copy to compare with')
+    rel = store.clean_rel(path)
+    out = _compare_file(r, rel)
+    running = _busy(f'dc-compare:{r.id}:{out.stem}')
+    if not out.exists():
+        return {'ready': False, 'running': running, 'path': rel, 'labels': cloudiff.LABEL}
+    sts = [s for s in (status.split(',') if isinstance(status, str) else status or ()) if s]
+    bad = [s for s in sts if s not in cloudiff.RANK]
+    if bad:
+        raise DCError(f'unknown status {bad[0]!r}: one of {", ".join(cloudiff.STATUSES)}')
+    return {'ready': True, 'running': running, 'path': rel, 'labels': cloudiff.LABEL, **cloudiff.summary(out),
+            **cloudiff.page(out, sts, str(q or '')[:200], offset, limit)}
+
+
 def drop_local(user, bid, paths):
     """Remove the local copy of downloaded folders `paths` (or of every downloaded folder below them); S3 is not
     touched and they stream again. -> {removed: [paths]}"""
@@ -1784,6 +1875,7 @@ def drop_local(user, bid, paths):
                     e.unlink(missing_ok=True)
             with db.begin() as c:
                 c.execute(text('DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path = :p'), {'b': r.id, 'p': x})
+            cloudiff.forget(store.data_root(_cfg()), r.id, x)
             gone.append(x)
     s3dir.invalidate(r.id)
     return {'removed': gone}

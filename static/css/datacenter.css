@@ -745,3 +745,43 @@ html[data-dock="open"] #datacenter { container-type: inline-size; }
 .dc-fr-strip figure { margin: 0; min-width: 0; }
 .dc-fr-strip img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-sm); background: var(--media-fill); }
 .dc-fr-strip figcaption { font-size: var(--fs-2xs); color: var(--text-faint); text-align: center; }
+
+/* ---- Compare with cloud (static/ts/datacenter/compare.ts): status cards, tabs, a virtual list of fixed rows */
+.ui-dlg.wide.dc-cmp-dlg { width: min(1040px, 100%); }
+.dc-cmp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin: 8px 0; }
+.dc-cmp-card { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 6px; align-items: center; height: auto;
+  padding: 6px 8px; text-align: left; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-2); color: var(--text-muted); }
+.dc-cmp-card .ico { grid-row: span 2; width: 16px; height: 16px; }
+.dc-cmp-card b { font-size: var(--fs-lg); color: var(--text); line-height: 1.1; }
+.dc-cmp-card span { font-size: var(--fs-2xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-cmp-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.dc-cmp-bar { display: flex; align-items: flex-end; gap: 8px; }
+.dc-cmp-bar input { width: 220px; margin-bottom: 4px; }
+.dc-cmp-head, .dc-cmp-row { display: grid; grid-template-columns: 26px 170px minmax(0, 1fr) 170px 170px; align-items: center; gap: 8px; padding: 0 8px; }
+.dc-cmp-head { height: 28px; font-size: var(--fs-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); border-bottom: 1px solid var(--border); }
+.dc-cmp-list { position: relative; height: min(52vh, 460px); overflow: auto; overscroll-behavior: contain; contain: strict; }
+.dc-cmp-inner { position: relative; width: 100%; }
+.dc-cmp-row { position: absolute; left: 0; right: 0; height: 30px; font-size: var(--fs-xs); border-bottom: 1px solid var(--border); }
+.dc-cmp-row.on { background: var(--accent-soft); }
+.dc-cmp-row.ghost { color: var(--text-faint); }
+.dc-cmp-p { min-width: 0; }
+.dc-cmp-p button.link { max-width: 100%; height: auto; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; cursor: pointer; }
+.dc-cmp-p button.link:hover { color: var(--accent-text); text-decoration: underline; }
+.dc-cmp-s { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-cmp-st { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.dc-cmp-st .ico, .dc-cmp-card .ico { flex: none; }
+.dc-cmp-st span { overflow: hidden; text-overflow: ellipsis; }
+.dc-cmp-empty { position: absolute; inset: 40% 0 auto; text-align: center; }
+.dc-cmp-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--fs-xs); }
+.dc-cmp-meta { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+/* yours (local side) warm, the cloud's cool, both red, same quiet */
+.s-added_local .ico, .s-edited_local .ico, .s-deleted_local .ico, .dc-cmp-st.s-added_local, .dc-cmp-st.s-edited_local, .dc-cmp-st.s-deleted_local { color: var(--warn-text); }
+.s-new_cloud .ico, .s-changed_cloud .ico, .s-removed_cloud .ico, .dc-cmp-st.s-new_cloud, .dc-cmp-st.s-changed_cloud, .dc-cmp-st.s-removed_cloud { color: var(--accent-text); }
+.s-both .ico, .dc-cmp-st.s-both { color: var(--danger-text); }
+.s-same .ico, .dc-cmp-st.s-same { color: var(--ok-text); }
+.dc-cmp-row.s-deleted_local .dc-cmp-p, .dc-cmp-row.s-removed_cloud .dc-cmp-p { text-decoration: line-through; text-decoration-color: var(--text-faint); }
+@media (max-width: 760px) {
+  .dc-cmp-head, .dc-cmp-row { grid-template-columns: 22px 120px minmax(0, 1fr); }
+  .dc-cmp-head > :nth-child(n+4), .dc-cmp-row > :nth-child(n+4) { display: none; }
+}

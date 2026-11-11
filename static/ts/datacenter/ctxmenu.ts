@@ -105,7 +105,8 @@ function folderMenu(): string {
       item({ act: 'export-to', ico: 'upload', label: 'Export to…', hint: 'S3, FTP, SFTP' })],
     sendItems(bid, [D.path]),
     s3 ? (here
-      ? [item({ act: 'update-local', ico: 'download', label: 'Update from S3…' }), item({ act: 'check-local', ico: 'refresh', label: 'Check for updates' })]
+      ? [item({ act: 'update-local', ico: 'download', label: 'Update from S3…' }), item({ act: 'check-local', ico: 'refresh', label: 'Check for updates' }),
+        item({ act: 'compare-cloud', ico: 'cloud', label: 'Compare with cloud…', hint: 'every file' })]
       : [D.path ? item({ act: 'ctx-dl', ico: 'hdd', label: 'Download this folder to local', data: { bid, paths: D.path }, hint: 'editable copy' }) : null]) : [],
   ]);
 }

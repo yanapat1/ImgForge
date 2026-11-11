@@ -19,6 +19,7 @@ from conftest import TEST_SECRET_KEY, make_jpeg
 from test_page_smoke import ADMIN, _HEADERS, _HTTP, _JAR, _browser, _free_port, _get, _make, _send
 
 sync_api = pytest.importorskip('playwright.sync_api')
+pytest_plugins = ['conftest_io']             # s3_server, s3_bucket (the compare test)
 
 HERE = Path(__file__).resolve().parents[2]
 
@@ -280,3 +281,53 @@ def test_data_center_extract_frames(server, tmp_path):
     ls = _get(f'{server}/api/dc/buckets/{bid}/ls?path=walk-frames/images')
     assert ls['total'] == 30
     assert not errors, '\n'.join(errors)
+
+
+def test_compare_with_cloud_dialog(server, tmp_path, s3_server, s3_bucket):
+    """A downloaded S3 folder: the strip's Compare with cloud lists every file by status in a virtual list; the cards
+    count them, a click filters; it only reads."""
+    client, bucket = s3_bucket
+    for i in range(40):
+        client.put_object(Bucket=bucket, Key=f'cats/im{i:02d}.jpg', Body=make_jpeg_bytes(i))
+    conn = _send(f'{server}/api/connections', {**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'})
+    b = _send(f'{server}/api/dc/buckets', {'name': 'zoo', 'kind': 's3', 'connection_id': conn['id'], 's3_bucket': bucket, 'prefix': ''})
+    bid = b['id']
+    job = _send(f'{server}/api/dc/buckets/{bid}/local', {'paths': ['cats']})['job_id']
+    for _ in range(200):
+        if _get(f'{server}/api/jobs/{job}').get('status') in ('done', 'error'):
+            break
+        time.sleep(0.1)
+    time.sleep(3.2)
+    client.put_object(Bucket=bucket, Key='cats/new.jpg', Body=make_jpeg_bytes(99))         # new in S3
+
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 950})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?data={bid}&path=cats')
+        page.wait_for_selector('[data-act="compare-cloud"]', timeout=30000)
+        page.click('[data-act="compare-cloud"]')
+        page.wait_for_selector('.dc-cmp-card.s-same b:has-text("40")', timeout=30000)
+        assert page.locator('.dc-cmp-card.s-new_cloud b').inner_text() == '1'
+        page.click('.dc-cmp-tabs [data-f="cloud"]')
+        page.wait_for_selector('.dc-cmp-row.s-new_cloud:has-text("cats/new.jpg")')
+        page.click('.dc-cmp-tabs [data-f="all"]')
+        page.wait_for_selector('.dc-cmp-row.s-same')
+        n = page.locator('.dc-cmp-row').count()
+        assert 0 < n < 41, 'only the rows in view (+ a few) are drawn'
+        page.click('.dc-cmp-card.s-same')
+        page.fill('[data-cmp="q"]', 'im3')
+        page.wait_for_function("document.querySelectorAll('.dc-cmp-row:not(.ghost)').length === 10")
+        page.screenshot(path=str(tmp_path / 'compare.png'))
+        browser.close()
+    assert not errors, errors
+
+
+def make_jpeg_bytes(i):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new('RGB', (16, 12), (i * 2 % 255, 80, 120)).save(buf, 'JPEG')
+    return buf.getvalue()
