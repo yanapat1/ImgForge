@@ -193,10 +193,21 @@ register(Tool('list_favorites', 'The user\'s favorite tables in their own catego
 register(Tool('describe_table', 'One table: columns, types, keys, descriptions. Wide tables come in pages (offset).',
               _obj({'table': S('table name'), 'schema': S('schema'), 'offset': I('first column'), **CONN}, ['table']),
               False, _describe, **_R))
+def _ask_query(ctx, clean):
+    """A query against the user's database asks first unless the chat is in mode auto."""
+    return getattr(ctx, 'mode', 'ask') != 'auto'
+
+
+def _query_line(b, a):
+    sql = ' '.join(str(a.get('sql') or '').split())
+    return f'Run on {a["connection"]}: {sql[:240]}' if a.get('connection') else f'Run: {sql[:260]}'
+
+
 register(Tool('run_query', 'Run one read-only query. Returns its size, columns and statistics plus result_id, never the rows. '
-                           'Then use query_result. Changes are refused here.',
+                           'Then use query_result. Changes are refused here. In mode ask the user approves (and may '
+                           'edit) each query first; in auto it runs at once.',
               _obj({'sql': S('the query, in this database\'s syntax'), 'name': S('a short name'), **CONN}, ['sql']),
-              False, _run_query, **_R))
+              False, _run_query, _query_line, confirm_if=_ask_query, confirm_risk='query', **_R))
 register(Tool('query_result', 'Answer from a saved result without touching the database: SQL over the table named `result` '
                               '(DuckDB syntax). Without row permission it must aggregate (GROUP BY, COUNT, SUM ...).',
               _obj({'result_id': S('from run_query'), 'sql': S('SELECT ... FROM result ...')}, ['result_id', 'sql']),

@@ -24,6 +24,10 @@ def run_sub(ctx, role, question, *, state=None, scope=None, steps=6, chars=1500,
     sub = react.prepare(ctx.user, role, p, react.history([{'role': 'user', 'text': question}]), scope or {}, opts,
                         state=state, app=ctx.app, limit=ctx.limit)
     sub.tools = {k: t for k, t in sub.tools.items() if (t.risk == 'read' and k not in NO_NESTING) or k == 'cannot_do'}
+    # nobody sees a side run's confirm card: a database query (asked first unless the chat is in auto) is left out
+    sub.ctx.mode = getattr(ctx, 'mode', 'ask')
+    if sub.ctx.mode != 'auto':
+        sub.tools = {k: t for k, t in sub.tools.items() if not (t.confirm_if and t.confirm_risk == 'query')}
     sub.ctx.depth = 1
     sub.ctx.roles_on = getattr(ctx, 'roles_on', None)
     if getattr(ctx, 'cancel', None) is not None:          # the user's Stop ends the side runs too

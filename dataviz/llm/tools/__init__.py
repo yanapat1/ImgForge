@@ -16,7 +16,8 @@ turn enders and the planner checklist, 'plugin' a user's HTTP tool) and a `risk`
     control  answered by the user or the engine (ask_user, cannot_do, todo, submit_plan)
 
 A read tool may also have `confirm_if(ctx, clean)`: when it says True the call is shown on a confirm card (risk
-'web') like a change, in every mode, and the user may edit its arguments before it runs.
+`confirm_risk`: 'web' for web search, 'query' for a database query in mode ask / plan) like a change, and the user
+may edit its arguments before it runs.
 
 The two agents never share data tools: the visual agent's domains do not include 'data', so a Data Center call
 from it is an unknown tool, checked on the server. `run` takes (user, args) for the data tools (the CLI shares
@@ -57,6 +58,7 @@ class Tool:
     ctx: bool = False                       # run / check take the agent context instead of the user
     confirm_if: object = None               # (ctx, clean args) -> True: this read call waits for the user first
                                             # (risk 'web' on the confirm card: web search's "Ask before each search")
+    confirm_risk: str = 'web'               # the risk such a confirm card shows: web | query (a database query)
     kind: str = field(init=False, default='read')
 
     def __post_init__(self):
@@ -187,7 +189,8 @@ def catalog(tools=None):
     return '\n'.join(rows)
 
 
-RISK_LINE = (('read', 'Run at once (read-only)'), ('change', 'Changes (confirmed as the mode says)'),
+RISK_LINE = (('read', 'Run at once (read-only)'), ('query', 'Database reads (the user approves each in ask / plan; at once in auto)'),
+             ('change', 'Changes (confirmed as the mode says)'),
              ('danger', 'Always confirmed by the user'), ('ui', 'Page actions (Apply button, or applied in auto)'),
              ('run', 'Page runs (they start work; confirmed in ask)'), ('control', 'Turn control'))
 
@@ -198,7 +201,8 @@ def risk_card(tools):
     system prompt does not repeat them (tools.catalog is still the table the CLI and SKILL.md show)."""
     by = {}
     for t in tools.values():
-        by.setdefault(t.risk, []).append(f'`{t.name}`')
+        k = 'query' if t.confirm_if and t.confirm_risk == 'query' else t.risk
+        by.setdefault(k, []).append(f'`{t.name}`')
     return '\n'.join(f'- {label}: {", ".join(by[k])}' for k, label in RISK_LINE if by.get(k))
 
 

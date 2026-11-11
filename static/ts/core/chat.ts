@@ -61,6 +61,8 @@ const IC_CLOCK = svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/
 const IC_PIN = svg('<path d="M9 4h6l-1 5 3 3v1.5H7V12l3-3z"/><path d="M12 13.5V20"/>');
 const okIcon = (ok: boolean | null): string => (ok === null ? '<span class="ct-spin" aria-label="running"></span>'
   : icon(ok ? 'check-c' : 'x-c').replace('class="ico"', `class="ico ${ok ? 'ct-okc' : 'ct-badc'}"`));
+/** the argument a confirm card lets the user edit: a database query's SQL, a web search's query */
+const editField = (a: { risk: string }): string => (a.risk === 'query' ? 'sql' : 'query');
 const badge = (risk: string): string => `<span class="ct-badge r-${esc(risk)}">${esc(risk)}</span>`;
 const since = (t0: number): string => `<span class="num" data-since="${t0}">${fmtSince(Math.max(0, performance.now() - t0))}</span>`;
 
@@ -439,6 +441,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const res = new Map(b.results.map((r) => [r.id, r]));
     const danger = b.actions.some((a) => a.risk === 'danger');
     const allWeb = b.actions.length > 0 && b.actions.every((a) => a.risk === 'web');
+    const allQuery = b.actions.length > 0 && b.actions.every((a) => a.risk === 'query');
     const nOn = b.actions.filter((a) => picks.has(a.id)).length;
     const status = pending ? `<span class="ct-wait"><i aria-hidden="true"></i>waiting for you · ${since(b.t0)}</span>`
       : b.state === 'sent' ? '<span class="ct-dim">sent…</span>'
@@ -449,18 +452,21 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       const r = res.get(a.id);
       const mark = r ? (r.declined ? `<span class="ct-dim ct-decl">${icon('x')}</span>` : okIcon(r.ok))
         : `<input type="checkbox" data-cc="pick" data-ti="${ti}" data-bi="${bi}" value="${esc(a.id)}"${picks.has(a.id) ? ' checked' : ''}${pending ? '' : ' disabled'} aria-label="${esc(a.summary || a.tool)}">`;
-      const qv = C.edits.get(`${b.id}:${a.id}`) ?? str(a.args['query']);
-      const isWebQ = pending && typeof a.args['query'] === 'string' && (a.risk === 'web' || /web|search/.test(a.tool));
+      const qv = C.edits.get(`${b.id}:${a.id}`) ?? str(a.args[editField(a)]);
+      const isWebQ = pending && a.risk !== 'query' && typeof a.args['query'] === 'string' && (a.risk === 'web' || /web|search/.test(a.tool));
+      const isSql = pending && a.risk === 'query' && typeof a.args['sql'] === 'string';
       return `<div class="ct-act r-${esc(a.risk)}${picks.has(a.id) || !pending ? '' : ' off'}"><label>${mark}<code class="ct-fn">${esc(a.tool)}</code>${badge(a.risk)}` +
         `<span class="ct-act-sum">${esc(a.summary || argsShort(a.args))}</span></label>` +
         (r ? `<span class="ct-res${r.ok || r.declined ? '' : ' bad'}">${esc(r.declined ? 'declined' : r.summary)}</span>${undoBtn(r.undoId, r.undone, r.ok && !r.declined, a.args)}` : '') +
-        (isWebQ ? `<input class="ct-q" type="text" data-ci="q" data-cid="${esc(b.id)}" data-aid="${esc(a.id)}" value="${esc(qv)}" aria-label="Search query (edit before approving)">` : '') + '</div>';
+        (isWebQ ? `<input class="ct-q" type="text" data-ci="q" data-cid="${esc(b.id)}" data-aid="${esc(a.id)}" value="${esc(qv)}" aria-label="Search query (edit before approving)">` : '') +
+        (isSql ? `<textarea class="ct-q ct-sql" rows="${Math.min(8, Math.max(2, qv.split('\n').length))}" spellcheck="false" data-ci="q" data-cid="${esc(b.id)}" data-aid="${esc(a.id)}" aria-label="The query (edit before approving)">${esc(qv)}</textarea>` : '') + '</div>';
     }).join('');
     return `<div class="ct-confirm ${b.state.replace(' ', '-')}${danger ? ' danger' : ''}" role="group" aria-label="Changes waiting for your confirmation">` +
-      `<div class="ct-confirm-h">${icon(danger ? 'alert' : allWeb ? 'globe' : 'lock')}<b>${allWeb ? (pending ? `Search the web? (${b.actions.length})` : 'Web search')
+      `<div class="ct-confirm-h">${icon(danger ? 'alert' : allWeb ? 'globe' : 'lock')}<b>${allQuery ? (pending ? (b.actions.length === 1 ? 'Run this query?' : `Run ${b.actions.length} queries?`) : plural(b.actions.length, 'query'))
+        : allWeb ? (pending ? `Search the web? (${b.actions.length})` : 'Web search')
         : `${esc(plural(b.actions.length, 'change'))}${pending ? (b.actions.length === 1 ? ' needs' : ' need') + ' your OK' : ''}`}</b>${status}</div>` +
       `<div class="ct-acts">${rows}</div>` +
-      (pending ? `<div class="ct-confirm-f"><span class="ct-dim">${danger ? 'Dangerous changes are marked red' : allWeb ? 'Edit the query before it is sent' : 'Nothing changes until you approve'}</span>` +
+      (pending ? `<div class="ct-confirm-f"><span class="ct-dim">${danger ? 'Dangerous changes are marked red' : allWeb ? 'Edit the query before it is sent' : allQuery ? 'Read-only: edit the SQL before it runs (auto mode runs queries at once)' : 'Nothing changes until you approve'}</span>` +
         `<button type="button" data-ca="reject" data-ti="${ti}" data-bi="${bi}">Reject</button>` +
         `<button type="button" class="${danger ? 'danger' : 'primary'}" data-ca="approve" data-ti="${ti}" data-bi="${bi}"${nOn ? '' : ' disabled'}>${icon('check')}Approve ${nOn}</button></div>` : '') +
       (b.state === 'expired' ? `<div class="ct-confirm-f"><span class="ct-dim">This confirmation expired: nothing changed</span><button type="button" data-ca="ask-again" data-ti="${ti}" data-bi="${bi}">${icon('refresh')}Ask again</button></div>` : '') + '</div>';
@@ -1374,7 +1380,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const edits: Record<string, Record<string, unknown>> = {};
     for (const a of b.actions) {
       const v = C.edits.get(`${b.id}:${a.id}`);
-      if (v !== undefined && yes.includes(a.id) && v !== str(a.args['query'])) edits[a.id] = { query: v };
+      const f = editField(a);
+      if (v !== undefined && yes.includes(a.id) && v.trim() && v !== str(a.args[f])) edits[a.id] = { [f]: v };
     }
     try {
       await postJSON('api/llm/agent/confirm', { confirm_id: b.id, approve: yes, reject: no, ...(Object.keys(edits).length ? { edits } : {}) });
@@ -1584,7 +1591,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   });
 
   root.addEventListener('input', (e) => {
-    const el = e.target instanceof HTMLInputElement ? e.target : null;
+    const el = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement ? e.target : null;
     if (el?.dataset['ci'] === 'q') C.edits.set(`${el.dataset['cid']}:${el.dataset['aid']}`, el.value);
     else if (el?.dataset['ci'] === 'h-q') {
       clearTimeout(H.qTimer);

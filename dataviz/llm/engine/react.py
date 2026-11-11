@@ -105,6 +105,7 @@ class Ctx:
     depth: int = 0                  # 1 inside a consult: no consult of a consult
     sub_usage: dict = field(default_factory=lambda: {'in': 0, 'out': 0})   # tokens of consults / sub-agents, added to the turn
     sub_model: str = ''             # the sub-agents' model (same provider); '' = the run's own
+    mode: str = 'ask'               # the run's mode (ask | auto | plan): a database query asks first unless auto
 
 
 @dataclass
@@ -260,7 +261,7 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     fitted, est = budget.fit(provider['kind'], sys_all, [], msgs, lim)
     run_id = uuid.uuid4().hex[:12]
     ctx = Ctx(user=user, role=role.name, scope=scope if isinstance(scope, dict) else {}, skills=sk, state=state,
-              app=app, web_level=opts['web'], run_id=run_id, provider=provider, limit=lim)
+              app=app, web_level=opts['web'], run_id=run_id, provider=provider, limit=lim, mode=opts['mode'])
     p = dict(provider)
     if opts['profile'] == 'small':
         p['temperature'] = min(float(p.get('temperature') or 0.1), 0.1)
@@ -613,7 +614,7 @@ def events(run):
                 clean, err = tools.validate(t, args)
                 if not err and t.confirm_if(run.ctx, clean):
                     summary = t.preview(None, clean) if t.preview else f'{name} {json.dumps(clean, ensure_ascii=False)}'
-                    pending.append((c, t, clean, summary, 'web'))
+                    pending.append((c, t, clean, summary, t.confirm_risk))
                     results.append(None)
                     continue
             # read: run at once
@@ -686,7 +687,7 @@ def events(run):
                 if a['id'] in decision['approve']:
                     o = yield from _run_change(run, pc[0], pc[1], pc[2], pc[3], pc[4])
                     outcome[pc[0]['id']] = o
-                    changed |= pc[4] != 'web'
+                    changed |= pc[4] not in ('web', 'query')
                     res_list.append({'id': a['id'], 'ok': o['ok'], 'summary': o['summary'], **o['extras']})
                 else:
                     outcome[pc[0]['id']] = {'ok': False, 'content': 'the user declined this action: do not do it '
