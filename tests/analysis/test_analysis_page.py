@@ -681,6 +681,41 @@ def test_favorites(server, target):  # noqa: F811
     assert not errors, errors
 
 
+def test_ai_access_from_the_table_menu(server, target):  # noqa: F811
+    """Right-click a table › ◆ AI access: Edit rows marks it ✎ and is kept on the server; Change structure asks first;
+    Read only clears it."""
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('response', lambda r: errors.append(f'{r.status} {r.url}') if r.status >= 400 and '/api/' in r.url else None)
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        row = '.an-tn[data-pre="t"][data-name="orders"]'
+        try:
+            page.click('.an-tn:has-text("sales")')
+            page.click(f'.an-tn:has-text("{target["db"]}")')
+            page.wait_for_selector(row, timeout=10000)
+            page.click(row, button='right')
+            page.click('#an-menu [data-m="ai-access"][data-g="rows"]')
+            page.wait_for_selector(f'{row} .an-aiacc.rows')
+            got = page.evaluate("fetch('api/analysis/ai-access').then((r) => r.json())")
+            assert [(x['t'], x['level']) for x in got['items']] == [('orders', 'rows')]
+            page.click(row, button='right')                       # structure asks first; Cancel keeps Edit rows
+            page.click('#an-menu [data-m="ai-access"][data-g="schema"]')
+            page.click('.ui-dlg [data-dlg="cancel"]')
+            assert page.locator(f'{row} .an-aiacc.rows').count() == 1
+            page.click(row, button='right')
+            page.click('#an-menu [data-m="ai-access"][data-g="read"]')
+            page.wait_for_selector(f'{row} .an-aiacc', state='detached')
+        finally:
+            page.evaluate("fetch('api/me/prefs', {method: 'PUT', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'dataviz'}, body: JSON.stringify({prefs: {analysis_ai_access: null}})})")
+            page.wait_for_timeout(300)
+            browser.close()
+    assert not errors, errors
+
+
 def test_objects_panel_resizes(server, target):  # noqa: F811
     """Drag the Objects panel's edge to see long names; it is remembered; a double-click fits the longest name."""
     long = 'customer_lifetime_value_by_region_and_quarter_snapshot'

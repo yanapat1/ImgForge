@@ -18,6 +18,7 @@ import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
 import { addTable, builderContext, builderDown, builderKey, builderMove, builderUp, builderWheel, renderBuilder } from './builder.js';
 import { gridClick, gridFit, gridPointer } from './grid.js';
 import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout } from './query.js';
+import { aiBadge, loadAiAccess } from './aiaccess.js';
 import { F_ACTIONS, favDrop, favMenu, isFav, loadFavs, renderFavs } from './favorites.js';
 import { A, api, clampExp, EXP_MIN, EXP_W, expMax, newTab, tableKey } from './state.js';
 import type { Tab, Workspace } from './state.js';
@@ -108,7 +109,7 @@ export function tableRow(conn: string, db: string, t: { schema: string; name: st
   const k = tableKey(conn, db, t.schema, t.name), ok = `${pre}|${k}`;
   const info = A.info.get(k), on = isFav(k);
   const data = `data-conn="${esc(conn)}" data-db="${esc(db)}" data-schema="${esc(t.schema)}" data-name="${esc(t.name)}"`;
-  return `<div class="an-trow"><button type="button" class="an-tn" draggable="true" style="padding-left:${pad}px" data-act="table" ${data} data-pre="${pre}" title="${esc(db ? `${db} · ${full}` : full)}&#10;Click for its columns, double-click to query it, right-click for favorites">${tw(ok)}${label ?? `<span class="lbl">${esc(full)}</span>`}</button>` +
+  return `<div class="an-trow"><button type="button" class="an-tn" draggable="true" style="padding-left:${pad}px" data-act="table" ${data} data-pre="${pre}" title="${esc(db ? `${db} · ${full}` : full)}&#10;Click for its columns, double-click to query it, right-click for favorites and AI access">${tw(ok)}${label ?? `<span class="lbl">${esc(full)}</span>`}${aiBadge({ c: conn, d: db, s: t.schema, t: t.name })}</button>` +
     `<button type="button" class="icon-btn ghost xs an-star${on ? ' on' : ''}" data-act="fav" ${data} aria-pressed="${on}" aria-label="${on ? 'Remove from' : 'Add to'} favorites: ${esc(full)}" title="${on ? 'Remove from' : 'Add to'} favorites">${icon(on ? 'star-on' : 'star')}</button></div>` +
     (A.open.has(ok) ? (info ? info.columns.map((c) => `<div class="an-tcol" style="padding-left:${pad + 20}px" title="${esc(c.description)}"><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}<span class="faint an-n">${esc(c.type)}</span></div>`).join('') : '<div class="an-tload">Loading…</div>') : '');
 }
@@ -392,6 +393,7 @@ export async function start(): Promise<void> {
   const [{ sources }, { sessions }] = await Promise.all([api.sources(), api.sessions()]);
   A.sources = sources;
   loadFavs();
+  void loadAiAccess().then(() => { if (document.getElementById('an-explorer')) renderTree(); });     // the ✎ / ⚙ marks
   const wanted = new URLSearchParams(location.search).get('analysis');
   const s = sessions.find((x) => x.id === wanted) ?? sessions[0] ?? await api.newSession('My analysis');
   A.sid = s.id;

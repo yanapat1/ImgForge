@@ -8,6 +8,7 @@ import { esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { promptDialog } from '../views/dialog.js';
 import { chip, renderTree, tableRow } from './app.js';
+import { aiMenu, setAiLevel } from './aiaccess.js';
 import { menuItem, openMenu } from './menu.js';
 import { A, tableKey } from './state.js';
 
@@ -166,6 +167,7 @@ export function favMenu(el: HTMLElement, at?: { x: number; y: number }): void {
   }
   h += item('new', 'New category…', 'folder-plus');
   if (cur) h += `<div class="sep"></div>${item('remove', 'Remove from Favorites', 'x', '', 'danger')}`;
+  h += `<div class="sep"></div>${aiMenu(f)}`;
   if (!at) { const r = el.getBoundingClientRect(); at = { x: r.left + 24, y: r.bottom }; }
   openMenu(h, el, menuAct, at);
 }
@@ -173,7 +175,8 @@ export function favMenu(el: HTMLElement, at?: { x: number; y: number }): void {
 async function menuAct(m: string, g: string): Promise<void> {
   const f = menuFor;
   const i = F.groups.indexOf(menuGroup);
-  if (m === 'add' && f) { if (put(f, g)) save(); }
+  if (m === 'ai-access' && f) await setAiLevel(f, g, renderTree);
+  else if (m === 'add' && f) { if (put(f, g)) save(); }
   else if (m === 'new') await newGroup(f);
   else if (m === 'remove' && f) { drop(keyOf(f)); save(); }
   else if (m === 'rename') await renameGroup(menuGroup);

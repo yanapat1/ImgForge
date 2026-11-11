@@ -28,7 +28,7 @@ from sqlglot import exp, parse_one
 
 from .. import db
 from ..auth import audit, tiers
-from . import favorites
+from . import aiaccess, favorites
 from ..core import logging as vlog
 from . import adapters, classify, joins, querymodel, spool
 from . import forecast as forecast_mod
@@ -811,10 +811,13 @@ def favorites_for_ai(user, name=None):
 def describe_for_ai(user, cid, database, schema, table, offset=0):
     d = describe(user, cid, database, schema, table)
     size, offset = _ai_cfg('ai_table_columns', 200), max(0, int(offset or 0))
+    kind = _conn(user, cid)['kind']
+    lv = aiaccess.level_of(aiaccess.load(user_prefs(user)), cid, database or '',
+                           schema or aiaccess.DEFAULT_SCHEMA.get(kind, ''), table)
     cols = d['columns'][offset:offset + size]
     return _cap({'table': table, 'description': d['description'], 'rows_estimate': d['rows'], 'total_columns': len(d['columns']),
                  'offset': offset, 'columns': [{k: c.get(k) for k in ('name', 'type', 'key', 'description') if c.get(k)} for c in cols],
-                 'keys': d['keys'][:40]})
+                 'keys': d['keys'][:40], 'ai_access': aiaccess.LABEL[lv]})
 
 
 def _result_card(rid, res, status):
@@ -857,8 +860,40 @@ def run_for_ai(user, sid, cid, database, sql, name, wait_s):
     return _result_card(last['id'], last, run.status)
 
 
+def ai_access(user):
+    """The tables whose AI access the user raised above Read only: [{c, d, s, t, level}]."""
+    return {'items': aiaccess.items(user_prefs(user)), 'levels': [{'id': k, 'label': aiaccess.LABEL[k]} for k in aiaccess.LEVELS]}
+
+
+def set_ai_access(user, cid, database, schema, table, level):
+    """Set what the assistant may change in one table (read | rows | schema); only the user does this."""
+    _conn(user, str(cid or ''))
+    from ..server.routes.me import _put_prefs
+    try:
+        new = aiaccess.put(user_prefs(user), cid, database, schema, table, level)
+    except aiaccess.AccessError as e:
+        raise AnalysisError(str(e)) from None
+    _put_prefs(user['id'], {aiaccess.KEY: new})
+    audit.log('analysis.ai_access', target=str(cid), user_id=user['id'],
+              meta={'database': database, 'schema': schema, 'table': table, 'level': level})
+    return {'items': new['items']}
+
+
+def ai_access_check(user, sid, cid, database, sql):
+    """AnalysisError (403) when a change of the assistant needs more than the AI access the user gave its tables."""
+    conn = _conn(user, cid)
+    st = _classify(conn, sql, sid)
+    try:
+        aiaccess.gate(aiaccess.load(user_prefs(user)), cid, database or conn.get('database') or '', st, conn['kind'])
+    except aiaccess.AccessError as e:
+        raise AnalysisError(str(e), 403) from None
+    return st
+
+
 def change_for_ai(user, sid, cid, database, sql, wait_s):
-    """Reached only after the user confirmed the card: the engine runs a 'danger' tool only then."""
+    """Reached only after the user confirmed the card: the engine runs a 'danger' tool only then. The tables'
+    AI access is checked again here (the card's SQL may have been edited)."""
+    ai_access_check(user, sid, cid, database, sql)
     token = check(user, sid, cid, database, sql)['confirm']
     pub = start(user, sid, cid, database, sql, token, 'AI change')
     run = _wait(_run(user, pub['id']), wait_s)

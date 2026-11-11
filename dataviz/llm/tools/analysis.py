@@ -114,6 +114,13 @@ def _describe_set(ctx, a):
     return {'ok': True}, f'→ described {a.get("column") or a["table"]}'
 
 
+def _change_check(ctx, a):
+    """Before the confirm card: a change the tables' AI access does not allow goes back to the model."""
+    cid, db = _target(ctx, a)
+    _call(_svc().ai_access_check, ctx.user, _sid(ctx), cid, db, a['sql'])
+    return a, None
+
+
 def _change(ctx, a):
     cid, db = _target(ctx, a)
     got = _call(_svc().change_for_ai, ctx.user, _sid(ctx), cid, db, a['sql'], RUN_WAIT_S)
@@ -235,9 +242,12 @@ register(Tool('set_column_description', 'Save what a column means, after the use
               _obj({'table': S('table'), 'column': S('column; empty = the table itself'), 'schema': S('schema'),
                     'description': S('what it means'), **CONN}, ['table', 'description']), True, _describe_set,
               lambda b, a: f'Describe {a.get("column") or a.get("table")}', domain='analysis', ctx=True))
-register(Tool('run_change', 'Change data or structure, or make a temp table. The user confirms it first, in every mode.',
+register(Tool('run_change', 'Change data or structure, or make a temp table. The user confirms it first, in every mode. '
+                            'Each table has an AI access the user sets: Read only (default: temp tables only), Edit rows '
+                            '(INSERT / UPDATE / DELETE / MERGE), Change structure (+ ALTER / TRUNCATE / DROP TABLE). '
+                            'describe_table shows it; one change per statement, permanent new tables are refused.',
               _obj({'sql': S('the statements'), **CONN}, ['sql']), True, _change, lambda b, a: a.get('sql', '')[:200],
-              domain='analysis', ctx=True, risk='danger'))
+              domain='analysis', ctx=True, risk='danger', check=_change_check))
 register(Tool('read_editor', 'The SQL in the user\'s editor on the open tab, its syntax and the last run\'s error. Call it '
                              'when the user means "my query" or "this SQL".', _obj({}), False, _read_editor, **_R))
 register(Tool('check_sql', 'Check SQL (default: the editor\'s) against the connection\'s syntax: syntax errors with line and '

@@ -204,9 +204,11 @@ def analysis_scope(user, scope):
         out.append('The user allowed row samples for this session.')
     else:
         out.append('Row samples are off: answer from aggregates.')
-    from ...analysis import favorites
-    line = favorites.index_line(favorites.load(service.user_prefs(user)))
-    return ' '.join(out) + (f'\n{line}' if line else '')
+    from ...analysis import aiaccess, favorites
+    prefs = service.user_prefs(user)
+    line = favorites.index_line(favorites.load(prefs))
+    access = aiaccess.index_line(aiaccess.items(prefs), cid)
+    return ' '.join(out) + ''.join(f'\n{x}' for x in (line, access) if x)
 
 
 SCOPES = {'data': data_scope, 'visual': visual_scope, 'analysis': analysis_scope}

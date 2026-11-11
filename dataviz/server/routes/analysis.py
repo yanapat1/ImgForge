@@ -67,6 +67,15 @@ def router(state, ctx):
     def describe(connection: str, table: str, database: str = '', schema: str = '', user=me):
         return _call(service.describe, user, connection, database, schema, table)
 
+    @r.get('/ai-access')
+    def ai_access(user=me):
+        return _call(service.ai_access, user)
+
+    @r.put('/ai-access')
+    def set_ai_access(body: dict = Body(...), user=me):
+        return _call(service.set_ai_access, user, body.get('connection'), body.get('database') or '',
+                     body.get('schema') or '', body.get('table'), body.get('level'))
+
     @r.put('/docs')
     def docs(body: dict = Body(...), user=me):
         return _call(service.set_description, user, body.get('connection'), body.get('database'), body.get('schema'),

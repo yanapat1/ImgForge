@@ -293,3 +293,9 @@ main.an-work { grid-template-columns: none; }
 .an-cast-gl { padding-top: 4px; font-size: var(--fs-xs); color: var(--text-muted); }
 .an-cast .chip { font-family: var(--mono); font-size: var(--fs-xs); }
 @media (max-width: 560px) { .an-cast-grp { grid-template-columns: minmax(0, 1fr); gap: var(--s1); } }
+
+/* ◆ AI access mark on a table whose level the user raised (static/ts/analysis/aiaccess.ts) */
+.an-aiacc { flex: none; margin-left: 4px; font-size: var(--fs-2xs); line-height: 1; padding: 1px 4px; border-radius: 4px; border: 1px solid var(--border-strong); color: var(--text-muted); }
+.an-aiacc.rows { border-color: var(--warn-soft); background: var(--warn-soft); color: var(--warn-text); }
+.an-aiacc.schema { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger-text); }
+.an-menu button .faint { margin-left: 6px; font-size: var(--fs-2xs); }
