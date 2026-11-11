@@ -119,3 +119,53 @@ def test_page_of():
     p = roles.page_of('visual', {'view': {'tab': 'model'}}, {'dataset_id': 'a1', 'name': 'traffic'})
     assert p == {'role': 'visual', 'screen': 'viz', 'label': 'Visualizer · traffic', 'session_id': 'a1', 'tab': 'model'}
     assert roles.page_of('data', {'bucket': 'b1', 'path': 'x/val'})['label'] == 'Data Center · val'
+
+
+def test_regenerate_and_edit_replace_the_rest_of_the_chat(client, monkeypatch, svc):  # noqa: F811
+    """from_seq (a regenerated answer / an edited message): the chat goes on from that message; it and every later
+    one are deleted, the model never sees them, and the session event names the seq the new user message got."""
+    _connect(client, ['data_center'])
+    seen = script(monkeypatch, ('A1', []), ('A2', []), ('A2 again', []), ('B1', []))
+    seq = lambda evs: next(e for e in evs if e['type'] == 'session')['user_seq']  # noqa: E731
+    evs = _lines(client.post('/api/llm/agent/data/chat', json={'text': 'q1'}))
+    assert seq(evs) == 1
+    sid = next(e for e in evs if e['type'] == 'session')['session_id']
+    evs = _lines(client.post('/api/llm/agent/data/chat', json={'text': 'q2', 'session_id': sid}))
+    assert seq(evs) == 3
+    # regenerate the 2nd answer: resend q2 from its seq
+    evs = _lines(client.post('/api/llm/agent/data/chat', json={'text': 'q2', 'session_id': sid, 'from_seq': 3}))
+    assert seq(evs) == 3
+    assert [m['parts'][0]['text'] for m in seen[2]['msgs']] == ['q1', 'A1', 'q2']
+    msgs = client.get(f'/api/llm/sessions/{sid}').json()['messages']
+    assert [(m['seq'], m['text']) for m in msgs] == [(1, 'q1'), (2, 'A1'), (3, 'q2'), (4, 'A2 again')]
+    # edit the first message: everything is replaced
+    _lines(client.post('/api/llm/agent/data/chat', json={'text': 'q1 edited', 'session_id': sid, 'from_seq': 1}))
+    assert [m['parts'][0]['text'] for m in seen[3]['msgs']] == ['q1 edited']
+    msgs = client.get(f'/api/llm/sessions/{sid}').json()['messages']
+    assert [m['text'] for m in msgs] == ['q1 edited', 'B1']
+    assert client.get(f'/api/llm/sessions/{sid}').json()['session']['n_messages'] == 2
+    # bad from_seq / no saved chat
+    for bad in ({'from_seq': 0, 'session_id': sid}, {'from_seq': 'x', 'session_id': sid}, {'from_seq': 1}):
+        assert client.post('/api/llm/agent/data/chat', json={'text': 'x', **bad}).status_code == 400
+
+
+def test_truncate_clears_a_summary_that_covered_the_cut(client):
+    u = client.user
+    sid = sessions.create(u, 'app', {}, 'c')['session']['id']
+    for i in range(1, 7):
+        sessions.append(u, sid, 'user' if i % 2 else 'assistant', f'm{i}')
+    from sqlalchemy import text as sql
+    from dataviz import db
+    with db.begin() as c:
+        c.execute(sql("UPDATE app.llm_sessions SET summary = 'S', summary_seq = 4 WHERE id = :s"), {'s': sid})
+    cx = sessions.context(u, sid, before=5)                  # the cut is after the summary: kept
+    assert cx['summary'] == 'S' and [m['text'] for m in cx['messages']] == []
+    cx = sessions.context(u, sid, before=3)                  # the summary covers the cut: every earlier message
+    assert cx['summary'] is None and [m['text'] for m in cx['messages']] == ['m1', 'm2']
+    assert sessions.truncate(u, sid, 5) == 2
+    assert sessions.context(u, sid)['summary'] == 'S'
+    assert sessions.truncate(u, sid, 3) == 2
+    cx = sessions.context(u, sid)
+    assert cx['summary'] is None and [m['text'] for m in cx['messages']] == ['m1', 'm2']
+    with pytest.raises(sessions.SessionError):
+        sessions.truncate(u, sid, 0)

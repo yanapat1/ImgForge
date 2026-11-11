@@ -404,3 +404,17 @@
 .chat .chat-jump.fresh .ico { color: inherit; }
 @media (prefers-reduced-motion: no-preference) { .chat .chat-jump:not([hidden]) { animation: chat-jump-in var(--t-fast, 0.15s) var(--ease, ease-out); } }
 @keyframes chat-jump-in { from { opacity: 0; transform: translate(-50%, 4px); } }
+
+/* ---- a sent message: Edit / Copy under it on hover; the edit box replaces it (ts/core/chat.ts userHTML) */
+.chat .chat-ucol { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 82%; min-width: 0; }
+.chat .chat-ucol .chat-bubble { max-width: 100%; }
+.chat .chat-uacts { display: flex; gap: 2px; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.chat .chat-turn.user:hover .chat-uacts, .chat .chat-uacts:focus-within { opacity: 1; }
+.chat .chat-uacts button { height: 22px; color: var(--text-faint); }
+.chat[aria-busy="true"] .chat-uacts, .chat[aria-busy="true"] .ct-regen { display: none; }
+.chat .chat-uedit { width: min(100%, 640px); display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--accent-line);
+  border-radius: var(--r-lg); background: var(--surface-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+.chat .chat-uedit textarea { width: 100%; min-height: 60px; max-height: 240px; resize: vertical; border: none; outline: none; background: transparent;
+  color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: 1.45; }
+.chat .chat-uedit-f { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); }
+@media (hover: none) { .chat .chat-uacts { opacity: 1; } }

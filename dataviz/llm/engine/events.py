@@ -7,9 +7,11 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
     context       {used, limit, exact}                       the next provider call's input tokens (the page's
                                                              context ring): after meta and each step; exact = the
                                                              provider's own count, else our estimate
-    session       {session_id, title, removed}               right after meta (saved chats): removed = the chat the
+    session       {session_id, title, removed, user_seq}     right after meta (saved chats): removed = the chat the
                                                              limit soft-deleted for this one {id, title,
-                                                             last_opened_at} or null
+                                                             last_opened_at} or null; user_seq = the seq the user
+                                                             message was stored under (regenerate / edit send it
+                                                             back as from_seq; the answer is user_seq + 1)
     step          {n, max}                                   a provider call starts
     thinking      {text}                                     streamed reasoning (where the provider returns it)
     thinking_end  {ms}

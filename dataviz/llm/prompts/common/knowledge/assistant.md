@@ -34,6 +34,10 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve).
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).
+- **Regenerate / Edit**: every answer has **Regenerate** (answer the same message again) and every sent message
+  has **Edit** on hover (change it, Enter sends, Esc cancels). Either one replaces that message's answer and every
+  message after it, on the page and in the saved chat, so the old branch is gone for good (no versions kept); a
+  summary that covered those messages is dropped too. Not while an answer is running.
 - **Sessions**: each chat is saved; History lists them all, with the page each was last on (20 in all; the one
   not opened longest is removed when a 21st is created; pinned ones are kept). Deleted chats disappear at once.
 - **Activity dropdown** ("Worked"): under each answer, one collapsible list of every step (thinking, reads, searches,

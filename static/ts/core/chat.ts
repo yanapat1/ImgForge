@@ -99,7 +99,7 @@ const DEFAULT_COMMANDS = [
 
 // ================================================================ the component
 
-interface UserEntry { role: 'user'; text: string; label: string | null; voice: boolean }
+interface UserEntry { role: 'user'; text: string; label: string | null; voice: boolean; seq?: number | null }   // seq: its number in the saved chat
 interface NoteEntry { role: 'note'; md: string; level: string }
 interface CustomEntry { role: 'custom'; html: () => string }
 interface ArchiveEntry { role: 'archive'; items: Array<{ role: string; text: string }> }
@@ -196,6 +196,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     forced: [] as string[],
     models: new Map<string, string[] | 'loading' | { err: string }>(),
     open: new Map<string, boolean>(),        // fold state overrides, by block key
+    editing: -1,                             // the user message being edited in place (its turn index)
     picks: new Map<string, Set<string>>(),   // confirm id -> ticked action ids
     edits: new Map<string, string>(),        // `${confirm id}:${action id}` -> edited web query
     sessionsOK: null as boolean | null,
@@ -538,14 +539,29 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       ? `<div class="ct-foot num">${esc([t.meta?.model, t.usage ? `in ${fmtK(t.usage.in)} · out ${fmtK(t.usage.out)}` : '', fmtMs(t.ms),
         t.steps && t.steps > 1 ? plural(t.steps, 'step') : '', t.status === 'stopped' ? 'stopped' : ''].filter(Boolean).join(' · '))}` +
         (words ? `<button type="button" class="ghost ct-mini" data-ca="copy" data-ti="${ti}" title="Copy the answer as Markdown">Copy</button>` : '') +
+        (userBefore(ti) >= 0 ? `<button type="button" class="ghost ct-mini ct-regen" data-ca="regen" data-ti="${ti}" title="Answer this message again: this answer and everything after it are replaced">${icon('refresh')}Regenerate</button>` : '') +
         (t.kind === 'report' && words && !t.err ? `<button type="button" class="ghost ct-mini" data-ca="dl" data-ti="${ti}">${icon('download')}Download .md</button>` : '') + '</div>' : '';
     return `<div class="chat-turn ai ai-msg bot" data-ti="${ti}"><span class="chat-av" aria-hidden="true">${icon('gem')}</span>` +
       `<div class="chat-body">${body}${err}${foot}</div></div>`;
   }
 
+  /** a sent message; Edit (on hover) turns it into a box: sending it replaces it and everything after it */
+  function userHTML(e: UserEntry, ti: number): string {
+    if (C.editing === ti) {
+      return `<div class="chat-turn user editing" data-ti="${ti}"><div class="chat-uedit">` +
+        `<textarea data-ci="uedit" rows="3" aria-label="Edit your message">${esc(e.text)}</textarea>` +
+        `<div class="chat-uedit-f"><span class="ct-dim">Sending replaces this message and every message after it</span><span class="grow"></span>` +
+        `<button type="button" data-ca="uedit-cancel">Cancel</button>` +
+        `<button type="button" class="primary" data-ca="uedit-save" data-ti="${ti}">${icon('send')}Send</button></div></div></div>`;
+    }
+    return `<div class="chat-turn user" data-ti="${ti}"><div class="chat-ucol"><div class="chat-bubble">${e.voice ? icon('mic') : ''}${esc(e.label || e.text)}</div>` +
+      `<div class="chat-uacts"><button type="button" class="ghost ct-mini" data-ca="uedit" data-ti="${ti}" title="Edit this message and answer it again">${icon('edit')}Edit</button>` +
+      `<button type="button" class="ghost ct-mini" data-ca="copy-u" data-ti="${ti}" title="Copy the message">Copy</button></div></div></div>`;
+  }
+
   function entryHTML(e: Entry, ti: number): string {
     switch (e.role) {
-      case 'user': return `<div class="chat-turn user" data-ti="${ti}"><div class="chat-bubble">${e.voice ? icon('mic') : ''}${esc(e.label || e.text)}</div></div>`;
+      case 'user': return userHTML(e, ti);
       case 'ai': return aiHTML(e, ti);
       case 'note': return `<div class="chat-turn note ai-msg bot" data-ti="${ti}"><span class="chat-av" aria-hidden="true">${icon('gem')}</span>` +
         `<div class="chat-body">${e.level === 'err' ? `<div class="status-line err">${icon('alert')}<span>${esc(e.md)}</span></div>` : `<div class="ct-md ct-note">${md(e.md)}</div>`}</div></div>`;
@@ -801,6 +817,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     C.blocked = null;
     C.forced = [];
     C.open.clear();
+    C.editing = -1;
     C.picks.clear();
     C.edits.clear();
     setFollow(true);
@@ -823,7 +840,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (C.busy) stop();
     try {
       const r = await getJSON<SessionDetail>(`api/llm/sessions/${encodeURIComponent(id)}`);
-      C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: m.page?.continued ? continuedLabel(m.text, m.page.label) : null, voice: false } : traceTurn(m)));
+      C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: m.page?.continued ? continuedLabel(m.text, m.page.label) : null, voice: false, seq: m.seq } : traceTurn(m)));
       // a /compact (not in any trace): its divider goes after the last message it covered
       const cov = r.session.summary_seq ?? null;
       const shown = C.turns.some((e) => e.role === 'ai' && e.blocks.some((x) => x.k === 'compact' && x.covered === cov));
@@ -838,6 +855,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       C.delCur = false;
       C.blocked = null;
       C.open.clear();
+      C.editing = -1;
       closeHist();
       setFollow(true);
       renderAll();
@@ -1029,7 +1047,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (rm && typeof rm['id'] === 'string') removedToast({ id: rm['id'], title: str(rm['title']) });
   }
 
-  async function send(text0: string, o: { label?: string; kind?: string; raw?: boolean; extra?: Record<string, unknown> } = {}): Promise<void> {
+  async function send(text0: string, o: { label?: string; kind?: string; raw?: boolean; extra?: Record<string, unknown>; fromSeq?: number } = {}): Promise<void> {
     const text = text0.trim();
     if (!text || C.busy) return;
     if (!o.raw) {
@@ -1056,6 +1074,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     // the server keeps the history: session_id continues a chat, none starts one (a 'session' event names it)
     const body: Record<string, unknown> = { text, scope: opts.scope(), mode: mode(), effort: effort(), web: web() };
     if (C.sid) body['session_id'] = C.sid;
+    if (C.sid && o.fromSeq != null) body['from_seq'] = o.fromSeq;     // regenerate / edit: the chat goes on from there
     if (think()) body['think'] = think();
     if (C.prefs.provider_id) body['model'] = { provider_id: C.prefs.provider_id, model: C.prefs.model ?? '' };
     if (C.forced.length) body['skills'] = C.forced;
@@ -1069,7 +1088,12 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         if (!isRec(v) || typeof v['type'] !== 'string') return;
         const ev: ChatEvent = { ...v, type: v['type'], _t: performance.now() };
         if (ev.type === 'ping') return;
-        if (ev.type === 'session') { onSessionEvent(ev); return; }
+        if (ev.type === 'session') {
+          const u = C.turns[idx - 1];
+          if (u?.role === 'user' && typeof ev['user_seq'] === 'number') u.seq = ev['user_seq'];     // regenerate / edit go on from it
+          onSessionEvent(ev);
+          return;
+        }
         if (ev.type === 'meta') C.runId = strOrNull(ev['run_id']);
         apply(ev);
         sideEffects(idx, ev);
@@ -1387,12 +1411,51 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     renderTurn(ti);
   }
 
+  /** the user message an answer replies to (-1: none, e.g. a compaction divider) */
+  function userBefore(ti: number): number {
+    for (let i = ti - 1; i >= 0; i--) { const e = C.turns[i]; if (e?.role === 'user') return i; if (e?.role === 'ai') return -1; }
+    return -1;
+  }
+
+  /** Regenerate / edit / retry: the chat goes on from user message `ui` with `text`; it and every later turn are
+   *  replaced, on the page and in the saved chat (from_seq), so the model never sees the old branch. */
+  function rebranch(ui: number, text: string, label: string | null = null): void {
+    const u = C.turns[ui];
+    if (C.busy || !u || u.role !== 'user' || !text.trim()) return;
+    if (C.sid && u.seq == null) { toast('That message was never saved, so it cannot be answered again. Send it as a new message.', 'err'); return; }
+    C.turns.splice(ui);
+    for (const k of [...C.open.keys()]) if (Number(k.replace(/^a\./, '').split('.')[0]) >= ui) C.open.delete(k);
+    for (const i of [...held]) if (i >= ui) held.delete(i);
+    C.editing = -1;
+    renderLog();
+    const o: { raw: boolean; label?: string; fromSeq?: number } = { raw: true };
+    if (label) o.label = label;
+    if (u.seq != null) o.fromSeq = u.seq;
+    void send(text, o);
+  }
+
   function retry(ti: number): void {
-    if (C.busy) return;
-    const u = C.turns[ti - 1];
-    if (!u || u.role !== 'user') return;
-    C.turns.splice(ti - 1, 2);
-    void send(u.text, u.label ? { label: u.label, raw: true } : { raw: true });
+    const ui = userBefore(ti), u = C.turns[ui];
+    if (u?.role === 'user') rebranch(ui, u.text, u.label);
+  }
+
+  function startEdit(ti: number): void {
+    if (C.busy || C.turns[ti]?.role !== 'user') return;
+    const was = C.editing;
+    C.editing = ti;
+    if (was >= 0 && C.turns[was]) renderTurn(was);
+    renderTurn(ti);
+    const box = logEl.querySelector<HTMLTextAreaElement>(`.chat-turn[data-ti="${ti}"] textarea`);
+    if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); box.style.height = `${Math.min(240, box.scrollHeight + 2)}px`; }
+  }
+  function endEdit(save: boolean): void {
+    const ti = C.editing;
+    if (ti < 0) return;
+    const box = logEl.querySelector<HTMLTextAreaElement>(`.chat-turn[data-ti="${ti}"] textarea`);
+    const text = box?.value.trim() ?? '';
+    if (save && text) { rebranch(ti, text); return; }
+    C.editing = -1;
+    renderTurn(ti);
   }
 
   async function copy(text: string, btn: HTMLElement): Promise<void> {
@@ -1468,6 +1531,11 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         break;
       }
       case 'retry': retry(ti); break;
+      case 'regen': retry(ti); break;
+      case 'uedit': startEdit(ti); break;
+      case 'uedit-save': endEdit(true); break;
+      case 'uedit-cancel': endEdit(false); break;
+      case 'copy-u': { const u = C.turns[ti]; if (u?.role === 'user') void copy(u.text, el); break; }
       case 'copy': { const t = aiAt(ti); if (t) void copy(turnText(t), el); break; }
       case 'dl': { const t = aiAt(ti); if (t) download(turnText(t), '-report'); break; }
       // session header
@@ -1527,6 +1595,11 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   // rename inputs (header, history row): Enter saves, Esc cancels, blur saves
   root.addEventListener('keydown', (e) => {
     const t = e.target;
+    if (t instanceof HTMLTextAreaElement && t.dataset['ci'] === 'uedit') {       // editing a sent message
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endEdit(false); ta.focus(); }
+      else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); endEdit(true); }
+      return;
+    }
     if (t instanceof HTMLInputElement && (t.dataset['ci'] === 'title' || t.dataset['ci'] === 'h-ren')) {
       if (e.key !== 'Enter' && e.key !== 'Escape') return;
       e.preventDefault();

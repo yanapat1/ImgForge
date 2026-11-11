@@ -409,9 +409,11 @@ def history(user, sid, turns=HISTORY_TURNS):
             for m in context(user, sid)['messages'][-int(turns):]]
 
 
-def context(user, sid):
+def context(user, sid, before=None):
     """What the model is sent of a chat: {summary, summary_seq, summary_tokens, plan, messages: [{seq, role, text,
-    page}] after summary_seq} (summary None = never compacted). Bounded by MAX_MESSAGES."""
+    page}] after summary_seq} (summary None = never compacted). Bounded by MAX_MESSAGES. `before`: only the
+    messages with seq < before (a regenerate / edit continues from there); a summary that covers seq >= before is
+    left out (it summed up messages that are being replaced), and then every earlier message is sent instead."""
     uid = _uid(user)
     with db.connect() as c:
         r = c.execute(text("""SELECT id, summary, summary_seq, summary_tokens, plan FROM app.llm_sessions
@@ -419,11 +421,38 @@ def context(user, sid):
                       {'s': str(sid or ''), 'u': uid}).first()
         if r is None:
             raise SessionError('no such chat', 404)
+        keep = before is None or int(r.summary_seq or 0) < int(before)
+        after = int(r.summary_seq or 0) if keep else 0
         rows = c.execute(text("""SELECT seq, role, text, page FROM app.llm_messages WHERE session_id = :s
-                                 AND seq > :a ORDER BY seq"""), {'s': r.id, 'a': int(r.summary_seq or 0)}).all()
-    return {'summary': r.summary, 'summary_seq': r.summary_seq, 'summary_tokens': r.summary_tokens,
-            'plan': r.plan or [],
+                                 AND seq > :a AND seq < :b ORDER BY seq"""),
+                         {'s': r.id, 'a': after, 'b': 2**31 - 1 if before is None else int(before)}).all()
+    return {'summary': r.summary if keep else None, 'summary_seq': r.summary_seq if keep else None,
+            'summary_tokens': r.summary_tokens if keep else None, 'plan': r.plan or [],
             'messages': [{'seq': m.seq, 'role': m.role, 'text': m.text, 'page': m.page or {}} for m in rows]}
+
+
+def truncate(user, sid, from_seq):
+    """Drop the messages of a live chat from seq `from_seq` on (a regenerated answer / an edited message replaces
+    them) -> the number removed. A summary that covered any of them is cleared with them."""
+    uid = _uid(user)
+    try:
+        from_seq = int(from_seq)
+    except (TypeError, ValueError):
+        raise SessionError('from_seq must be a message number', 400) from None
+    if from_seq < 1:
+        raise SessionError('from_seq must be a message number', 400)
+    with db.begin() as c:
+        s = _live(c, uid, sid, lock=True)
+        n = c.execute(text('DELETE FROM app.llm_messages WHERE session_id = :s AND seq >= :f'),
+                      {'s': s.id, 'f': from_seq}).rowcount
+        c.execute(text("""UPDATE app.llm_sessions SET
+                                 n_messages = (SELECT count(*) FROM app.llm_messages WHERE session_id = :s),
+                                 summary = CASE WHEN summary_seq >= :f THEN NULL ELSE summary END,
+                                 summary_tokens = CASE WHEN summary_seq >= :f THEN NULL ELSE summary_tokens END,
+                                 summary_seq = CASE WHEN summary_seq >= :f THEN NULL ELSE summary_seq END,
+                                 updated_at = now()
+                          WHERE id = :s"""), {'s': s.id, 'f': from_seq})
+    return n
 
 
 def set_plan(user, sid, items):

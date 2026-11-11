@@ -202,6 +202,11 @@ def router(state, ctx):
             user_text = str(msgs_in[-1].get('text') or '')
         if not user_text.strip():
             raise HTTPException(400, 'the message is empty')
+        # from_seq: regenerate / edit: the chat goes on from that message (it and every later one are replaced)
+        from_seq = body.get('from_seq')
+        if from_seq is not None and (isinstance(from_seq, bool) or not isinstance(from_seq, int) or from_seq < 1
+                                     or not sid):
+            raise HTTPException(400, 'from_seq must be the number of a message in a saved chat')
         summary, n_saved, plan = None, 0, None
         scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
         chat_scope = _chat_scope(role, scope)
@@ -210,7 +215,7 @@ def router(state, ctx):
             page['continued'] = True
         if sid:
             try:
-                cx = chat_sessions.context(user, sid)
+                cx = chat_sessions.context(user, sid, before=from_seq)
             except chat_sessions.SessionError as e:
                 raise HTTPException(e.status, str(e))
             summary, n_saved, plan = cx['summary'], len(cx['messages']), cx['plan']
@@ -265,12 +270,15 @@ def router(state, ctx):
                 sid, title, removed = made['session']['id'], made['session']['title'], made['removed']
                 first_turn = True
                 react.claim_chat(sid, run.cancel)
-            chat_sessions.append(user, sid, 'user', user_text, meta=meta, page=page)
+            if from_seq is not None:
+                chat_sessions.truncate(user, sid, from_seq)
+            user_seq = chat_sessions.append(user, sid, 'user', user_text, meta=meta, page=page)['seq']
         except chat_sessions.SessionError as e:
             react.release_chat(sid, run.cancel)
             raise HTTPException(e.status, str(e))
         title = title or chat_sessions.cut_title(user_text)
-        session_ev = {'type': 'session', 'session_id': sid, 'title': title, 'removed': removed}
+        # user_seq: the number the user message was saved under (the page regenerates / edits from it)
+        session_ev = {'type': 'session', 'session_id': sid, 'title': title, 'removed': removed, 'user_seq': user_seq}
 
         def compacted():
             """Auto-compaction before the run -> the events to send (the run is rebuilt on the summary)."""
