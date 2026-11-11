@@ -405,7 +405,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const live = t.status === 'streaming';
     if (!live && !steps.length) return '';
     const key = `${ti}.act`;
-    const open = isOpen(key, false);
+    // open while the answer runs (the steps show live), folded once it is done; a click either way is kept
+    const open = isOpen(key, live);
     const thinkMs = steps.reduce((n, s) => n + (s.b.k === 'think' ? s.b.ms ?? 0 : 0), 0);
     const nTools = steps.reduce((n, s) => n + (s.b.k === 'tools' ? s.b.items.length : 0), 0);
     const nSearch = steps.filter((s) => s.b.k === 'search').length;
