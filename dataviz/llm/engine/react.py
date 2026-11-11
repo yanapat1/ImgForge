@@ -44,6 +44,10 @@ REPEAT_NUDGE, REPEAT_STOP = 3, 5
 SMALL_STEPS = 20
 SMALL_TOOLS = 8
 MODES = ('ask', 'auto', 'plan')
+PLAN_ONLY_OUT = ('change', 'danger', 'ui', 'run')        # the risks plan mode does not offer (tools.for_role)
+PLAN_SWITCH = ('Plan mode is on for the rest of this turn: the change and page tools are gone. {how}\n'
+               'Look things up with the read-only tools, ask_user when a choice is the user\'s, then submit_plan with '
+               'the concrete steps. When the user approves it, it runs in auto.')
 EFFORTS = {                     # one knob: steps, thinking, a check pass before the final answer
     'low': {'steps': 15, 'think': 'off', 'verify': False},
     'medium': {'steps': 30, 'think': 'low', 'verify': False},
@@ -524,7 +528,7 @@ def events(run):
         # control tools that end the turn (the first valid one wins)
         for c in calls:
             t = run.tools.get(c.get('name'))
-            if t is None or not t.control or t.name == 'todo':
+            if t is None or not t.control or t.name in ('todo', 'enter_plan_mode'):
                 continue
             args, err = tools.validate(t, c.get('args'))
             if err:
@@ -541,6 +545,7 @@ def events(run):
         results = []
         pending = []            # changes in model order: (call, tool, clean, summary, risk)
         bad_change = False
+        planned = False         # enter_plan_mode in this step: the changes of the step do not run
         navigating = False      # a navigate was applied: the page reloads, the turn ends after this step
         for c in calls:
             name, args = c.get('name'), c.get('args')
@@ -562,6 +567,15 @@ def events(run):
                 return
             nudge = (' (you already called this with the same arguments: use the result you have, or change approach)'
                      if repeats[sig] >= REPEAT_NUDGE else '')
+            if t.name == 'enter_plan_mode':
+                clean, err = tools.validate(t, args)
+                if err:
+                    results.append({**res, 'content': err, 'is_error': True})
+                    continue
+                yield _enter_plan(run, clean.get('reason') or '')
+                planned = True
+                results.append({**res, 'content': PLAN_SWITCH.format(how=prompting.template('mode_plan') or '')})
+                continue
             if t.name == 'todo':
                 clean, err = tools.validate(t, args)
                 if err:
@@ -644,7 +658,10 @@ def events(run):
             for pc in pending:
                 outcome[pc[0]['id']] = {'ok': True, 'content': 'not run: another change in this step failed; send '
                                                                'all changes again, fixed'}
-        for pc in [] if bad_change else pending:
+        if planned:
+            for pc in pending:
+                outcome[pc[0]['id']] = {'ok': True, 'content': 'not run: you switched to plan mode; put it in the plan'}
+        for pc in [] if bad_change or planned else pending:
             c, t, clean, summary, risk = pc
             if not need and run.mode == 'auto' and risk in ('change', 'run'):
                 outcome[c['id']] = yield from _run_change(run, c, t, clean, summary, risk)
@@ -710,6 +727,17 @@ def events(run):
             return
     yield {'type': 'error', 'detail': f'stopped after {run.max_steps} steps without an answer: try a narrower '
                                       'request' + (' or a higher effort' if run.max_steps < MAX_STEPS else '')}
+
+
+def _enter_plan(run, reason):
+    """Auto -> plan for the rest of the turn: the change / page tools go, submit_plan comes, queries ask first.
+    The system prompt stays as it is (the provider's cache); the tool result tells the model the rules."""
+    run.mode = 'plan'
+    run.ctx.mode = 'plan'
+    run.tools = {k: t for k, t in run.tools.items() if t.risk not in PLAN_ONLY_OUT and k != 'enter_plan_mode'}
+    if 'submit_plan' in tools.REGISTRY:
+        run.tools['submit_plan'] = tools.REGISTRY['submit_plan']
+    return {'type': 'mode', 'mode': 'plan', 'reason': str(reason)[:300]}
 
 
 def _edited(run, pc, edit):

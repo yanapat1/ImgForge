@@ -200,6 +200,10 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
       const used = numOrNull(ev['used']), limit = numOrNull(ev['limit']);
       return used != null && limit ? { ...t, ctx: { used, limit } } : t;
     }
+    case 'mode': {            // auto switched itself to plan mode (enter_plan_mode): said in the answer, not the steps
+      const why = str(ev['reason']).trim().replace(/\.$/, '');
+      return { ...t, blocks: [...b, { k: 'notice', level: 'mode', text: `Switched to **plan mode**${why ? `: ${why}` : ''}. Nothing changes until you approve the plan.` }] };
+    }
     case 'notice': {
       const text = str(ev['text']);
       return text ? { ...t, blocks: [...b, { k: 'notice', level: str(ev['level'], 'info'), text }] } : t;

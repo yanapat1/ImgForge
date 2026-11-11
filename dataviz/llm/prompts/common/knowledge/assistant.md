@@ -33,7 +33,9 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   read-only ("Asking the Visualizer" in the Tasks strip).
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
   to approve). In Data Analysis a database query of the assistant (`run_query`) is confirmed too in ask and plan
-  (its SQL can be edited on the card) and runs at once in auto.
+  (its SQL can be edited on the card) and runs at once in auto. In auto, a big, unclear or far-reaching request
+  makes the assistant switch itself to plan mode first ("Switched to plan mode: …", the mode chip says plan):
+  it looks things up read-only, asks what is the user's choice, and shows a plan; Approve · auto runs it.
 - **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).
 - **Regenerate / Edit**: every answer has **Regenerate** (answer the same message again) and every sent message
   has **Edit** on hover (change it, Enter sends, Esc cancels). Either one replaces that message's answer and every

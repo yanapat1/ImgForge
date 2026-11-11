@@ -1124,6 +1124,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   }
 
   function sideEffects(idx: number, ev: ChatEvent): void {
+    if (ev.type === 'mode' && isMode(ev['mode'])) { C.prefs.mode = ev['mode']; renderChips(); }   // this chat only: not saved
     if (ev.type === 'tool_end' && ev['ok'] !== false && (ev['risk'] === 'change' || ev['risk'] === 'danger')) opts.onChange?.(ev);
     if (ev.type === 'ui_action' && ev['applied'] && opts.onUiAction) {
       const t = aiAt(idx);

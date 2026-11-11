@@ -422,3 +422,5 @@
 /* a database query waiting for its OK (mode ask): the SQL can be edited on the card */
 .ct-badge.r-query { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); }
 .chat .ct-q.ct-sql { height: auto; min-height: 44px; max-height: 200px; padding: 6px 8px; resize: vertical; line-height: 1.45; white-space: pre; overflow: auto; color: var(--text); }
+.ct-notice.mode { padding: 6px 10px; border: 1px solid var(--accent-line); border-radius: var(--r-md); border-color: var(--accent-line); background: var(--accent-soft); color: var(--text); }
+.ct-notice.mode .ico { color: var(--accent); }

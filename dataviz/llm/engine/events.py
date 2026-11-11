@@ -27,6 +27,8 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
     ask           {question, options}                        ends the turn
     cannot        {reason, alternative}                      ends the turn
     plan_proposal {summary, steps}                           mode plan: ends the turn, the page offers Approve
+    mode          {mode: 'plan', reason}                     auto switched itself to plan mode (enter_plan_mode):
+                                                             the page shows it and its mode chip says plan
     retry         {attempt, max, reason, wait_s, discard, step}   discard: drop this step's streamed text
     consult       {page, steps, tools, ok}                   another page's specialist answered a consult (its own
                                                              steps are not streamed: only its answer comes back)

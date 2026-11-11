@@ -13,7 +13,7 @@ turn enders and the planner checklist, 'plugin' a user's HTTP tool) and a `risk`
     change   changes something: proposed for confirmation (mode ask) or run at once (mode auto)
     danger   delete / overwrite: always confirmed by the user, in every mode
     ui       a visualizer page action (switch the projection ...): an Apply button, or applied in mode auto
-    control  answered by the user or the engine (ask_user, cannot_do, todo, submit_plan)
+    control  answered by the user or the engine (ask_user, cannot_do, todo, submit_plan, enter_plan_mode)
 
 A read tool may also have `confirm_if(ctx, clean)`: when it says True the call is shown on a confirm card (risk
 `confirm_risk`: 'web' for web search, 'query' for a database query in mode ask / plan) like a change, and the user
@@ -170,6 +170,8 @@ def for_role(domains, mode='ask', extra=()):
             continue
         if mode != 'plan' and t.name == 'submit_plan':
             continue
+        if mode != 'auto' and t.name == 'enter_plan_mode':
+            continue
         out[t.name] = t
     return out
 
@@ -201,6 +203,8 @@ def risk_card(tools):
     system prompt does not repeat them (tools.catalog is still the table the CLI and SKILL.md show)."""
     by = {}
     for t in tools.values():
+        if t.name == 'enter_plan_mode':     # auto only: kept out, so the card (cached) is the same in every mode
+            continue
         k = 'query' if t.confirm_if and t.confirm_risk == 'query' else t.risk
         by.setdefault(k, []).append(f'`{t.name}`')
     return '\n'.join(f'- {label}: {", ".join(by[k])}' for k, label in RISK_LINE if by.get(k))

@@ -65,6 +65,7 @@ tools.py). `?` marks an optional argument.
 | `undo` | change | bucket, undo_id | Undo one earlier change (move, copy, rename, delete, write) by the undo_id its result returned. |
 | `ask_user` | control | question, options | Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn. |
 | `cannot_do` | control | reason, alternative? | Say the request cannot be done with these tools, why, and the closest thing you can do. Ends your turn. |
+| `enter_plan_mode` | control | reason | Auto mode: switch to plan mode BEFORE acting when the request is big (several steps or pages), unclear, or would change or delete a lot. Then look things up read-only, ask_user when a choice is the user's, and submit_plan; nothing changes until they approve. Not for small, clear requests. |
 
 `bucket` is a bucket id or its exact name (a unique case-insensitive match also works). A name shared by several
 buckets is an error that lists their ids: ask which one, never pick one yourself. `move` / `copy` take `to` as

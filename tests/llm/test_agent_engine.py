@@ -379,3 +379,24 @@ def test_provider_bodies_cache_the_stable_part_and_the_history():
     assert oa['messages'][0]['content'] == 'RULES\n\nNOW 12:00'
     _, oa2, _ = providers._request({'kind': 'openai', 'model': 'gpt-x', 'api_key': 'k', 'base_url': 'http://x/v1'}, system, msgs, True)
     assert '<!-- dynamic -->' not in oa2['messages'][0]['content']
+
+
+def test_auto_switches_itself_to_plan_mode(monkeypatch, svc):
+    """enter_plan_mode (auto only): the change tools go for the rest of the turn, submit_plan comes, a change sent
+    after it in the same step is refused, and the page gets a 'mode' event before the plan."""
+    seen = script(monkeypatch,
+                  ('', [('enter_plan_mode', {'reason': 'This moves 300 images over 3 folders'}),
+                        ('create_folder', {'bucket': 'b1', 'path': 'val'})]),
+                  ('', [('list_folder', {'bucket': 'b1', 'path': ''})]),
+                  ('', [('submit_plan', {'summary': 'Split into val', 'steps': ['create val/', 'move 300 images']})]))
+    run = start('reorganise everything', mode='auto')
+    assert 'enter_plan_mode' in run.tools and 'submit_plan' not in run.tools
+    evs = drain(run)
+    assert [e for e in evs if e['type'] == 'mode'] == [{'type': 'mode', 'mode': 'plan', 'reason': 'This moves 300 images over 3 folders'}]
+    assert types(evs)[-2:] == ['plan_proposal', 'done'] and 'confirm' not in types(evs)
+    names = {s['name'] for s in seen[1]['specs']}
+    assert 'submit_plan' in names and not names & {'create_folder', 'move', 'delete', 'enter_plan_mode'}
+    res = [p['tool_result'] for p in seen[1]['msgs'][-1]['parts']]
+    assert 'Plan mode is on' in res[0]['content'] and 'not available in mode plan' in res[1]['content']
+    # not offered in ask / plan
+    assert 'enter_plan_mode' not in start('x', mode='ask').tools and 'enter_plan_mode' not in start('x', mode='plan').tools
