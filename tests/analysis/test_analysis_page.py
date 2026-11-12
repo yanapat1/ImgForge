@@ -496,7 +496,7 @@ def test_panes_open_and_close_and_the_objects_panel_comes_back(server, target): 
         assert page.locator('#an-explorer').is_hidden()
         page.keyboard.press('Escape')
         assert shown('viz') and shown('res') and page.locator('#an-explorer').is_visible()
-        # the Objects panel: closed from the rail, opened again from the slim tab, and with Ctrl+B
+        # the Objects panel: closed from the rail, opened again from the folded strip, and with Ctrl+B
         page.click('.an-rail-end')
         assert page.locator('#an-explorer').is_hidden()
         page.click('#an-expopen')

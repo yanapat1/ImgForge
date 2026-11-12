@@ -40,7 +40,7 @@ export function render(): void {
     // the same header as every page (core/header.ts); the session name sits after the links, like the visualizer's dataset
     root.innerHTML = appHeader({ page: 'analysis', cls: 'an-header', actionsId: 'an-hact' }).replace('<span class="grow"></span>', '<div class="ds-info"><span class="pill name"><b id="an-sess"></b></span></div>') +
       `<div class="an-main"><nav class="an-rail activity-bar" id="an-rail" aria-label="Workspaces"></nav><aside class="an-explorer left-panel" id="an-explorer" aria-label="Object explorer"></aside><main class="an-work" id="an-work"></main>` +
-      `<button type="button" class="an-expopen" id="an-expopen" data-act="explorer" aria-label="Open the Objects panel (Ctrl+B)" title="Open the Objects panel (Ctrl+B)">${icon('layers')}<span>Objects</span></button>` +
+      `<button type="button" class="an-expopen" id="an-expopen" data-act="explorer" aria-label="Open the Objects panel (Ctrl+B)" title="Open the Objects panel (Ctrl+B)">${icon('chev-r')}<span class="an-expopen-lbl">${icon('layers')}<span>Objects</span></span></button>` +
       `<div class="an-expsz" data-sp="e" role="separator" aria-orientation="vertical" aria-controls="an-explorer" aria-label="Objects panel width" aria-valuemin="${EXP_MIN}" tabindex="0" title="Drag to resize · double-click: fit the longest name"></div></div>`;
     mountUserMenu($req('an-hact'));
   }
@@ -100,7 +100,7 @@ function renderTree(): void {
     h += A.temps.map((t) => `<div class="an-tn temp"><span class="badge warn dashed">⏱</span><span class="lbl">${esc(t.name)}</span><span class="faint an-n">${esc(CHIP[t.source] ?? '')}</span></div>`).join('');
   }
   const scroll = el.querySelector('.an-tree')?.scrollTop ?? 0;
-  el.innerHTML = `<div class="side-head"><h2>Objects</h2><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="refresh-tree" aria-label="Refresh" title="Refresh">${icon('refresh')}</button><button type="button" class="icon-btn ghost xs" data-act="explorer" aria-label="Close object explorer" title="Close">${icon('x')}</button></div>` +
+  el.innerHTML = `<div class="side-head"><h2>Objects</h2><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="refresh-tree" aria-label="Refresh" title="Refresh">${icon('refresh')}</button><button type="button" class="icon-btn ghost xs" data-act="explorer" aria-label="Fold the Objects panel" title="Fold away (Ctrl+B)">${icon('chev-l')}</button></div>` +
     `<div class="an-tfind"><input class="txt" id="an-tfind" aria-label="Find a table" placeholder="Find table or collection" value="${esc(A.filter)}"></div><div class="an-tree">${h}</div>`;
   const t = el.querySelector('.an-tree');
   if (t) t.scrollTop = scroll;
@@ -262,7 +262,7 @@ export function applyExplorer(): void {
   }
 }
 
-/** Open or close the Objects panel (the rail button, its × , the slim Objects tab, Ctrl+B); remembered in this browser. */
+/** Open or close the Objects panel (the rail button, its fold button, the folded strip, Ctrl+B); remembered in this browser. */
 export function setExplorerOpen(on: boolean): void {
   if (A.explorer === on) return;
   A.explorer = on;

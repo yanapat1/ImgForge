@@ -13,16 +13,19 @@ html:not([data-screen=analysis]) #analysis { display: none; }
 /* ---------------------------------------------------------------- shell: activity bar | objects | work */
 .an-main { --an-expw: min(var(--an-exp, 280px), max(200px, calc(100vw - 360px))); position: relative; flex: 1; min-height: 0; display: grid;
   grid-template-columns: var(--activity-w) var(--an-expw) minmax(0, 1fr); }
-.an-main.noexp { grid-template-columns: var(--activity-w) minmax(0, 1fr); }
 .an-main.noexp .an-explorer, .an-main.noexp .an-expsz { display: none; }
-/* the Objects panel closed: a slim tab on the left edge of the work area opens it again (also Ctrl+B, the rail button) */
+/* the Objects panel folded: a slim strip stays in its place, full height, like a docked panel folded away; a click
+   anywhere on it (or Ctrl+B, the rail button) unfolds it */
 .an-expopen { display: none; }
-.an-main.noexp .an-expopen { display: flex; position: absolute; z-index: 6; left: var(--activity-w); top: 50%; transform: translateY(-50%);
-  flex-direction: column; align-items: center; gap: var(--s1); padding: var(--s2) 3px; min-height: 0; height: auto; writing-mode: vertical-rl;
-  font-size: var(--fs-xs); color: var(--text-muted); background: var(--surface); border: 1px solid var(--border); border-left: 0;
-  border-radius: 0 var(--r-sm, 6px) var(--r-sm, 6px) 0; box-shadow: var(--shadow-1, none); cursor: pointer; }
-.an-main.noexp .an-expopen:hover { color: var(--text); background: var(--surface-2); }
-.an-main.noexp .an-expopen svg { writing-mode: horizontal-tb; }
+.an-main.noexp { grid-template-columns: var(--activity-w) 32px minmax(0, 1fr); }
+.an-main.noexp .an-expopen { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; align-items: center; gap: var(--s3);
+  width: 32px; height: 100%; min-height: 0; padding: var(--s2) 0; margin: 0; border: 0; border-right: 1px solid var(--border);
+  border-radius: 0; background: var(--surface); color: var(--text-muted); font-size: var(--fs-xs); cursor: pointer; }
+.an-main.noexp .an-expopen:hover { background: var(--surface-2); color: var(--text); }
+.an-main.noexp .an-expopen:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.an-expopen-lbl { display: flex; align-items: center; gap: var(--s1); writing-mode: vertical-rl; letter-spacing: .02em; }
+.an-expopen-lbl svg { writing-mode: horizontal-tb; }
+.an-main.noexp .an-work { grid-column: 3; }
 .an-rail { grid-row: 1; }
 .an-rail .an-rail-end { margin-top: auto; }
 .an-explorer { grid-column: 2; position: relative; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); }
