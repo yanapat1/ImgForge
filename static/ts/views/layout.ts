@@ -10,6 +10,7 @@ import { refreshDock } from '../core/dock.js';
 import { EVAL_PLOTS, showEvalTab } from './eval.js';
 import { closestOf } from './ev-util.js';
 import { CMP_PLOTS, showCompareTab } from './compare.js';
+import { AUG_PLOTS, showAugTab } from './augment.js';
 import { MODEL_PLOTS, showModelTab } from './model.js';
 import { renderClassTable, renderStats } from './stats.js';
 
@@ -93,7 +94,7 @@ export function syncClassFilter(): void {
 // activity bar: each view has a left panel and a right panel
 // (curation.js also syncs its two panels from the act-curation aria-selected attribute: same ids, same result)
 // (the ◆ assistant is not a view: it is the right-side dock, core/dock.ts)
-const VIEWS: Record<string, string[]> = { explore: ['gallery-panel', 'tab-embed'], compare: ['cmp-side', 'tab-embed'], stats: ['stats-side', 'tab-stats'], model: ['model-side', 'tab-model'], eval: ['eval-side', 'tab-eval'], curation: ['cur-side', 'tab-curation'] };
+const VIEWS: Record<string, string[]> = { explore: ['gallery-panel', 'tab-embed'], compare: ['cmp-side', 'tab-embed'], stats: ['stats-side', 'tab-stats'], model: ['model-side', 'tab-model'], eval: ['eval-side', 'tab-eval'], curation: ['cur-side', 'tab-curation'], aug: ['aug-side', 'tab-aug'] };
 
 export let curTab = 'explore';
 
@@ -117,13 +118,14 @@ export function switchTab(tab: string): void {
   if (tab === 'model') void showModelTab();
   if (tab === 'eval') void showEvalTab();
   if (tab === 'compare') void showCompareTab();
+  if (tab === 'aug') void showAugTab();
   refreshDock();                                // its head names the view
   resizePlots();
 }
 
 export function resizePlots(): void {
   const ids = curTab === 'stats' ? ['stat-counts', 'stat-area', 'stat-confusion'] : curTab === 'model' ? MODEL_PLOTS : curTab === 'eval' ? EVAL_PLOTS
-    : curTab === 'compare' ? ['plot', ...CMP_PLOTS] : ['plot'];
+    : curTab === 'compare' ? ['plot', ...CMP_PLOTS] : curTab === 'aug' ? AUG_PLOTS : ['plot'];
   for (const id of ids) { const el = $<Plotly.PlotlyHTMLElement>(id); if (el && el.data) Plotly.Plots.resize(el); }
 }
 

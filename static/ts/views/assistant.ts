@@ -30,12 +30,14 @@ import { runModelOnDataset } from './model.js';
 import { applyFilterSpec, filterSpec, runNLFilter, runNow } from './filter-bar.js';
 import { setSelection } from './gallery.js';
 import { curTab, resizePlots, switchTab } from './layout.js';
+import { setAugRecipe } from './augment.js';
+import type { AugRecipe } from './augment.js';
 import { openModal } from './modal.js';
 
 const CHECK_MAX = 96, SEL_SEND_MAX = 500;
 const EXPLAIN_EVAL = 'Explain this evaluation: what is good, what is wrong, and the 3 most useful next steps.';
-const TABS = ['explore', 'stats', 'curation', 'model', 'eval', 'compare'];
-const TAB_NAMES: Record<string, string> = { explore: 'Explore', stats: 'Class stats', curation: 'Curation', model: 'Model', eval: 'Evaluation', compare: 'Compare' };
+const TABS = ['explore', 'stats', 'curation', 'aug', 'model', 'eval', 'compare'];
+const TAB_NAMES: Record<string, string> = { explore: 'Explore', stats: 'Class stats', curation: 'Curation', aug: 'Augment', model: 'Model', eval: 'Evaluation', compare: 'Compare' };
 
 /** One verdict card of a label check. `id` is a box id. */
 interface CheckItem { id: number; verdict: string; suggest?: string | undefined; why?: string | undefined }
@@ -215,6 +217,14 @@ async function applyUi(a: UiAction): Promise<boolean | UiResult> {
     case 'apply_filter':
       applyFilterSpec(g['spec']);
       return true;
+    case 'set_augment_recipe': {
+      const r = g['recipe'];
+      if (!r || typeof r !== 'object') return false;
+      setAugRecipe(r as AugRecipe);
+      touchTab('aug');
+      if (curTab !== 'aug') switchTab('aug');
+      return { ok: true, detail: 'the Augment tab shows it on the user\'s images now' };
+    }
     case 'open_tab': {
       const tab = s('tab');
       if (tab === 'ai') { openDock(false); return true; }           // the assistant itself: the dock

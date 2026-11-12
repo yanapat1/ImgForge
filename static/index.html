@@ -27,6 +27,7 @@
 <link rel="stylesheet" href="static/css/dock.css?v=1">
 <link rel="stylesheet" href="static/css/compare.css?v=1">
 <link rel="stylesheet" href="static/css/compare-shift.css?v=2">
+<link rel="stylesheet" href="static/css/augment.css?v=1">
 <link rel="stylesheet" href="static/css/states.css?v=17">
 <link rel="stylesheet" href="static/css/responsive.css?v=16">
 <link rel="stylesheet" href="static/css/editorial.css?v=5">
@@ -178,6 +179,8 @@
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-bars"/></svg></button>
     <button id="act-curation" class="act needs-boxes needs-labels" data-tab="curation" role="tab" aria-selected="false" aria-label="Curation: find and fix label problems" title="Curation — find and fix label / image problems">
       <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-alert"/></svg><span id="act-cur-badge" class="act-badge num hidden"></span></button>
+    <button id="act-aug" class="act needs-boxes" data-tab="aug" role="tab" aria-selected="false" aria-label="Augment: preview augmentations and check what they cover" title="Augment — preview Albumentations recipes, check boxes and coverage of new data">
+      <svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-sparkle"/></svg></button>
     <!-- model views: need a model (Settings › Models) -->
     <div class="act-sep" role="separator" aria-label="Model views"><span>model</span></div>
     <button class="act needs-boxes needs-labels" data-tab="model" role="tab" aria-selected="false" aria-label="Model: predictions vs labels" title="Model — predictions vs labels, likely label errors">
@@ -397,6 +400,15 @@
         <ol id="cur-hist" class="cur-hist"></ol>
       </details>
     </div>
+  </section>
+
+  <!-- LEFT (Augment): the recipe (views/augment.ts) -->
+  <section id="aug-side" class="left-panel hidden" aria-label="Augmentation recipe">
+    <div class="side-head">
+      <h2>Augment</h2>
+      <span class="muted hint">Albumentations</span>
+    </div>
+    <div id="aug-body" class="side-scroll aug-side"></div>
   </section>
 
   <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"
@@ -887,6 +899,12 @@
         <div id="cur-spacer" class="cur-spacer"></div>
       </div>
       <p class="hint cur-keys"><kbd>j</kbd> <kbd>k</kbd> move · <kbd>f</kbd> apply the first fix · <kbd>i</kbd> ignore · <kbd>u</kbd> undo the last fix</p>
+    </div>
+
+    <!-- Augment: preview / box check / coverage (views/augment.ts, views/augment-check.ts) -->
+    <div id="tab-aug" class="tab-body hidden" role="tabpanel" aria-label="Augmentation preview">
+      <div id="ag-bar" class="ag-bar toolbar"></div>
+      <div id="ag-main" class="ag-main"></div>
     </div>
   </section>
 </main>

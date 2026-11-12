@@ -24,6 +24,7 @@ Read tools (risk read, run at once):
     selection_view        a legend of selected boxes (id, class, image, size) + class counts
     search_boxes_by_text  boxes closest to a text, CLIP / SigLIP features only (the page's "Describe boxes…")
     list_models           the user's models (id, name, family): what run_model / the Model tab can use
+    augment_catalog       the Augment tab's Albumentations transforms (group, what each simulates, default args) + presets
 
 RUN ACTIONS (risk 'run'; the same ui_action event with wait: true, the page answers POST /api/llm/agent/ui-result
 {ok, detail, transient?}; a transient failure is retried twice, a long job reports "still running"):
@@ -56,11 +57,12 @@ views/assistant.ts, applies `args` through its existing controls). Names, args a
         ip_cls | ip_score | origin_ip           (one point per image: a model's top class per image, Model tab)
     apply_filter {spec: object}           the filter bar (core/filter.ts emptyFilter() shape, see tasks.FILTER_SYSTEM;
                                           cleaned by tasks.clean_filter: known class ids / tags / issue types only)
-    open_tab {tab: str}                   explore | stats | curation | model | eval | compare  (activity bar);
+    open_tab {tab: str}                   explore | stats | curation | aug | model | eval | compare  (activity bar);
                                           ai opens the right-side assistant dock
     show_issue {issue: str}               a Find issues view (its data-view):
         suspicious | far | far2d | dups | cl-issues | cl-low | cl-ood | cl-swap | cl-badloc | sel-outliers
     fit_view {}                           the plot's Fit button (#btn-fit)
+    set_augment_recipe {recipe: object}   the Augment tab's recipe (data/augment.validate shape), then the tab opens
 
 Each one's `preview(None, args)` is the Apply button's label. Mode ask: an Apply button (applied false); mode
 auto: applied at once (applied true); mode plan: not offered. `check(ctx, args)` validates the session-dependent
@@ -84,7 +86,7 @@ PARAM_INFO = {
 }
 PARAM_RANGE = {'n_neighbors': (2, 200), 'min_dist': (0.0, 1.0), 'perplexity': (2.0, 100.0), 'gamma': (0.0, 100.0)}
 
-UI_ACTIONS = ('set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view')
+UI_ACTIONS = ('set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view', 'set_augment_recipe')
 RUN_ACTIONS = ('set_projection', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats')
 SCAN_KINDS = ('curation', 'cleanlab')
 COLOR_BY = ('class', 'group', 'suggested', 'session', 'suspicion', 'outlier', 'area', 'aspect', 'brightness', 'blur',
@@ -105,8 +107,8 @@ COLOR_LABEL = {'class': 'class', 'group': 'group', 'suggested': 'kNN-suggested c
                'origin_cls': 'dataset × class', 'origin_pred': 'dataset × predicted class',
                'ip_cls': 'model: predicted class', 'ip_score': 'model: top confidence',
                'origin_ip': 'dataset × predicted class'}
-TABS = ('explore', 'stats', 'curation', 'model', 'eval', 'compare', 'ai')
-TAB_LABEL = {'explore': 'Explore', 'stats': 'Class stats', 'curation': 'Curation', 'model': 'Model',
+TABS = ('explore', 'stats', 'curation', 'aug', 'model', 'eval', 'compare', 'ai')
+TAB_LABEL = {'explore': 'Explore', 'stats': 'Class stats', 'curation': 'Curation', 'aug': 'Augment', 'model': 'Model',
              'eval': 'Evaluation', 'compare': 'Compare', 'ai': 'AI assistant'}
 ISSUES = ('suspicious', 'far', 'far2d', 'dups', 'cl-issues', 'cl-low', 'cl-ood', 'cl-swap', 'cl-badloc',
           'sel-outliers')
@@ -870,3 +872,43 @@ register(Tool('run_scan', 'Run curation (Scan dataset; with model: its misses to
               else 'Run the label-quality check (cleanlab)', check=_check_scan, **_RUN))
 register(Tool('compute_stats', 'Open Class stats (computes the features first if needed).',
               _obj({}), False, _ui_run(_check_stats), lambda b, a: 'Compute class stats', check=_check_stats, **_RUN))
+
+
+# ---------------------------------------------------------------- the Augment tab (data/augment.py)
+from ...data.augment import GROUPS as _AUG_GROUPS  # noqa: E402 - no albumentations at import
+
+
+def _aug_catalog(ctx, a):
+    from ...data import augment as ag
+    group = a.get('group')
+    items = [{'t': t['t'], 'label': t['label'], 'group': t['group'], 'simulates': t['covers'],
+              'args': {x['k']: x['default'] for x in t['args']}} for t in ag.CATALOG if not group or t['group'] == group]
+    presets = [{'id': k, 'label': lbl, 'about': h, 'steps': [s['t'] for s in st]} for k, (lbl, h, st) in ag.PRESETS.items()]
+    return {'groups': dict(ag.GROUPS), 'transforms': items, 'presets': presets,
+            'recipe_format': {'mode': 'all | one_of | some_of', 'n': 'steps per image for some_of', 'strength': '0..2 (1 = as set)',
+                              'steps': [{'t': 'a transform', 'p': 'chance 0..1', 'args': 'as listed, ranges are [low, high]'}]}}, \
+        f'→ {len(items)} transforms, {len(presets)} presets'
+
+
+def _aug_check(ctx, a):
+    from ...data import augment as ag
+    try:
+        recipe = ag.validate(a.get('recipe') or {})
+    except ValueError as e:
+        raise ToolError(f'recipe: {e}') from None
+    if not recipe['steps']:
+        raise ToolError('recipe: give at least one step (augment_catalog lists them)')
+    return {**a, 'recipe': recipe}, None
+
+
+register(Tool('augment_catalog', 'The Augment tab\'s augmentations (Albumentations): each transform with what it simulates '
+                                 '(camera, light, weather, blur, geometry, occlusion) and its default arguments, and the '
+                                 'presets. Read it before set_augment_recipe.',
+              _obj({'group': E('only one group', [g for g, _ in _AUG_GROUPS])}),
+              False, _aug_catalog, **_R))
+register(Tool('set_augment_recipe', 'Page action: put an augmentation recipe in the Augment tab and open it; the preview '
+                                    'shows it on the user\'s images at once. Use transforms from augment_catalog.',
+              _obj({'recipe': {'type': 'object', 'description': 'the recipe: {mode, n, strength, steps: [{t, p, args}]}'},
+                    'note': S('one line: what the recipe is for')}, ['recipe']), False, _ui_run(_aug_check),
+              lambda b, a: a.get('note') or f'Set an augmentation recipe ({len((a.get("recipe") or {}).get("steps") or [])} steps)',
+              check=_aug_check, **_U))

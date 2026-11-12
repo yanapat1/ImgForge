@@ -5,7 +5,7 @@ core: true
 ---
 - **◆ AI assistant** (you): the dock on the right of every page (◆ icon or Ctrl+. collapses it; see assistant).
 - **Activity bar** (left icons; the active one collapses the left panel): Explore (`explore`),
-  Class stats (`stats`), Curation (`curation`), then the model views Model (`model`) and Evaluation (`eval`), and
+  Class stats (`stats`), Curation (`curation`), Augment (`aug`: Albumentations recipes previewed on the images), then the model views Model (`model`) and Evaluation (`eval`), and
   Compare (`compare`, combined datasets only: label diff A vs B, shared map, Image conditions, Stress test).
   Settings: the gear at the bottom.
 - **Explore** = gallery on the left, map on the right. The bar above the map, left to right:

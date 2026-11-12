@@ -7,6 +7,8 @@ pacmap==0.9.1
 opentsne==1.0.4
 plotly==6.7.0
 opencv-python==5.0.0.93
+opencv-python-headless==5.0.0.93  # albumentations needs the headless build: pinned to the same version, so either cv2 is 5.0.0.93
+albumentations==2.0.8        # the Augment tab; 2.0.8 is the last MIT release (2.1+ is AlbumentationsX, AGPL)
 torch==2.14.1
 transformers==5.17.0
 ultralytics==8.4.174         # YOLO backbone features and YOLO models

@@ -45,7 +45,7 @@ CAN = {
     'data': 'Data Center (screen data; Home lists the sessions): buckets, folders, files, tags, S3, import / export, '
             'send a folder to the visualizer or labeling',
     'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
-              'curation, label errors, model runs + evaluation, compare',
+              'curation, label errors, model runs + evaluation, compare, augmentation (Albumentations) preview and coverage',
     'analysis': 'Data Analysis (screen analysis): SQL and MongoDB queries on the user\'s databases, joins, statistics, '
                 'forecasts, dashboards, zones and notes on the visual builder board',
 }

@@ -164,7 +164,7 @@ def test_image_browser_viewer_copy_and_edit(server, tmp_path):
         # the (hidden) ◆ AI button first (it opens the right-side dock, not a view), then the data views, the
         # separator, the model views
         order = page.eval_on_selector_all('#activity > *', 'els => els.map(e => e.dataset.tab || e.className)')
-        assert 'act-gem' in order[0] and order[1:7] == ['explore', 'stats', 'curation', 'act-sep', 'model', 'eval'], order
+        assert 'act-gem' in order[0] and order[1:8] == ['explore', 'stats', 'curation', 'aug', 'act-sep', 'model', 'eval'], order
         # no LLM configured: no diamond, and no AI control anywhere on the visualizer
         assert page.locator('#act-ai').is_hidden()
         assert page.eval_on_selector_all('[data-llm]:not(.hidden)', 'els => els.length') == 0
@@ -761,3 +761,41 @@ def test_settings_prompts_and_skills_section(server):
         page.wait_for_selector('#pr-level-cap:has-text("Full")')
         browser.close()
     assert not errors, '\n'.join(errors)
+
+
+def test_augment_tab_previews_a_recipe(server):
+    """Augment: a preset fills the recipe, the preview shows originals and variants with their boxes, a step added from
+    the picker runs, solo previews it alone, and the lightbox opens on a variant."""
+    pytest.importorskip('albumentations')
+    sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?session={sid}')
+        page.wait_for_selector('#act-aug', timeout=60000)
+        page.click('#act-aug')
+        page.wait_for_selector('#aug-body .ag-step', timeout=20000)          # the default preset (New camera)
+        page.select_option('#ag-preset', 'geometry')
+        page.wait_for_selector('#aug-body .ag-step:has-text("Mirror")')
+        page.wait_for_selector('.ag-row .ag-cell:not(.orig) img', timeout=20000)
+        rows = page.locator('.ag-row')
+        assert rows.count() == 6 and rows.first.locator('.ag-cell').count() == 5     # original + 4 variants
+        page.select_option('#ag-nv', '2')
+        page.wait_for_function("document.querySelector('.ag-row').querySelectorAll('.ag-cell').length === 3", timeout=20000)
+        # + Add augmentation: find it, pick it; solo shows only that step on every variant
+        page.click('[data-ag-act="add"]')
+        page.fill('#ag-find', 'motion blur')
+        page.click('.ag-pi[data-t="MotionBlur"]')
+        step = page.locator('#aug-body .ag-step:has-text("Motion blur")')
+        step.wait_for()
+        idx = step.get_attribute('data-i')
+        page.click(f'[data-ag-act="solo"][data-i="{idx}"]')
+        page.wait_for_function("[...document.querySelectorAll('.ag-cell:not(.orig) figcaption')].every(f => f.textContent.includes('Motion blur'))", timeout=20000)
+        page.locator('.ag-cell:not(.orig)').first.click()
+        page.wait_for_selector('.ag-wipe img.top')
+        page.keyboard.press('Escape')
+        browser.close()
+    assert not errors, errors

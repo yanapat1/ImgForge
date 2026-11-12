@@ -23,6 +23,7 @@ import { loadViewerPrefs } from '../views/viewer.js';
 import { bindMedia, isRows, metaCols, rowsPills, unit } from '../views/preview.js';
 import { initCuration } from '../views/curation.js';
 import { initCompare } from '../views/compare.js';
+import { initAug } from '../views/augment.js';
 import { invalidateEval, renderEval } from '../views/eval.js';
 import { invalidateModel, modelsChanged, renderModel } from '../views/model.js';
 import { invalidateStats, renderClassTable, renderStats } from '../views/stats.js';
@@ -183,6 +184,7 @@ async function init(st: Status): Promise<void> {
   // edits of this server session (deleted boxes) before the first render
   initFilterBar();
   if (caps.curation) await initCuration();      // an embeddings session has no label files to fix
+  initAug();
   // ---- end filters + curation
   applyUiDefaults(st.ui || {});        // config defaults first, then the user's last-used settings on top
   let saved: Record<string, unknown> = {};
