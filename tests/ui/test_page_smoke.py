@@ -780,6 +780,14 @@ def test_augment_tab_previews_a_recipe(server, tmp_path):
         page.wait_for_selector('.ag-row .ag-cell:not(.orig) img', timeout=20000)
         rows = page.locator('.ag-row')
         assert rows.count() == 6 and rows.first.locator('.ag-cell').count() == 5     # original + 4 variants
+        # the preview area scrolls with the mouse wheel (and the left recipe panel too)
+        page.set_viewport_size({'width': 1400, 'height': 500})
+        for sel in ('#ag-main', '#aug-body'):
+            bb = page.locator(sel).bounding_box()
+            page.mouse.move(bb['x'] + bb['width'] / 2, bb['y'] + min(bb['height'] / 2, 150))
+            page.mouse.wheel(0, 600)
+            page.wait_for_function(f"document.querySelector('{sel}').scrollTop > 0", timeout=5000)
+        page.set_viewport_size({'width': 1400, 'height': 900})
         page.select_option('#ag-nv', '2')
         page.wait_for_function("document.querySelector('.ag-row').querySelectorAll('.ag-cell').length === 3", timeout=20000)
         # + Add augmentation: find it, pick it; solo shows only that step on every variant
