@@ -344,7 +344,7 @@ def to_python(recipe):
     if r['mode'] == 'one_of':
         body = '    A.OneOf([\n' + '\n'.join('    ' + x for x in lines) + '\n    ], p=1.0),'
     elif r['mode'] == 'some_of':
-        body = f'    A.SomeOf([\n' + '\n'.join('    ' + x for x in lines) + f'\n    ], n={r["n"]}, p=1.0),'
+        body = '    A.SomeOf([\n' + '\n'.join('    ' + x for x in lines) + f'\n    ], n={r["n"]}, p=1.0),'
     return ('# made in the dataviz Augment tab\nimport albumentations as A\n\n'
             'transform = A.Compose([\n' + body + '\n], bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], min_visibility=0.3))\n')
 
@@ -401,7 +401,7 @@ def box_check(load, names, recipe, k=2, seed=0, min_px=8, train_size=640, classe
                 examples.append({'name': name, 'seed': s, 'lost': dropped, 'tiny': n_tiny, 'applied': applied})
         if progress is not None:
             progress(i + 1, len(names), 'checking boxes')
-    pct = lambda a, b: round(100.0 * a / b, 1) if b else 0.0                     # noqa: E731
+    pct = lambda a, b: round(100.0 * a / b, 1) if b else 0.0
     cls_rows = [{'cls': c, 'name': classes[c] if 0 <= c < len(classes) else str(c), 'in': st['in'], 'kept': st['kept'],
                  'lost': st['lost'], 'tiny': st['tiny'], 'edge': st['edge'], 'lost_pct': pct(st['lost'], st['in']),
                  'tiny_pct': pct(st['tiny'], st['kept'])} for c, st in sorted(cls_st.items())]

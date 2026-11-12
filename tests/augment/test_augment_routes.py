@@ -76,3 +76,59 @@ def test_box_check_runs_as_a_job_and_is_cached(world):
     again = c.post(f'/s/{sid}/api/augment/boxes', json=body).json()
     assert again['ready'] is True and again['result'] == res
     assert c.get(f'/s/{sid}/api/augment/boxes/result', params={'key': 'nope'}).status_code == 404
+
+
+def test_coverage_against_an_uploaded_target_set(pg, tmp_path):
+    import io
+    import numpy as np
+    from PIL import Image
+    from conftest import wait_job
+    rng = np.random.default_rng(3)
+    root = tmp_path / 'scenes'
+    (root / 'images').mkdir(parents=True)
+    (root / 'labels').mkdir()
+    (root / 'classes.txt').write_text('part\n')
+    bright = []
+    for k in range(14):
+        a = np.full((96, 128, 3), 170, np.uint8)
+        for _ in range(6):
+            x, y = int(rng.integers(0, 100)), int(rng.integers(0, 70))
+            a[y:y + 20, x:x + 24] = rng.integers(60, 255, 3)
+        Image.fromarray(a).save(root / 'images' / f's{k:02d}.jpg', quality=92)
+        (root / 'labels' / f's{k:02d}.txt').write_text('0 0.5 0.5 0.3 0.3\n')
+        bright.append(a)
+    alice = account('alice')
+    sid = viz_session(alice['id'], 'scenes', root)
+    _, app = make_viz_app(tmp_path / 'ws')
+    c = client(app)
+    assert login(c, 'alice').status_code == 200
+    # the "new camera": the same kind of scenes, much darker
+    files = []
+    for k, a in enumerate(bright[:8]):
+        buf = io.BytesIO()
+        Image.fromarray((a * 0.35).astype(np.uint8)).save(buf, 'JPEG', quality=90)
+        files.append(('files', (f'night{k}.jpg', buf.getvalue(), 'image/jpeg')))
+    files.append(('files', ('notes.txt', b'hello', 'text/plain')))
+    t = c.post(f'/s/{sid}/api/augment/targets', files=files, data={'name': 'night camera'}).json()
+    assert t['n'] == 8 and t['skipped'] == ['notes.txt'] and t['name'] == 'night camera'
+    assert c.get(f'/s/{sid}/api/augment/targets').json()['targets'][0]['id'] == t['id']
+    dark = {'steps': [{'t': 'RandomBrightnessContrast', 'p': 1, 'args': {'brightness_limit': [-0.6, -0.5], 'contrast_limit': [-0.4, -0.3]}}]}
+    flip = {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}
+    out = {}
+    for name, recipe in (('flip', flip), ('dark', dark)):
+        r = c.post(f'/s/{sid}/api/augment/coverage', json={'recipe': recipe, 'target': {'kind': 'upload', 'id': t['id']}, 'm': 14, 'k': 2}).json()
+        j = wait_job(c, r['job_id'], timeout=180)
+        assert j['status'] == 'done', j
+        out[name] = c.get(f'/s/{sid}/api/augment/coverage/result', params={'key': r['key']}).json()['result']
+    # darkening the dataset covers the dark camera better than mirroring it; the gap names brightness
+    assert out['dark']['coverage']['after'] > out['flip']['coverage']['after']
+    assert out['flip']['coverage']['before'] == out['dark']['coverage']['before']           # same train + target parts
+    assert any(g['key'] == 'brightness' for g in out['flip'].get('gap') or [])
+    assert out['dark']['credit'] and out['dark']['credit'][0]['t'] == 'RandomBrightnessContrast'
+    latest = c.get(f'/s/{sid}/api/augment/coverage/result', params={'latest': 1}).json()
+    assert latest['key'] == out['dark']['key']
+    th = c.get(f'/s/{sid}/api/augment/thumb', params={'part': out['dark']['parts']['target'], 'i': 0})
+    assert th.status_code == 200 and th.headers['content-type'] == 'image/jpeg'
+    assert c.get(f'/s/{sid}/api/augment/thumb', params={'part': '../x', 'i': 0}).status_code == 404
+    assert c.delete(f'/s/{sid}/api/augment/targets/{t["id"]}').json() == {'ok': True}
+    assert c.post(f'/s/{sid}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'upload', 'id': t['id']}}).status_code == 404

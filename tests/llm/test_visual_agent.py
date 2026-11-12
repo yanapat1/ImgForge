@@ -73,7 +73,7 @@ def test_tools_are_visual_ctx_tools_without_the_data_center():
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
                      'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view',
                      'list_models', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats', 'data_location',
-                     'augment_catalog', 'set_augment_recipe'}
+                     'augment_catalog', 'set_augment_recipe', 'augment_coverage'}
     assert all(tools.REGISTRY[n].ctx for n in names)
     assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS) - set(visual.RUN_ACTIONS)
     assert {n for n in names if tools.REGISTRY[n].risk == 'run'} == set(visual.RUN_ACTIONS)
@@ -328,7 +328,7 @@ def test_skills_name_only_real_tools():
     vocab = _vocab() | set(prompting.skills('data')) | args         # a tool's own argument names are fine too
     call = re.compile(r'^([a-z_][a-z0-9_]*)(\(.*\))?$')
     files = sorted((PROMPTS / 'skills').glob('*/*/SKILL.md'))
-    assert len(files) == 27
+    assert len(files) == 28
     for f in files:
         meta, body = prompting.front(f.read_text())
         assert meta['name'] == f.parent.name and meta['description'] and meta['when'], f

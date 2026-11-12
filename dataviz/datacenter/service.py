@@ -1390,6 +1390,27 @@ def ls(user, bid, path='', offset=0, limit=500, sort='name', q='', retry=False, 
     return out
 
 
+
+def image_files(user, bid, path='', limit=2000):
+    """The images in folder `path` of a bucket and its subfolders (hidden ones left out), sorted, at most `limit`
+    -> [absolute path]. Local and managed buckets, and the downloaded folders of an S3 link; a part of an S3 link
+    that is only streamed raises DCError: download it first. (The visualizer's Augment › Coverage reads its target.)"""
+    r = _row(user, bid)
+    rel = store.clean_rel(path)
+    if r.kind == 's3':
+        local = os.path.join(r.local_root or '', rel) if r.local_root else ''
+        if not local or not os.path.isdir(local):
+            raise DCError(f'{rel or "this bucket"} of “{r.name}” is streamed from S3: download that folder first (Download to local)')
+        r = _LocalView(r)
+    base = _abs(r, rel)
+    out = []
+    for dp, dn, fn in os.walk(base):
+        dn[:] = sorted(d for d in dn if not d.startswith('.'))
+        out += [os.path.join(dp, f) for f in sorted(fn) if not f.startswith('.') and f.lower().endswith(store.IMAGE_EXTS)]
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
 # ---------------------------------------------------------------------------------------------- S3 local copies
 def _jobs():
     ctx = _conf['ctx']

@@ -10,6 +10,7 @@ import { S } from '../core/state.js';
 import { clsColor } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import { initAugCheck } from './augment-check.js';
+import { initAugCover } from './augment-cover.js';
 import { openDialog } from './dialog.js';
 
 export interface AugArg { k: string; kind: 'range' | 'float' | 'int' | 'choice'; min?: number; max?: number; step?: number; default: unknown; choices?: string[]; label: string; int?: boolean }
@@ -387,6 +388,7 @@ export function initAug(): void {
   const side = $('aug-side'), main = $('tab-aug');
   if (!side || !main) return;
   initAugCheck();
+  initAugCover();
   side.addEventListener('input', (e) => onInput(e.target as HTMLInputElement, false));
   side.addEventListener('change', (e) => onInput(e.target as HTMLInputElement, true));
   side.addEventListener('click', (e) => {

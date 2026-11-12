@@ -763,7 +763,7 @@ def test_settings_prompts_and_skills_section(server):
     assert not errors, '\n'.join(errors)
 
 
-def test_augment_tab_previews_a_recipe(server):
+def test_augment_tab_previews_a_recipe(server, tmp_path):
     """Augment: a preset fills the recipe, the preview shows originals and variants with their boxes, a step added from
     the picker runs, solo previews it alone, and the lightbox opens on a variant."""
     pytest.importorskip('albumentations')
@@ -803,5 +803,23 @@ def test_augment_tab_previews_a_recipe(server):
         page.wait_for_selector('#ag-main .ag-cards', timeout=30000)
         assert 'Boxes kept' in page.locator('#ag-main .ag-cards').inner_text()
         assert page.locator('#ag-main .ag-tbl tbody tr').count() == 2           # cat, dog
+        # Coverage: upload "new camera" images, run, read the verdict and the map
+        night = []
+        for k in range(6):
+            f = tmp_path / f'night{k}.jpg'
+            make_jpeg(f, 64, 48, color=(5 * k, 10, 20))
+            night.append(str(f))
+        page.click('[data-ag-act="view"][data-k="coverage"]')
+        page.wait_for_selector('[data-agv-act="upload"]')
+        with page.expect_file_chooser() as fc:
+            page.click('[data-agv-act="upload"]')
+        fc.value.set_files(night)
+        page.wait_for_function("document.querySelector('#agv-t')?.value.startsWith('u:')", timeout=20000)
+        page.select_option('#agv-m', '100')
+        page.click('[data-agv-act="run"]')
+        page.wait_for_selector('#ag-main .ag-verdict', timeout=120000)
+        assert 'new images' in page.locator('#ag-main .ag-verdict').inner_text()
+        page.wait_for_selector('#ag-cov-plot .main-svg', timeout=20000)
+        assert 'Coverage of the new images' in page.locator('#ag-main .ag-cards').inner_text()
         browser.close()
     assert not errors, errors

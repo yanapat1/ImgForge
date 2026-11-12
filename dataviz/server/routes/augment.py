@@ -11,6 +11,13 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     POST /api/augment/export           {recipe, format: albumentations | python | yaml} -> the text
     POST /api/augment/boxes            {recipe, m, k, seed, min_px, train_size} -> {ready, result} | {ready: false, job_id, key}
     GET  /api/augment/boxes/result     ?key= -> the box check (lost / tiny / at the edge, per class and per step)
+    GET  /api/augment/targets          the image sets uploaded to compare against (this session)
+    POST /api/augment/targets          multipart files (+ name): a new target set -> {id, name, n}
+    DELETE /api/augment/targets/{id}
+    POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path}, quality: quick | deep,
+                                        m, k, seed} -> {ready, result} | {ready: false, job_id, key}  (data/augment_run.py)
+    GET  /api/augment/coverage/result  ?key= | latest=1 -> the coverage report
+    GET  /api/augment/thumb            ?part=&i= -> one 224 px thumbnail of a coverage part (the page's galleries)
 
 Images are read once each, shrunk to `size` before the recipe runs (a preview, not training data), and sent as JPEG data
 URLs. Everything runs in the request (the worker thread pool): 12 images x 8 variants at 384 px take well under a second.
@@ -21,9 +28,13 @@ import io
 import json
 import os
 import random
+import re
+import shutil
+import time
+import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from ...auth import deps
 from ...data import augment as ag
@@ -31,6 +42,8 @@ from ..deps import guards
 from .samples import image_boxes_px, open_image_rgb
 
 MAX_IMAGES, MAX_VARIANTS, MAX_RECIPES = 12, 8, 50
+MAX_TARGET_FILES, MAX_FILE_MB, MAX_DC_FILES = 1000, 50, 2000
+TARGET_RE = re.compile(r'^[0-9a-f]{16}$')
 MEM = 8                                            # results kept in memory (also saved under <cache>/augment/checks)
 
 
@@ -273,5 +286,192 @@ def router(state, ctx):
         except (ValueError, TypeError, AttributeError) as e:
             raise HTTPException(400, f'not an albumentations pipeline: {e}') from None
         return {'recipe': recipe, 'skipped': skipped}
+
+    # ------------------------------------------------------------ coverage: targets, the job, its report
+    def aug_root(st):
+        d = st.cache_dir / 'augment'
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def targets_dir(st):
+        d = aug_root(st) / 'targets'
+        d.mkdir(exist_ok=True)
+        return d
+
+    def target_meta(st, tid):
+        if not TARGET_RE.match(tid or ''):
+            raise HTTPException(404, 'no such target set')
+        try:
+            return json.loads((targets_dir(st) / tid / 'meta.json').read_text())
+        except (FileNotFoundError, ValueError):
+            raise HTTPException(404, 'no such target set') from None
+
+    @r.get('/api/augment/targets')
+    def targets():
+        st = ctx.current()
+        out = []
+        for d in sorted(targets_dir(st).iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                out.append(json.loads((d / 'meta.json').read_text()))
+            except (FileNotFoundError, ValueError, NotADirectoryError):
+                continue
+        return {'targets': out}
+
+    @r.post('/api/augment/targets')
+    def upload_targets(files: list[UploadFile] = File(...), name: str = Form('')):
+        st = ctx.current()
+        if not files or len(files) > MAX_TARGET_FILES:
+            raise HTTPException(400, f'give 1 to {MAX_TARGET_FILES} images')
+        tid = uuid.uuid4().hex[:16]
+        d = targets_dir(st) / tid
+        (d / 'images').mkdir(parents=True)
+        kept, skipped = 0, []
+        try:
+            for i, f in enumerate(files):
+                base = os.path.basename(f.filename or f'image{i}')
+                if not base.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff')):
+                    skipped.append(base)
+                    continue
+                dest, size = d / 'images' / f'{i:05d}_{base}', 0
+                with open(dest, 'wb') as out:
+                    while chunk := f.file.read(1 << 20):
+                        size += len(chunk)
+                        if size > MAX_FILE_MB << 20:
+                            break
+                        out.write(chunk)
+                if size > MAX_FILE_MB << 20:
+                    dest.unlink(missing_ok=True)
+                    skipped.append(base)
+                    continue
+                kept += 1
+        except Exception:
+            shutil.rmtree(d, ignore_errors=True)
+            raise
+        if not kept:
+            shutil.rmtree(d, ignore_errors=True)
+            raise HTTPException(400, 'none of these files is an image')
+        meta = {'id': tid, 'name': (name or f'{kept} images').strip()[:80], 'n': kept, 'skipped': skipped[:50],
+                'created': time.time()}
+        (d / 'meta.json').write_text(json.dumps(meta))
+        return meta
+
+    @r.delete('/api/augment/targets/{tid}')
+    def delete_target(tid: str):
+        st = ctx.current()
+        target_meta(st, tid)
+        shutil.rmtree(targets_dir(st) / tid, ignore_errors=True)
+        return {'ok': True}
+
+    def target_files(st, tgt, user):
+        """-> (cache key part, [local image paths], label) of a target spec."""
+        from ...data import augment_run as ar
+        kind = (tgt or {}).get('kind')
+        if kind == 'upload':
+            m = target_meta(st, str(tgt.get('id') or ''))
+            files = sorted((targets_dir(st) / m['id'] / 'images').iterdir())
+            return ar.h16('upload', m['id'], len(files)), files, m['name']
+        if kind == 'dc':
+            from ...datacenter import service as dc
+            from ...datacenter.store import DCError
+            try:
+                files = dc.image_files(user, str(tgt.get('bucket') or ''), str(tgt.get('path') or ''), MAX_DC_FILES)
+            except DCError as e:
+                raise HTTPException(e.status, e.message) from None
+            if not files:
+                raise HTTPException(400, 'that folder holds no images')
+            sig = []
+            for f in files:
+                try:
+                    stt = os.stat(f)
+                    sig.append(f'{f}:{stt.st_size}:{int(stt.st_mtime)}')
+                except OSError:
+                    continue
+            return ar.h16('dc', *sig), files, f'{tgt.get("path") or "/"} ({len(files)} images)'
+        raise HTTPException(400, 'target: {kind: upload, id} or {kind: dc, bucket, path}')
+
+    def feature_of(st, quality):
+        if quality != 'deep':
+            return 'quick'
+        reg = st.registry
+        key = st.default_feature
+        if key in reg and reg[key].group == 'deep':
+            return key
+        deep = [k for k in reg if reg[k].group == 'deep']
+        if not deep:
+            raise HTTPException(400, 'no deep feature is installed here: use Quick')
+        return deep[0]
+
+    @r.post('/api/augment/coverage')
+    def coverage(body: dict = Body(...), user=Depends(deps.current_user)):
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        from ...data import augment_run as ar
+        st = ctx.current()
+        recipe = _recipe(body)
+        m = _clamp(body.get('m'), 20, 1000, 300)
+        k = _clamp(body.get('k'), 1, 4, 2)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        feature = feature_of(st, body.get('quality') or 'quick')
+        tkey, files, label = target_files(st, body.get('target'), user)
+        fp = str(st.fingerprint or '')
+        trk = ar.h16(fp, m, seed)
+        auk = ar.h16(trk, ag.recipe_hash(recipe), k)
+        key = f'cov:{ar.h16(trk, auk, tkey, feature, seed)}'
+        hit = cached(st, key)
+        if hit is not None:
+            return {'ready': True, 'key': key, 'result': hit}
+        names = pick_images(st, 'random', m, seed)
+        root = aug_root(st) / 'emb'
+
+        def run(job):
+            def load(nm):
+                rgb, boxes, _, _ = load_small(st, nm, 448)
+                return rgb, boxes
+            job.progress(0, 4, 'this dataset\'s images')
+            trd, trm = ar.ensure_train(root, trk, names, load)
+            job.progress(1, 4, 'augmenting them')
+            aud, aum = ar.ensure_aug(root, auk, names, load, recipe, k, seed, cancelled=job.cancelled.is_set)
+            job.progress(2, 4, 'the target images')
+            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES])
+            if tgm['n'] < 1:
+                raise ValueError('none of the target images could be read')
+            vecs = []
+            for i, (d, mm) in enumerate(((trd, trm), (aud, aum), (tgd, tgm))):
+                if job.cancelled.is_set():
+                    return
+                vecs.append(ar.embed(d, mm['n'], feature, st.registry,
+                                     lambda done, total=None, stage=None, *a, _i=i: job.progress(done, total, f'embedding {("dataset", "augmented", "target")[_i]} images')))
+            rep = ar.report(*vecs, trm, aum, tgm, seed=seed)
+            rep.update(key=key, feature=feature, target_label=label, parts={'train': trd.name, 'aug': aud.name, 'target': tgd.name},
+                       recipe=recipe, aug_src=aum.get('src') or [])
+            check_file(st, key).write_text(json.dumps(rep))
+            (aug_root(st) / 'checks' / 'latest_coverage.json').write_text(json.dumps({'key': key}))
+            remember(key, rep)
+        job = st.submit(f'augcov:{key}', 'Augment · coverage', run, lane='main')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.get('/api/augment/coverage/result')
+    def coverage_result(key: str = '', latest: int = 0):
+        st = ctx.current()
+        if latest:
+            try:
+                key = json.loads((aug_root(st) / 'checks' / 'latest_coverage.json').read_text())['key']
+            except (FileNotFoundError, ValueError, KeyError):
+                raise HTTPException(404, 'no coverage run yet') from None
+        hit = cached(st, key)
+        if hit is None:
+            raise HTTPException(404, 'no such coverage run (run it again)')
+        return {'key': key, 'result': hit}
+
+    @r.get('/api/augment/thumb')
+    def thumb(part: str, i: int):
+        from ...data import augment_run as ar
+        if not ar.PART_RE.match(part or '') or i < 0:
+            raise HTTPException(404, 'no such image')
+        f = aug_root(ctx.current()) / 'emb' / part / 'imgs' / f'{int(i):05d}.jpg'
+        if not f.exists():
+            raise HTTPException(404, 'no such image')
+        return FileResponse(f, media_type='image/jpeg', headers={'Cache-Control': 'private, max-age=3600'})
 
     return r

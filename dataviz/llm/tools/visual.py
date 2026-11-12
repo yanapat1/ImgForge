@@ -25,6 +25,7 @@ Read tools (risk read, run at once):
     search_boxes_by_text  boxes closest to a text, CLIP / SigLIP features only (the page's "Describe boxes…")
     list_models           the user's models (id, name, family): what run_model / the Model tab can use
     augment_catalog       the Augment tab's Albumentations transforms (group, what each simulates, default args) + presets
+    augment_coverage      the newest Augment › Coverage check: new images covered before / after the recipe, gaps, steps
 
 RUN ACTIONS (risk 'run'; the same ui_action event with wait: true, the page answers POST /api/llm/agent/ui-result
 {ok, detail, transient?}; a transient failure is retried twice, a long job reports "still running"):
@@ -912,3 +913,28 @@ register(Tool('set_augment_recipe', 'Page action: put an augmentation recipe in 
                     'note': S('one line: what the recipe is for')}, ['recipe']), False, _ui_run(_aug_check),
               lambda b, a: a.get('note') or f'Set an augmentation recipe ({len((a.get("recipe") or {}).get("steps") or [])} steps)',
               check=_aug_check, **_U))
+
+
+def _aug_coverage(ctx, a):
+    import json
+    st = _state(ctx)
+    d = st.cache_dir / 'augment' / 'checks'
+    try:
+        key = json.loads((d / 'latest_coverage.json').read_text())['key']
+        r = json.loads((d / f'{key.replace(":", "_")}.json').read_text())
+    except (FileNotFoundError, ValueError, KeyError):
+        return {'run': None, 'note': 'No coverage check yet: the user picks the new images in Augment › Coverage and runs it.'}, '→ none yet'
+    out = {'target': r.get('target_label'), 'feature': r.get('feature'), 'images': r.get('n'), 'coverage': r.get('coverage'),
+           'frechet': r.get('frechet'), 'domain_auc': r.get('domain_auc'), 'unreal_variants': r.get('off_domain'),
+           'still_uncovered': r.get('n_uncovered'), 'verdict': r.get('verdict'),
+           'steps_that_helped': [{'step': c.get('label'), 'images': c.get('rescued')} for c in (r.get('credit') or [])[:8]],
+           'gaps': [{'what': g.get('text'), 'add': g.get('step')} for g in (r.get('gap') or [])[:6]],
+           'recipe_steps': [s.get('t') for s in (r.get('recipe') or {}).get('steps') or []]}
+    return out, f'→ coverage {out["coverage"]}'
+
+
+register(Tool('augment_coverage', 'The newest Augment › Coverage check of this session: how much of the user\'s new images '
+                                  '(another place, a new camera) this dataset covers before and after the recipe, Fréchet '
+                                  'and AUC distances, unreal variants, the steps that helped, what the uncovered images '
+                                  'differ in with the step to add for each. Read only; the user runs the check.',
+              _obj({}), False, _aug_coverage, **_R))

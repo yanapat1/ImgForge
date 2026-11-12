@@ -26,5 +26,7 @@ when: new camera / lighting, will the old model fit, a stress test
    LUT when colour / brightness drive the shift (an inference-time fix, the correction field of `compare_shift`: not for blur or noise), and
    when the verdict is shifted or a new camera appears: label the **Most B-like images** / **Uncovered B images**
    first, fine-tune on A + B, validate on B.
-7. Few images (< 30 per side) or EXIF missing: say the result is indicative only. You cannot run the analysis or
+7. To try augmentations against the new camera's images before training, point to Augment › Coverage (the
+   check-augmentation-coverage skill): it says how much of them a recipe covers and which steps would close the gap.
+8. Few images (< 30 per side) or EXIF missing: say the result is indicative only. You cannot run the analysis or
    change files yourself.
