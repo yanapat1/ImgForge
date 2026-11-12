@@ -18,6 +18,8 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
                                         target's coverage -> {recipe, history, before, after} (GET .../coverage/result?key=)
     POST /api/augment/model            {recipe, model, n, conf, seed} -> a job: the model's mAP50 / mAP / P / R with each step at
                                         full chance and with the whole recipe, against the labels the steps moved
+    POST /api/augment/ghost            {recipe, feature, n, k, seed} -> a job: augmented box crops with their 10 nearest session
+                                        boxes + weights in that feature (the page places them on the current map)
     POST /api/augment/curve            {recipe, target, quality, m, seed} -> a job: coverage + unreal variants at strengths
                                         0.25 … 2 -> {points, best} (GET .../coverage/result?key=)
     POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path} | {kind: session, id}, quality,
@@ -39,6 +41,7 @@ import shutil
 import time
 import uuid
 
+import numpy as np
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 
@@ -557,6 +560,51 @@ def router(state, ctx):
             check_file(st, key).write_text(json.dumps(res))
             remember(key, res)
         job = st.submit(f'augmodel:{key}', f'Augment · {m["name"]} under the recipe', run, lane='io' if m.get('format') == 'api' else 'main')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.post('/api/augment/ghost')
+    def ghost(body: dict = Body(...)):
+        """The recipe's augmented boxes placed on this session's map: crops embedded with the map's feature, each with
+        its nearest session boxes and weights (the page puts it at their weighted position on the current map). A job."""
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        from ...data import augment_run as ar
+        st = ctx.current()
+        recipe = _recipe(body)
+        feature = str(body.get('feature') or '')
+        if feature not in st.registry:
+            raise HTTPException(400, f'unknown feature {feature!r}')
+        if st.registry[feature].group != 'deep' and feature != 'color-hist' and feature != 'hog':
+            raise HTTPException(400, 'this map is made from box geometry: augmented boxes cannot be placed on it')
+        if not st.feature_cached(feature):
+            raise HTTPException(409, 'generate the map with this feature first')
+        n = _clamp(body.get('n'), 10, ar.GHOST_IMAGES, 60)
+        k = _clamp(body.get('k'), 1, ar.GHOST_K, 1)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        key = f'ghost:{ar.h16(str(st.fingerprint or ""), feature, ag.recipe_hash(recipe), n, k, seed)}'
+        hit = cached(st, key)
+        if hit is not None:
+            return {'ready': True, 'key': key, 'result': hit}
+        names = pick_images(st, 'per_class', n, seed)
+
+        def run(job):
+            def load(nm):
+                rgb, boxes, _, _ = load_small(st, nm, 640)
+                return rgb, boxes
+            job.progress(0, 3, 'augmenting the boxes')
+            d, m = ar.ghost_crops(aug_root(st) / 'emb', key.split(':')[1], names, load, recipe, k, seed, job.cancelled.is_set)
+            if not m['n']:
+                raise ValueError('the recipe left no box to place')
+            job.progress(1, 3, 'embedding them')
+            q = ar.embed(d, m['n'], feature, st.registry, lambda *a: None)
+            job.progress(2, 3, 'placing them on the map')
+            ids, w, sim = ar.place(np.asarray(st.get_features(feature), np.float32), q)
+            res = {'key': key, 'feature': feature, 'n': m['n'], 'part': d.name, 'cls': m['cls'], 'image': m['image'],
+                   'applied': m['applied'], 'nbr': ids.tolist(), 'w': np.round(w, 4).tolist(), 'sim': np.round(sim, 4).tolist()}
+            check_file(st, key).write_text(json.dumps(res))
+            remember(key, res)
+        job = st.submit(f'augghost:{key}', 'Augment · boxes on the map', run, lane='main')
         return {'ready': False, 'job_id': job.id, 'key': key}
 
     @r.post('/api/augment/curve')

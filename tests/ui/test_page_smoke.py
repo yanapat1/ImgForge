@@ -823,3 +823,33 @@ def test_augment_tab_previews_a_recipe(server, tmp_path):
         assert 'Coverage of the new images' in page.locator('#ag-main .ag-cards').inner_text()
         browser.close()
     assert not errors, errors
+
+
+def test_augmented_boxes_show_on_the_map(server):
+    """Augment › Show on the map: on a colour-histogram map the recipe's boxes appear as an extra (non-selectable) trace."""
+    pytest.importorskip('albumentations')
+    sid = _get(f'{server}/api/datasets')['datasets'][0]['id']
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.goto(f'{server}/?session={sid}')
+        page.wait_for_selector('#btn-compute', timeout=60000)
+        page.click('#map-btn')
+        page.select_option('#feature', 'color-hist')
+        page.keyboard.press('Escape')
+        page.click('#btn-compute')
+        page.wait_for_selector('#plot .main-svg', timeout=60000)
+        page.wait_for_function("document.getElementById('plot').data?.length > 0", timeout=60000)
+        page.click('#act-aug')
+        page.wait_for_selector('[data-ag-act="ghost"]', timeout=20000)
+        page.click('[data-ag-act="ghost"]')
+        page.wait_for_function("(document.getElementById('plot').data || []).some(t => t.name === 'aug-ghost')", timeout=90000)
+        n = page.evaluate("document.getElementById('plot').data.find(t => t.name === 'aug-ghost').x.filter(Number.isFinite).length")
+        assert n > 0
+        page.click('#ag-ghost-chip button')
+        page.wait_for_function("!(document.getElementById('plot').data || []).some(t => t.name === 'aug-ghost')", timeout=10000)
+        browser.close()
+    assert not errors, errors

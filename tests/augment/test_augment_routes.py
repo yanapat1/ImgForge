@@ -177,3 +177,25 @@ def test_coverage_against_another_session(pg, tmp_path):
     assert res['n']['target'] == 5 and 'there' in res['target_label']
     assert c.post(f'/s/{sa}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'session', 'id': private}}).status_code == 404
     assert c.post(f'/s/{sa}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'session', 'id': sa}}).status_code == 400
+
+
+def test_augmented_boxes_are_placed_on_the_map(world):
+    from types import SimpleNamespace
+
+    from conftest import wait_job
+    from dataviz.ml import features as feats
+    c, sid, ctx = world['c'], world['sid'], world['ctx']
+    ctx.registry['color-hist'] = SimpleNamespace(key='color-hist', label='Colour', group='simple', note='', text_model=None,
+                                                 kind=None, metric='cosine', fn=feats.color_hist)
+    flip = {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}
+    assert c.post(f'/s/{sid}/api/augment/ghost', json={'recipe': flip, 'feature': 'geom'}).status_code == 400   # geometry map
+    assert c.post(f'/s/{sid}/api/augment/ghost', json={'recipe': flip, 'feature': 'color-hist'}).status_code == 409   # no map yet
+    p = c.post(f'/s/{sid}/api/projection', json={'feature': 'color-hist', 'method': 'pca'}).json()
+    if not p.get('ready', True):
+        assert wait_job(c, p['job_id'], timeout=120)['status'] == 'done'
+    r = c.post(f'/s/{sid}/api/augment/ghost', json={'recipe': flip, 'feature': 'color-hist', 'n': 10}).json()
+    assert wait_job(c, r['job_id'], timeout=120)['status'] == 'done'
+    g = c.get(f'/s/{sid}/api/augment/coverage/result', params={'key': r['key']}).json()['result']
+    assert g['n'] == 4 and len(g['nbr']) == 4 and all(len(x) == 4 for x in g['nbr'])        # 4 boxes, at most 4 neighbours
+    assert all(abs(sum(w) - 1) < 1e-3 for w in g['w']) and all(s > 0.5 for s in g['sim'])
+    assert g['applied'][0] == ['HorizontalFlip'] and sorted(g['cls']) == [0, 0, 1, 1]

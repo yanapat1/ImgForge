@@ -26,7 +26,7 @@ from . import augment as ag
 from . import augment_cover as cov
 
 THUMB = 224
-PART_RE = re.compile(r'^(train|aug|tgt)_[0-9a-f]{16}$')
+PART_RE = re.compile(r'^(train|aug|tgt|ghost)_[0-9a-f]{16}$')
 
 
 def h16(*parts):
@@ -278,3 +278,53 @@ def autotune(root, trk, names, load, base, train_v, tgt_v, feature, registry, se
         history.append({'step': last['t'], 'label': ag.BY_NAME[last['t']]['label'], 'p': last['p'], 'coverage': top[2]['coverage']['after']})
     after = history[-1]['coverage'] if history else start['after']
     return {'recipe': cur, 'history': history, 'before': start['before'], 'start': start['after'], 'after': after}
+
+
+# ---------------------------------------------------------------- augmented boxes on the session's own map
+GHOST_IMAGES, GHOST_K, NEIGHBOURS = 200, 3, 10
+
+
+def ghost_crops(root, key, names, load, recipe, k=1, seed=0, cancelled=None, pad=0.1):
+    """Crops of the boxes of `names` after the recipe (k variants each), cut like the session's own crops (a padded
+    square, data/indexer.square_crop_box) -> (part dir, meta {n, cls, image, applied})."""
+    from PIL import Image
+    from .indexer import square_crop_box
+    d = root / f'ghost_{key}'
+    m = meta_of(d)
+    if m:
+        return d, m
+    imgs = d / 'imgs'
+    imgs.mkdir(parents=True, exist_ok=True)
+    compose = ag.build(recipe, seed)
+    cls, image, applied, n = [], [], [], 0
+    for i, name in enumerate(names):
+        if cancelled is not None and cancelled():
+            raise RuntimeError('cancelled')
+        rgb, boxes = load(name)
+        for j in range(k):
+            im, out, _, steps = ag.apply(rgb, boxes, recipe, seed * 1000 + i * 10 + j, compose=compose)
+            pil = Image.fromarray(im)
+            for c, x1, y1, x2, y2 in out:
+                if x2 - x1 < 2 or y2 - y1 < 2:
+                    continue
+                pil.crop(square_crop_box(x1, y1, x2, y2, pad)).resize((THUMB, THUMB), Image.BICUBIC).save(imgs / f'{n:05d}.jpg', 'JPEG', quality=90)
+                cls.append(int(c))
+                image.append(name)
+                applied.append(steps)
+                n += 1
+    meta = {'n': n, 'cls': cls, 'image': image, 'applied': applied}
+    (d / 'meta.json').write_text(json.dumps(meta))
+    return d, meta
+
+
+def place(X, Q, k=NEIGHBOURS):
+    """Each row of Q among the rows of X (both embeddings, L2-normalised here): its k nearest rows and inverse-distance
+    weights (summing to 1), and the cosine similarity to the nearest one -> (ids (q, k), weights (q, k), sim (q,))."""
+    from sklearn.neighbors import NearestNeighbors
+    X = X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
+    Q = Q / np.maximum(np.linalg.norm(Q, axis=1, keepdims=True), 1e-12)
+    k = min(k, len(X))
+    dist, ids = NearestNeighbors(n_neighbors=k).fit(X).kneighbors(Q, k)
+    w = 1.0 / (dist + 1e-6)
+    w /= w.sum(axis=1, keepdims=True)
+    return ids, w, 1.0 - dist[:, 0] ** 2 / 2

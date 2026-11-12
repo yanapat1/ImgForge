@@ -317,7 +317,7 @@ function paintBar(): void {
       `<label class="m-lbl" for="ag-ni">×</label><select id="ag-ni" data-ag="ni">${[3, 6, 9, 12].map((n) => `<option ${n === AG.nImages ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
       `<label class="m-lbl" for="ag-nv">variants</label><select id="ag-nv" data-ag="nv">${[2, 4, 6, 8].map((n) => `<option ${n === AG.variants ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
       `<label class="check"><input type="checkbox" data-ag="boxes" ${AG.boxes ? 'checked' : ''}> boxes</label>` +
-      `<button type="button" class="sm" data-ag-act="reroll" title="New random draws (other images, other variants)">🎲 Again</button><span class="grow"></span><span class="faint" id="ag-st">${AG.busy ? 'Working…' : ''}</span>` : '<span class="grow"></span>');
+      `<button type="button" class="sm" data-ag-act="reroll" title="New random draws (other images, other variants)">🎲 Again</button><button type="button" class="sm" data-ag-act="ghost" title="Draw the augmented boxes on the Explore map, placed by the map's own features: see where the recipe pushes the data">Show on the map</button><span class="grow"></span><span class="faint" id="ag-st">${AG.busy ? 'Working…' : ''}</span>` : '<span class="grow"></span>');
 }
 
 function paintPreview(): void {
@@ -442,6 +442,7 @@ export function initAug(): void {
   });
   main.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLElement>('[data-ag-act]');
+    if (b?.dataset['agAct'] === 'ghost') { void import('./augment-ghost.js').then((m) => m.showGhosts()); return; }
     if (b?.dataset['agAct'] === 'reroll') { AG.seed = (AG.seed * 7919 + 13) % 1000003; remember(); void runPreview(); return; }
     if (b?.dataset['agAct'] === 'view') { AG.view = b.dataset['k'] as typeof AG.view; paintBar(); if (AG.view === 'preview') paintPreview(); AUG_HOOKS.forEach((f) => f()); if (AG.view === 'preview') void runPreview(); return; }
     const f = (e.target as Element).closest<HTMLElement>('.ag-cell:not(.orig)');
