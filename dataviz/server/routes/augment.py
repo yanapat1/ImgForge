@@ -20,7 +20,7 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
                                         full chance and with the whole recipe, against the labels the steps moved
     POST /api/augment/curve            {recipe, target, quality, m, seed} -> a job: coverage + unreal variants at strengths
                                         0.25 … 2 -> {points, best} (GET .../coverage/result?key=)
-    POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path}, quality: quick | deep,
+    POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path} | {kind: session, id}, quality,
                                         m, k, seed} -> {ready, result} | {ready: false, job_id, key}  (data/augment_run.py)
     GET  /api/augment/coverage/result  ?key= | latest=1 -> the coverage report
     GET  /api/augment/thumb            ?part=&i= -> one 224 px thumbnail of a coverage part (the page's galleries)
@@ -401,13 +401,13 @@ def router(state, ctx):
         return {'ok': True}
 
     def target_files(st, tgt, user):
-        """-> (cache key part, [local image paths], label) of a target spec."""
+        """-> (cache key part, [images], label, read) of a target spec; read(image) -> PIL, None = local files."""
         from ...data import augment_run as ar
         kind = (tgt or {}).get('kind')
         if kind == 'upload':
             m = target_meta(st, str(tgt.get('id') or ''))
             files = sorted((targets_dir(st) / m['id'] / 'images').iterdir())
-            return ar.h16('upload', m['id'], len(files)), files, m['name']
+            return ar.h16('upload', m['id'], len(files)), files, m['name'], None
         if kind == 'dc':
             from ...datacenter import service as dc
             from ...datacenter.store import DCError
@@ -424,8 +424,25 @@ def router(state, ctx):
                     sig.append(f'{f}:{stt.st_size}:{int(stt.st_mtime)}')
                 except OSError:
                     continue
-            return ar.h16('dc', *sig), files, f'{tgt.get("path") or "/"} ({len(files)} images)'
-        raise HTTPException(400, 'target: {kind: upload, id} or {kind: dc, bucket, path}')
+            return ar.h16('dc', *sig), files, f'{tgt.get("path") or "/"} ({len(files)} images)', None
+        if kind == 'session':
+            other = str(tgt.get('id') or '')
+            seen = {d['id']: d for d in ctx.datasets.datasets(user)}
+            if other not in seen:
+                raise HTTPException(404, 'no such session (or you cannot open it)')
+            if other == getattr(st, 'dataset_id', None):
+                raise HTTPException(400, 'pick another session than this one')
+            try:
+                src = ctx.datasets.source(ctx.datasets.dataset(other))
+                names = list(src.list_images())
+            except Exception as e:  # noqa: BLE001 - its folder or bucket cannot be read now
+                raise HTTPException(409, f'that session cannot be read: {e}') from None
+            if not names:
+                raise HTTPException(400, 'that session has no images')
+            step = max(1, len(names) // MAX_DC_FILES)          # evenly spread when it is bigger than the cap
+            pick = names[::step][:MAX_DC_FILES]
+            return ar.h16('session', other, *pick), pick, f'session “{seen[other].get("name")}” ({len(pick)} images)', src.open_image
+        raise HTTPException(400, 'target: {kind: upload, id}, {kind: dc, bucket, path} or {kind: session, id}')
 
     def feature_of(st, quality):
         if quality != 'deep':
@@ -451,7 +468,7 @@ def router(state, ctx):
         k = _clamp(body.get('k'), 1, 4, 2)
         seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
         feature = feature_of(st, body.get('quality') or 'quick')
-        tkey, files, label = target_files(st, body.get('target'), user)
+        tkey, files, label, read = target_files(st, body.get('target'), user)
         fp = str(st.fingerprint or '')
         trk = ar.h16(fp, m, seed)
         auk = ar.h16(trk, ag.recipe_hash(recipe), k)
@@ -471,7 +488,7 @@ def router(state, ctx):
             job.progress(1, 4, 'augmenting them')
             aud, aum = ar.ensure_aug(root, auk, names, load, recipe, k, seed, cancelled=job.cancelled.is_set)
             job.progress(2, 4, 'the target images')
-            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES])
+            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES], read)
             if tgm['n'] < 1:
                 raise ValueError('none of the target images could be read')
             vecs = []
@@ -556,7 +573,7 @@ def router(state, ctx):
         m = _clamp(body.get('m'), 20, 1000, 300)
         seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
         feature = feature_of(st, body.get('quality') or 'quick')
-        tkey, files, _ = target_files(st, body.get('target'), user)
+        tkey, files, _, read = target_files(st, body.get('target'), user)
         trk = ar.h16(str(st.fingerprint or ''), m, seed)
         key = f'curve:{ar.h16(trk, ag.recipe_hash({**recipe, "strength": 1}), tkey, feature, seed)}'
         hit = cached(st, key)
@@ -570,7 +587,7 @@ def router(state, ctx):
                 rgb, boxes, _, _ = load_small(st, nm, 448)
                 return rgb, boxes
             trd, trm = ar.ensure_train(root, trk, names, load)
-            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES])
+            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES], read)
             trv = ar.embed(trd, trm['n'], feature, st.registry, lambda *a: None)
             tgv = ar.embed(tgd, tgm['n'], feature, st.registry, lambda *a: None)
             trial = ar.trial_fn(root, trk, names, load, trv, tgv, feature, st.registry, seed, job.cancelled.is_set)
@@ -593,7 +610,7 @@ def router(state, ctx):
         m = _clamp(body.get('m'), 20, 1000, 300)
         seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
         feature = feature_of(st, body.get('quality') or 'quick')
-        tkey, files, label = target_files(st, body.get('target'), user)
+        tkey, files, label, read = target_files(st, body.get('target'), user)
         trk = ar.h16(str(st.fingerprint or ''), m, seed)
         key = f'tune:{ar.h16(trk, ag.recipe_hash(base), tkey, feature, seed)}'
         hit = cached(st, key)
@@ -608,7 +625,7 @@ def router(state, ctx):
                 return rgb, boxes
             job.progress(0, 1, 'this dataset\'s and the target images')
             trd, trm = ar.ensure_train(root, trk, names, load)
-            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES])
+            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES], read)
             if tgm['n'] < 1:
                 raise ValueError('none of the target images could be read')
             trv = ar.embed(trd, trm['n'], feature, st.registry, lambda *a: None)

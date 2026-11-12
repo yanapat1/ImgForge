@@ -157,3 +157,23 @@ def test_model_check_needs_a_model(world):
     c, sid = world['c'], world['sid']
     r = c.post(f'/s/{sid}/api/augment/model', json={'recipe': {'steps': [{'t': 'HorizontalFlip'}]}, 'model': 'nope'})
     assert r.status_code in (404, 409) and ('model' in r.text)
+
+
+def test_coverage_against_another_session(pg, tmp_path):
+    from conftest import wait_job
+    a = make_yolo(tmp_path / 'a', boxes=tuple((f'a{k}', '0 0.5 0.5 0.3 0.3\n') for k in range(8)))
+    b = make_yolo(tmp_path / 'b', boxes=tuple((f'b{k}', '0 0.5 0.5 0.3 0.3\n') for k in range(5)))
+    alice, bob = account('alice'), account('bob')
+    sa = viz_session(alice['id'], 'here', a)
+    sb = viz_session(alice['id'], 'there', b)
+    private = viz_session(bob['id'], 'bobs', b)
+    _, app = make_viz_app(tmp_path / 'ws')
+    c = client(app)
+    assert login(c, 'alice').status_code == 200
+    flip = {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}
+    r = c.post(f'/s/{sa}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'session', 'id': sb}, 'm': 8, 'k': 1}).json()
+    assert wait_job(c, r['job_id'], timeout=180)['status'] == 'done'
+    res = c.get(f'/s/{sa}/api/augment/coverage/result', params={'key': r['key']}).json()['result']
+    assert res['n']['target'] == 5 and 'there' in res['target_label']
+    assert c.post(f'/s/{sa}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'session', 'id': private}}).status_code == 404
+    assert c.post(f'/s/{sa}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'session', 'id': sa}}).status_code == 400

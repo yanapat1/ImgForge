@@ -116,8 +116,9 @@ def ensure_aug(root, key, names, load, recipe, k, seed, cancelled=None):
     return d, meta
 
 
-def ensure_target(root, key, files):
-    """files: local paths of the target images (unreadable ones are skipped and counted)."""
+def ensure_target(root, key, files, read=None):
+    """files: the target images, local paths, or names read with read(name) -> PIL image (another session's source);
+    unreadable ones are skipped and counted."""
     from PIL import Image, ImageOps
     d = root / f'tgt_{key}'
     m = meta_of(d)
@@ -128,7 +129,8 @@ def ensure_target(root, key, files):
     def gen():
         for p in files:
             try:
-                with Image.open(p) as im:
+                im = read(p) if read is not None else Image.open(p)
+                with im:
                     rgb = np.asarray(ImageOps.exif_transpose(im).convert('RGB'))
             except Exception:  # noqa: BLE001 - not an image, truncated: left out and said
                 bad.append(Path(p).name)

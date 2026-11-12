@@ -31,7 +31,9 @@ interface Report {
 }
 interface Tune { recipe: AugRecipe; history: { step: string; label: string; p: number; coverage: number }[]; before: number; start: number; after: number }
 interface Curve { points: { strength: number; coverage: number; off_domain: number; score: number }[]; best: number; before: number }
-type TargetSpec = { kind: 'upload'; id: string; label: string } | { kind: 'dc'; bucket: string; path: string; label: string };
+type TargetSpec = { kind: 'upload'; id: string; label: string } | { kind: 'dc'; bucket: string; path: string; label: string }
+  | { kind: 'session'; id: string; label: string };
+const targetBody = (t: TargetSpec): Record<string, string> => (t.kind === 'dc' ? { kind: t.kind, bucket: t.bucket, path: t.path } : { kind: t.kind, id: t.id });
 
 const C = {
   targets: [] as Target[], target: null as TargetSpec | null, quality: 'quick' as 'quick' | 'deep', m: 300, k: 2,
@@ -47,11 +49,11 @@ async function loadTargets(): Promise<void> {
 }
 
 function targetRow(): string {
-  const cur = C.target, val = cur ? (cur.kind === 'upload' ? `u:${cur.id}` : `dc:${cur.bucket}|${cur.path}`) : '';
-  const dcOpt = cur?.kind === 'dc' ? `<option value="${esc(val)}" selected>${esc(cur.label)}</option>` : '';
+  const cur = C.target, val = cur ? (cur.kind === 'upload' ? `u:${cur.id}` : cur.kind === 'session' ? `s:${cur.id}` : `dc:${cur.bucket}|${cur.path}`) : '';
+  const dcOpt = cur && cur.kind !== 'upload' ? `<option value="${esc(val)}" selected>${esc(cur.label)}</option>` : '';
   return `<div class="ag-target"><label class="m-lbl" for="agv-t">Compare against</label><select id="agv-t" data-agv="t"><option value="">pick the new images…</option>` +
     C.targets.map((t) => `<option value="u:${esc(t.id)}" ${val === `u:${t.id}` ? 'selected' : ''}>${esc(t.name)} · ${t.n} images</option>`).join('') + dcOpt + '</select>' +
-    `<button type="button" class="sm" data-agv-act="upload">Upload images…</button><button type="button" class="sm" data-agv-act="dc">Data Center folder…</button>` +
+    `<button type="button" class="sm" data-agv-act="upload">Upload images…</button><button type="button" class="sm" data-agv-act="dc">Data Center folder…</button><button type="button" class="sm" data-agv-act="session" title="The images of another visualizer session you can open">Another session…</button>` +
     `<label class="m-lbl" for="agv-q" title="Quick: colour + edge features on the CPU, in seconds. Deep: the session's deep features (DINOv2 / CLIP), better at what things look like; slow without a GPU.">Features</label>` +
     `<select id="agv-q" data-agv="q"><option value="quick" ${C.quality === 'quick' ? 'selected' : ''}>quick</option><option value="deep" ${C.quality === 'deep' ? 'selected' : ''}>deep</option></select>` +
     `<label class="m-lbl" for="agv-m">images</label><select id="agv-m" data-agv="m">${[100, 300, 600, 1000].map((n) => `<option ${n === C.m ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
@@ -123,7 +125,7 @@ export function paintCoverage(): void {
 
 async function run(recipe: AugRecipe = AG.recipe): Promise<Report | null> {
   if (!C.target) return null;
-  const t = C.target, target = t.kind === 'upload' ? { kind: t.kind, id: t.id } : { kind: t.kind, bucket: t.bucket, path: t.path };
+  const target = targetBody(C.target);
   const r = await postJSON<{ ready: boolean; key: string; result?: Report; job_id?: number }>('api/augment/coverage',
     { recipe, target, quality: C.quality, m: C.m, k: C.k, seed: AG.seed });
   if (r.ready) return r.result ?? null;
@@ -171,7 +173,7 @@ function drawCurve(c: Curve): void {
 async function runCurve(): Promise<void> {
   if (!C.target) return;
   if (!AG.recipe.steps.some((x) => x.on)) { toast('The recipe has no step to apply', 'err'); return; }
-  const t = C.target, target = t.kind === 'upload' ? { kind: t.kind, id: t.id } : { kind: t.kind, bucket: t.bucket, path: t.path };
+  const target = targetBody(C.target);
   C.busy = true;
   C.curve = null;
   paintCoverage();
@@ -188,7 +190,7 @@ async function runCurve(): Promise<void> {
 
 async function runTune(): Promise<void> {
   if (!C.target) return;
-  const t = C.target, target = t.kind === 'upload' ? { kind: t.kind, id: t.id } : { kind: t.kind, bucket: t.bucket, path: t.path };
+  const target = targetBody(C.target);
   C.busy = true;
   C.err = '';
   C.tune = null;
@@ -255,6 +257,26 @@ async function pickDc(): Promise<void> {
   if (spec) { C.target = spec; paintCoverage(); }
 }
 
+async function pickSession(): Promise<void> {
+  const here = /\/s\/([^/@]+)/.exec(location.pathname)?.[1] ?? '';
+  let list: { id: string; name: string; kind?: string }[] = [];
+  try { list = (await getJSON<{ datasets: { id: string; name: string; kind?: string }[] }>('api/datasets')).datasets; } catch (e) { toast(errText(e), 'err'); return; }
+  list = list.filter((d) => d.id !== decodeURIComponent(here) && d.kind !== 'embeddings' && d.kind !== 'union');
+  if (!list.length) { toast('No other session with images to compare against', 'err'); return; }
+  let spec: TargetSpec | null = null;
+  await openDialog({
+    title: 'Compare against another session', ok: 'Use this session', focus: '#agv-s',
+    body: `<label class="fld"><span>Session</span><select id="agv-s">${list.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('')}</select></label>` +
+      '<p class="hint">Its images (up to 2000, evenly spread) are read from where that session reads them, local or S3.</p>',
+    onOk: (root) => {
+      const sel = root.querySelector<HTMLSelectElement>('#agv-s');
+      spec = { kind: 'session', id: sel?.value ?? '', label: `session ${sel?.selectedOptions[0]?.textContent ?? ''}` };
+      return null;
+    },
+  });
+  if (spec) { C.target = spec; paintCoverage(); }
+}
+
 function bindDrop(): void {
   const d = $('agv-drop');
   if (!d) return;
@@ -310,6 +332,7 @@ export function initAugCover(): void {
     else if (k === 'tune-use' && C.tune) { setAugRecipe(structuredClone(C.tune.recipe)); C.tune = null; toast('The recipe is in place. Run the coverage again to see the full report.'); paintCoverage(); }
     else if (k === 'upload') pickFiles();
     else if (k === 'dc') void pickDc();
+    else if (k === 'session') void pickSession();
     else if (k === 'near') void nearest(Number(b.dataset['j']));
     else if (k === 'add-gap') {
       const g = C.res?.gap?.[Number(b.dataset['i'])];
