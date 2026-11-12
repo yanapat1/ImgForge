@@ -261,6 +261,36 @@ register(Tool('set_editor_query', 'Page action: put a query in the SQL editor. T
                     'note': S('one line: what you wrote or fixed')}, ['sql']), False, _ui_run,
               lambda b, a: a.get('note') or ('Open this query in a new tab' if a.get('mode') == 'new_tab' else 'Put this query in the editor'),
               check=_ui_ok, **_U))
+
+
+def _editor_run_check(ctx, a):
+    """Before run_in_editor's card: a read on a known connection; the page then writes it in the editor and runs it."""
+    sql = str(a.get('sql') or '')
+    if not sql.strip():
+        raise ToolError('sql: the query to run is empty')
+    if len(sql) > EDITOR_CHARS:
+        raise ToolError(f'sql: at most {EDITOR_CHARS} characters')
+    if not (a.get('connection') or (ctx.scope or {}).get('connection')):
+        raise ToolError('no connection on the page: ask the user to choose one (list_sources shows them), then pass connection')
+    cid, db = _target(ctx, a)
+    _call(_svc().assert_read_for_ai, ctx.user, _sid(ctx), cid, db, sql)
+    out = {**a, 'sql': sql, 'connection': cid, 'mode': 'new_tab' if a.get('mode') == 'new_tab' else 'replace'}
+    if db:
+        out['database'] = db
+    return out, None
+
+
+def _editor_run_line(b, a):
+    sql = ' '.join(str(a.get('sql') or '').split())
+    return a.get('note') or f'Run in the editor{" (new tab)" if a.get("mode") == "new_tab" else ""}: {sql[:240]}'
+
+
+register(Tool('run_in_editor', 'Page action that runs: write a read in the SQL editor and run it; rows show in the Results '
+                               'tab. Returns rows, columns, result_id (never the rows) or the database error.',
+              _obj({'sql': S('the whole query, in this database\'s syntax'),
+                    'mode': E('replace = this tab, new_tab = a new one', ['replace', 'new_tab']),
+                    'name': S('new tab name'), 'note': S('one line: what it shows'), **CONN}, ['sql']),
+              False, _ui_run, _editor_run_line, check=_editor_run_check, domain='analysis', ctx=True, risk='run'))
 NOTE_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow']
 DASH_KINDS = ['kpi', 'bar', 'hbar', 'line', 'area', 'donut', 'forecast', 'table', 'text']
 register(Tool('build_dashboard', 'Page action: add charts from the last result to the dashboard.',

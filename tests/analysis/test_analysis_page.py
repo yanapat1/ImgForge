@@ -1271,6 +1271,69 @@ def test_the_assistant_reads_the_editor_and_shows_its_sql_before_apply(server, t
         fake.should_exit = True
 
 
+def test_the_assistant_writes_and_runs_sql_in_the_editor(server, target):  # noqa: F811
+    """run_in_editor (a run action, applied): the page writes the SQL in the editor, runs it, the rows show in the
+    Results tab, and the page reports rows, columns and result_id (never the rows); a failed run reports the error."""
+    from test_page_smoke import _post, _put
+    from test_llm import fake_app
+    from test_models import _serve
+    fake, url = _serve(fake_app())
+    sql = 'SELECT id, total FROM public.orders ORDER BY total DESC LIMIT 7'
+    events = [{'type': 'meta', 'run_id': 'r1', 'model': 'm', 'provider': 'p', 'mode': 'auto'},
+              {'type': 'ui_action', 'id': 'u1', 'action': 'run_in_editor', 'label': 'Seven biggest orders',
+               'args': {'sql': sql, 'mode': 'replace', 'connection': target['conn'], 'database': target['db']}, 'applied': True, 'wait': True},
+              {'type': 'text', 'text': 'Running it.'}, {'type': 'done', 'usage': {'in': 1, 'out': 1}}]
+    acks = []
+
+    def chat(route):
+        route.fulfill(status=200, content_type='application/x-ndjson', body=''.join(json.dumps(e) + '\n' for e in events))
+
+    def ack(route):
+        acks.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body='{"ok": true}')
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1', 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1500, 'height': 900})
+            errors = []
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.route('**/api/llm/agent/analysis/chat', chat)
+            page.route('**/api/llm/agent/ui-result', ack)
+            page.goto(f'{server}/?analysis')
+            page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+            page.select_option('#an-conn', target['conn'])
+            page.wait_for_function("document.querySelector('#an-db option:nth-child(2)')", timeout=10000)
+            page.select_option('#an-db', target['db'])
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=10000)
+            page.fill('#ai-analysis-q', 'show me the biggest orders')
+            page.keyboard.press('Enter')
+            page.wait_for_function('() => new Set([...document.querySelectorAll("#an-rc .an-grid td[data-r]")].map((td) => td.dataset.r)).size === 7', timeout=20000)
+            assert page.locator('#an-sql .cm-content').inner_text().strip() == sql
+            for _ in range(50):
+                if acks:
+                    break
+                page.wait_for_timeout(100)
+            assert len(acks) == 1 and acks[0]['ok'] and acks[0]['action_id'] == 'u1', acks
+            r = acks[0]['result']
+            assert r['rows'] == 7 and r['columns'] == ['id', 'total'] and r['result_id']
+            # a query the database rejects: the error goes back to the model, the Messages tab shows it
+            events[1] = {**events[1], 'id': 'u2', 'args': {**events[1]['args'], 'sql': 'SELECT nope FROM public.orders'}}
+            page.fill('#ai-analysis-q', 'again')
+            page.keyboard.press('Enter')
+            for _ in range(100):
+                if len(acks) == 2:
+                    break
+                page.wait_for_timeout(200)
+            assert len(acks) == 2 and not acks[1]['ok'] and 'the query failed' in acks[1]['detail'], acks
+            assert not errors, errors
+            browser.close()
+    finally:
+        fake.should_exit = True
+
+
 def test_the_assistant_groups_and_describes_the_board_without_coordinates(server, target):  # noqa: F811
     """edit_board with describe + zone ops and arrange: the page measures the cards, pins each description above its
     table, lays the tables out zone by zone (no overlap) and draws each zone around its tables; dragging a table

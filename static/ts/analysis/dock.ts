@@ -1,5 +1,6 @@
 // The ◆ assistant on this page: the app's one dock and chat, with the Analysis specialist. It is told what is open, and
-// may fill the editor or add charts; running and changing stay with the user's own Run and confirm.
+// may fill the editor, run a read there (run_in_editor: after the user's OK in Ask mode) or add charts; changes stay
+// with the user's own Run and confirm.
 
 import { mountChat } from '../core/chat.js';
 import { dockHooks, refreshDock, setDockHost, withNav } from '../core/dock.js';
@@ -13,8 +14,9 @@ import { applyBoardOps, boardScope } from './board.js';
 import type { BoardOp } from './board.js';
 import type { Widget } from './state.js';
 import { addCharts } from './dash.js';
-import { editorText } from './query.js';
-import { A, newTab, tab } from './state.js';
+import { editorText, isRunning, runTab } from './query.js';
+import { A, newTab, sourceOf, tab } from './state.js';
+import type { Tab } from './state.js';
 import type { UiAction, UiResult } from '../types-chat.js';
 
 /** the editor text the assistant is sent with each message (read_editor shows it; longer is cut and says so) */
@@ -80,26 +82,55 @@ function uiBody(a: UiAction, ref: string): string {
 
 const SUGGEST = ['What tables do I have about customers?', 'Why is this query slow?', 'Explain the last result in plain words'];
 
-function pageAction(a: UiAction): UiResult {
+/** Write the assistant's SQL into the open tab (replace) or a new one, as typed text (a run redraws the builder from
+ * it), and show the Query workspace. Ctrl+Z in the editor brings the old text back. */
+function putSql(sql: string, newTabMode: boolean, name?: string): { t: Tab; replaced: number } {
+  let replaced = 0;
+  if (newTabMode) {
+    const cur = tab();
+    A.tabs.push(newTab((name || '').trim().slice(0, 60) || `AI ${A.tabs.length + 1}`, sql, cur.conn, cur.db));
+    A.active = A.tabs.length - 1;
+  } else replaced = tab().sql ? tab().sql.split('\n').length : 0;
+  const t = tab();
+  t.sql = sql;
+  t.dirty = true;
+  t.typed = true;
+  A.ws = 'query';
+  render();
+  document.dispatchEvent(new CustomEvent('an-sql-changed'));
+  saveTabs();
+  return { t, replaced };
+}
+
+/** run_in_editor: the SQL in the editor, run there; the model gets the result's size and columns, never its rows. */
+async function runInEditor(a: UiAction): Promise<UiResult> {
+  const sql = String(a.args['sql'] ?? ''), newTabMode = a.args['mode'] === 'new_tab';
+  if (!sql.trim()) return { ok: false, detail: 'the query is empty' };
+  if (!newTabMode && isRunning(tab())) return { ok: false, detail: 'this tab is still running a query: wait, or use mode new_tab' };
+  const { t, replaced } = putSql(sql, newTabMode, String(a.args['name'] ?? ''));
+  const cid = String(a.args['connection'] ?? '');
+  if (cid && cid !== t.conn && sourceOf(cid)) { t.conn = cid; t.db = a.args['database'] ? String(a.args['database']) : null; }
+  else if (a.args['database'] && cid === t.conn) t.db = String(a.args['database']);
+  Object.assign(A.layout, { sql: true, res: true, max: '' });   // the SQL and its rows both on screen
+  t.rt = 'results';
+  render();
+  const run = await runTab(t, { ai: true });
+  if (!run) return { ok: false, detail: 'nothing ran' };
+  if (run.status === 'error') return { ok: false, detail: `the query failed: ${(run.error ?? 'no message').slice(0, 1500)} (shown in the Messages tab)` };
+  if (run.status === 'stopped') return { ok: false, detail: 'the user stopped the query' };
+  const last = run.results[run.results.length - 1];
+  return { ok: true, detail: 'shown in the Results tab', result: {
+    tab: t.name, status: run.status, ms: run.ms, statements: run.total, ...(replaced ? { replaced_lines: replaced, undo: 'Ctrl+Z in the editor' } : {}),
+    ...(last ? { result_id: last.id, rows: last.rows, columns: last.columns.slice(0, 60), ...(last.columns.length > 60 ? { more_columns: last.columns.length - 60 } : {}) } : { rows: 0 }),
+  } };
+}
+
+function pageAction(a: UiAction): UiResult | Promise<UiResult> {
+  if (a.action === 'run_in_editor') return runInEditor(a);
   if (a.action === 'set_editor_query') {
     const sql = String(a.args['sql'] ?? '');
     if (!sql.trim()) return { ok: false, detail: 'the query is empty' };
-    let replaced = 0;
-    if (a.args['mode'] === 'new_tab') {
-      const cur = tab();
-      A.tabs.push(newTab(`AI ${A.tabs.length + 1}`, sql, cur.conn, cur.db));
-      A.active = A.tabs.length - 1;
-    } else {
-      const t = tab();
-      replaced = t.sql ? t.sql.split('\n').length : 0;
-      t.sql = sql;
-      t.dirty = true;
-      t.typed = true;
-    }
-    A.ws = 'query';
-    render();
-    document.dispatchEvent(new CustomEvent('an-sql-changed'));
-    saveTabs();
+    const { replaced } = putSql(sql, a.args['mode'] === 'new_tab');
     return { ok: true, result: a.args['mode'] === 'new_tab' ? { tab: tab().name } : { replaced_lines: replaced, undo: 'Ctrl+Z in the editor' } };
   }
   if (a.action === 'edit_board') {

@@ -877,12 +877,17 @@ def _wait(run, seconds):
     return run
 
 
-def run_for_ai(user, sid, cid, database, sql, name, wait_s):
-    """A read, for the assistant: the result stays on the server and the model gets its summary."""
+def assert_read_for_ai(user, sid, cid, database, sql):
+    """The assistant runs reads only (run_query, run_in_editor): anything the user would confirm goes to run_change."""
     _session(user, sid)
     conn = _conn(user, cid)
     if classify.needs_confirm(_classify(conn, sql, sid)):
         raise AnalysisError('this is not a plain read: use run_change, and the user confirms it')
+
+
+def run_for_ai(user, sid, cid, database, sql, name, wait_s):
+    """A read, for the assistant: the result stays on the server and the model gets its summary."""
+    assert_read_for_ai(user, sid, cid, database, sql)
     pub = start(user, sid, cid, database, sql, None, name)
     run = _wait(_run(user, pub['id']), wait_s)
     if run.status == 'running':

@@ -26,7 +26,7 @@ async function vendor(): Promise<EditorModule> {
 
 const ranTyped = new Map<string, boolean>();
 let lastTab = { i: -1, at: 0 };
-const isRunning = (t: Tab): boolean => t.run?.status === 'running';
+export const isRunning = (t: Tab): boolean => t.run?.status === 'running';
 
 function dbOptions(t: Tab): string {
   const dbs = t.conn ? A.dbs.get(t.conn) : undefined;
@@ -216,18 +216,23 @@ function confirmBody(list: Statement[]): string {
   return `<div class="an-confirm"><p class="muted">Read each statement. Nothing runs until you press the button.</p>${list.map((s) => `<div class="an-cs"><span class="badge solid ${s.kind}">${s.kind === 'write' ? 'change' : 'temp'}</span><div><code>${esc(s.sql)}</code>${s.reason ? `<div class="faint">${esc(s.reason)}</div>` : ''}</div></div>`).join('')}</div>`;
 }
 
-export async function runQuery(): Promise<void> {
-  const t = tab();
-  if (isRunning(t)) return;
+export async function runQuery(): Promise<void> { await runTab(tab()); }
+
+/** Run a tab's SQL and follow it to the end: the rows land in its Results tab (and a typed query redraws the builder).
+ * For the assistant (ai), a write or temp table is refused instead of asking: it never opens the confirm dialog.
+ * Returns how the run ended, or null when nothing started. */
+export async function runTab(t: Tab, o: { ai?: boolean } = {}): Promise<RunState | null> {
+  if (isRunning(t)) { if (o.ai) throw new Error('this tab is still running a query: wait, or use mode new_tab'); return null; }
   const text = t.sql;
-  if (!t.conn) { toast('Choose a connection first', 'err'); return; }
-  if (!text.trim()) { toast('The query is empty', 'err'); return; }
+  if (!t.conn) { if (o.ai) throw new Error('no connection on this tab'); toast('Choose a connection first', 'err'); return null; }
+  if (!text.trim()) { if (o.ai) throw new Error('the query is empty'); toast('The query is empty', 'err'); return null; }
   const chk = await api.check(t.conn, t.db, text);
+  if (chk.confirm && o.ai) throw new Error('this is not a plain read: use run_change, and the user confirms it');
   if (chk.confirm) {
     const list = chk.statements.filter((s) => s.kind !== 'read');
     const writes = list.some((s) => s.kind === 'write');
     const ok = await openDialog({ title: writes ? 'Confirm this change' : 'Confirm this temp table', wide: true, okClass: writes ? 'danger-btn' : 'primary', onOk: () => null, ok: writes ? `Run ${list.length} statement${list.length > 1 ? 's' : ''}` : 'Create temp table', body: confirmBody(list) });
-    if (!ok) return;
+    if (!ok) return null;
   }
   t.run = await api.run(t.conn, t.db, text, chk.confirm, t.name);
   t.result = 0;
@@ -237,6 +242,7 @@ export async function runQuery(): Promise<void> {
   ranTyped.set(t.id, typed);
   renderIfActive(t);
   await follow(t);
+  return t.run;
 }
 
 async function follow(t: Tab): Promise<void> {

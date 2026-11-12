@@ -169,6 +169,31 @@ def test_set_editor_query_is_a_ui_proposal_with_its_note(prefs):
     assert 'read_editor' in names and 'check_sql' in names and 'set_editor_query' not in names
 
 
+def test_run_in_editor_runs_a_read_on_the_page_after_the_check(prefs, monkeypatch):
+    """run_in_editor is a run action: confirmed in ask, run at once in auto, not offered in plan. Its check resolves the
+    page's connection and refuses empty SQL, a missing connection and anything that is not a plain read."""
+    t = tools.REGISTRY['run_in_editor']
+    assert t.risk == 'run' and t.domain == 'analysis' and set(t.schema['properties']) >= {'sql', 'mode', 'name', 'note', 'connection'}
+    assert 'run_in_editor' not in tools.for_role(roles.get('analysis').domains, 'plan')
+    assert 'run_in_editor' in tools.for_role(roles.get('analysis').domains, 'ask')
+    seen = []
+    monkeypatch.setattr(service, 'assert_read_for_ai', lambda user, sid, cid, db, sql: seen.append((sid, cid, db, sql)))
+    clean, label = tools.prepare(_ctx({'database': 'db'}), 'run_in_editor', {'sql': 'SELECT 1', 'mode': 'new_tab'})
+    assert clean['connection'] == 'c1' and clean['database'] == 'db' and clean['mode'] == 'new_tab'
+    assert seen == [('s1', 'c1', 'db', 'SELECT 1')] and label == 'Run in the editor (new tab): SELECT 1'
+    assert tools.prepare(_ctx({}), 'run_in_editor', {'sql': 'SELECT 1', 'note': 'ten biggest orders'})[1] == 'ten biggest orders'
+    with pytest.raises(tools.ToolError, match='empty'):
+        tools.prepare(_ctx({}), 'run_in_editor', {'sql': '  '})
+    with pytest.raises(tools.ToolError, match='no connection'):
+        tools.prepare(Ctx(user=ALICE, role='analysis', scope={'page': 'analysis', 'session': 's1'}, skills={}), 'run_in_editor', {'sql': 'SELECT 1'})
+
+    def write(*a):
+        raise service.AnalysisError('this is not a plain read: use run_change, and the user confirms it')
+    monkeypatch.setattr(service, 'assert_read_for_ai', write)
+    with pytest.raises(tools.ToolError, match='not a plain read'):
+        tools.prepare(_ctx({}), 'run_in_editor', {'sql': 'UPDATE t SET a = 1'})
+
+
 def test_edit_board_checks_its_ops_before_the_page_sees_them():
     import pytest
     from dataviz.llm.tools import ToolError

@@ -8,4 +8,4 @@ description: Write a correct query for this database
 3. Write it in this database's syntax with real names, and limit it while exploring. Unsure of the syntax: `check_sql` with your SQL.
 4. `run_query`. If it fails, read the error, fix the query, and say what was wrong.
 5. Answer with `query_result`, and name the result you used.
-6. When the user wants the query itself, show it with `set_editor_query` (`mode` new_tab when the editor holds their own work).
+6. When the user wants the query itself, show it with `set_editor_query` (`mode` new_tab when the editor holds their own work). When they want to run it or see its rows on the page, `run_in_editor` instead: it writes it in the SQL tab and runs it into the Results tab.

@@ -135,7 +135,8 @@ def test_run_tool_validation(session):  # noqa: F811 - the fixture
     ctx.app = SimpleNamespace(curation=lambda s: c, models=None, model_service=None)
     with pytest.raises(tools.ToolError, match='Settings › Models'):
         tools.prepare(ctx, 'run_eval_all', {}, tools.REGISTRY)
-    assert {n for n, t in tools.REGISTRY.items() if t.risk == 'run'} == set(visual.RUN_ACTIONS)
+    assert {n for n, t in tools.REGISTRY.items() if t.risk == 'run' and t.domain == 'visual'} == set(visual.RUN_ACTIONS)
+    assert tools.REGISTRY['run_in_editor'].risk == 'run'                      # the Analysis page runs one too
 
 
 def test_plan_mode_offers_no_run_or_page_actions(monkeypatch, session):  # noqa: F811 - the fixture
