@@ -63,7 +63,7 @@
 .ag-card .big { font-size: var(--fs-xl, 1.5rem); font-weight: 650; font-variant-numeric: tabular-nums; }
 .ag-card .up { color: var(--ok-text); }
 .ag-card .down { color: var(--danger-text, var(--danger)); }
-.ag-verdict { margin: 0 0 var(--s3); padding: var(--s2) var(--s3); border-left: 3px solid var(--accent); background: var(--surface-2); }
+.ag-verdict { margin: 0 0 var(--s3); padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
 .ag-bars { display: flex; flex-direction: column; gap: 4px; }
 .ag-barrow { display: grid; grid-template-columns: 12em minmax(0, 1fr) 4em; gap: var(--s2); align-items: center; font-size: var(--fs-xs); }
 .ag-barrow i { display: block; height: 8px; border-radius: 4px; background: var(--accent); }
