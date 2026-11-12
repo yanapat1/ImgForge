@@ -797,5 +797,11 @@ def test_augment_tab_previews_a_recipe(server):
         page.locator('.ag-cell:not(.orig)').first.click()
         page.wait_for_selector('.ag-wipe img.top')
         page.keyboard.press('Escape')
+        # Boxes: the box check runs as a job and reports kept / lost per step and class
+        page.click('[data-ag-act="view"][data-k="boxes"]')
+        page.click('[data-agc-act="box-run"]')
+        page.wait_for_selector('#ag-main .ag-cards', timeout=30000)
+        assert 'Boxes kept' in page.locator('#ag-main .ag-cards').inner_text()
+        assert page.locator('#ag-main .ag-tbl tbody tr').count() == 2           # cat, dog
         browser.close()
     assert not errors, errors

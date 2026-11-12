@@ -66,3 +66,23 @@ def test_interchange_round_trip_and_code():
     assert 'RandomToneCurve' in ag.to_yaml(r)
     _, skipped = ag.from_albu_json({'transform': {'transforms': [{'__class_fullname__': 'Solarize', 'p': 1}]}})
     assert skipped == ['Solarize']
+
+
+def _loader(boxes):
+    return lambda name: (RGB, boxes)
+
+
+def test_box_check_counts_lost_tiny_and_per_step():
+    flip = ag.box_check(_loader(BOX), ['a', 'b'], {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}, k=2, classes=['cat'])
+    assert flip['boxes_in'] == 4 and flip['lost'] == 0 and flip['kept'] == 4 and flip['warnings'] == []
+    assert flip['transforms'][0]['t'] == 'HorizontalFlip' and flip['transforms'][0]['variants'] == 4
+    # a box in the corner and a big shift: some are lost, the step and the class say so
+    corner = [(0, 0.0, 0.0, 20.0, 20.0), (0, 140.0, 100.0, 160.0, 120.0)]
+    shift = {'steps': [{'t': 'Affine', 'p': 1, 'args': {'translate_percent': [0.3, 0.3], 'scale': [1, 1], 'rotate': [0, 0]}}]}
+    r = ag.box_check(_loader(corner), [f'i{n}' for n in range(5)], shift, k=2, classes=['cat'])
+    assert r['lost'] > 0 and r['classes'][0]['name'] == 'cat' and r['examples']
+    assert any('lost' in w for w in r['warnings'])
+    # small boxes: tiny at the train size
+    small = [(0, 10.0, 10.0, 14.0, 14.0)]
+    t = ag.box_check(_loader(small), ['a'], {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}, k=1, min_px=8, train_size=160)
+    assert t['tiny'] == 1 and t['tiny_pct'] == 100.0

@@ -70,7 +70,7 @@
 .ag-barrow i.warn { background: var(--warn); }
 .ag-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: var(--s2); }
 .ag-strip figure { margin: 0; cursor: zoom-in; }
-.ag-strip img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: var(--surface-2); }
+.ag-strip img, .ag-exph { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: var(--surface-2); }
 .ag-strip figcaption { font-size: var(--fs-2xs); color: var(--text-muted); }
 .ag-sec { margin: var(--s4, 20px) 0 var(--s2); font-size: var(--fs-sm); }
 .ag-target { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin-bottom: var(--s3); }

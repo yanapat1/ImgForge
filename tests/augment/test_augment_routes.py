@@ -62,3 +62,17 @@ def test_without_albumentations_the_tab_says_how_to_get_it(world, monkeypatch):
     monkeypatch.setitem(sys.modules, 'albumentations', None)
     r = world['c'].get(f'/s/{world["sid"]}/api/augment/catalog')
     assert r.status_code == 503 and 'albumentations' in r.text
+
+
+def test_box_check_runs_as_a_job_and_is_cached(world):
+    from conftest import wait_job
+    c, sid = world['c'], world['sid']
+    body = {'recipe': {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}, 'm': 10, 'k': 1}
+    r = c.post(f'/s/{sid}/api/augment/boxes', json=body).json()
+    assert r['ready'] is False
+    assert wait_job(c, r['job_id'])['status'] == 'done'
+    res = c.get(f'/s/{sid}/api/augment/boxes/result', params={'key': r['key']}).json()['result']
+    assert res['boxes_in'] == 4 and res['lost'] == 0 and res['images'] == 3
+    again = c.post(f'/s/{sid}/api/augment/boxes', json=body).json()
+    assert again['ready'] is True and again['result'] == res
+    assert c.get(f'/s/{sid}/api/augment/boxes/result', params={'key': 'nope'}).status_code == 404

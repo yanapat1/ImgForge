@@ -352,3 +352,72 @@ def to_python(recipe):
 def to_yaml(recipe):
     import yaml
     return yaml.safe_dump(validate(recipe), sort_keys=False, allow_unicode=True)
+
+
+# ---------------------------------------------------------------- box check: do the labels survive the recipe?
+def box_check(load, names, recipe, k=2, seed=0, min_px=8, train_size=640, classes=(), progress=None, cancelled=None):
+    """Run the recipe k times on each image and count what happens to the boxes.
+
+    load(name) -> (uint8 image, boxes [(cls, x1, y1, x2, y2)] px). A box is *lost* when less than 30 % of it stays
+    in the image, *tiny* when its short side is under min_px once the image is resized to train_size on its long
+    side (what YOLO trains on), and *at the edge* when it now touches the border (cut by a crop or a shift).
+    -> {totals, classes: [...], transforms: [...], warnings: [...], examples: [...]}."""
+    from collections import Counter
+    compose = build(recipe, seed)
+    cls_st, tr_st, examples = {}, {}, []
+    tot = Counter()
+
+    def edge(b, w, h):
+        return b[1] <= 0.5 or b[2] <= 0.5 or b[3] >= w - 0.5 or b[4] >= h - 0.5
+    for i, name in enumerate(names):
+        if cancelled is not None and cancelled():
+            break
+        rgb, boxes = load(name)
+        h, w = rgb.shape[:2]
+        good = [b for b in boxes if b[3] - b[1] > 0.5 and b[4] - b[2] > 0.5]
+        cin, ein = Counter(int(b[0]) for b in good), Counter(int(b[0]) for b in good if edge(b, w, h))
+        for j in range(k):
+            s = seed * 1000 + i * 10 + j
+            im, out, dropped, applied = apply(rgb, good, recipe, s, compose=compose)
+            hh, ww = im.shape[:2]
+            f = train_size / max(hh, ww)
+            cout = Counter(c for c, *_ in out)
+            tiny = Counter(c for c, x1, y1, x2, y2 in out if min(x2 - x1, y2 - y1) * f < min_px)
+            eout = Counter(c for c, *b in out if edge((c, *b), ww, hh))
+            n_tiny = sum(tiny.values())
+            for c in set(cin) | set(cout):
+                st = cls_st.setdefault(c, Counter())
+                st['in'] += cin[c]
+                st['kept'] += cout[c]
+                st['lost'] += max(0, cin[c] - cout[c])
+                st['tiny'] += tiny[c]
+                st['edge'] += max(0, eout[c] - ein[c])
+            tot.update({'variants': 1, 'in': len(good), 'kept': len(out), 'lost': dropped, 'tiny': n_tiny,
+                        'edge': sum(max(0, eout[c] - ein[c]) for c in eout)})
+            for t in set(applied):
+                ts = tr_st.setdefault(t, Counter())
+                ts.update({'variants': 1, 'in': len(good), 'lost': dropped, 'tiny': n_tiny})
+            if (dropped or n_tiny) and len(examples) < 12:
+                examples.append({'name': name, 'seed': s, 'lost': dropped, 'tiny': n_tiny, 'applied': applied})
+        if progress is not None:
+            progress(i + 1, len(names), 'checking boxes')
+    pct = lambda a, b: round(100.0 * a / b, 1) if b else 0.0                     # noqa: E731
+    cls_rows = [{'cls': c, 'name': classes[c] if 0 <= c < len(classes) else str(c), 'in': st['in'], 'kept': st['kept'],
+                 'lost': st['lost'], 'tiny': st['tiny'], 'edge': st['edge'], 'lost_pct': pct(st['lost'], st['in']),
+                 'tiny_pct': pct(st['tiny'], st['kept'])} for c, st in sorted(cls_st.items())]
+    tr_rows = sorted(({'t': t, 'label': BY_NAME.get(t, {}).get('label', t), 'variants': ts['variants'], 'in': ts['in'], 'lost': ts['lost'],
+                       'tiny': ts['tiny'], 'lost_pct': pct(ts['lost'], ts['in']), 'tiny_pct': pct(ts['tiny'], ts['in'])}
+                      for t, ts in tr_st.items()), key=lambda r: -(r['lost_pct'] + r['tiny_pct']))
+    warn = []
+    for r in tr_rows:
+        if r['lost_pct'] >= 5 and r['variants'] >= 3:
+            warn.append(f'{r["label"]}: {r["lost_pct"]}% of the boxes are lost in the images it ran on.')
+        if r['tiny_pct'] >= 10 and r['variants'] >= 3:
+            warn.append(f'{r["label"]}: {r["tiny_pct"]}% of the boxes become smaller than {min_px} px at {train_size}.')
+    for r in cls_rows:
+        if r['lost_pct'] >= 10 and r['in'] >= 5:
+            warn.append(f'“{r["name"]}”: {r["lost_pct"]}% of its boxes are lost.')
+    return {'images': len(names), 'variants': tot['variants'], 'boxes_in': tot['in'], 'kept': tot['kept'], 'lost': tot['lost'],
+            'tiny': tot['tiny'], 'edge': tot['edge'], 'lost_pct': pct(tot['lost'], tot['in']), 'tiny_pct': pct(tot['tiny'], tot['kept']),
+            'classes': cls_rows, 'transforms': tr_rows, 'warnings': warn[:12], 'examples': examples,
+            'min_px': min_px, 'train_size': train_size, 'k': k}

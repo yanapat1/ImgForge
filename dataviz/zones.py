@@ -155,7 +155,7 @@ FILES = (
     *((f'static/ts/views/{m}.ts', VIZ) for m in (
         'assistant', 'box-editor', 'chart-util', 'compare', 'compare-shift', 'compare-stress', 'compare-viewer', 'controls',
         'curation', 'eval', 'ev-util', 'explore-bind', 'filter-bar', 'gallery', 'image-grid', 'layout', 'modal',
-        'model-images', 'model', 'pick-bar', 'preview', 'stat-chip', 'stats', 'viewer', 'augment')),
+        'model-images', 'model', 'pick-bar', 'preview', 'stat-chip', 'stats', 'viewer', 'augment', 'augment-check')),
     *((f'static/ts/core/{m}.ts', VIZ) for m in ('live', 'compare-core', 'cmp-keys')),
     *((f'static/css/{m}.css', VIZ) for m in ('curation', 'compare', 'compare-shift', 'augment')),
 )

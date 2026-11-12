@@ -9,6 +9,8 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
                                        -> {items: [{name, w, h, orig, variants: [{img, boxes, dropped, applied}]}], classes}
     POST /api/augment/one              {recipe, name, seed, variant} -> image/jpeg at full size (the lightbox)
     POST /api/augment/export           {recipe, format: albumentations | python | yaml} -> the text
+    POST /api/augment/boxes            {recipe, m, k, seed, min_px, train_size} -> {ready, result} | {ready: false, job_id, key}
+    GET  /api/augment/boxes/result     ?key= -> the box check (lost / tiny / at the edge, per class and per step)
 
 Images are read once each, shrunk to `size` before the recipe runs (a preview, not training data), and sent as JPEG data
 URLs. Everything runs in the request (the worker thread pool): 12 images x 8 variants at 384 px take well under a second.
@@ -29,6 +31,7 @@ from ..deps import guards
 from .samples import image_boxes_px, open_image_rgb
 
 MAX_IMAGES, MAX_VARIANTS, MAX_RECIPES = 12, 8, 50
+MEM = 8                                            # results kept in memory (also saved under <cache>/augment/checks)
 
 
 def _clamp(v, lo, hi, default):
@@ -112,6 +115,28 @@ def router(state, ctx):
     r = APIRouter(dependencies=[Depends(deps.require_bound('viewer'))])
     g = guards(state)
 
+    mem = {}                                       # key -> result (the newest MEM)
+
+    def check_file(st, key):
+        d = st.cache_dir / 'augment' / 'checks'
+        d.mkdir(parents=True, exist_ok=True)
+        return d / f'{key.replace(":", "_")}.json'
+
+    def remember(key, value):
+        mem[key] = value
+        while len(mem) > MEM:
+            mem.pop(next(iter(mem)))
+
+    def cached(st, key):
+        if key in mem:
+            return mem[key]
+        try:
+            v = json.loads(check_file(st, key).read_text())
+        except (FileNotFoundError, ValueError):
+            return None
+        remember(key, v)
+        return v
+
     def recipes_file(user):
         d = ctx.current().cache_dir / 'augment' / 'recipes'
         d.mkdir(parents=True, exist_ok=True)
@@ -194,6 +219,39 @@ def router(state, ctx):
         rgb, boxes, _, _ = load_small(st, name, 2048)
         im, _, _, _ = ag.apply(rgb, boxes, recipe, _clamp(body.get('seed'), 0, 2**31 - 1, 0))
         return Response(_jpeg(im, 90), media_type='image/jpeg', headers={'Cache-Control': 'private, max-age=300'})
+
+    @r.post('/api/augment/boxes')
+    def boxes(body: dict = Body(...)):
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        st = ctx.current()
+        recipe = _recipe(body)
+        m = _clamp(body.get('m'), 10, 500, 200)
+        k = _clamp(body.get('k'), 1, 4, 2)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        min_px = _clamp(body.get('min_px'), 2, 64, 8)
+        size = _clamp(body.get('train_size'), 160, 2048, 640)
+        key = f'box:{str(st.fingerprint or "")[:12]}:{ag.recipe_hash(recipe)}:{m}:{k}:{seed}:{min_px}:{size}'
+        hit = cached(st, key)
+        if hit is not None:
+            return {'ready': True, 'key': key, 'result': hit}
+        names = pick_images(st, 'per_class', m, seed)
+
+        def run(job):
+            res = ag.box_check(lambda nm: load_small(st, nm, size)[:2], names, recipe, k, seed, min_px, size, list(st.classes),
+                               progress=job.progress, cancelled=job.cancelled.is_set)
+            check_file(st, key).write_text(json.dumps(res))
+            remember(key, res)
+        job = st.submit(f'augbox:{key}', 'Augment · box check', run, lane='io')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.get('/api/augment/boxes/result')
+    def boxes_result(key: str):
+        hit = cached(ctx.current(), key)
+        if hit is None:
+            raise HTTPException(404, 'no such box check (run it again)')
+        return {'key': key, 'result': hit}
 
     @r.post('/api/augment/export')
     def export(body: dict = Body(...)):
