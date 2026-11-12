@@ -1,0 +1,1066 @@
+"""
+The Data Analysis zone's one entry point: routes, assistant tools and tests call these functions.
+
+Every call names the signed-in user, and connections are looked up as that user's own: nobody can run SQL with someone
+else's credentials, so analysis sessions are private and never shared.
+
+    Flow of a query: check() classifies the text and, when something is not a plain read, returns a single-use token
+    bound to this user, session and exact text. start() refuses a non-read without that token. The run happens on a
+    worker thread; the page polls run(), and stop() cancels it. Rows go to a spool file (spool.py), never into memory.
+
+    Native temp tables live on one database connection, so a statement that makes or reads one runs on the session's
+    pinned connection; other queries get their own, and a long query does not block another tab.
+"""
+
+import hashlib
+import secrets
+import shutil
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import duckdb
+import orjson
+from sqlalchemy import text
+from sqlglot import exp, parse_one
+
+from .. import db
+from ..auth import audit, tiers
+from . import aiaccess, favorites
+from ..core import logging as vlog
+from . import adapters, classify, joins, querymodel, sample, spool
+from . import forecast as forecast_mod
+from . import stats as stats_mod
+
+KINDS = ('postgres', 'mssql', 'mongo')
+TOKEN_S = 300
+MAX_TEXT = 200000
+_log = vlog.get_logger('analysis')
+
+
+class DataError(Exception):
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.status = status
+
+
+class _Conf:
+    ctx = None
+    root = None
+
+
+_lock = threading.Lock()
+_runs = {}                 # run id -> Run
+_results = {}              # result id -> {user, session, path, columns, rows, stats, ...}
+_tokens = {}               # token -> (user id, session id, text hash, expiry)
+_tree_cache = {}           # (user, connection, database) -> (time, value)
+_live = {}                 # session id -> {seen, pinned: {(conn, db): (adapter, lock)}, temps: [...]}
+_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix='dataviz-analysis')
+
+
+def configure(ctx):
+    _Conf.ctx = ctx
+
+
+def _cfg():
+    return (_Conf.ctx.cfg or {}).get('data_analysis') or {}
+
+
+def _root():
+    return Path(_Conf.ctx.datasets.root)
+
+
+def _use(user):
+    tiers.check(user, 'analysis.use')
+
+
+def _conn(user, cid):
+    """The caller's own saved connection, with its secret. Someone else's is simply not found."""
+    try:
+        c = _Conf.ctx.datasets.connection(cid, owner_id=user['id'])
+    except KeyError:
+        raise DataError('no such connection', 404) from None
+    if c.get('kind') not in KINDS:
+        raise DataError(f'a {c.get("kind")} connection cannot be queried')
+    return c
+
+
+def _clean(e, conn):
+    """Driver messages can quote a connection string: the page and the AI only get this."""
+    msg = str(e).strip() or type(e).__name__
+    for secret in (conn.get('secret_key'),):
+        if secret:
+            msg = msg.replace(str(secret), '***')
+    return msg[:1000]
+
+
+def _dialect(conn):
+    return conn['kind']
+
+
+# ---------------------------------------------------------------- sessions
+def _session(user, sid):
+    with db.connect() as c:
+        r = c.execute(text('SELECT * FROM app.an_sessions WHERE id = :i AND owner_id = :o'),
+                      {'i': sid, 'o': user['id']}).first()
+    if r is None:
+        raise DataError('no such session', 404)
+    return r
+
+
+def _shape(r):
+    return {'id': r.id, 'name': r.name, 'state': r.state or {}, 'updated_at': r.updated_at.isoformat()}
+
+
+def list_sessions(user):
+    _use(user)
+    with db.connect() as c:
+        rows = c.execute(text('SELECT * FROM app.an_sessions WHERE owner_id = :o ORDER BY updated_at DESC'),
+                         {'o': user['id']}).all()
+    return [_shape(r) for r in rows]
+
+
+def create_session(user, name):
+    _use(user)
+    name = str(name or '').strip()[:200] or 'Untitled analysis'
+    sid = uuid.uuid4().hex
+    with db.begin() as c:
+        r = c.execute(text('INSERT INTO app.an_sessions (id, owner_id, name) VALUES (:i, :o, :n) RETURNING *'),
+                      {'i': sid, 'o': user['id'], 'n': name}).first()
+    return _shape(r)
+
+
+def update_session(user, sid, name=None, state=None):
+    _session(user, sid)
+    sets, args = ['updated_at = now()'], {'i': sid}
+    if name is not None:
+        sets.append('name = :n')
+        args['n'] = str(name).strip()[:200] or 'Untitled analysis'
+    if state is not None:
+        sets.append('state = CAST(:s AS JSONB)')
+        args['s'] = orjson.dumps(state).decode()
+    with db.begin() as c:
+        r = c.execute(text(f'UPDATE app.an_sessions SET {", ".join(sets)} WHERE id = :i RETURNING *'), args).first()
+    return _shape(r)
+
+
+def delete_session(user, sid):
+    _session(user, sid)
+    close_session(user, sid)
+    with db.begin() as c:
+        c.execute(text('DELETE FROM app.an_sessions WHERE id = :i'), {'i': sid})
+    shutil.rmtree(_root() / 'analysis' / str(user['id']) / sid, ignore_errors=True)
+
+
+def _state(sid):
+    with _lock:
+        return _live.setdefault(sid, {'seen': time.time(), 'pinned': {}, 'temps': []})
+
+
+def heartbeat(user, sid):
+    _session(user, sid)
+    _state(sid)['seen'] = time.time()
+    reap()
+    return {'temps': temps(user, sid)}
+
+
+def close_session(user, sid):
+    """Leaving: temp tables go with their connection, and the result files of this session too."""
+    _session(user, sid)
+    _forget(sid)
+    with _lock:
+        gone = [k for k, v in _results.items() if v['session'] == sid and v['user'] == user['id']]
+    for rid in gone:
+        _drop_result(rid)
+
+
+def _forget(sid):
+    with _lock:
+        st = _live.pop(sid, None)
+    for adapter, _ in (st or {}).get('pinned', {}).values():
+        try:
+            adapter.close()
+        except Exception:  # noqa: BLE001 - it is going away anyway
+            pass
+
+
+def reap():
+    """Sessions with no page open past the grace time lose their temp tables. A page refresh loses nothing."""
+    limit = time.time() - float(_cfg().get('temp_grace_s', 900))
+    with _lock:
+        gone = [sid for sid, st in _live.items() if st['seen'] < limit and st['pinned']]
+    for sid in gone:
+        _forget(sid)
+
+
+def temps(user, sid):
+    return [dict(t) for t in _state(sid)['temps']]
+
+
+# ---------------------------------------------------------------- what can be queried
+def sources(user):
+    _use(user)
+    _sample_connection(user)
+    out = []
+    for c in _Conf.ctx.datasets.connections(user['id']):
+        if c.get('kind') in KINDS:
+            out.append({'id': c['id'], 'name': c.get('name') or c.get('host'), 'kind': c['kind'], 'host': c.get('host'),
+                        'database': c.get('database') or '', **({'example': True} if sample.is_sample(c) else {})})
+    return out
+
+
+def _sample_connection(user):
+    """The first visit gives the user the sample database's connection (analysis/sample.py), once."""
+    prefs = user_prefs(user)
+    if prefs.get(sample.PREF):
+        return
+    try:
+        from ..server.routes.me import _put_prefs
+        sample.ensure_connection(user, _Conf.ctx.datasets, prefs, _put_prefs)
+    except Exception:  # noqa: BLE001 - the page works without the sample
+        _log.exception('could not add the sample connection')
+
+
+def tree(user, cid, database=None, refresh=False):
+    """database None: the databases of this connection; else its tables."""
+    _use(user)
+    conn = _conn(user, cid)
+    key = (user['id'], cid, database)
+    ttl = float(_cfg().get('tree_cache_s', 120))
+    with _lock:
+        hit = _tree_cache.get(key)
+    if hit and not refresh and time.time() - hit[0] < ttl:
+        return hit[1]
+    a = None
+    try:
+        a = adapters.adapter(conn, database)
+        value = {'tables': a.tables()} if database or conn['kind'] == 'mongo' and conn.get('database') else \
+            {'databases': a.databases(), 'version': a.version()}
+    except DataError:
+        raise
+    except Exception as e:  # noqa: BLE001 - a database's own error: say what it said
+        if sample.is_sample(conn) and 'does not exist' in str(e):
+            raise DataError(SAMPLE_GONE, 410) from None
+        raise DataError(_clean(e, conn)) from None
+    finally:
+        if a is not None:
+            a.close()
+    with _lock:
+        _tree_cache[key] = (time.time(), value)
+    return value
+
+
+SAMPLE_GONE = (f'The sample database {sample.DB} was removed. An admin can restore it (Restore sample database), '
+               'or remove this connection in Settings › Connections.')
+
+
+def restore_sample(user):
+    """An admin makes the sample database again, as on the first day (its rows and descriptions)."""
+    _use(user)
+    if not user.get('is_admin'):
+        raise DataError('only an admin can restore the sample database', 403)
+    url = str(((_Conf.ctx.cfg or {}).get('database') or {}).get('url') or '')
+    if not url or url.startswith('${'):
+        raise DataError('no database URL is configured', 500)
+    if not sample.reset_sample(url, _log.info):
+        raise DataError(sample.state().get('reason') or 'the sample database could not be made', 409)
+    with _lock:
+        _tree_cache.clear()
+    return {'ok': True, 'database': sample.DB}
+
+
+def describe(user, cid, database, schema, table):
+    _use(user)
+    conn = _conn(user, cid)
+    a = None
+    try:
+        a = adapters.adapter(conn, database)
+        out = a.describe(schema, table)
+    except Exception as e:  # noqa: BLE001
+        raise DataError(_clean(e, conn)) from None
+    finally:
+        if a is not None:
+            a.close()
+    with db.connect() as c:
+        rows = c.execute(text("""SELECT column_name, description, source FROM app.an_column_docs
+                                 WHERE connection_id = :c AND database = :d AND schema_name = :s AND table_name = :t"""),
+                         {'c': cid, 'd': database or '', 's': schema or '', 't': table}).all()
+    docs = {r.column_name: r for r in rows}
+    for col in out['columns']:
+        col['from'] = 'database' if col['description'] else ''
+        d = docs.get(col['name'])
+        if d:
+            col['description'], col['from'] = d.description, d.source
+    if '' in docs:
+        out['description'] = docs[''].description
+    return out
+
+
+def set_description(user, cid, database, schema, table, column, description, source='user'):
+    _use(user)
+    _conn(user, cid)
+    keys = {'c': cid, 'd': database or '', 's': schema or '', 't': table, 'col': column or ''}
+    with db.begin() as c:
+        if not str(description or '').strip():
+            c.execute(text("""DELETE FROM app.an_column_docs WHERE connection_id = :c AND database = :d
+                              AND schema_name = :s AND table_name = :t AND column_name = :col"""), keys)
+            return {'ok': True}
+        c.execute(text("""
+            INSERT INTO app.an_column_docs (connection_id, database, schema_name, table_name, column_name, description,
+                                            source, updated_by)
+            VALUES (:c, :d, :s, :t, :col, :text, :src, :u)
+            ON CONFLICT (connection_id, database, schema_name, table_name, column_name)
+            DO UPDATE SET description = :text, source = :src, updated_by = :u, updated_at = now()"""),
+                  {**keys, 'text': str(description).strip()[:4000], 'src': 'ai' if source == 'ai' else 'user', 'u': user['id']})
+    return {'ok': True}
+
+
+# ---------------------------------------------------------------- the gate
+def _classify(conn, sql, sid=None):
+    if not str(sql or '').strip():
+        raise DataError('the query is empty')
+    if len(sql) > MAX_TEXT:
+        raise DataError('the query is too long')
+    if conn['kind'] == 'mongo':
+        return classify.classify_mongo(sql)
+    names = [t['name'].lstrip('#') for t in (_state(sid)['temps'] if sid else ())]
+    return classify.classify(sql, _dialect(conn), names)
+
+
+def _digest(sql):
+    return hashlib.sha256(sql.encode()).hexdigest()
+
+
+def check(user, sid, cid, database, sql):
+    """What the text would do. confirm: a single-use token, present when the user must agree first."""
+    _session(user, sid)
+    conn = _conn(user, cid)
+    st = _classify(conn, sql, sid)
+    public = [{k: s.get(k) for k in ('sql', 'kind', 'op', 'tables', 'reason')} for s in st]
+    need = classify.needs_confirm(st)
+    if not need:
+        return {'statements': public, 'confirm': None}
+    if any(s['kind'] == classify.WRITE for s in need):
+        tiers.check(user, 'analysis.write')
+    token = secrets.token_urlsafe(24)
+    with _lock:
+        for k in [k for k, v in _tokens.items() if v[3] < time.time()]:
+            del _tokens[k]
+        _tokens[token] = (user['id'], sid, _digest(sql), time.time() + TOKEN_S)
+    return {'statements': public, 'confirm': token}
+
+
+def _spend(user, sid, sql, token):
+    with _lock:
+        got = _tokens.pop(token or '', None)
+    if got is None or got[3] < time.time() or got[:3] != (user['id'], sid, _digest(sql)):
+        raise DataError('this needs your confirmation first', 409)
+
+
+# ---------------------------------------------------------------- running
+class Run:
+    def __init__(self, user, sid, cid, database, name, sql):
+        self.id = uuid.uuid4().hex
+        self.user = user
+        self.sid = sid
+        self.cid = cid
+        self.database = database
+        self.name = name
+        self.sql = sql
+        self.status = 'running'
+        self.t0 = time.time()
+        self.ms = None
+        self.statement = 0
+        self.total = 0
+        self.results = []
+        self.error = None
+        self.stopped = threading.Event()
+        self.active = None
+
+    def public(self):
+        return {'id': self.id, 'status': self.status, 'ms': self.ms if self.ms is not None else round((time.time() - self.t0) * 1000),
+                'statement': self.statement, 'total': self.total, 'results': self.results, 'error': self.error}
+
+
+def start(user, sid, cid, database, sql, token=None, name=''):
+    _session(user, sid)
+    conn = _conn(user, cid)
+    st = _classify(conn, sql, sid)
+    need = classify.needs_confirm(st)
+    if need:
+        if any(s['kind'] == classify.WRITE for s in need):
+            tiers.check(user, 'analysis.write')
+        _spend(user, sid, sql, token)
+    with _lock:
+        mine = sum(1 for r in _runs.values() if r.user['id'] == user['id'] and r.status == 'running')
+    if mine >= int(_cfg().get('runs_per_user', 4)):
+        raise DataError('you already have the most queries running at once: wait or stop one', 429)
+    run = Run(user, sid, cid, database, str(name or '')[:200], sql)
+    run.total = len(st)
+    with _lock:
+        _runs[run.id] = run
+        for k in [k for k, r in _runs.items() if r.status != 'running' and r.t0 < time.time() - 3600]:
+            del _runs[k]
+    _pool.submit(_execute, run, conn, st)
+    return run.public()
+
+
+def _pinned(sid, conn, database):
+    st = _state(sid)
+    key = (conn['id'], database or '')
+    with _lock:
+        hit = st['pinned'].get(key)
+    if hit:
+        return hit
+    made = adapters.adapter(conn, database, _cfg().get('statement_timeout_s', 0)), threading.Lock()
+    with _lock:
+        return st['pinned'].setdefault(key, made)
+
+
+def _uses_temp(sid, s):
+    if s['kind'] == classify.TEMP:
+        return True
+    names = {t['name'].lstrip('#').lower() for t in _state(sid)['temps']}
+    return any(t.split('.')[-1].lower() in names for t in s.get('tables') or [])
+
+
+def _note_temp(sid, conn, database, s):
+    target = s.get('target') or ''
+    if not target:
+        return
+    bare = target.split('.')[-1].lstrip('#')
+    label = f'#{bare}' if conn['kind'] == 'mssql' else bare
+    st = _state(sid)
+    with _lock:
+        st['temps'] = [t for t in st['temps'] if t['name'].lstrip('#').lower() != bare.lower()]
+        if s['op'] != 'DROP':
+            st['temps'].append({'name': label, 'connection': conn['id'], 'database': database or '',
+                                'source': conn['kind'], 'source_name': conn.get('name') or ''})
+
+
+def _execute(run, conn, statements):
+    total_rows, kind = 0, classify.READ
+    pinned_lock = None
+    try:
+        for i, s in enumerate(statements):
+            if run.stopped.is_set():
+                break
+            run.statement = i + 1
+            read = s['kind'] == classify.READ
+            if not read:
+                kind = classify.WRITE if s['kind'] == classify.WRITE else (classify.TEMP if kind == classify.READ else kind)
+            pin = _uses_temp(run.sid, s)
+            if pin:
+                a, pinned_lock = _pinned(run.sid, conn, run.database)
+                pinned_lock.acquire()
+            else:
+                a = adapters.adapter(conn, run.database, _cfg().get('statement_timeout_s', 0))
+            run.active = a
+            try:
+                total_rows += _one(run, conn, a, s, read)
+            finally:
+                run.active = None
+                if pin:
+                    pinned_lock.release()
+                else:
+                    a.close()
+            if s['kind'] == classify.TEMP:
+                _note_temp(run.sid, conn, run.database, s)
+            if s['kind'] == classify.WRITE:
+                audit.log('analysis.change', target=conn['id'], user_id=run.user['id'],
+                          meta={'database': run.database, 'op': s['op'], 'sql': s['sql'][:2000]})
+        run.status = 'stopped' if run.stopped.is_set() else 'done'
+    except Exception as e:  # noqa: BLE001 - the database's own error, shown in Messages
+        if run.stopped.is_set():
+            run.status = 'stopped'
+        else:
+            run.status = 'error'
+            run.error = _clean(e, conn)
+            _log.info(f'query failed: {vlog.esc(run.error[:200])}')
+    run.ms = round((time.time() - run.t0) * 1000)
+    _remember(run, kind, total_rows)
+
+
+def _one(run, conn, a, s, read):
+    stmt = s['command'] if conn['kind'] == 'mongo' else s['sql']
+    t0 = time.time()
+    columns, batches = a.run(stmt, read=read)
+    if not columns:
+        for _ in batches:
+            pass
+        return 0
+    path = spool.new_path(_root(), run.user['id'], run.sid)
+
+    def until_stopped():
+        try:
+            for b in batches:
+                yield b
+                if run.stopped.is_set():
+                    return
+        except Exception:
+            if not run.stopped.is_set():    # a cancelled driver raises: what arrived before it is kept
+                raise
+
+    info = spool.Spool(path).write(columns, until_stopped(), int(_cfg().get('max_rows', 1000000)))
+    rid = uuid.uuid4().hex
+    entry = {'user': run.user['id'], 'session': run.sid, 'path': path, 'stats': None, 'at': time.time(), **info}
+    with _lock:
+        _results[rid] = entry
+    run.results.append({'id': rid, 'rows': info['rows'], 'columns': info['columns'], 'truncated': info['truncated'],
+                        'ms': round((time.time() - t0) * 1000), 'statement': s['sql'][:500], 'stopped': run.stopped.is_set()})
+    _trim(run.user['id'])
+    return info['rows']
+
+
+def _trim(user_id):
+    """Oldest results go first once a user's files pass the quota."""
+    limit = float(_cfg().get('max_spool_mb', 4096)) * 1e6
+    with _lock:
+        mine = sorted(((v['at'], k, v['bytes']) for k, v in _results.items() if v['user'] == user_id))
+    used = sum(x[2] for x in mine)
+    for _, rid, size in mine:
+        if used <= limit:
+            break
+        _drop_result(rid)
+        used -= size
+
+
+def _drop_result(rid):
+    with _lock:
+        v = _results.pop(rid, None)
+    if v:
+        Path(v['path']).unlink(missing_ok=True)
+
+
+def _remember(run, kind, rows):
+    try:
+        with db.begin() as c:
+            c.execute(text("""INSERT INTO app.an_history (session_id, connection_id, database, name, sql, kind, status, rows, ms, error)
+                              VALUES (:s, :c, :d, :n, :q, :k, :st, :r, :m, :e)"""),
+                      {'s': run.sid, 'c': run.cid, 'd': run.database, 'n': run.name, 'q': run.sql, 'k': kind,
+                       'st': run.status, 'r': rows, 'm': run.ms, 'e': run.error})
+    except Exception as e:  # noqa: BLE001 - history is a nicety: the result is there
+        _log.warning(f'history not saved: {vlog.esc(e)}')
+
+
+def _run(user, rid):
+    with _lock:
+        r = _runs.get(rid)
+    if r is None or r.user['id'] != user['id']:
+        raise DataError('no such run', 404)
+    return r
+
+
+def run_state(user, rid):
+    return _run(user, rid).public()
+
+
+def stop(user, rid):
+    r = _run(user, rid)
+    r.stopped.set()
+    a = r.active
+    if a is not None:
+        try:
+            a.cancel()
+        except Exception as e:  # noqa: BLE001 - the flag still ends it at the next batch
+            _log.info(f'cancel: {vlog.esc(e)}')
+    return r.public()
+
+
+def explain(user, sid, cid, database, sql):
+    """The plan of one read: each step's share of the cost, estimated unless it says otherwise."""
+    _session(user, sid)
+    conn = _conn(user, cid)
+    st = [s for s in _classify(conn, sql, sid) if s['kind'] == classify.READ]
+    if not st:
+        raise DataError('only a read has a plan here')
+    a = adapters.adapter(conn, database, _cfg().get('statement_timeout_s', 0))
+    try:
+        plan = a.explain(st[0]['command'] if conn['kind'] == 'mongo' else st[0]['sql'])
+    except Exception as e:  # noqa: BLE001
+        raise DataError(_clean(e, conn)) from None
+    finally:
+        a.close()
+    total = plan['total'] or 1
+    for n in plan['nodes']:
+        n['pct'] = round(n['cost'] / total * 100, 1)
+    return plan
+
+
+# ---------------------------------------------------------------- the Visual builder
+def parse_model(user, cid, sql):
+    """SQL -> the builder's model. Only parses: nothing reaches the database."""
+    _use(user)
+    conn = _conn(user, cid)
+    if conn['kind'] == 'mongo':
+        return {'error': 'the builder does not read MongoDB text'}
+    return querymodel.parse(sql, _dialect(conn))
+
+
+def join_stats(user, cid, database, model, index):
+    """What one join keeps and cuts. Asked for by the user, because it counts rows in their database."""
+    _use(user)
+    conn = _conn(user, cid)
+    if conn['kind'] == 'mongo':
+        raise DataError('join counts work on SQL databases')
+    try:
+        j = model['joins'][int(index)]
+        sql = joins.query(model, int(index), _dialect(conn))
+    except (KeyError, IndexError, TypeError) as e:
+        raise DataError(f'that join is not in the builder: {e}') from None
+    a = adapters.adapter(conn, database, _cfg().get('statement_timeout_s', 0))
+    try:
+        _, batches = a.run(sql, read=True)
+        rows = [r for b in batches for r in b]
+    except Exception as e:  # noqa: BLE001
+        raise DataError(_clean(e, conn)) from None
+    finally:
+        a.close()
+    return joins.summary(rows[0], j['type'])
+
+
+def join_overview(user, cid, database, model):
+    """Every table of the builder's joins at once: the rows the query keeps and the join keys of each table it
+    uses. Asked for by the user (Count all), because it reads their database; one query, read-only."""
+    _use(user)
+    conn = _conn(user, cid)
+    if conn['kind'] == 'mongo':
+        raise DataError('join counts work on SQL databases')
+    try:
+        sql, keys = joins.overview(model, _dialect(conn))
+    except (KeyError, IndexError, TypeError) as e:
+        raise DataError(f'the builder\'s joins cannot be counted: {e}') from None
+    except ValueError as e:
+        raise DataError(str(e)) from None
+    if any(x['kind'] != classify.READ for x in classify.classify(sql, conn['kind'])):
+        raise DataError('the builder\'s filter is not a plain read: run it from the editor')
+    a = adapters.adapter(conn, database, _cfg().get('statement_timeout_s', 0))
+    try:
+        _, batches = a.run(sql, read=True)
+        rows = [r for b in batches for r in b]
+    except Exception as e:  # noqa: BLE001
+        raise DataError(_clean(e, conn)) from None
+    finally:
+        a.close()
+    return joins.overview_summary(rows[0], keys)
+
+
+def generate_sql(user, model, dialect):
+    _use(user)
+    if dialect not in adapters.ADAPTERS:
+        raise DataError(f'unknown dialect {dialect}')
+    try:
+        return {'sql': querymodel.generate(model, dialect)}
+    except (KeyError, TypeError, ValueError) as e:
+        raise DataError(f'the builder could not write this query: {e}') from None
+
+
+# ---------------------------------------------------------------- results
+def _result(user, rid):
+    with _lock:
+        r = _results.get(rid)
+    if r is None or r['user'] != user['id']:
+        raise DataError('that result is gone: run the query again', 404)
+    return r
+
+
+def page(user, rid, offset=0, limit=200, sort=None, desc=False, q=''):
+    return spool.page(_result(user, rid)['path'], offset, limit, sort, desc, q)
+
+
+def stats(user, rid):
+    r = _result(user, rid)
+    if r['stats'] is None:
+        r['stats'] = {'columns': spool.stats(r['path']), 'duplicates': spool.duplicate_rows(r['path'])}
+    return r['stats']
+
+
+def histogram(user, rid, column, bins=12):
+    return spool.histogram(_result(user, rid)['path'], column, bins)
+
+
+def result_path(user, rid):
+    return _result(user, rid)['path']
+
+
+def export_result(user, rid, fmt='parquet'):
+    """(file, download name, media type, temporary?) of a result in one of spool.FORMATS. Parquet is the spool file
+    itself; another format is written next to it and the caller deletes it once it is sent."""
+    path = Path(_result(user, rid)['path'])
+    fmt = str(fmt or 'parquet').lower()
+    if fmt not in spool.FORMATS:
+        raise DataError(f'unknown export format {fmt!r}: {", ".join(spool.FORMATS)}')
+    ext, media, _ = spool.FORMATS[fmt]
+    name = f'result-{rid[:8]}.{ext}'
+    if fmt == 'parquet':
+        return path, name, media, False
+    out = path.with_name(f'{path.stem}-{uuid.uuid4().hex[:8]}.{ext}')
+    try:
+        spool.export(path, fmt, out)
+    except ValueError as e:
+        out.unlink(missing_ok=True)
+        raise DataError(str(e)) from None
+    except Exception:
+        out.unlink(missing_ok=True)
+        raise
+    return out, name, media, True
+
+
+def profile(user, rid):
+    r = _result(user, rid)
+    if r.get('profile') is None:
+        r['profile'] = stats_mod.profile(r['path'])
+    return r['profile']
+
+
+def run_test(user, rid, kind, a, b, group_a=None, group_b=None):
+    return stats_mod.test(_result(user, rid)['path'], kind, a, b, group_a, group_b)
+
+
+def suggest(user, rid):
+    return stats_mod.suggest(_result(user, rid)['path'])
+
+
+def quality(user, rid):
+    return stats_mod.quality(_result(user, rid)['path'])
+
+
+def pivot(user, rid, row, col, value, agg):
+    return stats_mod.pivot(_result(user, rid)['path'], row, col, value or None, agg or 'sum')
+
+
+def chart(user, rid, x, y, agg, limit, order='key'):
+    return stats_mod.chart(_result(user, rid)['path'], x, y or None, agg or 'sum', limit, order or 'key')
+
+
+def total(user, rid, y, agg):
+    return stats_mod.total(_result(user, rid)['path'], y or None, agg or 'sum')
+
+
+def forecast(user, rid, date, value=None, agg='sum', grain='auto', horizon=None, group=None):
+    """A measure over time, forecast ahead with its range, its tested accuracy and the unusual steps (forecast.py)."""
+    return forecast_mod.forecast(_result(user, rid)['path'], date, value or None, agg or 'sum', grain or 'auto', horizon, group or None)
+
+
+# ---------------------------------------------------------------- what the assistant sees
+def _ai_cfg(k, default):
+    return int(_cfg().get(k, default))
+
+
+def _cap(payload):
+    """Every tool result stays under the limit, whatever a table holds. The last list is what gets shorter."""
+    limit = _ai_cfg('ai_result_chars', 4000)
+    text = orjson.dumps(payload, default=str)
+    if len(text) <= limit:
+        return payload
+    for key in ('rows', 'columns', 'tables', 'top', 'cells', 'forecast', 'groups', 'anomalies'):
+        items = payload.get(key)
+        while isinstance(items, list) and len(items) > 1 and len(orjson.dumps(payload, default=str)) > limit:
+            del items[max(1, len(items) * 3 // 4):]
+            payload['truncated'] = True
+    if len(orjson.dumps(payload, default=str)) > limit:
+        return {'truncated': True, 'note': 'this result was too large to show: ask for less'}
+    return payload
+
+
+def _cell(v):
+    n = _ai_cfg('ai_cell_chars', 80)
+    v = spool._json(v)
+    return f'{v[:n]}…' if isinstance(v, str) and len(v) > n else v
+
+
+def _rows_allowed(user, sid):
+    return bool((_session(user, sid).state or {}).get('ai_rows'))
+
+
+def search_catalog(user, cid, database, query):
+    """Tables whose name or saved description holds the words, so the model never needs a whole schema."""
+    words = [w for w in str(query).lower().split() if w]
+    tables = tree(user, cid, database).get('tables') or []
+    with db.connect() as c:
+        docs = c.execute(text("""SELECT schema_name, table_name, column_name, description FROM app.an_column_docs
+                                 WHERE connection_id = :c AND database = :d"""), {'c': cid, 'd': database or ''}).all()
+    note = {}
+    for d in docs:
+        note.setdefault((d.schema_name, d.table_name), []).append(f'{d.column_name} {d.description}'.lower())
+    hits = []
+    for t in tables:
+        if t['kind'] == 'system':
+            continue
+        blob = f'{t["schema"]} {t["name"]} {" ".join(note.get((t["schema"], t["name"]), []))}'.lower()
+        score = sum(w in blob for w in words)
+        if score or not words:
+            hits.append((score, t))
+    hits.sort(key=lambda x: (-x[0], x[1]['name']))
+    cat = favorites.lookup(favorites.load(user_prefs(user)), cid, database)
+    out = []
+    for _, t in hits[:30]:
+        row = {'schema': t['schema'], 'name': t['name'], 'kind': t['kind']}
+        g = cat.get((t['schema'] or '', t['name']))
+        if g is not None:
+            row['category' if g else 'favorite'] = g or True
+        out.append(row)
+    return _cap({'tables': out, 'matched': len(hits), 'of': len(tables)})
+
+
+def user_prefs(user):
+    """The user's prefs blob (favorites live there); {} when it cannot be read, so the assistant never breaks on it."""
+    try:
+        from ..server.routes.me import get_prefs
+        return get_prefs(user['id']) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def favorites_for_ai(user, name=None):
+    """The user's favorite tables of the category (or table words) `name`, with where each lives and its saved
+    description. 'none' / 'ambiguous' come back with the category names so the model can ask the user."""
+    got = favorites.resolve(favorites.load(user_prefs(user)), name)
+    items = got['items']
+    names = {s['id']: s['name'] for s in sources(user)} if items else {}
+    docs = {}
+    if items:
+        with db.connect() as c:
+            for r in c.execute(text("""SELECT connection_id, database, schema_name, table_name, description
+                                         FROM app.an_column_docs WHERE column_name = '' AND connection_id = ANY(:c)"""),
+                               {'c': sorted({f['c'] for f in items})}).all():
+                docs[(r.connection_id, r.database, r.schema_name, r.table_name)] = r.description
+    tables = []
+    for f in items:
+        row = {'category': f['g'], 'connection': f['c'], 'database': f['d'], 'schema': f['s'], 'table': f['t']}
+        d = docs.get((f['c'], f['d'], f['s'], f['t']))
+        if d:
+            row['description'] = _cell(d)
+        if f['c'] not in names:
+            row['missing'] = 'this connection is gone'
+        tables.append({k: v for k, v in row.items() if v != '' or k == 'category'})
+    used = {f['c'] for f in items}
+    out = {'match': got['match'], 'categories': got['categories'],
+           'connections': {k: v for k, v in names.items() if k in used}, 'tables': tables, 'total': len(tables)}
+    if got['match'] == 'none':
+        out['note'] = 'not a category or favorite table: try search_catalog, then ask_user'
+    elif got['match'] == 'ambiguous':
+        out['note'] = 'several categories match: ask_user which one'
+    return _cap(out)
+
+
+def describe_for_ai(user, cid, database, schema, table, offset=0):
+    d = describe(user, cid, database, schema, table)
+    size, offset = _ai_cfg('ai_table_columns', 200), max(0, int(offset or 0))
+    kind = _conn(user, cid)['kind']
+    lv = aiaccess.level_of(aiaccess.load(user_prefs(user)), cid, database or '',
+                           schema or aiaccess.DEFAULT_SCHEMA.get(kind, ''), table)
+    cols = d['columns'][offset:offset + size]
+    return _cap({'table': table, 'description': d['description'], 'rows_estimate': d['rows'], 'total_columns': len(d['columns']),
+                 'offset': offset, 'columns': [{k: c.get(k) for k in ('name', 'type', 'key', 'description') if c.get(k)} for c in cols],
+                 'keys': d['keys'][:40], 'unique_columns': (d.get('unique') or [])[:40], 'ai_access': aiaccess.LABEL[lv]})
+
+
+def _result_card(rid, res, status):
+    r = _results[rid]
+    st = stats(r['_owner'], rid) if r.get('_owner') else None
+    columns = []
+    for name in res['columns']:
+        s = (st or {}).get('columns', {}).get(name, {})
+        columns.append({'name': name, 'type': s.get('type'), 'empty': s.get('nulls'), 'distinct': s.get('distinct'),
+                        'min': _cell(s.get('min')), 'max': _cell(s.get('max')), 'mean': s.get('mean')})
+    return _cap({'status': status, 'result_id': rid, 'rows': res['rows'], 'hit_row_limit': res['truncated'], 'columns': columns,
+                 'duplicates': (st or {}).get('duplicates')})
+
+
+def _wait(run, seconds):
+    t0 = time.time()
+    while run.status == 'running' and time.time() - t0 < seconds:
+        time.sleep(0.05)
+    return run
+
+
+def assert_read_for_ai(user, sid, cid, database, sql):
+    """The assistant runs reads only (run_query, run_in_editor): anything the user would confirm goes to run_change."""
+    _session(user, sid)
+    conn = _conn(user, cid)
+    if classify.needs_confirm(_classify(conn, sql, sid)):
+        raise DataError('this is not a plain read: use run_change, and the user confirms it')
+
+
+def run_for_ai(user, sid, cid, database, sql, name, wait_s):
+    """A read, for the assistant: the result stays on the server and the model gets its summary."""
+    assert_read_for_ai(user, sid, cid, database, sql)
+    pub = start(user, sid, cid, database, sql, None, name)
+    run = _wait(_run(user, pub['id']), wait_s)
+    if run.status == 'running':
+        stop(user, run.id)
+        raise DataError(f'this query took over {wait_s} s, so it was stopped: narrow it')
+    if run.status == 'error':
+        return {'status': 'error', 'error': run.error}
+    if not run.results:
+        return {'status': run.status, 'rows': 0, 'columns': []}
+    last = run.results[-1]
+    with _lock:
+        _results[last['id']]['_owner'] = user
+    return _result_card(last['id'], last, run.status)
+
+
+def ai_access(user):
+    """The tables whose AI access the user raised above Read only: [{c, d, s, t, level}]."""
+    return {'items': aiaccess.items(user_prefs(user)), 'levels': [{'id': k, 'label': aiaccess.LABEL[k]} for k in aiaccess.LEVELS]}
+
+
+def set_ai_access(user, cid, database, schema, table, level):
+    """Set what the assistant may change in one table (read | rows | schema); only the user does this."""
+    _conn(user, str(cid or ''))
+    from ..server.routes.me import _put_prefs
+    try:
+        new = aiaccess.put(user_prefs(user), cid, database, schema, table, level)
+    except aiaccess.AccessError as e:
+        raise DataError(str(e)) from None
+    _put_prefs(user['id'], {aiaccess.KEY: new})
+    audit.log('analysis.ai_access', target=str(cid), user_id=user['id'],
+              meta={'database': database, 'schema': schema, 'table': table, 'level': level})
+    return {'items': new['items']}
+
+
+def ai_access_check(user, sid, cid, database, sql):
+    """DataError (403) when a change of the assistant needs more than the AI access the user gave its tables."""
+    conn = _conn(user, cid)
+    st = _classify(conn, sql, sid)
+    try:
+        aiaccess.gate(aiaccess.load(user_prefs(user)), cid, database or conn.get('database') or '', st, conn['kind'])
+    except aiaccess.AccessError as e:
+        raise DataError(str(e), 403) from None
+    return st
+
+
+def change_for_ai(user, sid, cid, database, sql, wait_s):
+    """Reached only after the user confirmed the card: the engine runs a 'danger' tool only then. The tables'
+    AI access is checked again here (the card's SQL may have been edited)."""
+    ai_access_check(user, sid, cid, database, sql)
+    token = check(user, sid, cid, database, sql)['confirm']
+    pub = start(user, sid, cid, database, sql, token, 'AI change')
+    run = _wait(_run(user, pub['id']), wait_s)
+    return {'status': run.status, 'error': run.error, 'statements': run.total}
+
+
+def query_result(user, sid, rid, sql):
+    """SQL over a saved result. Only that file exists for it: no tables, no other files, no network."""
+    path = str(_result(user, rid)['path'])
+    st = classify.classify(sql, 'workspace')
+    if len(st) != 1 or st[0]['kind'] != classify.READ:
+        raise DataError('one SELECT over the table named result')
+    tree_ = parse_one(st[0]['sql'], dialect='duckdb')
+    if any(t.name.lower() != 'result' for t in tree_.find_all(exp.Table)):
+        raise DataError('the only table here is named result')
+    allowed = _rows_allowed(user, sid)
+    if not allowed and tree_.find(exp.AggFunc) is None:
+        raise DataError('row access is off for this session: aggregate with COUNT, SUM, AVG, GROUP BY ...')
+    con = duckdb.connect(':memory:', config={'threads': 2})
+    try:
+        con.execute('CREATE VIEW result AS SELECT * FROM read_parquet(?)'.replace('?', "'" + path.replace("'", "''") + "'"))
+        con.execute(f"SET allowed_paths=['{path.replace(chr(39), chr(39) * 2)}']")
+        con.execute('SET enable_external_access=false')
+        con.execute('SET lock_configuration=true')
+        cur = con.execute(st[0]['sql'])
+        limit = _ai_cfg('ai_rows', 20) if allowed else 50
+        rows = cur.fetchmany(limit + 1)
+        names = [d[0] for d in cur.description]
+    except duckdb.Error as e:
+        raise DataError(str(e).splitlines()[0][:300]) from None
+    finally:
+        con.close()
+    return _cap({'columns': names, 'rows': [[_cell(v) for v in r] for r in rows[:limit]], 'rows_returned': min(len(rows), limit),
+                 'more': len(rows) > limit})
+
+
+def sample_for_ai(user, sid, rid):
+    if not _rows_allowed(user, sid):
+        raise DataError('the user has not allowed row access for this session: it is on the Query toolbar')
+    n = _ai_cfg('ai_rows', 20)
+    p = spool.page(_result(user, rid)['path'], 0, n)
+    return _cap({'columns': p['columns'], 'rows': [[_cell(v) for v in r] for r in p['rows']], 'rows_returned': len(p['rows']),
+                 'rows_total': p['total'], 'note': 'a sample, not all the data'})
+
+
+def profile_for_ai(user, rid, column=None):
+    p = profile(user, rid)
+    cols = [c for c in p['columns'] if not column or c['name'] == column]
+    return _cap({'rows': p['rows'], 'columns': [{k: _cell(c[k]) for k in ('name', 'type', 'nulls', 'distinct', 'min', 'max', 'mean', 'note')} for c in cols]})
+
+
+def forecast_for_ai(user, rid, date, value=None, agg='sum', grain='auto', horizon=None, group=None):
+    return _cap(forecast_mod.summary(forecast(user, rid, date, value, agg, grain, horizon, group)))
+
+
+def explain_for_ai(user, sid, cid, database, sql):
+    p = explain(user, sid, cid, database, sql)
+    top = sorted(p['nodes'], key=lambda n: -n['pct'])[:8]
+    return _cap({'estimated': p['estimated'], 'top': [{'step': n['label'][:200], 'share_pct': n['pct'], 'rows': n['rows']} for n in top], 'steps': len(p['nodes'])})
+
+
+# ---------------------------------------------------------------- saved things
+def history(user, sid, limit=200):
+    _session(user, sid)
+    with db.connect() as c:
+        rows = c.execute(text('SELECT * FROM app.an_history WHERE session_id = :s ORDER BY at DESC LIMIT :l'),
+                         {'s': sid, 'l': max(1, min(int(limit), 1000))}).all()
+    return [{'id': r.id, 'connection': r.connection_id, 'database': r.database, 'name': r.name, 'sql': r.sql, 'kind': r.kind,
+             'status': r.status, 'rows': r.rows, 'ms': r.ms, 'error': r.error, 'at': r.at.isoformat()} for r in rows]
+
+
+def scripts(user, sid):
+    _session(user, sid)
+    with db.connect() as c:
+        rows = c.execute(text('SELECT * FROM app.an_scripts WHERE session_id = :s ORDER BY position, updated_at'), {'s': sid}).all()
+    return [{'id': r.id, 'name': r.name, 'position': r.position, 'connection': r.connection_id, 'database': r.database,
+             'body': r.body} for r in rows]
+
+
+def save_script(user, sid, body):
+    _session(user, sid)
+    pid = str(body.get('id') or uuid.uuid4().hex)
+    args = {'i': pid, 's': sid, 'n': str(body.get('name') or 'command').strip()[:200] or 'command',
+            'p': int(body.get('position') or 0), 'c': body.get('connection'), 'd': body.get('database'),
+            'b': str(body.get('body') or '')[:MAX_TEXT]}
+    with db.begin() as c:
+        got = c.execute(text("""
+            INSERT INTO app.an_scripts (id, session_id, name, position, connection_id, database, body)
+            VALUES (:i, :s, :n, :p, :c, :d, :b)
+            ON CONFLICT (id) DO UPDATE SET name = :n, position = :p, connection_id = :c, database = :d, body = :b, updated_at = now()
+            WHERE app.an_scripts.session_id = :s RETURNING id"""), args).first()
+    if got is None:
+        raise DataError('no such script', 404)
+    return {'id': pid}
+
+
+def delete_script(user, sid, pid):
+    _session(user, sid)
+    with db.begin() as c:
+        c.execute(text('DELETE FROM app.an_scripts WHERE id = :i AND session_id = :s'), {'i': pid, 's': sid})
+
+
+def dashboards(user, sid):
+    _session(user, sid)
+    with db.connect() as c:
+        rows = c.execute(text('SELECT * FROM app.an_dashboards WHERE session_id = :s ORDER BY updated_at DESC'), {'s': sid}).all()
+    return [{'id': r.id, 'name': r.name, 'layout': r.layout} for r in rows]
+
+
+def save_dashboard(user, sid, body):
+    _session(user, sid)
+    pid = str(body.get('id') or uuid.uuid4().hex)
+    args = {'i': pid, 's': sid, 'n': str(body.get('name') or 'Dashboard').strip()[:200], 'l': orjson.dumps(body.get('layout') or []).decode()}
+    with db.begin() as c:
+        got = c.execute(text("""
+            INSERT INTO app.an_dashboards (id, session_id, name, layout) VALUES (:i, :s, :n, CAST(:l AS JSONB))
+            ON CONFLICT (id) DO UPDATE SET name = :n, layout = CAST(:l AS JSONB), updated_at = now()
+            WHERE app.an_dashboards.session_id = :s RETURNING id"""), args).first()
+    if got is None:
+        raise DataError('no such dashboard', 404)
+    return {'id': pid}
+
+
+def delete_dashboard(user, sid, pid):
+    _session(user, sid)
+    with db.begin() as c:
+        c.execute(text('DELETE FROM app.an_dashboards WHERE id = :i AND session_id = :s'), {'i': pid, 's': sid})

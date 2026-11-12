@@ -28,7 +28,7 @@ from sqlalchemy import text
 
 from .. import db
 from ..core.names import clean_tags
-from ..data import sessions
+from ..image import sessions
 from .store import TABLES, ProjectStore
 
 SOURCE_KINDS = ('upload', 'local', 's3', 'ftp', 'sftp')

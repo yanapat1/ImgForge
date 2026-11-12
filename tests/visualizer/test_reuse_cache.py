@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'labeling'))
 
 from test_curation import _Job, make_dataset                   # noqa: E402
-from dataviz.data.sources import LocalSource                    # noqa: E402
+from dataviz.image.sources import LocalSource                    # noqa: E402
 from dataviz.state import State                                 # noqa: E402
 
 

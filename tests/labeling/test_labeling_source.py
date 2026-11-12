@@ -7,7 +7,7 @@ from PIL import Image
 
 from conftest import make_jpeg, make_user, wait_job
 
-from dataviz.data.labeling_source import LabelConflict, LabelingSource
+from dataviz.image.labeling_source import LabelConflict, LabelingSource
 from dataviz.labeling import formats
 from dataviz.labeling.projects import ProjectRegistry
 from dataviz.labeling.store import new_id
@@ -266,7 +266,7 @@ def test_restore_rows_brings_back_polygons_keypoints_and_attributes(lab):
 
 
 def test_curation_fix_undo_on_a_labeling_session(lab, tmp_path):
-    from dataviz.data import curation as cur
+    from dataviz.image import curation as cur
     from dataviz.state import State
     pid, st, tasks, mids = make_project(lab)
     seg = tasks['segmentation']
@@ -298,7 +298,7 @@ def test_curation_fix_undo_on_a_labeling_session(lab, tmp_path):
 def test_image_editor_on_a_labeling_session(lab, tmp_path):
     """The visualizer's image editor on a labeling task: a moved box keeps its row, an added box becomes a new
     detection row (even on an image with no shapes yet), and undo puts the rows back."""
-    from dataviz.data import curation as cur
+    from dataviz.image import curation as cur
     from dataviz.state import State
     pid, st, tasks, mids = make_project(lab)
     det = tasks['object_detection']

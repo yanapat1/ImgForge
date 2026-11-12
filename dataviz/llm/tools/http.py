@@ -224,8 +224,8 @@ def _brief(raw, ctype):
 
 def call(http, args, secrets=None, admin=False):
     """Run one HTTP tool -> (result, summary). ToolError for anything the model or user can act on."""
-    from ...datacenter.sources import fetch
-    from ...datacenter.store import DCError
+    from ...bucket.sources import fetch
+    from ...bucket.store import BucketError
     method, url, params, headers, body = render(http, args, secrets)
     if urlsplit(url).scheme != 'https' and not admin:
         raise ToolError('plugin calls must use https')
@@ -246,7 +246,7 @@ def call(http, args, secrets=None, admin=False):
             status, ctype = resp.status_code, resp.headers.get('content-type', '').lower()
         finally:
             resp.close()
-    except DCError as e:
+    except BucketError as e:
         raise ToolError(_redact(str(e), secrets)) from None
     except httpx.TimeoutException:
         raise ToolError(f'{host} did not answer within {TIMEOUT:.0f} s') from None

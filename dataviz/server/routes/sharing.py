@@ -8,7 +8,7 @@ from starlette.exceptions import HTTPException
 
 from ...auth import access, audit
 from ...auth.deps import current_user
-from ...data import sessions
+from ...image import sessions
 from .auth import client_ip
 
 

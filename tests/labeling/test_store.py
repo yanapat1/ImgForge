@@ -626,7 +626,7 @@ def test_delete_cascades_every_row(pg, tmp_path):
 
 
 def test_registry_entry_list_and_names(pg, tmp_path):
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     from dataviz.labeling.projects import ProjectRegistry
     reg = ProjectRegistry(tmp_path / 'labeling')
     alice, bob = make_user('alice'), make_user('bob')

@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 
 from dataviz.core import hardware
-from dataviz.data import sources
+from dataviz.image import sources
 from dataviz.models import predict
 
 

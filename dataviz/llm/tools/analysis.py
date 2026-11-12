@@ -18,15 +18,15 @@ RUN_WAIT_S = 120
 
 
 def _svc():
-    from ...analysis import service
+    from ...data import service
     return service
 
 
 def _call(fn, *a, **k):
-    from ...analysis.service import AnalysisError
+    from ...data.service import DataError
     try:
         return fn(*a, **k)
-    except (AnalysisError, ValueError) as e:
+    except (DataError, ValueError) as e:
         raise ToolError(str(e)) from None
 
 
@@ -148,8 +148,8 @@ def _read_editor(ctx, a):
     sql, s = _editor(ctx)
     cid = s.get('connection')
     kind = _kind(ctx, cid) if cid else None
-    from ...analysis.sqlfix import NAMES
-    from ...analysis.classify import DIALECTS
+    from ...data.sqlfix import NAMES
+    from ...data.classify import DIALECTS
     out = {'tab': s.get('tab_name') or '', 'connection': cid, 'database': s.get('database'),
            'syntax': NAMES.get(DIALECTS.get(kind, kind), kind) if kind else None, 'sql': sql,
            'lines': sql.count('\n') + 1 if sql else 0, 'truncated': bool(s.get('sql_truncated')),
@@ -165,14 +165,14 @@ def _check_sql(ctx, a):
     kind = _kind(ctx, cid)
     if kind is None:
         raise ToolError(f'unknown connection {cid!r}: list_sources shows them')
-    from ...analysis import sqlfix
+    from ...data import sqlfix
     try:
         got = sqlfix.check(sql, kind, a.get('from_syntax') or None)
     except ValueError as e:
         raise ToolError(str(e)) from None
     final = got['fixed'] or sql
     if not got['errors'] and kind != 'mongo':      # the database itself confirms the names, without running anything
-        from ...analysis import classify
+        from ...data import classify
         if all(x['kind'] == classify.READ for x in classify.classify(final, kind)):
             try:
                 _svc().explain_for_ai(ctx.user, _sid(ctx), cid, db, final)

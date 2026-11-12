@@ -376,7 +376,7 @@ def _frame_opts(a):
 
 
 def _frames_how(a):
-    from ...datacenter import video
+    from ...bucket import video
     try:
         return video.describe(video.options(_frame_opts(a)))
     except Exception as e:  # noqa: BLE001 - shown in the preview; the run reports the real error

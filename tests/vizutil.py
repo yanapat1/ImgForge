@@ -21,12 +21,12 @@ def make_yolo(root, classes=('cat', 'dog'), boxes=(('a', '0 0.5 0.5 0.4 0.4\n1 0
 
 def union_session(owner_id, name, parts, visibility='private'):
     """A combined dataset over the visualizer sessions `parts` ([(sid, alias)]) through the registry -> its id."""
-    from dataviz.data import connections
+    from dataviz.image import connections
     reg = connections.Registry('/nonexistent')
     ds = reg.upsert_dataset({'kind': 'union', 'name': name, 'parts': [{'id': i, 'alias': a} for i, a in parts]},
                             owner_id)
     if visibility != 'private':
-        from dataviz.data import sessions
+        from dataviz.image import sessions
         sessions.set_sharing(ds['id'], visibility, [], owner_id)
     return ds['id']
 
@@ -34,7 +34,7 @@ def union_session(owner_id, name, parts, visibility='private'):
 def viz_session(owner_id, name, path, visibility='private', kind='local'):
     """A visualizer session (app.sessions + app.viz_sessions, a local or embeddings folder) -> its id."""
     from dataviz import db
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     with db.begin() as c:
         sid = sessions.create('viz', owner_id, name, visibility=visibility, conn=c)['id']
         c.execute(text("INSERT INTO app.viz_sessions(session_id, source_kind, path) VALUES (:s, :k, :p)"),
@@ -44,7 +44,7 @@ def viz_session(owner_id, name, path, visibility='private', kind='local'):
 
 def share(sid, owner_id, **members):
     """share(sid, owner, <user id>=<role>, ...) as a private session with these members."""
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     sessions.set_sharing(sid, 'private', [{'user_id': u, 'role': r} for u, r in members.items()], owner_id)
 
 
@@ -67,15 +67,15 @@ def make_viz_app(root, max_loaded=4):
     """(ctx, app): the real app with sign-in; ctx.builds counts the States built, each indexed at once."""
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data.embedding_source import EmbeddingSource
-    from dataviz.data.sources import LocalSource
+    from dataviz.image.embedding_source import EmbeddingSource
+    from dataviz.image.sources import LocalSource
     from dataviz.server.app import Ctx, create_app
     from dataviz.state import State
     cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG))
     cfg['logging']['http'] = False
     cfg['sessions']['max_loaded'] = max_loaded
     registry = geom_registry()
-    from dataviz.data import connections
+    from dataviz.image import connections
     ctx = Ctx(None, registry=registry, datasets=connections.Registry(root), cfg=cfg, jobs=JobManager())
     ctx.builds = []
 

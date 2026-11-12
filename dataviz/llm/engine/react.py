@@ -309,7 +309,7 @@ def _preview(result):
 def _error_text(e):
     if isinstance(e, tools.ToolError):
         return str(e)
-    if getattr(e, 'status', None) is not None or type(e).__name__ == 'DCError':     # the services' own messages
+    if getattr(e, 'status', None) is not None or type(e).__name__ == 'BucketError':     # the services' own messages
         return str(e)
     _log.warning(f'agent tool: {type(e).__name__}: {vlog.esc(str(e))}')
     return f'{type(e).__name__}: {e}'

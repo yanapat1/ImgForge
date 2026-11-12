@@ -13,7 +13,7 @@ import orjson
 from fastapi import APIRouter, Depends, HTTPException
 
 from ...auth import context, deps
-from ...data import promote
+from ...image import promote
 from ..deps import json_bytes as _send
 
 

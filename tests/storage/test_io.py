@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 
 from conftest_io import N_IMAGES, jpeg_bytes, make_image_tree
-from dataviz.data import connections, sources
+from dataviz.image import connections, sources
 from dataviz.labeling import media, sinks
 
 pytest_plugins = ['conftest_io']             # fixtures: image_tree, s3_*, ftp_server, sftp_server
@@ -254,7 +254,7 @@ def test_connection_kinds(pg, tmp_path):
     from sqlalchemy import text
     from conftest import make_user
     from dataviz import db as appdb
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     me, other = make_user('conn'), make_user('other')
     reg = connections.Registry(tmp_path)
     s3 = reg.upsert_connection({'name': 'old', 'endpoint': 'http://x', 'access_key': 'AKIA123456', 'secret_key': 'sssss'},

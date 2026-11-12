@@ -38,7 +38,7 @@ UA = 'Mozilla/5.0 (compatible; dataviz-assistant/1)'
 
 # ---------------------------------------------------------------- plumbing
 def _fetch():
-    from ...datacenter.sources import fetch
+    from ...bucket.sources import fetch
     return fetch
 
 
@@ -74,12 +74,12 @@ def _key(ctx):
 
 
 def _get(method, url, allow_private=None, **kw):
-    """One request through the SSRF-safe helper -> response (ToolError-free: httpx / DCError pass to the caller)."""
+    """One request through the SSRF-safe helper -> response (ToolError-free: httpx / BucketError pass to the caller)."""
     f = _fetch()
     with _client() as c:
         resp, _ = f.request(c, method, url, kw.pop('headers', None), allow_private, timeout=TIMEOUT, **kw)
     if resp.status_code >= 400:
-        raise f.DCError(f'{urlsplit(url).hostname} answered {resp.status_code}', 502)
+        raise f.BucketError(f'{urlsplit(url).hostname} answered {resp.status_code}', 502)
     return resp
 
 
@@ -295,7 +295,7 @@ def _fetch_url(ctx, a):
                         break
             finally:
                 resp.close()
-    except f.DCError as e:
+    except f.BucketError as e:
         raise ToolError(str(e)) from None
     raw = bytes(buf[:MAX_PAGE]).decode(resp.encoding or 'utf-8', errors='replace')
     title, text = readable(raw) if 'html' in ctype or '<html' in raw[:2000].lower() else ('', raw.strip())

@@ -5,7 +5,7 @@ import time
 
 import numpy as np
 
-from dataviz.data import diff as D
+from dataviz.image import diff as D
 
 SLOW = 3 if os.environ.get('PYTEST_XDIST_WORKER') else 1
 B0 = (0.1, 0.1, 0.3, 0.3)

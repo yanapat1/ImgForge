@@ -1,4 +1,4 @@
-"""The Data Center: buckets, their tags, cached format detections and the undo log (dataviz/datacenter/).
+"""The Data Center: buckets, their tags, cached format detections and the undo log (dataviz/bucket/).
 
 Revision ID: 0006
 Revises: 0005

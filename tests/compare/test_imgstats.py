@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dataviz.data import imgstats as S
+from dataviz.image import imgstats as S
 
 
 def scene(w=800, h=600, seed=0):

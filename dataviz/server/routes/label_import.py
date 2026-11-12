@@ -33,7 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...auth import access, deps
 from ...core import logging as vlog
-from ...data import connections
+from ...image import connections
 from ...labeling import importers as imp
 
 _log = vlog.get_logger('label')

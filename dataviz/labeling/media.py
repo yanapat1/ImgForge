@@ -31,8 +31,8 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageOps
 
 from ..core import logging as vlog
-from ..data import sources
-from ..data.sources import IMAGE_EXTS, _is_image
+from ..image import sources
+from ..image.sources import IMAGE_EXTS, _is_image
 
 _log = vlog.get_logger('label')
 

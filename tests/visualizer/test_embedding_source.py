@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dataviz.data.embedding_source import EmbeddingSource, column_types
+from dataviz.image.embedding_source import EmbeddingSource, column_types
 
 
 def _folder(tmp_path, n=30, d=8, rows=None, extra=None, unit=False, images=True):

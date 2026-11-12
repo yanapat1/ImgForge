@@ -295,7 +295,7 @@ def delete(uid, transfer_to=None, conn=None):
     """Delete a user. transfer_to: another user who becomes the owner of their sessions (and of the connections,
     models and LLM providers those sessions may use); without it their sessions are deleted.
     Returns {transferred, deleted} (session counts)."""
-    from ..data import sessions
+    from ..image import sessions
     out = {'transferred': 0, 'deleted': 0}
     with _conn(conn) as c:
         cur = c.execute(text('SELECT * FROM app.users WHERE id = :id FOR UPDATE'), {'id': uid}).first()

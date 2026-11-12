@@ -30,8 +30,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
 from ...auth import deps
-from ...data import compare
-from ...data import stress as stresslib
+from ...image import compare
+from ...image import stress as stresslib
 from ..binary import columns_response, etag_for
 from ..deps import guards, owned
 from ..deps import json_bytes as _send

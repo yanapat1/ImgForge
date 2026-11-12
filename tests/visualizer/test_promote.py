@@ -27,7 +27,7 @@ def _yolo(root, classes, items):
 def _app(root, calls):
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.labeling.projects import ProjectRegistry
     from dataviz.ml import features as feats
     from dataviz.server.app import Ctx, create_app
@@ -127,7 +127,7 @@ def test_promote_dedup_labels_and_live_session(world):
     emb = live.get_features('geom', _Job())
     assert world['calls'] == [] and emb.shape == (5, 2)
     # a relabel in the labeling session: the re-index takes every image from the previous workspace
-    from dataviz.data import indexer
+    from dataviz.image import indexer
     decoded = []
     real = indexer._index_one
     world['mp'].setattr(indexer, '_index_one', lambda src, label, *a, **k: (decoded.append(label),
@@ -167,7 +167,7 @@ def test_promote_without_dedup_and_access(world):
     bob = account('bob')
     share(U, world['alice']['id'], **{bob['id']: 'viewer'})
     share(world['A'], world['alice']['id'], **{bob['id']: 'viewer'})
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     B = [p['id'] for p in ctx.datasets.dataset(U)['parts'] if p['alias'] == 'B'][0]
     sessions.set_sharing(B, 'private', [{'user_id': bob['id'], 'role': 'viewer'}], world['alice']['id'])
     cb = client(c.app)
@@ -188,7 +188,7 @@ def test_promote_twice_takes_a_free_name(world):
 def test_orient_box_matches_exif_transpose(tmp_path, o):
     """orient_box() puts a box where PIL's exif_transpose puts its pixels, for every EXIF orientation."""
     from PIL import Image, ImageOps
-    from dataviz.data.promote import orient_box
+    from dataviz.image.promote import orient_box
     W, H = 80, 50
     im = Image.new('RGB', (W, H), (0, 0, 0))
     box = {'x': .1, 'y': .2, 'w': .25, 'h': .3}

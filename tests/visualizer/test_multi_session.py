@@ -138,7 +138,7 @@ def test_page_urls_and_redirects(world):
     r = alice.get(f'/?session={A}', follow_redirects=False)
     assert r.status_code == 302 and r.headers['location'] == f's/{A}/'
     # the page marks the session as opened by me (home sort order)
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     row = next(x for x in sessions.listing(world['users']['alice'], 'viz') if x['id'] == A)
     assert row['opened_at']
     # assets also resolve under the session prefix
@@ -179,7 +179,7 @@ def test_jobs_visibility_and_cancel(world):
 
 def test_features_kept_in_pgvector(world):
     """A computed feature matrix is also stored in PostgreSQL; a lost .npy is rebuilt from there, not recomputed."""
-    from dataviz.data.sources import LocalSource
+    from dataviz.image.sources import LocalSource
     from dataviz.ml import features as feats, vectors
     from dataviz.state import State
     calls = []

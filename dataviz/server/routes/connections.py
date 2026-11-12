@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ... import zones
 from ...auth import deps, tiers
 from ...core import logging as vlog
-from ...data import connections, sources
+from ...image import connections, sources
 
 
 def router(state, ctx):
@@ -97,7 +97,7 @@ def router(state, ctx):
         where = conn.get('url') if kind == 'model' else conn.get('host') or kind
         try:
             if kind in connections.TOKEN_KINDS:
-                from ...datacenter.sources import tokens
+                from ...bucket.sources import tokens
                 res = await run_io(tokens.test, conn)
             elif kind == 'model':
                 from ...labeling import models
@@ -108,7 +108,7 @@ def router(state, ctx):
                 from ...labeling import media
                 res = await run_io(media.remote_test, conn)
             elif kind == 'mongo' or not zones.on('labeling', ctx.cfg):
-                from ...analysis import adapters
+                from ...data import adapters
                 res = await run_io(adapters.ping, conn)
             else:
                 from ...labeling import db_export

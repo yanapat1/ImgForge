@@ -20,7 +20,7 @@ def box(cls):
 @pytest.fixture
 def team(client_as, tmp_path):
     """A label session of `owner` with two images, shared with a viewer and a labeler; plus a stranger and an admin."""
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     client_as.ctx.cfg['storage']['allowed_roots'] = [str(tmp_path)]
     c = {k: client_as(make_user(k, admin=k == 'admin')) for k in ('owner', 'viewer', 'labeler', 'labeler2',
                                                                     'stranger', 'admin')}
@@ -125,7 +125,7 @@ def test_stranger_gets_404_owner_and_admin_everything(team):
 
 
 def test_global_session_gives_everyone_the_viewer_role(team):
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     s, pid, det, mid = team['stranger'], team['pid'], team['det'], team['mids'][0]
     sessions.set_sharing(pid, 'global', [{'user_id': team['labeler'].user['id'], 'role': 'labeler'}],
                          team['owner'].user['id'])
@@ -164,7 +164,7 @@ def test_label_settings_are_per_user(team):
 
 
 def test_visualize_session_roles(team, tmp_path):
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     o, v = team['owner'], team['viewer']
     for sub in ('images', 'labels'):
         (tmp_path / 'ds' / sub).mkdir(parents=True)

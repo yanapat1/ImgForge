@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from ...auth import deps
-from ...data import live
+from ...image import live
 from ..deps import guards
 
 NO_STORE = {'Cache-Control': 'no-store'}

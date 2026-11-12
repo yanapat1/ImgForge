@@ -3,7 +3,7 @@ L2-normalised, so what matters is the direction)."""
 
 import numpy as np
 
-from dataviz.data import augment_cover as cov
+from dataviz.image import augment_cover as cov
 
 
 def _sets(seed=0):
@@ -43,7 +43,7 @@ def test_gap_names_the_darker_images():
 
 
 def test_strength_curve_picks_where_more_stops_helping():
-    from dataviz.data import augment_run as ar
+    from dataviz.image import augment_run as ar
     seen = []
 
     def trial(recipe):                     # coverage rises with strength, but past 1x the variants stop looking real

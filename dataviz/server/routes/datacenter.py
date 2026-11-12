@@ -1,6 +1,6 @@
 """
 The Data Center API (/api/dc/*, contract: datacenter/API.md). Thin on purpose: every handler maps its request
-onto one datacenter/service.py function (the same ones the LLM tools and the CLI call) and turns DCError into
+onto one datacenter/service.py function (the same ones the LLM tools and the CLI call) and turns BucketError into
 an HTTP error. Visibility (owner / admin) and the data.manage permission are decided in the service, so the
 assistant cannot do more than the page; the routes add the sign-in guard and the permission dependency on the
 changing routes so a refused call never reaches the service.
@@ -17,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from ...auth import deps
-from ...datacenter import DCError, service
+from ...bucket import BucketError, service
 
 MANAGE = deps.require_perm('data.manage')
 CACHE = {'Cache-Control': 'private, max-age=300'}
@@ -27,7 +27,7 @@ PART_MAX = 64 << 20                 # one upload chunk (POST upload/part); the p
 def _call(fn, *a, **kw):
     try:
         return fn(*a, **kw)
-    except DCError as e:
+    except BucketError as e:
         raise HTTPException(e.status, e.message) from None
 
 

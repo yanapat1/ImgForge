@@ -11,7 +11,7 @@ from conftest import _TestUserMiddleware, make_user
 def _app(tmp_path, user):
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.models.registry import ModelRegistry
     from dataviz.models.service import ModelService
     from dataviz.server.app import Ctx, create_app

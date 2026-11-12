@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from .core import logging as vlog
-from .data import sources
+from .image import sources
 
 
 def _now():

@@ -8,7 +8,7 @@ from conftest import make_user
 
 def test_roles_and_listing(pg):
     from dataviz.auth import access
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     alice, bob, carol, root = make_user('alice'), make_user('bob'), make_user('carol'), make_user('root', admin=True)
     s1 = sessions.create('label', alice['id'], 'Shelf A', tags=['x'])
     s2 = sessions.create('label', bob['id'], 'Shelf A')            # same name, other owner: fine
@@ -51,7 +51,7 @@ def test_roles_and_listing(pg):
 
 
 def test_transfer_and_delete(pg):
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     alice, bob = make_user('alice'), make_user('bob')
     s = sessions.create('viz', alice['id'], 'D')
     sessions.set_sharing(s['id'], 'private', [{'user_id': bob['id'], 'role': 'viewer'}], alice['id'])

@@ -13,7 +13,7 @@ from sqlalchemy import text
 from test_agent_engine import _connect, script, svc  # noqa: F401 - svc is a fixture
 
 from dataviz import db
-from dataviz.datacenter import service
+from dataviz.bucket import service
 from dataviz.llm import sessions, tools
 from dataviz.llm.engine import react
 from dataviz.llm.tools import nav

@@ -6,7 +6,7 @@ import pytest
 
 from test_curation import LABELS, make_dataset, open_state
 
-from dataviz.data import curation as cur
+from dataviz.image import curation as cur
 
 
 @pytest.fixture

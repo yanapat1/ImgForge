@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from dataviz.data import augment as ag
+from dataviz.image import augment as ag
 
 pytest.importorskip('albumentations')
 
@@ -89,7 +89,7 @@ def test_box_check_counts_lost_tiny_and_per_step():
 
 
 def test_make_copy_writes_a_yolo_folder(tmp_path):
-    from dataviz.data import augment_run as ar
+    from dataviz.image import augment_run as ar
     flip = {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}
     res = ar.make_copy(['a/x.jpg', 'b.jpg'], _loader(BOX), flip, 2, True, tmp_path / 'out', ['cat'])
     assert res == {'images': 6, 'boxes': 6, 'lost': 0}

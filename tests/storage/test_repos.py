@@ -100,7 +100,7 @@ def test_connection_in_use_cannot_be_deleted(two):
 
 
 def test_member_reads_the_owners_s3_session_without_seeing_its_connection(two, tmp_path):
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     a, b = two
     cid = a.post('/api/connections', json=s3_body()).json()['id']
     ds = a.post('/api/datasets', json={'kind': 's3', 'connection_id': cid, 'bucket': 'bkt', 'prefix': '/x/y/',
@@ -207,7 +207,7 @@ def test_env_secrets_are_admin_only(client_as, monkeypatch):
 
 # ---------------------------------------------------------------- allowed roots
 def test_check_local_resolves_and_refuses_escapes(tmp_path):
-    from dataviz.data import connections
+    from dataviz.image import connections
     root = tmp_path / 'allowed'
     (root / 'ds').mkdir(parents=True)
     (tmp_path / 'secret').mkdir()
@@ -223,7 +223,7 @@ def test_check_local_resolves_and_refuses_escapes(tmp_path):
 
 
 def test_routes_keep_local_paths_inside_the_allowed_roots(client_as, tmp_path):
-    from dataviz.data.connections import OUTSIDE
+    from dataviz.image.connections import OUTSIDE
     root = tmp_path / 'allowed'
     yolo_dir(root / 'ds')
     yolo_dir(tmp_path / 'outside')
@@ -252,7 +252,7 @@ def test_routes_keep_local_paths_inside_the_allowed_roots(client_as, tmp_path):
 
 # ---------------------------------------------------------------- legacy rows
 def test_rows_written_by_the_legacy_importer_are_read_back(pg, tmp_path):
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.db import legacy
     from dataviz.llm.store import LLMStore
     from dataviz.models.registry import ModelRegistry

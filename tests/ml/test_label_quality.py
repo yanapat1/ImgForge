@@ -103,7 +103,7 @@ def world(pg, tmp_path):
 
 
 def test_state_caches_by_settings_and_labels(world):
-    from dataviz.data.sources import LocalSource
+    from dataviz.image.sources import LocalSource
     from dataviz.state import State
     from vizutil import _Job, geom_registry
     st = State(LocalSource(world['tmp'] / 'ds'), None, geom_registry(), default_feature='geom',

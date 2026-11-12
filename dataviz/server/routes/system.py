@@ -49,7 +49,7 @@ def router(state, ctx):
         uid = context.user_id()
         if uid:
             try:
-                from ...data import sessions
+                from ...image import sessions
                 sessions.mark_opened(uid, b.session_id)
             except Exception:  # noqa: BLE001 - "last opened" is a nicety
                 pass

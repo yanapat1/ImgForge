@@ -20,7 +20,7 @@ def _guarded(dependant):
 def full_app(pg, tmp_path):
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.labeling.projects import ProjectRegistry
     from dataviz.llm.store import LLMStore
     from dataviz.server.app import Ctx, create_app

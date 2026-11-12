@@ -8,8 +8,8 @@ import json
 from PIL import Image
 
 from conftest_io import jpeg_bytes
-from dataviz.data import sources, views
-from dataviz.data.indexer import build_index
+from dataviz.image import sources, views
+from dataviz.image.indexer import build_index
 
 pytest_plugins = ['conftest_io']             # fixtures: s3_server, s3_bucket
 

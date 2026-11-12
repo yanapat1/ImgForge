@@ -5,7 +5,7 @@ masked ap_stats, and simulate() moving an image toward B's medians."""
 import numpy as np
 from scipy import stats
 
-from dataviz.data import imgstats, shift
+from dataviz.image import imgstats, shift
 from dataviz.models import evaluate
 
 

@@ -22,7 +22,7 @@ import zipfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
-from ..data import sources
+from ..image import sources
 from . import media
 
 _STORED_EXTS = media.IMAGE_EXTS + ('.gif', '.tif', '.tiff', '.zip', '.gz')

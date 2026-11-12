@@ -47,7 +47,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadF
 from fastapi.responses import FileResponse, Response
 
 from ...auth import deps
-from ...data import augment as ag
+from ...image import augment as ag
 from ..deps import guards, owned
 from .samples import image_boxes_px, open_image_rgb
 
@@ -316,9 +316,9 @@ def router(state, ctx):
         g.need_index()
         g.boxes_only()
         _albu()
-        from ...data import augment_run as ar
-        from ...datacenter import service as dc
-        from ...datacenter.store import DCError
+        from ...image import augment_run as ar
+        from ...bucket import service as dc
+        from ...bucket.store import BucketError
         st = ctx.current()
         recipe = _recipe(body)
         if not any(s['on'] for s in recipe['steps']):
@@ -330,7 +330,7 @@ def router(state, ctx):
         name = str(body.get('name') or '').strip()[:80] or 'augmented copy'
         try:
             b = dc.create_bucket(user, name, kind='managed')
-        except DCError as e:
+        except BucketError as e:
             raise HTTPException(e.status, e.message) from None
 
         def run(job):
@@ -417,18 +417,18 @@ def router(state, ctx):
 
     def target_files(st, tgt, user):
         """-> (cache key part, [images], label, read) of a target spec; read(image) -> PIL, None = local files."""
-        from ...data import augment_run as ar
+        from ...image import augment_run as ar
         kind = (tgt or {}).get('kind')
         if kind == 'upload':
             m = target_meta(st, str(tgt.get('id') or ''))
             files = sorted((targets_dir(st) / m['id'] / 'images').iterdir())
             return ar.h16('upload', m['id'], len(files)), files, m['name'], None
         if kind == 'dc':
-            from ...datacenter import service as dc
-            from ...datacenter.store import DCError
+            from ...bucket import service as dc
+            from ...bucket.store import BucketError
             try:
                 files = dc.image_files(user, str(tgt.get('bucket') or ''), str(tgt.get('path') or ''), MAX_DC_FILES)
-            except DCError as e:
+            except BucketError as e:
                 raise HTTPException(e.status, e.message) from None
             if not files:
                 raise HTTPException(400, 'that folder holds no images')
@@ -476,7 +476,7 @@ def router(state, ctx):
         g.need_index()
         g.boxes_only()
         _albu()
-        from ...data import augment_run as ar
+        from ...image import augment_run as ar
         st = ctx.current()
         recipe = _recipe(body)
         m = _clamp(body.get('m'), 20, 1000, 300)
@@ -527,8 +527,8 @@ def router(state, ctx):
         g.need_index()
         g.boxes_only()
         _albu()
-        from ...data import augment_model as am
-        from ...data import augment_run as ar
+        from ...image import augment_model as am
+        from ...image import augment_run as ar
         st = ctx.current()
         reg, ms = getattr(ctx, 'models', None), getattr(ctx, 'model_service', None)
         if reg is None or ms is None:
@@ -581,7 +581,7 @@ def router(state, ctx):
         g.need_index()
         g.boxes_only()
         _albu()
-        from ...data import augment_run as ar
+        from ...image import augment_run as ar
         st = ctx.current()
         recipe = _recipe(body)
         feature = str(body.get('feature') or '')
@@ -625,7 +625,7 @@ def router(state, ctx):
         g.need_index()
         g.boxes_only()
         _albu()
-        from ...data import augment_run as ar
+        from ...image import augment_run as ar
         st = ctx.current()
         recipe = _recipe(body)
         if not any(x['on'] for x in recipe['steps']):
@@ -664,7 +664,7 @@ def router(state, ctx):
         g.need_index()
         g.boxes_only()
         _albu()
-        from ...data import augment_run as ar
+        from ...image import augment_run as ar
         st = ctx.current()
         base = _recipe(body)
         m = _clamp(body.get('m'), 20, 1000, 300)
@@ -713,7 +713,7 @@ def router(state, ctx):
 
     @r.get('/api/augment/thumb')
     def thumb(part: str, i: int):
-        from ...data import augment_run as ar
+        from ...image import augment_run as ar
         if not ar.PART_RE.match(part or '') or i < 0:
             raise HTTPException(404, 'no such image')
         f = aug_root(ctx.current()) / 'emb' / part / 'imgs' / f'{int(i):05d}.jpg'

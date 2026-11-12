@@ -179,7 +179,7 @@ INLINE_SQL = 1500                   # editor SQL up to this many characters is i
 
 def analysis_scope(user, scope):
     """What the page has open: the connection and database, the provider's syntax, the last result."""
-    from ...analysis import service
+    from ...data import service
     scope = scope if isinstance(scope, dict) else {}
     cid, db, rid = scope.get('connection'), scope.get('database'), scope.get('result')
     kind = next((s['kind'] for s in service.sources(user) if s['id'] == cid), None)
@@ -208,7 +208,7 @@ def analysis_scope(user, scope):
         out.append('The user allowed row samples for this session.')
     else:
         out.append('Row samples are off: answer from aggregates.')
-    from ...analysis import aiaccess, favorites
+    from ...data import aiaccess, favorites
     prefs = service.user_prefs(user)
     line = favorites.index_line(favorites.load(prefs))
     access = aiaccess.index_line(aiaccess.items(prefs), cid)

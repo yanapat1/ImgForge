@@ -270,7 +270,7 @@ def test_http_tool_against_a_local_server(users, fake_server):
 
 def test_missing_secret_and_private_hosts(users, monkeypatch):
     alice = users[0]
-    from dataviz.datacenter.sources import fetch
+    from dataviz.bucket.sources import fetch
     p = assets.install(alice, manifest())
     ts = {t.name: t for t in assets.for_run(alice, 'data')['tools']}
     from dataviz.llm import tools
@@ -299,7 +299,7 @@ def test_missing_secret_and_private_hosts(users, monkeypatch):
 
 def test_change_plugin_tool_goes_through_confirm(users, monkeypatch):
     alice = users[0]
-    from dataviz.datacenter.sources import fetch
+    from dataviz.bucket.sources import fetch
     from test_llm_tools import OPENAI
     p = assets.install(alice, manifest())
     assets.update_plugin(alice, p['id'], {'secrets': {'TOKEN': 't0k3n'}})

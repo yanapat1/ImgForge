@@ -35,7 +35,7 @@ MAX_SESSIONS = 40
 
 
 def _sessions(user, kind, ids=None):
-    from ...data import sessions as data_sessions
+    from ...image import sessions as data_sessions
     try:
         return data_sessions.listing(user, kind, 'all', ids=ids)
     except Exception as e:  # noqa: BLE001 - no database (tests without accounts): nothing to list

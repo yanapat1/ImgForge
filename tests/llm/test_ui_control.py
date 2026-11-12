@@ -219,7 +219,7 @@ def test_ui_result_route_and_stream(client, monkeypatch, svc):  # noqa: F811
 
 # ---------------------------------------------------------------- the Analysis editor
 def test_analysis_reads_the_editor_and_proposes_sql_for_apply(monkeypatch):
-    from dataviz.analysis import service
+    from dataviz.data import service
     monkeypatch.setattr(service, 'sources', lambda user: [{'id': 'c1', 'name': 'DB', 'kind': 'mssql'}])
     monkeypatch.setattr(service, 'user_prefs', lambda user: {})
     fix = {'sql': 'SELECT TOP 3 a FROM t', 'mode': 'replace', 'note': 'LIMIT → TOP for SQL Server'}

@@ -30,9 +30,9 @@ from .core import config as vconfig
 from .core import logging as vlog
 from .core import workers as compute
 from .core.jobs import JobManager
-from .data import sources
-from .data import views
-from .data.indexer import build_index
+from .image import sources
+from .image import views
+from .image.indexer import build_index
 from .ml import analysis
 from .ml import features as feats
 from .ml import label_quality as lqual
@@ -284,7 +284,7 @@ class State:
         donor = None
         if src.kind == 'labeling' and self.workspace_root and self.cfg['index'].get('reuse_previous', True):
             # every edit is a new fingerprint (a new workspace): unchanged images come from the previous one
-            from .data import reuse
+            from .image import reuse
             donor = reuse.previous_donor(self.workspace_root, src.uri, self.dataset_id, self.cache_dir)
         return build_index(src, self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
                           pad=float(self.cfg['index']['crop_pad']), rebuild=self.rebuild,
@@ -312,7 +312,7 @@ class State:
         meta_path.write_text(json.dumps(meta, indent=1))
         self.index = idx
         if src.kind in ('labeling', 'union'):           # the live feed's base: ann id per box, change cursor
-            from .data import live
+            from .image import live
             try:
                 self.live_base = live.capture(self)
             except Exception as e:  # noqa: BLE001 - no live updates, the session still opens
@@ -364,7 +364,7 @@ class State:
                     return emb
             if emb is None and job is not None:
                 # an index that reused a donor (data/reuse.py): its rows + only the missing ones computed
-                from .data import reuse
+                from .image import reuse
                 emb = reuse.transplant_features(self, key, job.progress)
                 if emb is not None:
                     feats.save_cached(self.features_dir, key, self.fingerprint, emb)

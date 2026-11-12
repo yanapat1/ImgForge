@@ -11,7 +11,7 @@ def app(pg):
 
 
 def test_sharing_owner_only(app):
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     ca, alice = signed_in(app, 'alice')
     cb, bob = signed_in(app, 'bob')
     cc, carol = signed_in(app, 'carol')

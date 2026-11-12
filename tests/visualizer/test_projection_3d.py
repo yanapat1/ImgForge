@@ -75,7 +75,7 @@ def test_3d_projection_route(pg, tmp_path):
 
 
 def test_live_feed_skips_3d(pg, tmp_path):
-    from dataviz.data import live
+    from dataviz.image import live
     alice = account('alice')
     sid = viz_session(alice['id'], 'D', make_yolo(tmp_path / 'd', boxes=_boxes(4)))
     ctx, app = make_viz_app(tmp_path / 'ws')

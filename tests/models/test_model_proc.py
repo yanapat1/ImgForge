@@ -8,7 +8,7 @@ import pytest
 
 from conftest import make_jpeg
 
-from test_dc_routes import dc, new_bucket, upload_zip  # noqa: F401 - the Data Center fixture
+from test_bucket_routes import dc, new_bucket, upload_zip  # noqa: F401 - the Data Center fixture
 
 from dataviz.models import proc
 
@@ -79,14 +79,14 @@ def test_idle_worker_goes_away(stub, tmp_path):
 def test_autolabel_post_does_not_wait_for_the_model(dc, monkeypatch):  # noqa: F811
     """The model may take seconds to load: the POST must not wait for it (the page froze while it did)."""
     from conftest import wait_job
-    from dataviz.datacenter import service
+    from dataviz.bucket import service
     _, client = dc
     b = new_bucket(client)
     upload_zip(client, b['id'])
 
     def slow_info(link, owner):
         time.sleep(3)
-        raise service.DCError('the model is broken')
+        raise service.BucketError('the model is broken')
     monkeypatch.setattr(service._hooks(), 'model_info', slow_info)
     t0 = time.time()
     r = client.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': {'registry_id': 'x', 'name': 'Slow'}})

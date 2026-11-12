@@ -322,7 +322,7 @@ def _compare_tests(ctx, a):
     if not getattr(st, 'members', None):
         return {'tests': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (home page: pick '
                                        'them, Combine)'}, '→ not combined'
-    from ...data import compare
+    from ...image import compare
     svc = compare.service(st)
     with svc.lock:
         memo = list((getattr(svc, '_tests', None) or {}).values())
@@ -343,7 +343,7 @@ def _compare_shift(ctx, a):
     if not getattr(st, 'members', None):
         return {'report': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (home page: pick '
                                         'them, Combine)'}, '→ not combined'
-    from ...data import compare
+    from ...image import compare
     svc = compare.service(st)
     want_a, want_b = (a.get('a') or '').strip(), (a.get('b') or '').strip()
     with svc.lock:
@@ -400,7 +400,7 @@ def _compare_stress(ctx, a):
     st = _state(ctx)
     if not getattr(st, 'members', None):
         return {'stress': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined'}, '→ not combined'
-    from ...data import compare, stress
+    from ...image import compare, stress
     svc = compare.service(st)
     want_m, want_a = (a.get('model') or '').strip().lower(), (a.get('member') or '').strip()
     with svc.lock:
@@ -876,11 +876,11 @@ register(Tool('compute_stats', 'Open Class stats (computes the features first if
 
 
 # ---------------------------------------------------------------- the Augment tab (data/augment.py)
-from ...data.augment import GROUPS as _AUG_GROUPS  # noqa: E402 - no albumentations at import
+from ...image.augment import GROUPS as _AUG_GROUPS  # noqa: E402 - no albumentations at import
 
 
 def _aug_catalog(ctx, a):
-    from ...data import augment as ag
+    from ...image import augment as ag
     group = a.get('group')
     items = [{'t': t['t'], 'label': t['label'], 'group': t['group'], 'simulates': t['covers'],
               'args': {x['k']: x['default'] for x in t['args']}} for t in ag.CATALOG if not group or t['group'] == group]
@@ -892,7 +892,7 @@ def _aug_catalog(ctx, a):
 
 
 def _aug_check(ctx, a):
-    from ...data import augment as ag
+    from ...image import augment as ag
     try:
         recipe = ag.validate(a.get('recipe') or {})
     except ValueError as e:

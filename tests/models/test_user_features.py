@@ -151,7 +151,7 @@ def viz(pg, tmp_path):
 
 
 def test_import_embeddings_npy_and_npz(viz):
-    from dataviz.data.sources import LocalSource
+    from dataviz.image.sources import LocalSource
     from dataviz.state import State
     from vizutil import _Job, geom_registry
     st = State(LocalSource(viz['tmp'] / 'ds'), None, geom_registry(), default_feature='geom',
@@ -181,7 +181,7 @@ def test_import_route_for_labelers_only(viz):
     import io
     from authutil import client, login
     from conftest import wait_job
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     from vizutil import make_viz_app
     _, app = make_viz_app(viz['tmp'] / 'ws')
     sessions.set_sharing(viz['S'], 'private', [{'user_id': viz['bob']['id'], 'role': 'viewer'}], viz['alice']['id'])

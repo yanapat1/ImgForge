@@ -80,7 +80,7 @@ class Tool:
 
 def _svc():
     """The Data Center service (lazy: optional at import time, and tests swap it through this name)."""
-    from ...datacenter import service
+    from ...bucket import service
     return service
 
 

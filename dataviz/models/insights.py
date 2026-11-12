@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..data.indexer import parse_session_and_frame
+from ..image.indexer import parse_session_and_frame
 from . import evaluate
 
 SMALL, MEDIUM = 32 * 32, 96 * 96          # COCO size buckets (pixels²)

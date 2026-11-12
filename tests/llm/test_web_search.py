@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from dataviz.auth import settings
-from dataviz.datacenter.sources import fetch
+from dataviz.bucket.sources import fetch
 from dataviz.llm import tools, web_guard
 from dataviz.llm.engine import confirm, react
 from dataviz.llm.tools import web

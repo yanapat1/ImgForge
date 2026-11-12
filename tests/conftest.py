@@ -19,7 +19,7 @@ from pathlib import Path
 # and the 64 GiB container was OOM-killed. Each worker is pinned to its own slice of the cores instead (sched_setaffinity
 # is what hardware._cpu_count reads, and children -- decode pools, app.py -- inherit it), with BLAS threads to match.
 # The example database (analysis/sample.py) lives on the shared test server: an app started by a test (app.py in a
-# subprocess inherits this) does not make it; tests/analysis/test_sample.py makes its own under a name of its own.
+# subprocess inherits this) does not make it; tests/data/test_sample.py makes its own under a name of its own.
 os.environ.setdefault('DATAVIZ_SAMPLE_DB', '0')
 
 # Set before anything imports numpy. A serial run is left as it is.
@@ -176,7 +176,7 @@ def make_user(username, admin=False, display_name=None, active=True):
 @pytest.fixture
 def store(pg):
     """A ProjectStore on an empty project 'ppp…' owned by a fresh user (store.owner)."""
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     from dataviz.labeling.store import ProjectStore
     owner = make_user('owner')
     pid = 'p' * 32
@@ -190,7 +190,7 @@ def store(pg):
 
 def new_store(owner_id, name, pid=None):
     """Another ProjectStore (session row + project row) in the test database."""
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     from dataviz.labeling.store import ProjectStore
     pid = pid or uuid.uuid4().hex
     sessions.create('label', owner_id, name, sid=pid)
@@ -220,7 +220,7 @@ class _TestUserMiddleware:
 def app_ctx(pg, tmp_path):
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.labeling.projects import ProjectRegistry
     from dataviz.llm.store import LLMStore
     from dataviz.server.app import Ctx, create_app
@@ -259,7 +259,7 @@ def wait_job(client, job_id, timeout=30):
 def tmp_roots(monkeypatch, tmp_path):
     """The folders local paths may use (data/connections.py allowed_roots, read by the routes on every request)
     also include tmp_path, where the test folders live. Use with pytestmark = pytest.mark.usefixtures('tmp_roots')."""
-    from dataviz.data import connections
+    from dataviz.image import connections
     orig = connections.allowed_roots
     monkeypatch.setattr(connections, 'allowed_roots', lambda cfg: [*orig(cfg), tmp_path.resolve()])
     return tmp_path
@@ -289,7 +289,7 @@ def client_as(pg, tmp_path):
     from fastapi.testclient import TestClient
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.labeling.projects import ProjectRegistry
     from dataviz.llm.store import LLMStore
     from dataviz.models.registry import ModelRegistry

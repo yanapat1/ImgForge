@@ -17,7 +17,7 @@ from .core import hardware
 from .core import logging as vlog
 from .core.jobs import JobManager
 from . import db, zones
-from .data import connections
+from .image import connections
 from .llm.store import LLMStore
 from .paths import PROJECT_ROOT
 from .server.app import Ctx, create_app
@@ -215,7 +215,7 @@ def start_database(cfg, ws_root):
     an_cfg = cfg.get('data_analysis') or {}
     if zones.on('analysis', cfg) and an_cfg.get('sample_database', True) and os.environ.get('DATAVIZ_SAMPLE_DB', '1') != '0':
         # the example database, once (analysis/sample.py), off the start path; DATAVIZ_SAMPLE_DB=0 skips it
-        from .analysis import sample
+        from .data import sample
         sample.ensure_soon(url, vlog.get_logger('analysis').info)
     admin, password = bootstrap.ensure_first_admin(log=dlog.info)
     try:

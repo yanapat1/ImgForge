@@ -15,8 +15,8 @@ from test_agent_engine import drain, script, types
 from test_curation import _Job, make_dataset
 from test_llm_tools import ALICE, OPENAI
 
-from dataviz.data import curation as cur
-from dataviz.data.sources import LocalSource
+from dataviz.image import curation as cur
+from dataviz.image.sources import LocalSource
 from dataviz.llm import budget, prompting, tasks, tools
 from dataviz.llm.engine import react, roles
 from dataviz.llm.engine.react import Ctx

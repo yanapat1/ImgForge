@@ -4,7 +4,7 @@ handled (the labels move with it) and darkening it is not."""
 import numpy as np
 import pytest
 
-from dataviz.data import augment_model as am
+from dataviz.image import augment_model as am
 
 pytest.importorskip('albumentations')
 

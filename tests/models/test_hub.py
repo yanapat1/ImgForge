@@ -20,7 +20,7 @@ def mclient(pg, tmp_path):
     from fastapi.testclient import TestClient
     from dataviz.core import config as vconfig
     from dataviz.core.jobs import JobManager
-    from dataviz.data import connections
+    from dataviz.image import connections
     from dataviz.labeling.projects import ProjectRegistry
     from dataviz.models.registry import ModelRegistry
     from dataviz.models.service import ModelService

@@ -49,7 +49,7 @@ def test_open_lane_runs_sessions_side_by_side(jm):
     assert all(j.wait(T) and j.status == 'done' for j, _, _ in jobs)
 
 
-def test_dc_lane_is_fair_per_account(jm):
+def test_bucket_lane_is_fair_per_account(jm):
     a1, a1_on, a1_gate = gated(jm, 'dc-frames:b:1', 'dc', owner='alice')
     assert a1_on.wait(T)
     a2, a2_on, a2_gate = gated(jm, 'dc-import:b', 'dc', owner='alice')      # alice's second job waits for her first
@@ -65,7 +65,7 @@ def test_dc_lane_is_fair_per_account(jm):
     assert all(j.wait(T) and j.status == 'done' for j in (a1, a2, b1))
 
 
-def test_dc_lane_caps_parallel_accounts_and_frees_on_error(jm):
+def test_bucket_lane_caps_parallel_accounts_and_frees_on_error(jm):
     workers = LANES['dc'][0]
     running = [gated(jm, f'dc-sync:{i}', 'dc', owner=f'u{i}') for i in range(workers)]
     assert all(on.wait(T) for _, on, _ in running)
@@ -104,7 +104,7 @@ def test_session_opens_while_a_data_center_job_runs(jm, tmp_path):
     """The real index job of State.start goes to the 'open' lane: a running frame extraction does not hold it."""
     from vizutil import geom_registry, make_yolo
     from dataviz.core import config as vconfig
-    from dataviz.data.sources import LocalSource
+    from dataviz.image.sources import LocalSource
     from dataviz.state import State
     make_yolo(tmp_path / 'ds')
     cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG))

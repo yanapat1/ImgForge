@@ -11,7 +11,7 @@ import pytest
 from PIL import Image
 from test_imgstats import scene
 
-from dataviz.data import imgstats, stress
+from dataviz.image import imgstats, stress
 from dataviz.models import predict, runners
 
 

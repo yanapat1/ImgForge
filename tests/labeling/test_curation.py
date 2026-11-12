@@ -11,8 +11,8 @@ import pytest
 
 from conftest import make_jpeg, wait_job
 
-from dataviz.data import curation as cur
-from dataviz.data.sources import Conflict, LocalSource, sha1_bytes
+from dataviz.image import curation as cur
+from dataviz.image.sources import Conflict, LocalSource, sha1_bytes
 
 CLASSES = ['cat', 'dog', 'bird']
 
@@ -234,7 +234,7 @@ def test_routes(ds, tmp_path):
 def test_s3_write_label(monkeypatch, tmp_path):
     moto = pytest.importorskip('moto')
     import boto3
-    from dataviz.data.sources import S3Source
+    from dataviz.image.sources import S3Source
     for k, v in {'AWS_ACCESS_KEY_ID': 'x', 'AWS_SECRET_ACCESS_KEY': 'x', 'AWS_DEFAULT_REGION': 'us-east-1'}.items():
         monkeypatch.setenv(k, v)
     with moto.mock_aws():

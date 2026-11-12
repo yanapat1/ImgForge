@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 from PIL import Image
 
-from dataviz.data import indexer as ix
+from dataviz.image import indexer as ix
 
 
 def _make(root, n=6):

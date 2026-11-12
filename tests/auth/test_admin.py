@@ -84,7 +84,7 @@ def test_last_admin_guard(app):
 
 def test_delete_with_transfer(app):
     from dataviz import db
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     adm, root = signed_in(app, 'root', admin=True)
     alice, bob, carol = make_user('alice'), make_user('bob'), make_user('carol')
     with db.begin() as c:
@@ -118,7 +118,7 @@ def test_delete_with_transfer(app):
 
 def test_delete_without_transfer(app):
     from dataviz import db
-    from dataviz.data import sessions
+    from dataviz.image import sessions
     adm, root = signed_in(app, 'root', admin=True)
     alice = make_user('alice')
     with db.begin() as c:

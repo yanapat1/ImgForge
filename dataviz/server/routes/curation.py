@@ -33,8 +33,8 @@ from fastapi.responses import Response
 
 from ...auth import access, context, deps
 from ...core import config as vconfig
-from ...data import curation as cur
-from ...data.sources import Conflict
+from ...image import curation as cur
+from ...image.sources import Conflict
 from ...models.splits import load_splits
 from ..deps import guards, owned
 

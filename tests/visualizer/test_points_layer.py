@@ -4,8 +4,8 @@ any. The same access as the session; a combined dataset shows every member as im
 
 from authutil import account, client, login
 from conftest import make_jpeg
-from dataviz.data import sources, views
-from dataviz.data.indexer import build_index
+from dataviz.image import sources, views
+from dataviz.image.indexer import build_index
 from vizutil import make_viz_app, make_yolo, union_session, viz_session
 
 

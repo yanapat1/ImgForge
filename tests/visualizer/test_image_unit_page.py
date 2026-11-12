@@ -32,7 +32,7 @@ def _seed(client):
 
 
 def test_images_only_s3_prefix_in_the_page(server, s3_server):  # noqa: F811
-    from dataviz.data import sources
+    from dataviz.image import sources
     _seed(sources.make_client(s3_server))
     conn = _send(f'{server}/api/connections', {k: v for k, v in s3_server.items() if k != 'id'})
     shots = os.environ.get('DATAVIZ_SCREENSHOTS')

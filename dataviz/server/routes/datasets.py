@@ -18,8 +18,8 @@ from fastapi.responses import FileResponse
 
 from ...auth import access, deps, tiers
 from ...core import logging as vlog
-from ...data import connections, sessions, sources
-from ...data.embedding_source import EmbeddingSource
+from ...image import connections, sessions, sources
+from ...image.embedding_source import EmbeddingSource
 from ...workspace import find_workspace
 
 VIEWER = deps.require_session('viewer', param='did', kind='viz', what='visualize session')

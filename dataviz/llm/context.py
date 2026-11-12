@@ -176,7 +176,7 @@ def _crop(state, sid, cell):
     except OSError:
         pass
     s = state.samples[sid]
-    from ..data import sources
+    from ..image import sources
     img = sources.cached_rgb(state.source, s['image'])      # shared and read-only: crop() makes a new image
     x1, y1, x2, y2 = s['bbox']
     side = max(x2 - x1, y2 - y1) * 1.2
@@ -244,7 +244,7 @@ def image_mosaic(state, names, cell=256):
 def image_with_boxes(state, name, max_side=1024):
     """(jpeg, (w, h)) of a dataset image with its label boxes drawn, numbered, <= max_side px."""
     from ..server.routes.samples import image_boxes_px
-    from ..data import sources
+    from ..image import sources
     img = sources.cached_rgb(state.source, name).copy()     # the cache is shared: thumbnail / draw on a copy
     img.thumbnail((max_side, max_side), Image.BILINEAR)
     draw = ImageDraw.Draw(img)

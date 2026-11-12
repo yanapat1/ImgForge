@@ -140,7 +140,7 @@ class _Run:
         self.summary['connections'] = n
 
     def datasets(self, data):
-        from ..data import sessions
+        from ..image import sessions
         n = 0
         with begin() as c:
             for ds in data.get('datasets') or []:
@@ -262,7 +262,7 @@ class _Run:
         self.progress(len(entries), len(entries), 'labeling sessions')
 
     def label_project(self, e):
-        from ..data import sessions
+        from ..image import sessions
         pid = e['id']
         if not re.fullmatch(r'[0-9a-f]+', pid):
             raise ValueError(f'unexpected session id {pid!r}')

@@ -14,8 +14,8 @@ from test_labeling_source import box, make_project, put
 from vizutil import _Job, make_viz_app, make_yolo, viz_session
 
 from dataviz import db
-from dataviz.data import live
-from dataviz.data.labeling_source import LabelingSource
+from dataviz.image import live
+from dataviz.image.labeling_source import LabelingSource
 from dataviz.labeling.projects import ProjectRegistry
 
 pytestmark = pytest.mark.usefixtures('tmp_roots')
@@ -191,8 +191,8 @@ def test_api_live_false_on_local_session(pg, tmp_path):
 
 
 def test_union_with_labeling_member(world, tmp_path):
-    from dataviz.data.sources import LocalSource
-    from dataviz.data.union import Member, UnionSource
+    from dataviz.image.sources import LocalSource
+    from dataviz.image.union import Member, UnionSource
     from dataviz.state import State
     b = make_yolo(tmp_path / 'dsB', classes=('dog', 'bird'), boxes=(('b1', '0 0.5 0.5 0.3 0.3\n'),))
     src = world['state'].source

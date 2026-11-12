@@ -10,15 +10,15 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException
 
-from ...analysis import service
-from ...analysis.service import AnalysisError
+from ...data import service
+from ...data.service import DataError
 from ...auth import deps
 
 
 def _call(fn, *a, **k):
     try:
         return fn(*a, **k)
-    except AnalysisError as e:
+    except DataError as e:
         raise HTTPException(e.status, str(e)) from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from None

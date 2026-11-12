@@ -47,7 +47,7 @@ def test_assemble(world):
     mws = world['tmp'] / 'ws' / st.members[1]['ws']
     assert os.stat(st.cache_dir / 'crops' / '000003.jpg').st_ino == os.stat(mws / 'crops' / '000000.jpg').st_ino
     # every image hashed (images.json of the union), same content -> same group id
-    from dataviz.data import imagehash
+    from dataviz.image import imagehash
     imgs = imagehash.load(st.cache_dir)['images']
     assert set(imgs) == {'A/a1.jpg', 'A/a2.jpg', 'B/b1.jpg'} and all(e['q'] for e in imgs.values())
 
@@ -74,7 +74,7 @@ def test_write_routes_to_member(world):
     src = st.source
     text = src.read_label('B/b1.txt')
     assert text.split('\n')[0].split()[0] == '1' and text.split('\n')[1].split()[0] == '2'
-    from dataviz.data.sources import Conflict, sha1_bytes
+    from dataviz.image.sources import Conflict, sha1_bytes
     sha = sha1_bytes(src.read_label_bytes('B/b1.txt'))
     src.write_label('B/b1.txt', '2 0.5 0.5 0.3 0.3\n', sha)            # union 'bird' = B's class 1
     assert (world['b'] / 'labels' / 'b1.txt').read_text() == '1 0.5 0.5 0.3 0.3\n'
@@ -125,7 +125,7 @@ def test_stale_when_member_changes(world):
 
 
 def test_index_lock_serializes(tmp_path):
-    from dataviz.data.indexer import index_lock
+    from dataviz.image.indexer import index_lock
     order = []
 
     def hold(tag):
@@ -145,8 +145,8 @@ def test_index_lock_serializes(tmp_path):
 
 
 def _union(tmp_path, *members):
-    from dataviz.data.sources import LocalSource
-    from dataviz.data.union import Member, UnionSource
+    from dataviz.image.sources import LocalSource
+    from dataviz.image.union import Member, UnionSource
     ms = [Member(a, f'sid{i}', a, LocalSource(p), i) for i, (a, p) in enumerate(members)]
     return UnionSource({'id': 'u1', 'name': 'u'}, ms, tmp_path / 'ws')
 

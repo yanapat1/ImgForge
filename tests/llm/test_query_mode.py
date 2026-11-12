@@ -70,14 +70,14 @@ def test_side_runs_have_no_query_unless_auto(monkeypatch):
 
 def test_run_change_is_checked_against_ai_access_before_the_card(monkeypatch):
     """A change the table's AI access does not allow goes back to the model: no confirm card is shown."""
-    from dataviz.analysis.service import AnalysisError
+    from dataviz.data.service import DataError
     _fake(monkeypatch)
     calls = []
 
     def check(user, sid, cid, db, sql):
         calls.append(sql)
         if 'ALTER' in sql:
-            raise AnalysisError('ALTER on public.orders needs AI access "Change structure"', 403)
+            raise DataError('ALTER on public.orders needs AI access "Change structure"', 403)
     monkeypatch.setattr(atools._svc(), 'ai_access_check', check)
     seen = script(monkeypatch, ('', [('run_change', {'sql': 'ALTER TABLE orders ADD x int'})]), ('I cannot.', []))
     evs = drain(start('add a column', role='analysis', mode='auto'))

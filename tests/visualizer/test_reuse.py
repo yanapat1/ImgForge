@@ -8,8 +8,8 @@ import numpy as np
 from conftest import make_jpeg
 from vizutil import _Job, geom_registry, make_yolo
 
-from dataviz.data import indexer, reuse
-from dataviz.data.sources import LocalSource
+from dataviz.image import indexer, reuse
+from dataviz.image.sources import LocalSource
 
 
 def _count(monkeypatch):
@@ -59,7 +59,7 @@ def test_reindex_reuses_unchanged_images(tmp_path, monkeypatch):
     d_new = [s['id'] for s in got['samples'] if s['image'] == 'd.jpg']
     assert [int(v) for v in src] == [0, 1, 2, 3, -1] and d_new == [4]
     # images.json: the reused images keep their hash
-    from dataviz.data import imagehash
+    from dataviz.image import imagehash
     imagehash.ensure(LocalSource(root), ws1, first['fingerprint'])       # the backfill hashes ws1's images
     calls.clear()
     got = indexer.build_index(LocalSource(root), ws2, workers=1, rebuild=True, donor=reuse.Donor.from_workspace(ws1))

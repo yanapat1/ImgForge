@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse, Response
 
 from ...auth import access, context, deps, tiers
 from ...core import logging as vlog
-from ...data import connections
+from ...image import connections
 from ...labeling import colors, models
 from ...labeling.export import run_export
 from ...labeling import writers as label_writers
@@ -151,7 +151,7 @@ def router(state, ctx):
     def source_roots():
         """Where a local image source may lie: the allowed roots plus the Data Center's managed store (New label ›
         Data Center reads a managed bucket in place)."""
-        from ...datacenter import store as dcstore
+        from ...bucket import store as dcstore
         return dcstore.roots(ctx.cfg)
 
     def owners_connections(owner_id):

@@ -108,7 +108,7 @@ def test_kept_backend_loads_nothing_pruned(analyst):
 def test_prune_removes_the_files_and_their_build(tmp_path, analyst):
     from dataviz import zones
     for rel in ('dataviz/state.py', 'dataviz/ml/features.py', 'static/ts/plot/render.ts', 'static/js/plot/render.js',
-                'static/js/plot/render.js.map', 'static/js/views/gallery.js', 'dataviz/analysis/service.py',
+                'static/js/plot/render.js.map', 'static/js/views/gallery.js', 'dataviz/data/service.py',
                 'static/js/analysis/app.js', 'static/js/main.js'):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text('x')
@@ -116,7 +116,7 @@ def test_prune_removes_the_files_and_their_build(tmp_path, analyst):
     assert 'dataviz/state.py' in gone and 'dataviz/ml/' in gone
     assert not (tmp_path / 'dataviz/ml').exists() and not (tmp_path / 'static/js/plot').exists()
     assert not (tmp_path / 'static/js/views/gallery.js').exists()
-    for kept in ('dataviz/analysis/service.py', 'static/js/analysis/app.js', 'static/js/main.js'):
+    for kept in ('dataviz/data/service.py', 'static/js/analysis/app.js', 'static/js/main.js'):
         assert (tmp_path / kept).exists()
 
 

@@ -22,7 +22,7 @@ from fastapi.responses import Response, PlainTextResponse
 from ...auth import deps, tiers
 from ...auth.deps import can_add_connections, current_user, require_perm
 from ...core import logging as vlog
-from ...data import connections, sources
+from ...image import connections, sources
 from ...models import insights, registry as mreg, schema
 from ...paths import PROJECT_ROOT
 from ..deps import guards, json_bytes, owned
@@ -389,7 +389,7 @@ def router(state, ctx):
             p = svc.pred(ctx.current(), m, pid)
         except KeyError as e:
             raise HTTPException(404, str(e))
-        from ...data.indexer import crop_outside_transparent, square_crop_box
+        from ...image.indexer import crop_outside_transparent, square_crop_box
         img = sources.cached_rgb(state.source, p['image'])             # shared, read-only: crop() copies
         x1, y1, x2, y2 = p['box']
         pad = float(state.cfg['index']['crop_pad'])

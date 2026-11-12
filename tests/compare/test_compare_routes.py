@@ -9,7 +9,7 @@ import pytest
 
 from authutil import account, client, login
 from conftest import make_jpeg
-from dataviz.data import diff
+from dataviz.image import diff
 from dataviz.server.binary import unpack_columns
 from vizutil import make_viz_app, make_yolo, union_session, viz_session
 
@@ -82,7 +82,7 @@ def test_patch_keeps_diff_current(world):
     assert out and list(out.values())[0]['summary']['boxes']['reclass'] == 0
     new = c.post(f'/s/{U}/api/compare/run', json={'a': 'A', 'b': 'B'}).json()
     assert new['key'] != key and new['summary']['boxes']['reclass'] == 0
-    fresh = __import__('dataviz.data.compare', fromlist=['x']).CompareService(st).run('A', 'B', {})[1]
+    fresh = __import__('dataviz.image.compare', fromlist=['x']).CompareService(st).run('A', 'B', {})[1]
     assert np.array_equal(fresh.status, st._compare.cached('A', 'B', {})[1].status)
 
 
@@ -98,7 +98,7 @@ def test_errors(world):
 def test_deleting_a_box_updates_the_diff(world):
     """A box deleted through the patch path (curation / live feed) is no longer SAME in the diff (review finding:
     patched() walked by_image, which no longer lists deleted boxes)."""
-    from dataviz.data import patching
+    from dataviz.image import patching
     c, U, ctx = world['c'], world['U'], world['ctx']
     before = c.post(f'/s/{U}/api/compare/run', json={'a': 'A', 'b': 'B'}).json()['summary']['boxes']
     st = ctx.state_for(U)
@@ -196,7 +196,7 @@ def test_stress_test_route(world, monkeypatch):
             out.append(np.array(boxes, np.float32).reshape(-1, 6))
         return out
     monkeypatch.setattr(predict, 'predict_batch', fake)
-    from dataviz.data import stress as stresslib
+    from dataviz.image import stress as stresslib
     real_run = stresslib.run
 
     def run(state, mm, fp, wd, names, axes, conf, job=None, labelled=True):

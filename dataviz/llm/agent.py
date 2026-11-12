@@ -133,7 +133,7 @@ def _error_text(e):
     if isinstance(e, tools.ToolError):
         return str(e)
     status = getattr(e, 'status', None)
-    if status is not None or type(e).__name__ == 'DCError':           # the service's own human messages
+    if status is not None or type(e).__name__ == 'BucketError':           # the service's own human messages
         return str(e)
     _log.warning(f'dc tool: {type(e).__name__}: {vlog.esc(str(e))}')
     return f'{type(e).__name__}: {e}'

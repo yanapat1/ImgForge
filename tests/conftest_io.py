@@ -86,7 +86,7 @@ def s3_server():
 
 @pytest.fixture
 def s3_bucket(s3_server, request):
-    from dataviz.data import sources
+    from dataviz.image import sources
     client = sources.make_client(s3_server)
     name = 'b-' + ''.join(c if c.isalnum() else '-' for c in request.node.name.lower())[:50].strip('-')
     client.create_bucket(Bucket=name)

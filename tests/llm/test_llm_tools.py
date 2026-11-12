@@ -206,8 +206,8 @@ class FakeService:
     def read_text(self, user, bid, path, limit=65536):
         self.calls.append(('read_text', bid, path))
         if path == 'new.txt':
-            from dataviz.datacenter.store import DCError
-            raise DCError('nothing at new.txt', 404)
+            from dataviz.bucket.store import BucketError
+            raise BucketError('nothing at new.txt', 404)
         return {'text': 'names: [cat]\n', 'truncated': False, 'mtime_ns': '42'}
 
     def write_text(self, user, bid, path, text, expect_mtime_ns=None, create=False):
@@ -454,16 +454,16 @@ def test_catalog_lists_every_tool():
 
 
 def test_cli_list_and_usage(capsys):
-    from dataviz import datacenter_cli
-    assert datacenter_cli.main(['list']) == 0
+    from dataviz import bucket_cli
+    assert bucket_cli.main(['list']) == 0
     assert '`list_buckets`' in capsys.readouterr().out
-    assert datacenter_cli.main(['ask_user', '--user', 'x']) == 2
-    assert datacenter_cli.main(['search', '--args', '{bad', '--user', 'x']) == 2
-    assert datacenter_cli.main(['search']) == 2                      # --user is required
+    assert bucket_cli.main(['ask_user', '--user', 'x']) == 2
+    assert bucket_cli.main(['search', '--args', '{bad', '--user', 'x']) == 2
+    assert bucket_cli.main(['search']) == 2                      # --user is required
 
 
 # ---------------------------------------------------------------- routes
-def test_dc_routes_gated(client):
+def test_bucket_routes_gated(client):
     msg = {'messages': [{'role': 'user', 'text': 'hi'}], 'scope': {}}
     assert client.post('/api/llm/dc/chat', json=msg).status_code == 403            # feature off
     assert client.post('/api/llm/dc/confirm', json={'plan_id': 'x', 'action_ids': ['a1']}).status_code == 403

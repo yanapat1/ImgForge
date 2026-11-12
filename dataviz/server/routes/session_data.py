@@ -83,7 +83,7 @@ def router(state, ctx):
         need_index()
         s = state.samples
         if state.source.kind == 'embeddings':          # rows, not boxes: metadata columns instead of box geometry
-            from ...data.embedding_source import shown_previews
+            from ...image.embedding_source import shown_previews
             types = state.index.get('meta_types') or {}
             urls = bool((state.cfg.get('embeddings') or {}).get('allow_url_previews'))
             return json_bytes(state.payload('points', lambda: {
@@ -109,7 +109,7 @@ def router(state, ctx):
                 'blur': [x['blur'] for x in s],
             }
             if state.origin is not None:               # combined dataset: member of each box + same-content group
-                from ...data import imagehash
+                from ...image import imagehash
                 imgs = (imagehash.load(state.cache_dir) or {}).get('images') or {}
                 out['origin'] = state.origin
                 out['hgroup'] = [(imgs.get(x['image']) or {}).get('g', -1) for x in s]

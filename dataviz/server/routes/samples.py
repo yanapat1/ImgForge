@@ -14,8 +14,8 @@ from PIL import Image, ImageDraw
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-from ...data import sources
-from ...data.curation import parse_label
+from ...image import sources
+from ...image.curation import parse_label
 
 from ...auth import deps
 from ...ml import analysis
@@ -98,7 +98,7 @@ def router(state, ctx):
             raise HTTPException(404, f'sample {sid} has no image')
         cut = None
         if s.get('img_w') and s.get('img_h'):     # a box at the image edge: its crop is part black, send that part transparent
-            from ...data.indexer import crop_outside_transparent
+            from ...image.indexer import crop_outside_transparent
             with Image.open(path) as im:
                 cut = crop_outside_transparent(im.convert('RGB'), s['bbox'], s['img_w'], s['img_h'],
                                                float(state.cfg['index']['crop_pad']))
@@ -112,7 +112,7 @@ def router(state, ctx):
     def preview(sid: int, kind: str):
         """An embeddings row's own audio / video / image file (Range requests work, so media can seek), or a redirect
         to its URL. The path was checked to stay inside the session folder when indexed and is checked again here."""
-        from ...data.embedding_source import AUDIO_TYPES, IMAGE_TYPES, VIDEO_TYPES, is_url
+        from ...image.embedding_source import AUDIO_TYPES, IMAGE_TYPES, VIDEO_TYPES, is_url
         s = sample_or_404(sid)
         types = {'audio': AUDIO_TYPES, 'video': VIDEO_TYPES, 'image': IMAGE_TYPES}.get(kind)
         ref = (s.get('preview') or {}).get(kind)
