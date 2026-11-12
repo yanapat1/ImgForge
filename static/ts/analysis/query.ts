@@ -5,12 +5,13 @@ import { errText } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { openDialog, promptDialog } from '../views/dialog.js';
-import { chip, render, renderTree, saveTabs } from './app.js';
+import { applyExplorer, chip, render, renderTree, saveTabs } from './app.js';
 import { B_ACTIONS, fitView, renderBuilder, syncFromSql } from './builder.js';
 import { mountGrid } from './grid.js';
 import { countAll, countJoin, joinsHtml } from './joins.js';
-import { A, api, newTab, sourceOf, tab } from './state.js';
-import type { RunState, Statement, Tab } from './state.js';
+import { menuHead, openMenu } from './menu.js';
+import { A, api, newTab, saveExplorer, sourceOf, tab } from './state.js';
+import type { Pane, RunState, Statement, Tab } from './state.js';
 import type { EditorHandle, EditorModule } from '../types-editor.js';
 
 const VENDOR_URL = new URL('../vendor/editor.js', import.meta.url).href;
@@ -38,9 +39,9 @@ export function renderQuery(): void {
   const t = tab();
   if (!w.querySelector('.an-q')) {
     w.innerHTML = `<div class="an-q"><div class="an-tabs tabbar sm" role="tablist" id="an-qtabs"></div><div class="an-toolbar toolbar" id="an-qbar"></div>` +
-      `<div class="an-qbody" id="an-qbody"><div class="an-split" id="an-pair"><div class="an-pane" data-pane="viz"><div class="an-sqlhead">Visual builder <span class="faint lbl" title="Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.">Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="viz" aria-label="Fill the window" title="Fill the window">⤢</button><button type="button" class="icon-btn ghost xs" data-act="viz-hide" aria-label="Close the visual builder" title="Close the visual builder (SQL only). Builder on the toolbar brings it back.">×</button></div><div class="an-canvas" id="an-canvas"></div></div>` +
+      `<div class="an-qbody" id="an-qbody"><div class="an-split" id="an-pair"><div class="an-pane" data-pane="viz"><div class="an-sqlhead">Visual builder <span class="faint lbl" title="Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.">Left-drag: select. Right-drag: move the board. Wheel: zoom. Right-click a line: remove join.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="viz" aria-label="Fill the window" title="Fill the window">⤢</button><button type="button" class="icon-btn ghost xs" data-act="viz-hide" aria-label="Close the visual builder" title="Close the visual builder. Builder on the toolbar brings it back.">×</button></div><div class="an-canvas" id="an-canvas"></div></div>` +
       `<div class="an-spv" data-sp="v" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"></div>` +
-      `<div class="an-pane" data-pane="sql"><div class="an-sqlhead">SQL <span class="faint lbl" title="Type your query. Ctrl+Enter runs it.">Type your query. Ctrl+Enter runs it.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="sql" aria-label="Fill the window" title="Fill the window">⤢</button></div><div class="an-sql" id="an-sql"></div></div></div>` +
+      `<div class="an-pane" data-pane="sql"><div class="an-sqlhead">SQL <span class="faint lbl" title="Type your query. Ctrl+Enter runs it.">Type your query. Ctrl+Enter runs it.</span><span class="grow"></span><button type="button" class="icon-btn ghost xs" data-act="fill" data-k="sql" aria-label="Fill the window" title="Fill the window">⤢</button><button type="button" class="icon-btn ghost xs" data-act="pane-hide" data-k="sql" aria-label="Close the SQL pane" title="Close the SQL pane. SQL on the toolbar brings it back.">×</button></div><div class="an-sql" id="an-sql"></div></div></div>` +
       `<div class="an-sph" data-sp="h" role="separator" aria-orientation="horizontal" aria-label="Resize panels" tabindex="0"></div>` +
       `<div class="an-pane an-res" data-pane="res"><div class="an-tabs tabbar sm" role="tablist" id="an-rtabs"></div><div class="an-rc" id="an-rc"></div></div></div></div>`;
     editorTab = '';
@@ -52,7 +53,7 @@ export function renderQuery(): void {
   $req('an-qbar').innerHTML = `<button type="button" class="primary" data-act="run"${isRunning(t) ? ' disabled' : ''}>${icon('play')}Run</button><button type="button" data-act="stop"${isRunning(t) ? '' : ' disabled'}>Stop</button>` +
     `<select id="an-conn" aria-label="Connection"><option value="">Choose a connection</option>${A.sources.map((s) => `<option value="${esc(s.id)}" ${s.id === t.conn ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` +
     `<select id="an-db" aria-label="Database"${t.conn ? '' : ' disabled'}>${dbOptions(t)}</select>` +
-    (src ? `${chip(src.kind)}${A.version.get(src.id) ? `<span class="pill faint an-ver" title="${esc(A.version.get(src.id) ?? '')}">${esc(A.version.get(src.id) ?? '')}</span>` : ''}` : '') + `<span class="grow"></span><label class="check" title="The assistant gets at most 20 rows, each cell cut short. Off: it only sees totals."><input type="checkbox" id="an-airows" ${A.aiRows ? 'checked' : ''}> Let AI read sample rows</label><span class="an-lay"><span class="faint">Layout</span><button type="button" class="view-btn an-vizbtn${A.layout.viz ? ' active' : ''}" data-act="viz-toggle" aria-pressed="${A.layout.viz}" title="${A.layout.viz ? 'Close' : 'Open'} the visual builder">Builder</button><span class="an-seg segmented">${[['std', 'Standard'], ['top', 'Table on top'], ['only', 'Table only']].map(([k, n]) => `<button type="button" class="view-btn" data-act="layout" data-lay="${k}" data-k="${k}">${n}</button>`).join('')}</span></span>`;
+    (src ? `${chip(src.kind)}${A.version.get(src.id) ? `<span class="pill faint an-ver" title="${esc(A.version.get(src.id) ?? '')}">${esc(A.version.get(src.id) ?? '')}</span>` : ''}` : '') + `<span class="grow"></span><label class="check" title="The assistant gets at most 20 rows, each cell cut short. Off: it only sees totals."><input type="checkbox" id="an-airows" ${A.aiRows ? 'checked' : ''}> Let AI read sample rows</label><span class="an-lay"><span class="faint">Show</span><span class="an-seg segmented" role="group" aria-label="Panes">${PANES.map(([k, n]) => `<button type="button" class="view-btn an-pbtn${k === 'viz' ? ' an-vizbtn' : ''}" data-act="pane" data-k="${k}">${n}</button>`).join('')}</span><button type="button" class="view-btn" data-act="layout-menu" aria-haspopup="menu" title="Layout presets">Layout ▾</button></span>`;
   void mountEditor(t);
   renderBuilder();
   applyLayout();
@@ -62,24 +63,64 @@ export function renderQuery(): void {
 export function applyLayout(): void {
   const b = $('an-qbody'), pair = $('an-pair'), L = A.layout;
   if (!b || !pair) return;
-  b.className = `an-qbody${L.flip ? ' flip' : ''}${L.max ? ' one' : ''}`;
+  if (L.max && !L[L.max]) L.max = '';
+  if (!L.viz && !L.sql && !L.res) L.res = true;                     // never all closed (an old saved layout)
+  const vis = (k: Pane): boolean => L[k] && (!L.max || L.max === k);
+  const top = vis('viz') || vis('sql');
+  b.className = `an-qbody${L.flip ? ' flip' : ''}${top && vis('res') ? '' : ' one'}`;
   b.style.setProperty('--r1', `${L.h}fr`);
   b.style.setProperty('--r2', `${100 - L.h}fr`);
   pair.style.setProperty('--a', `${L.w}fr`);
   pair.style.setProperty('--b', `${100 - L.w}fr`);
-  document.querySelector('.an-main')?.classList.toggle('filled', !!L.max);
-  ['sql', 'viz', 'res'].forEach((k) => { const p = document.querySelector<HTMLElement>(`[data-pane="${k}"]`); if (p) p.hidden = !!L.max && L.max !== k || k === 'viz' && !L.viz; });
-  pair.classList.toggle('nobuild', !L.viz);
-  const vb = document.querySelector<HTMLElement>('.an-vizbtn');
-  if (vb) { vb.classList.toggle('active', L.viz); vb.setAttribute('aria-pressed', String(L.viz)); vb.title = `${L.viz ? 'Close' : 'Open'} the visual builder`; }
-  pair.hidden = L.max === 'res';
+  (['sql', 'viz', 'res'] as const).forEach((k) => { const p = document.querySelector<HTMLElement>(`[data-pane="${k}"]`); if (p) p.hidden = !vis(k); });
+  pair.classList.toggle('nobuild', !vis('viz'));
+  pair.classList.toggle('nosql', !vis('sql'));
+  pair.hidden = !top;
+  const open = PANES.filter(([k]) => L[k]).length;
+  document.querySelectorAll<HTMLElement>('.an-pbtn').forEach((x) => {
+    const k = x.dataset['k'] as Pane, on = L[k], name = PANES.find((p) => p[0] === k)?.[1] ?? k;
+    x.classList.toggle('active', on);
+    x.setAttribute('aria-pressed', String(on));
+    (x as HTMLButtonElement).disabled = on && open === 1;
+    x.title = on && open === 1 ? 'At least one pane stays open' : `${on ? 'Close' : 'Open'} the ${name} pane`;
+    const ready = k === 'res' && !on && !!tab().run;                 // a result waits in the closed pane
+    x.classList.toggle('an-ready', ready);
+    if (ready) x.title += ' (a result is ready)';
+  });
   const pres = $('an-rtabs');
   if (pres && !pres.querySelector('[data-act="fill"]')) pres.insertAdjacentHTML('beforeend', '<button type="button" class="icon-btn ghost xs" data-act="fill" data-k="res" aria-label="Fill the window" title="Fill the window">⤢</button>');
   document.querySelectorAll<HTMLElement>('[data-act="fill"]').forEach((x) => { const on = L.max === x.dataset['k']; x.textContent = on ? '⤡' : '⤢'; x.title = on ? 'Restore layout (Esc)' : 'Fill the window'; });
-  document.querySelectorAll<HTMLElement>('[data-lay]').forEach((x) => x.classList.toggle('active', x.dataset['lay'] === layoutName()));
 }
 
-const layoutName = (): string => (A.layout.max === 'res' ? 'only' : A.layout.flip ? 'top' : A.layout.max ? '' : 'std');
+const PANES: [Pane, string][] = [['viz', 'Builder'], ['sql', 'SQL'], ['res', 'Results']];
+
+/** Open or close one pane; the last open one stays. */
+export function setPane(k: Pane, on: boolean): void {
+  const L = A.layout;
+  if (!on && PANES.filter(([p]) => L[p]).length === 1 && L[k]) { toast('At least one pane stays open'); return; }
+  L[k] = on;
+  if (!on && L.max === k) setMax('');
+  saveLayout();
+  applyLayout();
+  if (on || k !== 'viz') renderBuilderAfterLayout();
+}
+
+/** Fill the window with one pane ('' = restore). Filling also closes the Objects panel, and restoring brings it back. */
+export function setMax(k: '' | Pane): void {
+  const L = A.layout, was = L.max;
+  L.max = k;
+  if (k && !was) {
+    L.expBefore = A.explorer;
+    if (A.explorer) { A.explorer = false; applyExplorer(); }
+  } else if (!k && was) {
+    if (L.expBefore && !A.explorer) { A.explorer = true; applyExplorer(); renderTree(); }
+    delete L.expBefore;
+  }
+  saveExplorer();
+  applyLayout();
+  renderBuilderAfterLayout();
+}
+
 
 async function mountEditor(t: Tab): Promise<void> {
   const host = $('an-sql');
@@ -235,18 +276,24 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   'join-step': (el) => { tab().joinStep = Number(el.dataset['i']); renderQuery(); },
   'join-count': async (el) => { await countJoin(Number(el.dataset['i'])); renderQuery(); },
   'join-count-all': async () => { await countAll(); renderQuery(); },
-  layout: (el) => {
-    const L = A.layout, k = el.dataset['k'];
-    L.max = k === 'only' ? 'res' : '';
-    if (k === 'std') { L.flip = false; L.h = 46; }
-    if (k === 'top') { L.flip = true; L.h = 62; }
-    saveLayout();
-    applyLayout();
-    renderBuilderAfterLayout();
+  'layout-menu': (el) => {
+    const L = A.layout, now = !L.viz && !L.sql ? 'only' : L.flip ? 'top' : 'std';
+    const item = (k: string, n: string, hint: string): string => `<button type="button" role="menuitem" data-m="${k}"${k === now ? ' class="on"' : ''}>${icon(k === now ? 'check' : 'grid')}<span class="lbl">${n} <span class="faint">· ${hint}</span></span></button>`;
+    openMenu(menuHead('Layout') + item('std', 'Standard', 'builder and SQL above the results') + item('top', 'Table on top', 'results above') + item('only', 'Table only', 'just the results'), el, (k) => {
+      L.max = '';
+      if (k === 'std') Object.assign(L, { flip: false, h: 46, viz: true, sql: true, res: true });
+      if (k === 'top') Object.assign(L, { flip: true, h: 62, viz: true, sql: true, res: true });
+      if (k === 'only') Object.assign(L, { viz: false, sql: false, res: true });
+      saveLayout();
+      applyLayout();
+      renderBuilderAfterLayout();
+    });
   },
-  'viz-hide': () => setViz(false),
-  'viz-toggle': () => setViz(!A.layout.viz),
-  fill: (el) => { const k = el.dataset['k'] as 'sql' | 'viz' | 'res'; A.layout.max = A.layout.max === k ? '' : k; applyLayout(); renderBuilderAfterLayout(); },
+  pane: (el) => { const k = el.dataset['k'] as Pane; setPane(k, !A.layout[k]); },
+  'pane-hide': (el) => setPane(el.dataset['k'] as Pane, false),
+  'viz-hide': () => setPane('viz', false),
+  'viz-toggle': () => setPane('viz', !A.layout.viz),
+  fill: (el) => { const k = el.dataset['k'] as Pane; setMax(A.layout.max === k ? '' : k); },
   rt: (el) => { tab().rt = el.dataset['k'] as Tab['rt']; renderQuery(); },
   rset: (el) => { tab().result = Number(el.dataset['i']); renderQuery(); },
   qtab: (el) => {                   // a click rebuilds the tab bar, so a double click is told from two clicks (no dblclick event)
@@ -271,16 +318,8 @@ export const Q_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   },
 };
 
-function setViz(on: boolean): void {
-  A.layout.viz = on;
-  if (!on && A.layout.max === 'viz') A.layout.max = '';
-  saveLayout();
-  applyLayout();
-  if (on) renderBuilderAfterLayout();
-}
-
 function renderBuilderAfterLayout(): void { requestAnimationFrame(() => renderBuilder()); }
-export function saveLayout(): void { try { localStorage.setItem('dataviz.analysis.layout', JSON.stringify({ ...A.layout, max: '' })); } catch { /* a convenience only */ } }
+export function saveLayout(): void { try { localStorage.setItem('dataviz.analysis.layout', JSON.stringify({ ...A.layout, max: '', expBefore: undefined })); } catch { /* a convenience only */ } }
 
 export function queryChange(t: HTMLInputElement | HTMLSelectElement): boolean {
   const c = tab();

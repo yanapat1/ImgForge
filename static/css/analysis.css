@@ -13,8 +13,16 @@ html:not([data-screen=analysis]) #analysis { display: none; }
 /* ---------------------------------------------------------------- shell: activity bar | objects | work */
 .an-main { --an-expw: min(var(--an-exp, 280px), max(200px, calc(100vw - 360px))); position: relative; flex: 1; min-height: 0; display: grid;
   grid-template-columns: var(--activity-w) var(--an-expw) minmax(0, 1fr); }
-.an-main.noexp, .an-main.filled { grid-template-columns: var(--activity-w) minmax(0, 1fr); }
-.an-main.noexp .an-explorer, .an-main.filled .an-explorer, .an-main.noexp .an-expsz, .an-main.filled .an-expsz { display: none; }
+.an-main.noexp { grid-template-columns: var(--activity-w) minmax(0, 1fr); }
+.an-main.noexp .an-explorer, .an-main.noexp .an-expsz { display: none; }
+/* the Objects panel closed: a slim tab on the left edge of the work area opens it again (also Ctrl+B, the rail button) */
+.an-expopen { display: none; }
+.an-main.noexp .an-expopen { display: flex; position: absolute; z-index: 6; left: var(--activity-w); top: 50%; transform: translateY(-50%);
+  flex-direction: column; align-items: center; gap: var(--s1); padding: var(--s2) 3px; min-height: 0; height: auto; writing-mode: vertical-rl;
+  font-size: var(--fs-xs); color: var(--text-muted); background: var(--surface); border: 1px solid var(--border); border-left: 0;
+  border-radius: 0 var(--r-sm, 6px) var(--r-sm, 6px) 0; box-shadow: var(--shadow-1, none); cursor: pointer; }
+.an-main.noexp .an-expopen:hover { color: var(--text); background: var(--surface-2); }
+.an-main.noexp .an-expopen svg { writing-mode: horizontal-tb; }
 .an-rail { grid-row: 1; }
 .an-rail .an-rail-end { margin-top: auto; }
 .an-explorer { grid-column: 2; position: relative; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); }
@@ -90,12 +98,14 @@ main.an-work { grid-template-columns: none; }
 .an-qbody.flip .an-sph { order: 2; }
 .an-qbody.flip .an-res { order: 1; }
 .an-qbody.one { grid-template-rows: minmax(0, 1fr); }
-.an-qbody.one .an-sph, .an-qbody.one .an-spv { display: none; }
-.an-qbody.one .an-split { grid-template-columns: minmax(0, 1fr); }
+.an-qbody.one .an-sph { display: none; }
 .an-split { display: grid; grid-template-columns: minmax(0, var(--a, 42fr)) 6px minmax(0, var(--b, 58fr)); min-height: 0; }
 .an-split[hidden], .an-pane[hidden] { display: none; }
-.an-split.nobuild { grid-template-columns: minmax(0, 1fr); }
-.an-split.nobuild .an-spv { display: none; }
+.an-split.nobuild, .an-split.nosql { grid-template-columns: minmax(0, 1fr); }
+.an-split.nobuild .an-spv, .an-split.nosql .an-spv { display: none; }
+/* a closed Results pane with a result waiting: a dot on its button */
+.an-pbtn.an-ready::after { content: ''; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; background: var(--accent); display: inline-block; vertical-align: middle; }
+.an-sqlhead, #an-rtabs { cursor: default; }
 .an-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); }
 .an-sqlhead { display: flex; gap: var(--s2); align-items: center; min-width: 0; height: 34px; padding: 0 var(--s3); flex: none;
   border-bottom: 1px solid var(--border); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }

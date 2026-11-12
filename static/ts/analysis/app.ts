@@ -17,10 +17,10 @@ import { D_ACTIONS, dashDrag, dashDrop, dashInput, renderDash } from './dash.js'
 import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
 import { addTable, builderContext, builderDown, builderKey, builderMove, builderUp, builderWheel, renderBuilder } from './builder.js';
 import { gridClick, gridFit, gridPointer } from './grid.js';
-import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout } from './query.js';
+import { applyLayout, Q_ACTIONS, queryChange, renderQuery, runQuery, saveLayout, setMax } from './query.js';
 import { aiBadge, loadAiAccess } from './aiaccess.js';
 import { F_ACTIONS, favDrop, favMenu, isFav, loadFavs, renderFavs } from './favorites.js';
-import { A, api, clampExp, EXP_MIN, EXP_W, expMax, newTab, tableKey } from './state.js';
+import { A, api, clampExp, EXP_MIN, EXP_W, expMax, newTab, saveExplorer, tableKey } from './state.js';
 import type { Tab, Workspace } from './state.js';
 
 const WS: [Workspace, string, string][] = [
@@ -38,14 +38,15 @@ export function render(): void {
     // the same header as every page (core/header.ts); the session name sits after the links, like the visualizer's dataset
     root.innerHTML = appHeader({ page: 'analysis', cls: 'an-header', actionsId: 'an-hact' }).replace('<span class="grow"></span>', '<div class="ds-info"><span class="pill name"><b id="an-sess"></b></span></div>') +
       `<div class="an-main"><nav class="an-rail activity-bar" id="an-rail" aria-label="Workspaces"></nav><aside class="an-explorer left-panel" id="an-explorer" aria-label="Object explorer"></aside><main class="an-work" id="an-work"></main>` +
+      `<button type="button" class="an-expopen" id="an-expopen" data-act="explorer" aria-label="Open the Objects panel (Ctrl+B)" title="Open the Objects panel (Ctrl+B)">${icon('layers')}<span>Objects</span></button>` +
       `<div class="an-expsz" data-sp="e" role="separator" aria-orientation="vertical" aria-controls="an-explorer" aria-label="Objects panel width" aria-valuemin="${EXP_MIN}" tabindex="0" title="Drag to resize · double-click: fit the longest name"></div></div>`;
     mountUserMenu($req('an-hact'));
   }
   $req('an-sess').textContent = A.name;
   $req('an-rail').innerHTML = WS.map(([k, ic, t], i) => `<button type="button" class="act${A.ws === k ? ' active' : ''}" data-act="ws" data-k="${k}" aria-label="${t}" title="${t} · Alt+${i + 1}"${A.ws === k ? ' aria-current="page"' : ''}>${icon(ic)}</button>`).join('') +
-    `<button type="button" class="act an-rail-end${A.explorer ? ' active' : ''}" data-act="explorer" aria-pressed="${A.explorer}" aria-label="Object explorer" title="${A.explorer ? 'Close' : 'Open'} object explorer">${icon('layers')}</button>`;
+    `<button type="button" class="act an-rail-end" data-act="explorer" aria-label="Objects panel">${icon('layers')}</button>`;
+  applyExplorer();
   const main = document.querySelector<HTMLElement>('.an-main');
-  main?.classList.toggle('noexp', !A.explorer);
   main?.style.setProperty('--an-exp', `${clampExp(A.layout.exp)}px`);
   const sz = document.querySelector('.an-expsz');
   sz?.setAttribute('aria-valuenow', String(clampExp(A.layout.exp)));
@@ -178,7 +179,8 @@ function dragExplorer(e: PointerEvent, handle: HTMLElement): void {
   };
   const up = (): void => {
     cancelAnimationFrame(raf);
-    setExplorer(w0 + x - x0);
+    const w = w0 + x - x0;
+    if (w < EXP_MIN - 40) { setExplorer(w0); setExplorerOpen(false); } else setExplorer(w);   // dragged shut: closes, keeps its width
     handle.classList.remove('on');
     document.documentElement.classList.remove('an-resizing');
     document.removeEventListener('pointermove', move);
@@ -218,11 +220,33 @@ export function saveTabs(): void {
   }, 800);
 }
 
+/** Show or hide the Objects panel as A.explorer says, without rebuilding the page. */
+export function applyExplorer(): void {
+  document.querySelector('.an-main')?.classList.toggle('noexp', !A.explorer);
+  const b = document.querySelector<HTMLElement>('.an-rail-end');
+  if (b) {
+    b.classList.toggle('active', A.explorer);
+    b.setAttribute('aria-pressed', String(A.explorer));
+    b.title = `${A.explorer ? 'Close' : 'Open'} the Objects panel (Ctrl+B)`;
+  }
+}
+
+/** Open or close the Objects panel (the rail button, its × , the slim Objects tab, Ctrl+B); remembered in this browser. */
+export function setExplorerOpen(on: boolean): void {
+  if (A.explorer === on) return;
+  A.explorer = on;
+  delete A.layout.expBefore;             // the user chose: Fill the window's restore must not undo it
+  saveExplorer();
+  applyExplorer();
+  if (on) renderTree();
+  if (A.ws === 'query') renderBuilder();  // the board's width changed
+}
+
 let lastTable = { key: '', at: 0 };
 
 const ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
   ws: (el) => { A.ws = el.dataset['k'] as Workspace; render(); },
-  explorer: () => { A.explorer = !A.explorer; render(); },
+  explorer: () => setExplorerOpen(!A.explorer),
   tog: (el) => toggle(el.dataset['k'] ?? ''),
   'tog-sec': (el) => {
     const k = el.dataset['k'] ?? '';
@@ -279,6 +303,10 @@ function bind(root: HTMLElement): void {
   root.addEventListener('dblclick', (e) => {
     const t = e.target instanceof Element ? e.target : null;
     if (t?.closest('.an-expsz')) { fitExplorer(); return; }
+    // double-click on a pane's header (not on its buttons): that pane fills the window, again: back
+    const head = t && !t.closest('button, input, select') ? t.closest<HTMLElement>('.an-sqlhead, #an-rtabs') : null;
+    const pane = head?.closest<HTMLElement>('[data-pane]')?.dataset['pane'] as 'viz' | 'sql' | 'res' | undefined;
+    if (pane) { setMax(A.layout.max === pane ? '' : pane); return; }
     if (t) gridFit(t);
   });
   root.addEventListener('pointerdown', (e) => {
@@ -380,7 +408,13 @@ function bind(root: HTMLElement): void {
   });
   document.addEventListener('keydown', (e) => {
     if (A.ws === 'catalog' && catalogKey(e)) return;
-    if (e.key === 'Escape' && A.layout.max) { A.layout.max = ''; applyLayout(); return; }
+    if (e.key === 'Escape' && A.layout.max) { setMax(''); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && document.documentElement.dataset['screen'] === 'analysis' &&
+        !(e.target instanceof HTMLElement && e.target.isContentEditable && !e.target.closest('.cm-editor'))) {
+      e.preventDefault();
+      setExplorerOpen(!A.explorer);
+      return;
+    }
     if (A.ws === 'query' && builderKey(e)) return;
     if (e.altKey && /^[1-9]$/.test(e.key)) { const w = WS[Number(e.key) - 1]; if (w) { e.preventDefault(); A.ws = w[0]; render(); } }
   });

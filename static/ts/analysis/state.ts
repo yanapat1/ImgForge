@@ -63,7 +63,12 @@ export interface Tab {
   /** the overview and the model it was counted for (joins, tables, WHERE): stale once they change */
   joinAll: { sig: string; data: JoinOverview } | null;
 }
-export interface Layout { flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean; viz: boolean; exp: number }
+export interface Layout {
+  flip: boolean; h: number; w: number; max: '' | 'sql' | 'viz' | 'res'; swap: boolean; exp: number;
+  viz: boolean; sql: boolean; res: boolean;     // which panes of the Query workspace are open (at least one)
+  expBefore?: boolean;                          // Fill the window closed the Objects panel: was it open before
+}
+export type Pane = 'viz' | 'sql' | 'res';
 export type Workspace = 'query' | 'catalog' | 'scripts' | 'analyze' | 'dash' | 'history';
 
 /** The Objects panel's width in px: the default, and the bounds of a drag (the right side keeps at least 360 px). */
@@ -71,15 +76,20 @@ export const EXP_W = 280, EXP_MIN = 200;
 export const expMax = (): number => Math.max(EXP_MIN, Math.min(900, innerWidth - 360));
 export const clampExp = (v: number): number => Math.round(Math.max(EXP_MIN, Math.min(expMax(), Number.isFinite(v) ? v : EXP_W)));
 
+const EXPLORER_KEY = 'dataviz.analysis.explorer';
+function readExplorer(): boolean { try { return localStorage.getItem(EXPLORER_KEY) !== '0'; } catch { return true; } }
+/** Remember whether the Objects panel is open (this browser). */
+export function saveExplorer(): void { try { localStorage.setItem(EXPLORER_KEY, A.explorer ? '1' : '0'); } catch { /* a convenience only */ } }
+
 export const A = {
   sid: '', name: '', ws: 'query' as Workspace,
   sources: [] as Source[], tabs: [] as Tab[], active: 0, temps: [] as TempTable[],
   open: new Set<string>(), dbs: new Map<string, string[]>(), tables: new Map<string, TableRef[]>(), info: new Map<string, TableInfo>(),
-  version: new Map<string, string>(), filter: '', explorer: true,
+  version: new Map<string, string>(), filter: '', explorer: readExplorer(),
   catalog: null as { conn: string; db: string; schema: string; table: string } | null,
   history: [] as HistoryRow[], scripts: [] as Script[], script: 0,
   aiRows: false,
-  layout: { flip: false, h: 46, w: 55, max: '', swap: false, viz: true, exp: EXP_W } as Layout,
+  layout: { flip: false, h: 46, w: 55, max: '', swap: false, viz: true, sql: true, res: true, exp: EXP_W } as Layout,
 };
 
 const P = 'api/analysis';

@@ -451,6 +451,57 @@ def test_results_grid_drag_selects_a_block_and_copies_it(server, target):  # noq
     assert not errors, errors
 
 
+def test_panes_open_and_close_and_the_objects_panel_comes_back(server, target):  # noqa: F811
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+        shown = lambda k: page.locator(f'[data-pane="{k}"]').is_visible()          # noqa: E731
+        # SQL and Results closed: the builder alone fills the work area; the last open pane cannot close
+        page.click('.an-pbtn[data-k="sql"]')
+        page.click('.an-pbtn[data-k="res"]')
+        assert shown('viz') and not shown('sql') and not shown('res')
+        assert page.locator('.an-pbtn[data-k="viz"]').is_disabled()
+        work = page.locator('#an-qbody').bounding_box()
+        assert page.locator('[data-pane="viz"]').bounding_box()['height'] > work['height'] - 10
+        page.click('.an-pbtn[data-k="res"]')
+        page.click('.an-pbtn[data-k="sql"]')
+        assert shown('viz') and shown('sql') and shown('res')
+        page.click('[data-pane="sql"] [data-act="pane-hide"]')
+        assert not shown('sql')
+        page.click('.an-pbtn[data-k="sql"]')
+        # double-click a pane header fills the window with it (the Objects panel closes); Esc brings both back
+        page.dblclick('[data-pane="sql"] .an-sqlhead')
+        assert shown('sql') and not shown('viz') and not shown('res')
+        assert page.locator('#an-explorer').is_hidden()
+        page.keyboard.press('Escape')
+        assert shown('viz') and shown('res') and page.locator('#an-explorer').is_visible()
+        # the Objects panel: closed from the rail, opened again from the slim tab, and with Ctrl+B
+        page.click('.an-rail-end')
+        assert page.locator('#an-explorer').is_hidden()
+        page.click('#an-expopen')
+        assert page.locator('#an-explorer').is_visible()
+        # filled, the rail button still opens it (it used to stay hidden)
+        page.click('[data-pane="viz"] [data-act="fill"]')
+        assert page.locator('#an-explorer').is_hidden()
+        page.click('.an-rail-end')
+        assert page.locator('#an-explorer').is_visible()
+        page.keyboard.press('Escape')
+        page.locator('#an-work').click(position={'x': 5, 'y': 5})
+        page.keyboard.press('Control+b')
+        assert page.locator('#an-explorer').is_hidden()
+        page.reload()                                     # remembered
+        page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+        assert page.locator('#an-explorer').is_hidden() and page.locator('#an-expopen').is_visible()
+        page.keyboard.press('Control+b')
+        assert page.locator('#an-explorer').is_visible()
+        browser.close()
+    assert not errors, errors
+
+
 def test_plain_http_without_random_uuid(server, target):  # noqa: F811
     """A server opened over plain http at its address is not a secure context: the browser has no crypto.randomUUID.
     The page must still start and make new query tabs, scripts and dashboards (core/uuid.ts)."""
