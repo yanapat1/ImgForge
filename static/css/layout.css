@@ -117,37 +117,12 @@ body.resizing #plot, body.resizing iframe { pointer-events: none; }
 .side-hint { margin: var(--s3) 8px 0; }
 
 /* ---------------------------------------------------------------- ◆ AI assistant diamond
-   #act-ai (index.html) is the first activity button, shown only when an LLM is connected and the AI panel is switched
-   on (core/llm.js). Its inline svg.gem-ico paints with the gradient #gem-grad (stops --gem-1/2/3 from tokens.css):
-   a faint gradient body, a gradient outline and thin facets, and a pink spark. Hover / active add a soft glow;
-   hover plays one sheen of the body and one twinkle of the spark. No motion under prefers-reduced-motion.
-
    .gem-mark: a small inline gradient diamond for other AI buttons and labels (filter bar "Describe…", Evaluation
    "Explain", gallery "Check labels", label page ◆). Use <span class="gem-mark" aria-hidden="true"></span> before the
    text; it sizes with the font (0.85em) and needs no sprite or gradient id. .gem-mark.lg = 1.2em. */
-.gem-ico { overflow: visible; }
-.gem-ico .gem-body { fill: url(#gem-grad); fill-opacity: .2; stroke: url(#gem-grad); stroke-width: 1.6; }
-.gem-ico .gem-facet { fill: none; stroke: url(#gem-grad); stroke-width: 1; stroke-opacity: .85; }
-.gem-ico .gem-spark { fill: none; stroke: var(--gem-3); stroke-width: 1.6; transform-box: fill-box; transform-origin: center; }
-.activity-bar .act-gem .gem-ico { transition: filter var(--t) var(--ease); }
-.activity-bar .act-gem:hover:not(:disabled) .gem-ico,
-.activity-bar .act-gem.active .gem-ico { filter: drop-shadow(0 0 4px var(--gem-glow)) drop-shadow(0 0 1px var(--gem-glow)); }
-.activity-bar .act-gem:hover:not(:disabled) .gem-body { animation: gem-sheen 1.2s var(--ease) 1; }
-.activity-bar .act-gem:hover:not(:disabled) .gem-spark { animation: gem-twinkle 1.2s var(--ease) 1; }
-.activity-bar .act-gem.active,
-.activity-bar .act-gem.active:hover:not(:disabled) { background: color-mix(in srgb, var(--gem-2) 14%, transparent); }
-.activity-bar .act-gem.active::before { background: linear-gradient(var(--gem-1), var(--gem-2), var(--gem-3)); }
-.activity-bar .act-gem.active .gem-body { fill-opacity: .32; }
-@keyframes gem-sheen { 0%, 100% { fill-opacity: .2; } 40% { fill-opacity: .55; } }
-@keyframes gem-twinkle { 0%, 100% { transform: scale(1) rotate(0); opacity: 1; } 30% { transform: scale(.4) rotate(45deg); opacity: .5; }
-  60% { transform: scale(1.35) rotate(90deg); opacity: 1; } }
 .gem-mark { display: inline-block; flex: none; width: .85em; height: .85em; vertical-align: -.08em;
   background: linear-gradient(135deg, var(--gem-1), var(--gem-2) 55%, var(--gem-3));
   clip-path: polygon(27% 17%, 69% 17%, 88% 40%, 48% 88%, 8% 40%); }
 .gem-mark.lg { width: 1.2em; height: 1.2em; }
-@media (prefers-reduced-motion: reduce) {
-  .activity-bar .act-gem .gem-ico { transition: none; }
-  .activity-bar .act-gem:hover .gem-body, .activity-bar .act-gem:hover .gem-spark { animation: none; }
-}
 .pill.stale { border-color: var(--warn, #d9a400); color: var(--text); }
 .pill.stale b { color: var(--warn, #d9a400); }

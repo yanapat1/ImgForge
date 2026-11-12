@@ -161,12 +161,10 @@ def test_image_browser_viewer_copy_and_edit(server, tmp_path):
         page.goto(f'{server}/?session={sid}')
         page.click('#btn-compute')                # Explore starts idle: the embedding runs on demand
         page.wait_for_selector('#plot .main-svg', timeout=60000)
-        # the (hidden) ◆ AI button first (it opens the right-side dock, not a view), then the data views, the
-        # separator, the model views
+        # the data views, the separator, the model views (no ◆ here: the right-side dock has its own)
         order = page.eval_on_selector_all('#activity > *', 'els => els.map(e => e.dataset.tab || e.className)')
-        assert 'act-gem' in order[0] and order[1:8] == ['explore', 'stats', 'curation', 'aug', 'act-sep', 'model', 'eval'], order
-        # no LLM configured: no diamond, and no AI control anywhere on the visualizer
-        assert page.locator('#act-ai').is_hidden()
+        assert order[0:7] == ['explore', 'stats', 'curation', 'aug', 'act-sep', 'model', 'eval'], order
+        # no LLM configured: no AI control anywhere on the visualizer
         assert page.eval_on_selector_all('[data-llm]:not(.hidden)', 'els => els.length') == 0
         assert page.locator('#ai-side').is_hidden() and page.locator('#ai-dock').is_hidden()
         assert page.evaluate("document.documentElement.dataset.dock") == 'off'
@@ -322,16 +320,16 @@ def test_ai_assistant_appears_only_when_connected_and_streams(server):
             page.goto(f'{server}/?session={sid}')
             page.click('#btn-compute')                # Explore starts idle: the embedding runs on demand
             page.wait_for_selector('#plot .main-svg', timeout=60000)
-            assert page.is_hidden('#act-ai'), 'switched on but never tested: still hidden'
+            assert page.is_hidden('#ai-dock'), 'switched on but never tested: still hidden'
             assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
             page.evaluate("window.dispatchEvent(new Event('llm-changed'))")
-            page.wait_for_selector('#act-ai:not(.hidden)', timeout=5000)
-            # the right-side dock opens on its own the first time; the ◆ icon collapses it to the rail and back
+            # the right-side dock opens on its own the first time; its collapse button folds it to the rail, the rail's ◆
+            # opens it again
             page.wait_for_selector('#ai-dock #ai-side #ai-q', timeout=5000)
-            page.click('#act-ai')
+            page.click('#ai-dock [data-dock="rail"]')
             page.wait_for_function("document.documentElement.dataset.dock === 'rail'", timeout=5000)
             assert page.is_hidden('#ai-q')
-            page.click('#act-ai')
+            page.click('#ai-dock .dock-rail-btn')
             page.wait_for_selector('#ai-q', state='visible')
             assert page.is_visible('#plot'), 'the plot stays next to the chat'
             box = page.locator('#ai-dock').bounding_box()
@@ -364,7 +362,6 @@ def test_ai_assistant_appears_only_when_connected_and_streams(server):
             page.click('.snav[data-sec="llm"]')
             page.wait_for_selector('.llm-card:has-text("Connected")')
             page.uncheck('[data-llm-feat="assistant"]')
-            page.wait_for_selector('#act-ai.hidden', state='attached', timeout=5000)
             page.wait_for_function("document.documentElement.dataset.dock === 'off'", timeout=5000)
             browser.close()
         assert not errors, errors

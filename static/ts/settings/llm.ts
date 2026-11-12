@@ -92,7 +92,7 @@ function presetOf(p: LlmProvider): PresetKey {
   return p.kind === 'openai_compat' ? 'custom' : isPreset(p.kind) ? p.kind : 'custom';
 }
 
-// the gradient diamond (own gradient id: the activity-bar copy uses #gem-grad)
+// the gradient diamond (each copy has its own gradient id)
 const gemSVG = (cls: string, id: string): string => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">` +
   '<stop offset="0" style="stop-color:var(--gem-1)"/><stop offset=".55" style="stop-color:var(--gem-2)"/><stop offset="1" style="stop-color:var(--gem-3)"/></linearGradient></defs>' +
   `<path class="gem-body" style="fill:url(#${id});stroke:url(#${id})" d="M6.5 4h10l4.5 5.5L11.5 21 2 9.5z"/>` +

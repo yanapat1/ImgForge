@@ -18,7 +18,7 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   fold into one summary (goal, preferences, app state, work done with numbers and ids, open tasks); the model reads
   it + the last 3 exchanges ("Context compacted · view summary" line). `/compact [focus]` does it now. The page
   keeps every message; if the summary fails, the oldest messages are left out instead.
-- **Where it is**: a dock on the right of every page; Ctrl+. or the ◆ icon collapses it, its left edge resizes
+- **Where it is**: a dock on the right of every page; Ctrl+. or its collapse button folds it to a slim rail whose ◆ opens it again, its left edge resizes
   it, a floating ◆ opens it on a phone. Head ring = how full this chat's context is now (the latest model call's input of the limit; it moves while an answer runs and is kept after a reload; compaction at 80%), not the tokens billed (`/cost` sums those over every step); Tasks strip = the checklist,
   "is driving …" and Stop.
 - **One chat, every page**: the same chat (history, summary) is open on Home, the Data Center, every visualizer

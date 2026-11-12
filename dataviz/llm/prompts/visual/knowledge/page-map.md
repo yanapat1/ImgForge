@@ -3,7 +3,7 @@ title: Where things are on the visualizer page
 summary: activity bar views, the bar above the map (Projection, Color, Classes, Describe boxes, Find issues, Display), filter bar, gallery
 core: true
 ---
-- **◆ AI assistant** (you): the dock on the right of every page (◆ icon or Ctrl+. collapses it; see assistant).
+- **◆ AI assistant** (you): the dock on the right of every page (the ◆ on its collapsed rail, its collapse button or Ctrl+. open / collapse it; see assistant).
 - **Activity bar** (left icons; the active one collapses the left panel): Explore (`explore`),
   Class stats (`stats`), Curation (`curation`), Augment (`aug`: Albumentations recipes previewed on the images), then the model views Model (`model`) and Evaluation (`eval`), and
   Compare (`compare`, combined datasets only: label diff A vs B, shared map, Image conditions, Stress test).

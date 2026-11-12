@@ -13,7 +13,7 @@
 import { api, errMessage, errText, isTransient, postJSON } from '../core/api.js';
 import { userKey } from '../core/auth.js';
 import { mountChat, type ChatHandle } from '../core/chat.js';
-import { dockHooks, dockOpen, openDock, refreshDock, setDockHost, toggleDock, withNav } from '../core/dock.js';
+import { dockHooks, openDock, refreshDock, setDockHost, withNav } from '../core/dock.js';
 import { $, $req, esc, icon } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { applyLLM, llmOn } from '../core/llm.js';
@@ -253,26 +253,18 @@ async function applyUi(a: UiAction): Promise<boolean | UiResult> {
 
 // ---------------------------------------------------------------- entry points
 
-/** The visualizer's dock host: the ◆ activity icon and Ctrl+. open / collapse it; plots resize with it. */
+/** The visualizer's dock host: the dock's own ◆ rail and Ctrl+. open / collapse it; plots resize with it. */
 export function initAssistantDock(): void {
   setDockHost({
     id: 'ai-side',
     label: () => `Visualizer · ${TAB_NAMES[curTab] ?? curTab}`,
     enabled: () => llmOn('assistant'),
     mount: (el) => { build(el); return A.chat as ChatHandle; },
-    onShow: () => { renderAll(); syncActIcon(); },
-    onResize: () => { resizePlots(); syncActIcon(); },
+    onShow: () => { renderAll(); },
+    onResize: () => { resizePlots(); },
     settings: () => { void openSettings('llm'); },
     onHandoff: (h) => { if (h.tab && TABS.includes(h.tab) && h.tab !== curTab) switchTab(h.tab); },
   });
-  const act = $('act-ai');
-  if (act) act.onclick = () => toggleDock();
-  syncActIcon();
-}
-
-function syncActIcon(): void {
-  const act = $('act-ai');
-  if (act) { act.classList.toggle('active', dockOpen()); act.setAttribute('aria-pressed', String(dockOpen())); }
 }
 
 function openAi(): void {
@@ -656,7 +648,6 @@ function bind(): void {
       A.busy?.abort();
       if (A.rec !== 'idle') { cancelRecording(); A.rec = 'idle'; renderMic(); }
       refreshDock();
-      syncActIcon();
       return;
     }
     renderAll();

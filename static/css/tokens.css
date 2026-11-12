@@ -257,8 +257,8 @@
   --lb-ok-text: #23833a;
 }
 
-/* ---- ◆ AI assistant: the diamond's gradient (sky → violet → pink) and its glow. Used by the activity-bar icon
-   (#act-ai .gem-ico), .gem-mark on other AI buttons and Settings › AI assistant; the light theme gets deeper stops so
+/* ---- ◆ AI assistant: the diamond's gradient (sky → violet → pink) and its glow. Used by
+   .gem-mark on AI buttons and Settings › AI assistant; the light theme gets deeper stops so
    the thin strokes keep their contrast on white. */
 :root {
   --gem-1: #7dd3fc;
