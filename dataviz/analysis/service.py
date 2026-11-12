@@ -817,7 +817,7 @@ def describe_for_ai(user, cid, database, schema, table, offset=0):
     cols = d['columns'][offset:offset + size]
     return _cap({'table': table, 'description': d['description'], 'rows_estimate': d['rows'], 'total_columns': len(d['columns']),
                  'offset': offset, 'columns': [{k: c.get(k) for k in ('name', 'type', 'key', 'description') if c.get(k)} for c in cols],
-                 'keys': d['keys'][:40], 'ai_access': aiaccess.LABEL[lv]})
+                 'keys': d['keys'][:40], 'unique_columns': (d.get('unique') or [])[:40], 'ai_access': aiaccess.LABEL[lv]})
 
 
 def _result_card(rid, res, status):

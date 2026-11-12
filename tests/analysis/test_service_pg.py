@@ -228,12 +228,27 @@ def test_join_counts_match_a_hand_computed_case(an):
     assert s['a_rows'] == 50 and s['b_rows'] == 4
     assert s['matched_a'] == 3 and s['matched_b'] == 3 and s['lost_a'] == 47 and s['lost_b'] == 1
     assert s['joined'] == 4 and s['kept'] == 4 and s['fan_out']          # 1 x 2 orders + 2 x 2 buyers
+    assert not s['a_unique'] and not s['b_unique']                       # cid 1 twice, id 2 twice: N:M in this data
     with psycopg.connect(an.url) as c:
         assert c.execute('SELECT count(*) FROM public.orders o JOIN public.buyers b ON o.cid = b.id').fetchone()[0] == 4
         assert c.execute('SELECT count(*) FROM public.orders o LEFT JOIN public.buyers b ON o.cid = b.id').fetchone()[0] == 51
     m = join_model()
     m['joins'][0]['type'] = 'LEFT'
     assert an.s.join_stats(an.user, an.cid, an.db, m, 0)['kept'] == 51
+
+
+def test_describe_says_which_columns_are_unique_on_their_own(an):
+    with psycopg.connect(an.url, autocommit=True) as c:
+        c.execute('CREATE TABLE public.cust (id int PRIMARY KEY, email text UNIQUE, a int, b int, UNIQUE (a, b))')
+        c.execute('CREATE TABLE public.prof (cust_id int UNIQUE REFERENCES public.cust)')
+        c.execute('CREATE TABLE public.buys (cust_id int REFERENCES public.cust, code text)')
+        c.execute('CREATE UNIQUE INDEX buys_code ON public.buys (code) WHERE code IS NOT NULL')      # partial: not unique
+    cust = an.s.describe(an.user, an.cid, an.db, 'public', 'cust')
+    assert sorted(cust['unique']) == ['email', 'id']                   # (a, b) together is not a 1 for a or b
+    assert an.s.describe(an.user, an.cid, an.db, 'public', 'prof')['unique'] == ['cust_id']   # 1 : 0..1
+    assert an.s.describe(an.user, an.cid, an.db, 'public', 'buys')['unique'] == []           # many : 1
+    ai = an.s.describe_for_ai(an.user, an.cid, an.db, 'public', 'cust')
+    assert sorted(ai['unique_columns']) == ['email', 'id']
 
 
 def rid(an, sql):

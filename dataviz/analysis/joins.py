@@ -4,7 +4,8 @@ user asks, never on each edit. One query answers everything: both sides are grou
 the cost is one scan of each table.
 
     query(model, index, dialect)   -> the SQL, read-only by construction
-    summary(row)                   -> {a_rows, b_rows, matched_a, matched_b, a_keys, b_keys, matched_keys, fan_out, kept}
+    summary(row)                   -> {a_rows, b_rows, matched_a, matched_b, a_keys, b_keys, matched_keys, fan_out, kept,
+                                     a_unique, b_unique: no key value of that side repeats (its 1 of 1:N)}
     overview(model, dialect)       -> (the SQL, the key column of each table): the whole query in one count
     overview_summary(row, keys)    -> {rows, used: {table id: distinct keys the query keeps}, key: {table id: column}}
 """
@@ -34,18 +35,21 @@ def query(model, index, dialect):
        COALESCE(SUM(CASE WHEN a.k IS NOT NULL AND b.k IS NOT NULL THEN b.n END), 0) AS matched_b,
        COUNT(a.k) AS a_keys, COUNT(b.k) AS b_keys,
        SUM(CASE WHEN a.k IS NOT NULL AND b.k IS NOT NULL THEN 1 ELSE 0 END) AS matched_keys,
-       COALESCE(SUM(CASE WHEN a.k IS NOT NULL AND b.k IS NOT NULL THEN a.n * b.n END), 0) AS joined
+       COALESCE(SUM(CASE WHEN a.k IS NOT NULL AND b.k IS NOT NULL THEN a.n * b.n END), 0) AS joined,
+       SUM(CASE WHEN a.k IS NOT NULL AND a.n > 1 THEN 1 ELSE 0 END) AS a_dup,
+       SUM(CASE WHEN b.k IS NOT NULL AND b.n > 1 THEN 1 ELSE 0 END) AS b_dup
 FROM ({_side(a, j['a'][1], d)}) AS a
 FULL OUTER JOIN ({_side(b, j['b'][1], d)}) AS b ON a.k = b.k"""
 
 
 def summary(row, join_type):
-    a_rows, b_rows, matched_a, matched_b, a_keys, b_keys, matched_keys, joined = (int(x or 0) for x in row)
+    vals = [int(x or 0) for x in row] + [0, 0]
+    a_rows, b_rows, matched_a, matched_b, a_keys, b_keys, matched_keys, joined, a_dup, b_dup = vals[:10]
     lost_a, lost_b = a_rows - matched_a, b_rows - matched_b
     kept = joined + (lost_a if join_type in ('LEFT', 'FULL') else 0) + (lost_b if join_type in ('RIGHT', 'FULL') else 0)
     return {'a_rows': a_rows, 'b_rows': b_rows, 'matched_a': matched_a, 'matched_b': matched_b, 'lost_a': lost_a, 'lost_b': lost_b,
             'a_keys': a_keys, 'b_keys': b_keys, 'matched_keys': matched_keys, 'joined': joined, 'kept': kept,
-            'fan_out': joined > max(matched_a, matched_b)}
+            'fan_out': joined > max(matched_a, matched_b), 'a_unique': a_dup == 0, 'b_unique': b_dup == 0}
 
 
 def keys_of(group):

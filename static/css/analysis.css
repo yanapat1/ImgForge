@@ -200,6 +200,8 @@ html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
 .an-jl { position: absolute; transform: translate(-50%, -50%); z-index: 3; height: 20px; padding: 0 var(--s2); border: 0; border-radius: 999px;
   background: var(--accent); color: var(--on-accent); font: 650 var(--fs-2xs) var(--mono); }
 .an-jl:hover:not(:disabled) { background: var(--accent-hover); }
+.an-jl.many { background: var(--warn); color: var(--on-warn, #1a1300); }
+.an-jcheck { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 /* floating bars on the board: actions top left, zoom bottom right, computed items bottom left */
 .an-cvt { position: absolute; z-index: 6; display: flex; gap: var(--s1); align-items: center; padding: var(--s1); background: var(--surface);
   border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-2); font-size: var(--fs-sm); }

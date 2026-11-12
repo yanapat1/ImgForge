@@ -90,10 +90,14 @@ class PostgresAdapter:
             JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.col
             JOIN pg_attribute fa ON fa.attrelid = c.confrelid AND fa.attnum = k.fcol
             WHERE c.conrelid = %s AND c.contype = 'f'""", [oid]).fetchall()
+        # columns unique on their own (PK, UNIQUE, a one-column unique index without WHERE / expression): the builder's 1 vs N
+        uniq = [r[0] for r in self.c.execute("""
+            SELECT DISTINCT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+            WHERE i.indrelid = %s AND i.indisunique AND i.indnatts = 1 AND i.indpred IS NULL AND i.indkey[0] <> 0""", [oid]).fetchall()]
         info = self.c.execute('SELECT obj_description(%s), reltuples FROM pg_class WHERE oid = %s', [oid, oid]).fetchone()
         return {'columns': [{'name': n, 'type': t, 'nullable': nl, 'key': keys.get(n, ''), 'description': d or ''}
                             for n, t, nl, d in cols],
-                'description': info[0] or '', 'rows': max(int(info[1] or 0), 0),
+                'description': info[0] or '', 'rows': max(int(info[1] or 0), 0), 'unique': uniq,
                 'keys': [{'column': a, 'schema': b, 'table': c, 'to': d} for a, b, c, d in fks]}
 
     def run(self, statement, chunk=CHUNK, read=True):
@@ -225,6 +229,11 @@ class MssqlAdapter:
             JOIN sys.columns rc ON rc.object_id = fk.referenced_object_id AND rc.column_id = fk.referenced_column_id
             WHERE fk.parent_object_id = %s""", oid)
         fk_cols = {r[0] for r in fks}
+        uniq = [r[0] for r in self._q("""
+            SELECT MIN(c.name) FROM sys.indexes i JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE i.object_id = %s AND i.is_unique = 1 AND i.has_filter = 0 AND ic.is_included_column = 0
+            GROUP BY i.index_id HAVING COUNT(*) = 1""", oid)]
         note = self._q("""SELECT CAST(value AS nvarchar(4000)) FROM sys.extended_properties
                           WHERE major_id = %s AND minor_id = 0 AND class = 1 AND name = 'MS_Description'""", oid)
         rows = self._q('SELECT SUM(rows) FROM sys.partitions WHERE object_id = %s AND index_id IN (0, 1)', oid)
@@ -239,7 +248,7 @@ class MssqlAdapter:
                              'key': 'PK' if n in pk else 'FK' if n in fk_cols else '', 'description': d or ''}
                             for n, t, ln, p, s, nl, d in cols],
                 'description': (note[0][0] if note else '') or '', 'rows': int((rows[0][0] if rows else 0) or 0),
-                'keys': [{'column': a, 'schema': b, 'table': c, 'to': d} for a, b, c, d in fks]}
+                'unique': sorted(set(uniq)), 'keys': [{'column': a, 'schema': b, 'table': c, 'to': d} for a, b, c, d in fks]}
 
     def run(self, statement, chunk=CHUNK, read=True):
         cur = self.c.cursor()
@@ -380,7 +389,8 @@ class MongoAdapter:
         columns = [{'name': k, 'type': types[k].most_common(1)[0][0], 'nullable': seen[k] < total,
                     'key': 'PK' if k == '_id' else '', 'description': '', 'present': round(seen[k] / max(total, 1), 3)}
                    for k in seen]
-        return {'columns': columns, 'description': '', 'rows': col.estimated_document_count(), 'keys': [], 'sampled': total}
+        return {'columns': columns, 'description': '', 'rows': col.estimated_document_count(), 'keys': [], 'sampled': total,
+                'unique': ['_id']}
 
     def run(self, statement, chunk=CHUNK, read=True):
         """statement: the command dict from classify.parse_mongo."""

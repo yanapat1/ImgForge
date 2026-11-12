@@ -12,9 +12,11 @@ import { $, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, saveTabs } from './app.js';
+import { cardOf, cardTitle, ENDS_LABEL, ENDS_NEXT, endsMode, markerDefs, setEndsMode, sideMarks, statKey } from './cardinality.js';
+import { countJoin } from './joins.js';
 import { MENU_SEP, menuHead, menuItem, openMenu } from './menu.js';
 import { A, api, sourceOf, tab, tableKey } from './state.js';
-import type { Calc, Join, Model, MTable, Tab } from './state.js';
+import type { Calc, Card, Join, Model, MTable, Tab } from './state.js';
 
 const WINDOW_FNS = ['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE', 'PERCENT_RANK', 'CUME_DIST', 'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'STDEV', 'VAR'];
 const NO_ARG = new Set(['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK', 'CUME_DIST']);
@@ -133,7 +135,7 @@ export function renderBuilder(): void {
       cols.map((c) => { const cast = x.cast[c.name]; return `<div class="an-col${on(c.name) ? ' sel' : ''}" tabindex="0" role="checkbox" aria-checked="${on(c.name)}" data-t="${esc(x.id)}" data-c="${esc(c.name)}"><span class="an-dot"></span><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}${x.kind === 'table' ? `<button type="button" class="an-ty${cast ? ' cast' : ''}" data-act="b-cast" data-t="${esc(x.id)}" data-c="${esc(c.name)}" title="Change type with CAST">${esc(cast?.type ?? c.type ?? 'type')}</button>` : ''}</div>`; }).join('') + (x.star && x.kind !== 'table' && !cols.length ? '<div class="an-col sel an-allcols"><span class="an-dot"></span><span class="lbl faint">all columns (*)</span></div>' : '') + '</div>';
   }).join('');
   host.classList.toggle('ro', readOnly(t));
-  host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="sm" data-act="b-fit">Fit</button></div>` +
+  host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="sm" data-act="b-fit">Fit</button><button type="button" class="sm" data-act="b-ends" title="How a join line shows 1:1, 1:N, N:1 or N:M. Click to change.">${ENDS_LABEL[endsMode()]}</button></div>` +
     `<div class="an-board" id="an-board" style="transform:translate(${v.x}px,${v.y}px) scale(${v.z})"><svg class="an-lines" id="an-lines" width="2400" height="1600" aria-hidden="true"></svg>${cards}<span id="an-jl"></span>${m.adv ? `<div class="an-remote" style="left:${m.tables[0]?.x ?? 24}px;top:${Math.max(60, ...m.tables.map((x) => x.y)) + 240}px"><span class="pill warn">Locked part</span><pre class="an-hq">${esc(m.adv)}</pre></div>` : ''}</div>` +
     (!m.tables.length && !t.notDrawn ? '<div class="an-cvhint">Drag a table here from the object explorer.</div>' : '');
   host.style.backgroundSize = `${18 * v.z}px ${18 * v.z}px`;
@@ -181,14 +183,20 @@ function drawLines(): void {
     const r = e.getBoundingClientRect();
     return { l: (r.left - br.left) / z, r: (r.right - br.left) / z, y: (r.top - br.top + r.height / 2) / z };
   };
-  let p = '', lb = '';
-  modelOf(t).joins.forEach((j, i) => {
+  let p = markerDefs(), lb = '';
+  const m = modelOf(t), ends = endsMode();
+  m.joins.forEach((j, i) => {
     const A1 = pt(j.a[0], j.a[1]), B1 = pt(j.b[0], j.b[1]);
     if (!A1 || !B1) return;
     const ltr = A1.l < B1.l, x1 = ltr ? A1.r : A1.l, x2 = ltr ? B1.l : B1.r, dx = Math.max(34, Math.abs(x2 - x1) / 2) * (ltr ? 1 : -1);
     const d = `M${x1} ${A1.y}C${x1 + dx} ${A1.y} ${x2 - dx} ${B1.y} ${x2} ${B1.y}`;
-    p += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/><path class="an-jhit" data-j="${i}" d="${d}" fill="none" stroke="transparent" stroke-width="14"><title>Right-click to remove this join</title></path>`;
-    lb += `<button type="button" class="an-jl" style="left:${(x1 + x2) / 2}px;top:${(A1.y + B1.y) / 2}px" data-act="b-join" data-i="${i}" data-j="${i}" title="Change this join. Right-click removes it.">${esc(j.type)}</button>`;
+    const c = ends === 'off' ? null : cardOf(t, m.tables, j), many = c?.card === 'N:M', w = many ? 'w' : '';
+    const [ma, mb] = c ? sideMarks(c) : ['', ''];
+    const mk = c && ends === 'crow' ? ` marker-start="url(#an-m${ma}${w})" marker-end="url(#an-m${mb}${w})"` : '';
+    const na = m.tables.find((x) => x.id === j.a[0]), nb = m.tables.find((x) => x.id === j.b[0]);
+    const tip = c ? cardTitle(c, na?.label || na?.name || 'left', nb?.label || nb?.name || 'right') : '';
+    p += `<path class="an-jline${many ? ' many' : ''}" data-card="${c?.card ?? ''}" d="${d}" fill="none" stroke="var(${many ? '--warn' : '--accent'})" stroke-width="2"${mk}/><path class="an-jhit" data-j="${i}" d="${d}" fill="none" stroke="transparent" stroke-width="14"><title>${esc(tip ? `${tip}\n` : '')}Right-click to remove this join</title></path>`;
+    lb += `<button type="button" class="an-jl${many ? ' many' : ''}" style="left:${(x1 + x2) / 2}px;top:${(A1.y + B1.y) / 2}px" data-act="b-join" data-i="${i}" data-j="${i}" title="${esc(tip ? `${tip}. ` : '')}Change this join. Right-click removes it.">${esc(j.type)}${c ? ` · ${c.card}` : ''}</button>`;
   });
   lines.innerHTML = p;
   labels.innerHTML = lb;
@@ -298,11 +306,27 @@ function joinDialog(i: number): void {
   if (!a || !b) return;
   const opts = (x: MTable, cur: string): string => columnsOf(t, x).map((c) => `<option ${c.name === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
   void openDialog({
-    title: `Join ${a.name} and ${b.name}`, ok: 'Done', body: `<div class="an-form form-stack"><label>Join type<select id="an-j-type">${ORDER.map((k) => `<option ${k === j.type ? 'selected' : ''}>${k}</option>`).join('')}</select></label><label>${esc(a.name)} column<select id="an-j-a">${opts(a, j.a[1])}</select></label><label>${esc(b.name)} column<select id="an-j-b">${opts(b, j.b[1])}</select></label><label class="check"><input type="checkbox" id="an-j-rm"> Remove this join</label><p class="faint">Press Run to see the new result.</p></div>`,
+    title: `Join ${a.name} and ${b.name}`, ok: 'Done', body: `<div class="an-form form-stack"><label>Join type<select id="an-j-type">${ORDER.map((k) => `<option ${k === j.type ? 'selected' : ''}>${k}</option>`).join('')}</select></label><label>${esc(a.name)} column<select id="an-j-a">${opts(a, j.a[1])}</select></label><label>${esc(b.name)} column<select id="an-j-b">${opts(b, j.b[1])}</select></label>` +
+      `<label>Relationship (${esc(a.name)} : ${esc(b.name)})<select id="an-j-card">${relOptions(t, j)}</select></label><div class="an-jcheck"><button type="button" class="sm" id="an-j-check" title="Counts both sides in your database (read-only): is each join value there once, or many times?">Check with data</button><span class="faint" id="an-j-cstat"></span></div>` +
+      `<label class="check"><input type="checkbox" id="an-j-rm"> Remove this join</label><p class="faint">Press Run to see the new result.</p></div>`,
+    bind: (root) => {
+      const btn = root.querySelector<HTMLButtonElement>('#an-j-check'), st = root.querySelector<HTMLElement>('#an-j-cstat');
+      btn?.addEventListener('click', () => {
+        btn.disabled = true;
+        if (st) st.textContent = 'Counting…';
+        void checkCard(t, i).then((c) => {
+          if (st) st.textContent = c ? `The data says ${c}.` : 'Could not count this join.';
+          const sel = root.querySelector<HTMLSelectElement>('#an-j-card');
+          if (sel) sel.innerHTML = relOptions(t, j);
+        }).catch((e: unknown) => { if (st) st.textContent = errText(e); }).finally(() => { btn.disabled = false; });
+      });
+    },
     onOk: (root) => {
       record(t);
       if (root.querySelector<HTMLInputElement>('#an-j-rm')?.checked) m.joins.splice(i, 1);
       else {
+        const rel = root.querySelector<HTMLSelectElement>('#an-j-card')?.value ?? '';
+        if (rel === 'auto') { delete j.card; delete j.cardFrom; } else if (rel !== 'keep') { j.card = rel as Card; j.cardFrom = 'you'; }
         const type = root.querySelector<HTMLSelectElement>('#an-j-type')?.value as typeof j.type;
         m.joins.forEach((x) => { if (samePair(x, j)) x.type = type; });
         j.a[1] = root.querySelector<HTMLSelectElement>('#an-j-a')?.value ?? j.a[1];
@@ -312,6 +336,28 @@ function joinDialog(i: number): void {
       return null;
     },
   });
+}
+
+/** The Relationship choices of the join dialog: Auto (what the keys or a count say), the four relations, and the current one. */
+function relOptions(t: Tab, j: Join): string {
+  const auto = cardOf(t, modelOf(t).tables, { a: j.a, b: j.b, type: j.type });
+  const now = j.card ? (j.cardFrom === 'data' ? 'keep' : j.card) : 'auto';
+  const autoLabel = auto ? `Auto: ${auto.card} (${auto.from === 'data' ? 'counted in the data' : 'from the keys'})` : 'Auto (not known: no keys)';
+  return (j.card && j.cardFrom === 'data' ? `<option value="keep" selected>${esc(j.card)} (counted in the data)</option>` : '') +
+    `<option value="auto" ${now === 'auto' ? 'selected' : ''}>${esc(autoLabel)}</option>` +
+    (['1:1', '1:N', 'N:1', 'N:M'] as const).map((k) => `<option value="${k}" ${now === k ? 'selected' : ''}>${k} (set by you)</option>`).join('');
+}
+
+/** Count the join in the data (read-only) and keep what it says as the join's relation -> the relation, or null. */
+export async function checkCard(t: Tab, i: number): Promise<Card | null> {
+  await countJoin(i);
+  const j = modelOf(t).joins[i], s = j ? t.joinStats[statKey(j)] : undefined;
+  if (!j || !s || s.a_unique === undefined || s.b_unique === undefined) return null;
+  j.card = s.a_unique ? (s.b_unique ? '1:1' : '1:N') : (s.b_unique ? 'N:1' : 'N:M');
+  j.cardFrom = 'data';
+  saveTabs();
+  if (tab() === t) drawLines();
+  return j.card;
 }
 
 function castDialog(id: string, c: string): void {
@@ -481,6 +527,7 @@ export const B_ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>
   'b-zoom': (el) => { const c = $('an-canvas')?.getBoundingClientRect(); if (c) zoomAt(Number(el.dataset['k']) > 0 ? 1.2 : 1 / 1.2, c.width / 2, c.height / 2); },
   'b-fit': () => fitView(),
   'b-join': (el) => joinDialog(Number(el.dataset['i'])),
+  'b-ends': (el) => { const v = ENDS_NEXT[endsMode()]; setEndsMode(v); el.textContent = ENDS_LABEL[v]; drawLines(); },
   'b-cast': (el) => castDialog(el.dataset['t'] ?? '', el.dataset['c'] ?? ''),
   'b-slim': (el) => cardAct(el.dataset['id'] ?? '', 'slim'),
 };
@@ -697,6 +744,24 @@ export async function syncFromSql(t: Tab): Promise<void> {
     if (o?.slim) x.slim = true;
     if (!o) S.settle.push(x.id);
   });
+  // what the SQL cannot hold stays: a join's relation the user set or counted (matched by table and column names)
+  const was = modelOf(t), oldName = new Map(was.tables.map((x) => [x.id, `${x.schema}.${x.name}`]));
+  const newName = new Map(p.tables.map((x) => [x.id, `${x.schema}.${x.name}`]));
+  const keyOf = (names: Map<string, string>, j: Join, flip: boolean): string => {
+    const [x, y] = flip ? [j.b, j.a] : [j.a, j.b];
+    return `${names.get(x[0]) ?? ''}.${x[1]}|${names.get(y[0]) ?? ''}.${y[1]}`.toLowerCase();
+  };
+  const kept = new Map<string, Join>();
+  was.joins.forEach((j) => { if (j.card) kept.set(keyOf(oldName, j, false), j); });
+  if (kept.size) {
+    for (const j of p.joins) {
+      const same = kept.get(keyOf(newName, j, false)), flip = same ? undefined : kept.get(keyOf(newName, j, true));
+      const o = same ?? flip;
+      if (!o?.card) continue;
+      j.card = flip ? (({ '1:N': 'N:1', 'N:1': '1:N' } as Record<string, Card>)[o.card] ?? o.card) : o.card;
+      if (o.cardFrom) j.cardFrom = o.cardFrom;
+    }
+  }
   t.model = p as Model;
   await Promise.all(p.tables.map((x) => needInfo(t, x)));
   const loose = p.loose ?? [];

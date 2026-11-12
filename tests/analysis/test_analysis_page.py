@@ -202,6 +202,23 @@ def test_visual_builder(server, target):  # noqa: F811
         page.wait_for_selector('#an-rc .an-grid td', timeout=20000)
         assert '500' in page.locator('#an-sum').inner_text()
 
+        # the line's ends: many orders to one customer, from the keys (customers.id is the primary key; the order's
+        # customer_id may be NULL, so the customer end is "zero or one")
+        assert page.locator('.an-jl').inner_text() == 'LEFT · N:1'
+        line = page.locator('#an-lines path.an-jline')
+        assert line.get_attribute('marker-start') == 'url(#an-mN)' and line.get_attribute('marker-end') == 'url(#an-m01)'
+        page.click('.an-jl')
+        page.click('#an-j-check')
+        page.wait_for_selector('#an-j-cstat:has-text("The data says N:1")', timeout=20000)
+        page.select_option('#an-j-card', 'N:M')                    # the user's own choice wins
+        page.click('.ui-dlg [data-dlg="ok"]')
+        page.wait_for_selector('.an-jl.many:has-text("N:M")', timeout=10000)
+        page.click('[data-act="b-ends"]')                          # text only: no crow's feet
+        assert page.locator('#an-lines path.an-jline').get_attribute('marker-start') is None
+        page.click('[data-act="b-ends"]')                          # off: the label is the join type again
+        assert page.locator('.an-jl').inner_text() == 'LEFT'
+        page.click('[data-act="b-ends"]')
+
         # after an edit the results stay, with a notice
         page.click('.an-col[data-t="c"][data-c="segment"] .lbl')
         page.wait_for_selector('#an-stale:not([hidden])', timeout=10000)

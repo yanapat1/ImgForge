@@ -10,6 +10,7 @@ export interface Column { name: string; type: string; nullable: boolean; key: st
 export interface TableInfo {
   columns: Column[]; description: string; rows: number; sampled?: number;
   keys: { column: string; schema: string; table: string; to: string }[];
+  unique?: string[];             // columns unique on their own (PK, UNIQUE): a join's 1 side
 }
 export interface Statement { sql: string; kind: 'read' | 'temp' | 'write'; op: string; tables: string[]; reason: string }
 export interface ResultInfo { id: string; rows: number; columns: string[]; truncated: boolean; ms: number; statement: string; stopped?: boolean }
@@ -30,13 +31,17 @@ export interface MTable {
   /** the card only, never the SQL: a header name the user chose, and a collapsed (200 px) card */
   label?: string; slim?: boolean;
 }
-export interface Join { a: [string, string]; b: [string, string]; type: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL' }
+export type Card = '1:1' | '1:N' | 'N:1' | 'N:M';
+export interface Join {
+  a: [string, string]; b: [string, string]; type: 'INNER' | 'LEFT' | 'RIGHT' | 'FULL';
+  card?: Card; cardFrom?: 'data' | 'you';      // the relation, when counted or set by the user (else read from the keys)
+}
 export interface Calc { alias: string; t: string; kind: string; expr: string; spec?: unknown }
 export interface Parts { where?: string; group?: string; having?: string; order?: string; top?: number; distinct?: boolean; parsed?: boolean }
 export interface Model { tables: MTable[]; joins: Join[]; calc: Calc[]; parts: Parts; locked: string[]; adv: string; cte?: { name: string; sql: string }[] }
 /** The whole query at once (POST /joins/overview): its rows, and the join keys of each table that reach it. */
 export interface JoinOverview { rows: number; used: Record<string, number>; key: Record<string, string> }
-export interface JoinStats { a_rows: number; b_rows: number; matched_a: number; matched_b: number; lost_a: number; lost_b: number; a_keys: number; b_keys: number; matched_keys: number; joined: number; kept: number; fan_out: boolean }
+export interface JoinStats { a_rows: number; b_rows: number; matched_a: number; matched_b: number; lost_a: number; lost_b: number; a_keys: number; b_keys: number; matched_keys: number; joined: number; kept: number; fan_out: boolean; a_unique?: boolean; b_unique?: boolean }
 export interface Parsed extends Model { error?: string; statement?: string; loose?: string[]; output?: string[] }
 
 export interface Profile { rows: number; columns: { name: string; type: string; numeric: boolean; nulls: number; null_pct: number; distinct: number; min: unknown; max: unknown; mean: number | null; note: string; hist: { counts: number[] } }[] }
