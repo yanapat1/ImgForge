@@ -151,3 +151,9 @@ def test_augmented_copy_lands_in_a_new_data_center_bucket(world, tmp_path):
     assert body['images'] == 6 and wait_job(c, body['job_id'])['status'] == 'done'
     root = next((tmp_path / 'dc').iterdir())
     assert len(list((root / 'images').iterdir())) == 6 and (root / 'recipe.json').exists()
+
+
+def test_model_check_needs_a_model(world):
+    c, sid = world['c'], world['sid']
+    r = c.post(f'/s/{sid}/api/augment/model', json={'recipe': {'steps': [{'t': 'HorizontalFlip'}]}, 'model': 'nope'})
+    assert r.status_code in (404, 409) and ('model' in r.text)

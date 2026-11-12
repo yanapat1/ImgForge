@@ -12,6 +12,7 @@ import { clsColor } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import { initAugCheck } from './augment-check.js';
 import { initAugCover } from './augment-cover.js';
+import { initAugModel } from './augment-model.js';
 import { openDialog } from './dialog.js';
 
 export interface AugArg { k: string; kind: 'range' | 'float' | 'int' | 'choice'; min?: number; max?: number; step?: number; default: unknown; choices?: string[]; label: string; int?: boolean }
@@ -27,7 +28,7 @@ export const AG = {
   cat: null as Catalog | null,
   recipe: { version: 1, mode: 'all', n: 2, strength: 1, steps: [] } as AugRecipe,
   seed: 1, pick: 'random' as 'random' | 'per_class' | 'selection', nImages: 6, variants: 4, boxes: true,
-  items: [] as Item[], busy: false, err: '', solo: -1, view: 'preview' as 'preview' | 'boxes' | 'coverage',
+  items: [] as Item[], busy: false, err: '', solo: -1, view: 'preview' as 'preview' | 'boxes' | 'coverage' | 'model',
   saved: [] as { name: string; recipe: AugRecipe }[],
 };
 let ready = false, timer: ReturnType<typeof setTimeout> | undefined, ctl: AbortController | null = null;
@@ -311,7 +312,7 @@ function paintBar(): void {
   const bar = $('ag-bar');
   if (!bar) return;
   const nSel = (S.sel as number[]).length;
-  bar.innerHTML = `<span class="segmented" role="tablist">${[['preview', 'Preview'], ['boxes', 'Boxes'], ['coverage', 'Coverage']].map(([k, l]) => `<button type="button" class="view-btn${AG.view === k ? ' active' : ''}" role="tab" aria-selected="${AG.view === k}" data-ag-act="view" data-k="${k}">${l}</button>`).join('')}</span>` +
+  bar.innerHTML = `<span class="segmented" role="tablist">${[['preview', 'Preview'], ['boxes', 'Boxes'], ['coverage', 'Coverage'], ['model', 'Model']].map(([k, l]) => `<button type="button" class="view-btn${AG.view === k ? ' active' : ''}" role="tab" aria-selected="${AG.view === k}" data-ag-act="view" data-k="${k}">${l}</button>`).join('')}</span>` +
     (AG.view === 'preview' ? `<label class="m-lbl" for="ag-pick">Images</label><select id="ag-pick" data-ag="pick"><option value="random" ${AG.pick === 'random' ? 'selected' : ''}>random</option><option value="per_class" ${AG.pick === 'per_class' ? 'selected' : ''}>one per class</option><option value="selection" ${AG.pick === 'selection' ? 'selected' : ''} ${nSel ? '' : 'disabled'}>my selection${nSel ? ` (${nSel})` : ''}</option></select>` +
       `<label class="m-lbl" for="ag-ni">×</label><select id="ag-ni" data-ag="ni">${[3, 6, 9, 12].map((n) => `<option ${n === AG.nImages ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
       `<label class="m-lbl" for="ag-nv">variants</label><select id="ag-nv" data-ag="nv">${[2, 4, 6, 8].map((n) => `<option ${n === AG.variants ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
@@ -418,6 +419,7 @@ export function initAug(): void {
   if (!side || !main) return;
   initAugCheck();
   initAugCover();
+  initAugModel();
   side.addEventListener('input', (e) => onInput(e.target as HTMLInputElement, false));
   side.addEventListener('change', (e) => onInput(e.target as HTMLInputElement, true));
   side.addEventListener('click', (e) => {

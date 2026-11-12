@@ -144,7 +144,7 @@ FILES = (
     ('dataviz/state.py', VIZ), ('dataviz/visualizer_boot.py', VIZ), ('dataviz/core/workers.py', VIZ),
     ('dataviz/server/binary.py', VIZ), ('dataviz/llm/tools/visual.py', VIZ),
     ('dataviz/llm/prompts/visual/', VIZ), ('dataviz/llm/prompts/skills/visual/', VIZ),
-    *((f'dataviz/data/{m}.py', VIZ) for m in ('curation', 'compare', 'diff', 'imgstats', 'promote', 'shift', 'stress', 'augment', 'augment_cover', 'augment_run',
+    *((f'dataviz/data/{m}.py', VIZ) for m in ('curation', 'compare', 'diff', 'imgstats', 'promote', 'shift', 'stress', 'augment', 'augment_cover', 'augment_run', 'augment_model',
                                                'indexer', 'views', 'union', 'reuse', 'live', 'patching', 'bucket_sessions')),
     *((f'dataviz/server/routes/{m}.py', VIZ) for m, z in ROUTES if z == 'visualizer'),
     ('dataviz/ml/', VIZ_OR_LABEL), ('dataviz/models/', VIZ_OR_LABEL), ('dataviz/server/models.py', VIZ_OR_LABEL),
@@ -155,7 +155,7 @@ FILES = (
     *((f'static/ts/views/{m}.ts', VIZ) for m in (
         'assistant', 'box-editor', 'chart-util', 'compare', 'compare-shift', 'compare-stress', 'compare-viewer', 'controls',
         'curation', 'eval', 'ev-util', 'explore-bind', 'filter-bar', 'gallery', 'image-grid', 'layout', 'modal',
-        'model-images', 'model', 'pick-bar', 'preview', 'stat-chip', 'stats', 'viewer', 'augment', 'augment-check', 'augment-cover')),
+        'model-images', 'model', 'pick-bar', 'preview', 'stat-chip', 'stats', 'viewer', 'augment', 'augment-check', 'augment-cover', 'augment-model')),
     *((f'static/ts/core/{m}.ts', VIZ) for m in ('live', 'compare-core', 'cmp-keys')),
     *((f'static/css/{m}.css', VIZ) for m in ('curation', 'compare', 'compare-shift', 'augment')),
 )

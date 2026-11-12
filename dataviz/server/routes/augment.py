@@ -16,6 +16,8 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     DELETE /api/augment/targets/{id}
     POST /api/augment/autotune         {recipe (start), target, quality, m, seed} -> a job: steps added while they raise the
                                         target's coverage -> {recipe, history, before, after} (GET .../coverage/result?key=)
+    POST /api/augment/model            {recipe, model, n, conf, seed} -> a job: the model's mAP50 / mAP / P / R with each step at
+                                        full chance and with the whole recipe, against the labels the steps moved
     POST /api/augment/curve            {recipe, target, quality, m, seed} -> a job: coverage + unreal variants at strengths
                                         0.25 … 2 -> {points, best} (GET .../coverage/result?key=)
     POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path}, quality: quick | deep,
@@ -42,7 +44,7 @@ from fastapi.responses import FileResponse, Response
 
 from ...auth import deps
 from ...data import augment as ag
-from ..deps import guards
+from ..deps import guards, owned
 from .samples import image_boxes_px, open_image_rgb
 
 MAX_IMAGES, MAX_VARIANTS, MAX_RECIPES = 12, 8, 50
@@ -485,6 +487,59 @@ def router(state, ctx):
             (aug_root(st) / 'checks' / 'latest_coverage.json').write_text(json.dumps({'key': key}))
             remember(key, rep)
         job = st.submit(f'augcov:{key}', 'Augment · coverage', run, lane='main')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.post('/api/augment/model', dependencies=[Depends(deps.require_bound('labeler'))])
+    def model_check(body: dict = Body(...)):
+        """A detection model on each recipe step at full chance, scored against the moved labels (a job)."""
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        from ...data import augment_model as am
+        from ...data import augment_run as ar
+        st = ctx.current()
+        reg, ms = getattr(ctx, 'models', None), getattr(ctx, 'model_service', None)
+        if reg is None or ms is None:
+            raise HTTPException(409, 'models are not available on this server')
+        mid = str(body.get('model') or '')
+        m = next((x for x in owned(reg.models) if x['id'] == mid and x.get('family') != 'hf'), None)
+        if m is None:
+            raise HTTPException(404, f'no detection model {mid!r}')
+        recipe = _recipe(body)
+        if not any(x['on'] for x in recipe['steps']):
+            raise HTTPException(400, 'the recipe has no step to apply')
+        n = _clamp(body.get('n'), 10, 300, 100)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        try:
+            conf = float(body['conf']) if body.get('conf') is not None else float(m.get('conf') or ms.cfg.get('default_conf', 0.25))
+        except (TypeError, ValueError):
+            raise HTTPException(400, 'conf: a number') from None
+        fp = ms.fingerprint(m)
+        key = f'model:{ar.h16(str(st.fingerprint or ""), m["id"], fp, ag.recipe_hash(recipe), n, seed, round(conf, 3))}'
+        hit = cached(st, key)
+        if hit is not None:
+            return {'ready': True, 'key': key, 'result': hit}
+        names = pick_images(st, 'per_class', n, seed)
+
+        def run(job):
+            from ...models import predict, runners, schema
+            job.progress(stage=f'loading {m["name"]}')
+            runner = runners.get_runner(m, fp, ms.workdir)
+            target = int(getattr(runner, 'draft_size', None) or getattr(runner, 'imgsz', None) or 640)
+            model_names = list(runner.names or [])
+
+            def pred(imgs):
+                out = []
+                for im, d in zip(imgs, predict.predict_batch(m, fp, ms.workdir, imgs), strict=False):
+                    d = schema.clean(d, *im.size)
+                    out.append(d[d[:, 4] >= runners.LOW_CONF])
+                return out
+            res = am.run(lambda nm: load_small(st, nm, target)[:2], names, recipe, pred, model_names, list(st.classes), conf,
+                         predict.pick_batch_size(runner, m, None), job.progress, job.cancelled.is_set, seed)
+            res.update(key=key, model={'id': m['id'], 'name': m['name']}, recipe=recipe)
+            check_file(st, key).write_text(json.dumps(res))
+            remember(key, res)
+        job = st.submit(f'augmodel:{key}', f'Augment · {m["name"]} under the recipe', run, lane='io' if m.get('format') == 'api' else 'main')
         return {'ready': False, 'job_id': job.id, 'key': key}
 
     @r.post('/api/augment/curve')
