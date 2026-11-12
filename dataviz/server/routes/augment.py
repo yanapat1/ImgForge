@@ -276,7 +276,9 @@ def router(state, ctx):
             return {'text': ag.to_python(recipe), 'file': 'augment.py'}
         if fmt == 'yaml':
             return {'text': ag.to_yaml(recipe), 'file': 'augment.yaml'}
-        raise HTTPException(400, 'format: albumentations, python or yaml')
+        if fmt == 'ultralytics':
+            return {'text': ag.to_ultralytics(recipe), 'file': 'train_augmented.py'}
+        raise HTTPException(400, 'format: albumentations, python, yaml or ultralytics')
 
     @r.post('/api/augment/import')
     def import_(body: dict = Body(...)):
@@ -286,6 +288,36 @@ def router(state, ctx):
         except (ValueError, TypeError, AttributeError) as e:
             raise HTTPException(400, f'not an albumentations pipeline: {e}') from None
         return {'recipe': recipe, 'skipped': skipped}
+
+    @r.post('/api/augment/copy')
+    def make_copy(body: dict = Body(...), user=Depends(deps.current_user)):
+        """A new managed Data Center bucket holding k augmented variants of every image (+ the originals), YOLO labels."""
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        from ...data import augment_run as ar
+        from ...datacenter import service as dc
+        from ...datacenter.store import DCError
+        st = ctx.current()
+        recipe = _recipe(body)
+        if not any(s['on'] for s in recipe['steps']):
+            raise HTTPException(400, 'the recipe has no step to apply')
+        k = _clamp(body.get('k'), 1, 10, 2)
+        originals = bool(body.get('originals', True))
+        names = pick_images(st, 'random', len(st.by_image), 0)
+        names.sort()
+        name = str(body.get('name') or '').strip()[:80] or 'augmented copy'
+        try:
+            b = dc.create_bucket(user, name, kind='managed')
+        except DCError as e:
+            raise HTTPException(e.status, e.message) from None
+
+        def run(job):
+            res = ar.make_copy(names, lambda nm: load_small(st, nm, 0)[:2], recipe, k, originals, b['root'], list(st.classes),
+                               progress=job.progress, cancelled=job.cancelled.is_set)
+            job.progress(len(names), len(names), f'{res["images"]} images written')
+        job = st.submit(f'augcopy:{b["id"]}', f'Augment · copy to “{b["name"]}”', run, lane='io')
+        return {'job_id': job.id, 'bucket': {'id': b['id'], 'name': b['name']}, 'images': len(names) * (k + int(originals))}
 
     # ------------------------------------------------------------ coverage: targets, the job, its report
     def aug_root(st):

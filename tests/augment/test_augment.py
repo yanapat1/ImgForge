@@ -86,3 +86,17 @@ def test_box_check_counts_lost_tiny_and_per_step():
     small = [(0, 10.0, 10.0, 14.0, 14.0)]
     t = ag.box_check(_loader(small), ['a'], {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}, k=1, min_px=8, train_size=160)
     assert t['tiny'] == 1 and t['tiny_pct'] == 100.0
+
+
+def test_make_copy_writes_a_yolo_folder(tmp_path):
+    from dataviz.data import augment_run as ar
+    flip = {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}
+    res = ar.make_copy(['a/x.jpg', 'b.jpg'], _loader(BOX), flip, 2, True, tmp_path / 'out', ['cat'])
+    assert res == {'images': 6, 'boxes': 6, 'lost': 0}
+    names = sorted(p.name for p in (tmp_path / 'out' / 'images').iterdir())
+    assert names == ['a_x.jpg', 'a_x_aug1.jpg', 'a_x_aug2.jpg', 'b.jpg', 'b_aug1.jpg', 'b_aug2.jpg']
+    line = (tmp_path / 'out' / 'labels' / 'b_aug1.txt').read_text().split()
+    assert line[0] == '0' and abs(float(line[1]) - (160 - 50) / 160) < 1e-4            # the box mirrored with the image
+    assert (tmp_path / 'out' / 'classes.txt').read_text() == 'cat\n'
+    assert '"variants": 2' in (tmp_path / 'out' / 'recipe.json').read_text()
+    assert 'augmentations=augmentations' in ag.to_ultralytics(flip) and 'A.HorizontalFlip(p=1.0)' in ag.to_ultralytics(flip)

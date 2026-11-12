@@ -16,10 +16,10 @@ def world(pg, tmp_path):
         ('a', '0 0.5 0.5 0.4 0.4\n'), ('b', '1 0.3 0.3 0.2 0.2\n'), ('c', '0 0.6 0.6 0.3 0.3\n1 0.2 0.2 0.1 0.1\n')))
     alice = account('alice')
     sid = viz_session(alice['id'], 'ds', ds)
-    _, app = make_viz_app(tmp_path / 'ws')
+    ctx, app = make_viz_app(tmp_path / 'ws')
     c = client(app)
     assert login(c, 'alice').status_code == 200
-    return {'c': c, 'sid': sid}
+    return {'c': c, 'sid': sid, 'ctx': ctx}
 
 
 def test_catalog_preview_and_errors(world):
@@ -132,3 +132,16 @@ def test_coverage_against_an_uploaded_target_set(pg, tmp_path):
     assert c.get(f'/s/{sid}/api/augment/thumb', params={'part': '../x', 'i': 0}).status_code == 404
     assert c.delete(f'/s/{sid}/api/augment/targets/{t["id"]}').json() == {'ok': True}
     assert c.post(f'/s/{sid}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'upload', 'id': t['id']}}).status_code == 404
+
+
+def test_augmented_copy_lands_in_a_new_data_center_bucket(world, tmp_path):
+    from conftest import wait_job
+    world['ctx'].cfg['storage']['data_root'] = str(tmp_path / 'dc')    # never the real data folder
+    c, sid = world['c'], world['sid']
+    assert c.post(f'/s/{sid}/api/augment/copy', json={'recipe': {'steps': []}}).status_code == 400
+    r = c.post(f'/s/{sid}/api/augment/copy', json={'recipe': {'steps': [{'t': 'HorizontalFlip', 'p': 1}]}, 'k': 1, 'name': 'flipped'})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['images'] == 6 and wait_job(c, body['job_id'])['status'] == 'done'
+    root = next((tmp_path / 'dc').iterdir())
+    assert len(list((root / 'images').iterdir())) == 6 and (root / 'recipe.json').exists()

@@ -6,6 +6,7 @@
 
 import { api, errText, getJSON, postJSON, sendJSON } from '../core/api.js';
 import { $, $req, esc, icon } from '../core/dom.js';
+import { waitJob } from '../core/jobs.js';
 import { S } from '../core/state.js';
 import { clsColor } from '../core/theme.js';
 import { toast } from '../core/toast.js';
@@ -191,12 +192,14 @@ function recipeMenu(from: HTMLElement): void {
   openMenu(from, [
     ['save', 'Save as…'], ...AG.saved.map((s, i): [string, string] => [`load:${i}`, `Open “${s.name}”`]),
     ['import', 'Import Albumentations JSON…'], ['export:albumentations', 'Export Albumentations JSON'], ['export:python', 'Export Python code'],
-    ['export:yaml', 'Export YAML'], ['clear', 'Clear the recipe'],
+    ['export:yaml', 'Export YAML'], ['export:ultralytics', 'Export for Ultralytics training'],
+    ['copy', 'Make an augmented copy in the Data Center…'], ['clear', 'Clear the recipe'],
   ], (k) => { void recipeAct(k); });
 }
 
 async function recipeAct(k: string): Promise<void> {
   if (k === 'clear') { AG.recipe.steps = []; AG.solo = -1; renderRecipe(); changed(); return; }
+  if (k === 'copy') { await copyDialog(); return; }
   if (k.startsWith('load:')) { const s = AG.saved[Number(k.slice(5))]; if (s) { AG.recipe = structuredClone(s.recipe); renderRecipe(); changed(); } return; }
   if (k === 'save') {
     let name = '';
@@ -235,6 +238,32 @@ async function recipeAct(k: string): Promise<void> {
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     } catch (e) { toast(errText(e), 'err'); }
   }
+}
+
+/** Write k augmented variants of every image (+ the originals) with YOLO labels into a new Data Center bucket. */
+async function copyDialog(): Promise<void> {
+  if (!AG.recipe.steps.some((s) => s.on)) { toast('The recipe has no step to apply', 'err'); return; }
+  let body: Record<string, unknown> | null = null;
+  await openDialog({
+    title: 'Make an augmented copy', ok: 'Make the copy', focus: '#ag-cname',
+    body: '<p>A new managed bucket in the Data Center gets every image of this session run through the recipe, with YOLO labels that follow the boxes (lost boxes are left out) and the recipe saved beside them.</p>' +
+      '<label class="fld"><span>Bucket name</span><input type="text" class="txt" id="ag-cname" maxlength="80" value="augmented copy"></label>' +
+      '<label class="fld"><span>Variants per image</span><select id="ag-ck">' + [1, 2, 3, 5, 10].map((n) => `<option ${n === 2 ? 'selected' : ''}>${n}</option>`).join('') + '</select></label>' +
+      '<label class="check"><input type="checkbox" id="ag-corig" checked> Also copy the originals</label>',
+    onOk: (root) => {
+      const name = root.querySelector<HTMLInputElement>('#ag-cname')?.value.trim() ?? '';
+      if (!name) return 'Give the bucket a name';
+      body = { recipe: AG.recipe, name, k: Number(root.querySelector<HTMLSelectElement>('#ag-ck')?.value ?? 2), originals: !!root.querySelector<HTMLInputElement>('#ag-corig')?.checked };
+      return null;
+    },
+  });
+  if (!body) return;
+  try {
+    const r = await postJSON<{ job_id: number; bucket: { id: string; name: string }; images: number }>('api/augment/copy', body);
+    toast(`Writing ${r.images.toLocaleString()} images into “${r.bucket.name}”…`);
+    await waitJob(r.job_id);
+    toast(`“${r.bucket.name}” is ready in the Data Center`);
+  } catch (e) { toast(errText(e), 'err'); }
 }
 
 function stepAct(k: string, i: number): void {

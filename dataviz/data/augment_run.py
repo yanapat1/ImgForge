@@ -149,3 +149,41 @@ def report(train_v, aug_v, tgt_v, tr_meta, au_meta, tg_meta, seed=0):
     for c in rep['credit']:
         c['label'] = ag.BY_NAME.get(c['t'], {}).get('label', c['t'])
     return rep
+
+
+def make_copy(names, load, recipe, k, originals, out_root, classes, progress=None, cancelled=None, seed=0):
+    """An augmented copy as a YOLO folder: images/<name>_aug<j>.jpg + labels/<name>_aug<j>.txt for k variants of each
+    image (+ the originals when asked), classes.txt and recipe.json (what made it). Boxes the recipe lost are left out
+    of the labels. load(name) -> (full-size uint8 image, boxes px). -> {images, boxes, lost}."""
+    from PIL import Image
+    out_root = Path(out_root)
+    (out_root / 'images').mkdir(parents=True, exist_ok=True)
+    (out_root / 'labels').mkdir(exist_ok=True)
+    (out_root / 'classes.txt').write_text(''.join(f'{c}\n' for c in classes))
+    (out_root / 'recipe.json').write_text(json.dumps({'recipe': ag.validate(recipe), 'variants': k, 'originals': bool(originals),
+                                                      'source_images': len(names)}, indent=2))
+    compose = ag.build(recipe, seed)
+    done = {'images': 0, 'boxes': 0, 'lost': 0}
+
+    def save(stem, im, boxes):
+        h, w = im.shape[:2]
+        Image.fromarray(im).save(out_root / 'images' / f'{stem}.jpg', 'JPEG', quality=92)
+        lines = [f'{c} {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} {(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}'
+                 for c, x1, y1, x2, y2 in boxes]
+        (out_root / 'labels' / f'{stem}.txt').write_text('\n'.join(lines) + ('\n' if lines else ''))
+        done['images'] += 1
+        done['boxes'] += len(boxes)
+    for i, name in enumerate(names):
+        if cancelled is not None and cancelled():
+            break
+        rgb, boxes = load(name)
+        stem = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(name).with_suffix('').as_posix())
+        if originals:
+            save(stem, rgb, [(int(c), *b) for c, *b in boxes])
+        for j in range(k):
+            im, out, lost, _ = ag.apply(rgb, boxes, recipe, seed * 1000 + i * 10 + j, compose=compose)
+            save(f'{stem}_aug{j + 1}', im, out)
+            done['lost'] += lost
+        if progress is not None:
+            progress(i + 1, len(names), 'writing the augmented copy')
+    return done

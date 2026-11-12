@@ -349,6 +349,17 @@ def to_python(recipe):
             'transform = A.Compose([\n' + body + '\n], bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], min_visibility=0.3))\n')
 
 
+def to_ultralytics(recipe):
+    """A training script for Ultralytics (8.4 takes Albumentations transforms as `augmentations=`)."""
+    r = validate(recipe)
+    code = to_python(r).split('transform = A.Compose([\n', 1)[1].rsplit('\n], bbox_params', 1)[0]
+    return ('# made in the dataviz Augment tab: train YOLO with this recipe on top of its own augmentation\n'
+            'import albumentations as A\nfrom ultralytics import YOLO\n\n'
+            'augmentations = [\n' + code + '\n]\n\n'
+            'model = YOLO("yolo11n.pt")\n'
+            'model.train(data="data.yaml", epochs=100, imgsz=640, augmentations=augmentations)\n')
+
+
 def to_yaml(recipe):
     import yaml
     return yaml.safe_dump(validate(recipe), sort_keys=False, allow_unicode=True)
