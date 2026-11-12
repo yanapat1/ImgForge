@@ -519,6 +519,98 @@ def test_panes_open_and_close_and_the_objects_panel_comes_back(server, target): 
     assert not errors, errors
 
 
+def test_board_notes_zones_text_lock_and_auto_zones(server, target):  # noqa: F811
+    errors = []
+    with psycopg.connect(target['url'], autocommit=True) as c:
+        c.execute('CREATE TABLE public.customers (id int PRIMARY KEY, name text)')
+        c.execute('CREATE TABLE public.products (id int PRIMARY KEY, title text)')
+        c.execute('ALTER TABLE public.orders ADD COLUMN customer_id int')
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1500, 'height': 950})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.select_option('#an-conn', target['conn'])
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        page.wait_for_selector('.an-tn:has-text("public.orders")', timeout=10000)
+        for name, x in (('public.orders', 120), ('public.customers', 470)):
+            page.drag_and_drop(f'.an-tn:has-text("{name}")', '#an-canvas', target_position={'x': x, 'y': 160})
+            page.wait_for_selector(f'.an-tb:has-text("{name.split(".")[1]}") .an-col', timeout=10000)
+        a = page.locator('.an-col[data-t="o"][data-c="customer_id"]').bounding_box()
+        b = page.locator('.an-col[data-t="c"][data-c="id"]').bounding_box()
+        page.mouse.move(a['x'] + 30, a['y'] + 6)
+        page.mouse.down()
+        page.mouse.move(b['x'] + 30, b['y'] + 6, steps=8)
+        page.mouse.up()
+        page.wait_for_selector('.an-jl', timeout=10000)
+        sql_before = page.locator('#an-sql .cm-content').text_content()
+        page.click('.an-pbtn[data-k="sql"]')                                # the builder alone: room for notes
+        page.click('.an-pbtn[data-k="res"]')
+
+        # a zone: right-click an empty spot of the board, written in, its text bottom right, then locked
+        cv = page.locator('#an-canvas').bounding_box()
+        page.mouse.click(cv['x'] + 700, cv['y'] + 600, button='right')
+        page.click('#an-menu [data-m="zone"]')
+        zone = page.locator('.an-note.l-back').first
+        zone.wait_for()
+        assert page.locator('#an-nbar').is_visible()
+        zb = zone.bounding_box()
+        page.mouse.dblclick(zb['x'] + zb['width'] - 40, zb['y'] + zb['height'] - 40)
+        page.keyboard.press('Control+a')
+        page.keyboard.type('Sales area')
+        page.keyboard.press('Control+Enter')
+        page.wait_for_selector('.an-note.l-back:has-text("Sales area")')
+        page.mouse.click(zb['x'] + 40, zb['y'] + 8)                          # the title strip selects it
+        page.click('#an-nbar .an-al[data-ha="right"][data-va="bottom"]')
+        st = page.eval_on_selector('.an-note.l-back .an-ntext', 'e => [getComputedStyle(e).justifyContent, getComputedStyle(e).textAlign]')
+        assert st == ['flex-end', 'right'], st
+        page.click('#an-nbar [data-act="n-lock"]')
+        box = zone.bounding_box()
+        page.mouse.move(box['x'] + 40, box['y'] + 8)
+        page.mouse.down()
+        page.mouse.move(box['x'] + 240, box['y'] + 120, steps=6)
+        page.mouse.up()
+        assert abs(zone.bounding_box()['x'] - box['x']) < 1                 # locked: it stayed
+        # a sticky note moves; none of this touched the SQL
+        page.click('[data-act="n-add"]')
+        page.click('#an-menu [data-m="sticky"]')
+        sticky = page.locator('.an-note.l-front')
+        sb = sticky.bounding_box()
+        page.mouse.move(sb['x'] + 30, sb['y'] + 30)
+        page.mouse.down()
+        page.mouse.move(sb['x'] + 130, sb['y'] + 70, steps=6)
+        page.mouse.up()
+        assert sticky.bounding_box()['x'] > sb['x'] + 50
+        assert page.locator('#an-sql .cm-content').text_content() == sql_before
+        # Auto zones: orders + customers are joined, one schema: one zone around both; the user's locked zone stays
+        page.click('[data-act="n-add"]')
+        page.click('#an-menu [data-m="auto"]')
+        page.wait_for_function("document.querySelectorAll('.an-note.l-back').length === 2", timeout=5000)
+        assert page.locator('.an-note.l-back:has-text("Tables")').count() == 1
+        page.wait_for_timeout(1200)                                        # the tab is saved after 800 ms
+        page.reload()
+        page.wait_for_selector('.an-note.l-back:has-text("Sales area")', timeout=20000)
+        assert page.locator('.an-note').count() == 3
+        # Ctrl+Z on the board undoes the last board change
+        page.click('.an-note.l-front')
+        page.keyboard.press('Delete')
+        assert page.locator('.an-note').count() == 2
+        page.keyboard.press('Control+z')
+        assert page.locator('.an-note').count() == 3
+        # typed SQL that runs redraws the tables from the text: the notes stay
+        page.click('.an-pbtn[data-k="sql"]')
+        page.click('.an-pbtn[data-k="res"]')
+        type_sql(page, 'SELECT o.id, c.name FROM public.orders o JOIN public.customers c ON c.id = o.customer_id')
+        page.keyboard.press('Control+Enter')
+        page.wait_for_selector('#an-sum', timeout=20000)
+        page.wait_for_function("!document.querySelector('#an-canvas .an-cvt.tl')?.textContent.includes('Press Run')", timeout=10000)
+        assert page.locator('.an-note').count() == 3
+        browser.close()
+    assert not errors, errors
+
+
 def test_plain_http_without_random_uuid(server, target):  # noqa: F811
     """A server opened over plain http at its address is not a secure context: the browser has no crypto.randomUUID.
     The page must still start and make new query tabs, scripts and dashboards (core/uuid.ts)."""

@@ -12,6 +12,7 @@ import { $, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, saveTabs } from './app.js';
+import { addMenu, bindBoard, clearNoteSel, layerHTML, marqueeNotes, noteDown, noteKey, noteMenu, noteMove, noteUp, placeNoteBar, renderNotes } from './board.js';
 import { cardOf, cardTitle, ENDS_LABEL, ENDS_NEXT, endsMode, markerDefs, setEndsMode, sideMarks, statKey } from './cardinality.js';
 import { countJoin } from './joins.js';
 import { MENU_SEP, menuHead, menuItem, openMenu } from './menu.js';
@@ -69,7 +70,7 @@ function loadMissing(t: Tab): void {
 
 // ---------------------------------------------------------------- undo
 const snap = (t: Tab): string => JSON.stringify({ model: modelOf(t), sql: t.sql, typed: t.typed });
-function record(t: Tab): void {
+export function record(t: Tab): void {
   t.undo.push(snap(t));
   if (t.undo.length > 50) t.undo.shift();
   t.redo = [];
@@ -86,6 +87,9 @@ function restore(t: Tab, s: string): void {
 function undo(): void { const t = tab(); const s = t.undo.pop(); if (!s) { toast('Nothing to undo'); return; } t.redo.push(snap(t)); restore(t, s); }
 function redo(): void { const t = tab(); const s = t.redo.pop(); if (!s) { toast('Nothing to redo'); return; } t.undo.push(snap(t)); restore(t, s); }
 
+/** The model as the server needs it for SQL: without the board's notes. */
+function sqlModel(m: Model): Model { const c = { ...m }; delete c.notes; return c; }
+
 /** The model changed: the server writes the SQL, the results stay as they are until Run. */
 async function changed(t: Tab): Promise<void> {
   const src = sourceOf(t.conn);
@@ -93,7 +97,7 @@ async function changed(t: Tab): Promise<void> {
   t.dirty = true;
   renderBuilder();
   try {
-    t.sql = await api.generate(modelOf(t), src?.kind ?? 'postgres');
+    t.sql = await api.generate(sqlModel(modelOf(t)), src?.kind ?? 'postgres');
     document.dispatchEvent(new CustomEvent('an-sql-changed'));
     saveTabs();
   } catch (e) { toast(errText(e), 'err'); }
@@ -135,13 +139,14 @@ export function renderBuilder(): void {
       cols.map((c) => { const cast = x.cast[c.name]; return `<div class="an-col${on(c.name) ? ' sel' : ''}" tabindex="0" role="checkbox" aria-checked="${on(c.name)}" data-t="${esc(x.id)}" data-c="${esc(c.name)}"><span class="an-dot"></span><span class="lbl">${esc(c.name)}</span>${c.key ? `<span class="an-key">${esc(c.key)}</span>` : ''}${x.kind === 'table' ? `<button type="button" class="an-ty${cast ? ' cast' : ''}" data-act="b-cast" data-t="${esc(x.id)}" data-c="${esc(c.name)}" title="Change type with CAST">${esc(cast?.type ?? c.type ?? 'type')}</button>` : ''}</div>`; }).join('') + (x.star && x.kind !== 'table' && !cols.length ? '<div class="an-col sel an-allcols"><span class="an-dot"></span><span class="lbl faint">all columns (*)</span></div>' : '') + '</div>';
   }).join('');
   host.classList.toggle('ro', readOnly(t));
-  host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="sm" data-act="b-fit">Fit</button><button type="button" class="sm" data-act="b-ends" title="How a join line shows 1:1, 1:N, N:1 or N:M. Click to change.">${ENDS_LABEL[endsMode()]}</button></div>` +
-    `<div class="an-board" id="an-board" style="transform:translate(${v.x}px,${v.y}px) scale(${v.z})"><svg class="an-lines" id="an-lines" width="2400" height="1600" aria-hidden="true"></svg>${cards}<span id="an-jl"></span>${m.adv ? `<div class="an-remote" style="left:${m.tables[0]?.x ?? 24}px;top:${Math.max(60, ...m.tables.map((x) => x.y)) + 240}px"><span class="pill warn">Locked part</span><pre class="an-hq">${esc(m.adv)}</pre></div>` : ''}</div>` +
+  host.innerHTML = cvTop(t) + panel(t) + `<div class="an-cvt br"><button type="button" class="sm" data-act="n-add" aria-haspopup="menu" title="Add a zone, text, sticky note or shape. Right-click the board adds one there.">${icon('plus')}Note</button><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="-1" aria-label="Zoom out">−</button><span class="num an-z" id="an-zl">${Math.round(v.z * 100)}%</span><button type="button" class="icon-btn ghost xs" data-act="b-zoom" data-k="1" aria-label="Zoom in">+</button><button type="button" class="sm" data-act="b-fit">Fit</button><button type="button" class="sm" data-act="b-ends" title="How a join line shows 1:1, 1:N, N:1 or N:M. Click to change.">${ENDS_LABEL[endsMode()]}</button></div>` +
+    `<div class="an-board" id="an-board" style="transform:translate(${v.x}px,${v.y}px) scale(${v.z})">${layerHTML('back')}<svg class="an-lines" id="an-lines" width="2400" height="1600" aria-hidden="true"></svg>${cards}<span id="an-jl"></span>${layerHTML('front')}${m.adv ? `<div class="an-remote" style="left:${m.tables[0]?.x ?? 24}px;top:${Math.max(60, ...m.tables.map((x) => x.y)) + 240}px"><span class="pill warn">Locked part</span><pre class="an-hq">${esc(m.adv)}</pre></div>` : ''}</div>` +
     (!m.tables.length && !t.notDrawn ? '<div class="an-cvhint">Drag a table here from the object explorer.</div>' : '');
   host.style.backgroundSize = `${18 * v.z}px ${18 * v.z}px`;
   host.style.backgroundPosition = `${v.x}px ${v.y}px`;
   if (S.settle.length) settle();
   drawLines();
+  renderNotes();
   loadMissing(t);
 }
 
@@ -210,6 +215,7 @@ function applyView(): void {
   c.style.backgroundPosition = `${v.x}px ${v.y}px`;
   const l = $('an-zl');
   if (l) l.textContent = `${Math.round(v.z * 100)}%`;
+  placeNoteBar();
 }
 
 function zoomAt(f: number, cx: number, cy: number): void {
@@ -573,7 +579,7 @@ async function cardAct(id: string, k: string): Promise<void> {
 
 // ---------------------------------------------------------------- pointer, keyboard, drops
 type Drag =
-  | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number; moved: boolean; join: string | null; card: string | null }
+  | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number; moved: boolean; join: string | null; card: string | null; note: string | null }
   | { kind: 'marq'; sx: number; sy: number; el: HTMLElement; r: DOMRect; add: boolean; moved: boolean }
   | { kind: 'move'; id: string; sx: number; sy: number; moved: boolean; group: { m: MTable; ox: number; oy: number }[] }
   | { kind: 'col'; t: string; c: string; sx: number; sy: number; moved: boolean };
@@ -584,16 +590,18 @@ export function builderDown(e: PointerEvent): boolean {
   const target = e.target instanceof Element ? e.target : null;
   const cv = target?.closest<HTMLElement>('#an-canvas');
   if (!target || !cv) return false;
-  if (target.closest('.an-cvt')) return false;
+  if (target.closest('.an-cvt, .an-nbar')) return false;
   const t = tab();
   if (e.button === 1 || e.button === 2 || (e.pointerType === 'touch' && !target.closest('.an-tb'))) {
-    P = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: t.view.x, oy: t.view.y, moved: false, join: target.closest<HTMLElement>('[data-j]')?.dataset['j'] ?? null, card: target.closest<HTMLElement>('.an-tb')?.dataset['t'] ?? null };
+    P = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: t.view.x, oy: t.view.y, moved: false, join: target.closest<HTMLElement>('[data-j]')?.dataset['j'] ?? null, card: target.closest<HTMLElement>('.an-tb')?.dataset['t'] ?? null, note: target.closest<HTMLElement>('.an-note')?.dataset['n'] ?? null };
     cv.classList.add('panning');
     e.preventDefault();
     return true;
   }
   if (e.button !== 0 || target.closest('.an-x,.an-ty,.an-sl')) return false;
+  if (noteDown(e, target)) return true;
   const head = target.closest<HTMLElement>('.an-th[data-mv]'), col = target.closest<HTMLElement>('.an-col');
+  if (head && !e.shiftKey && !e.ctrlKey && !e.metaKey) clearNoteSel();
   if (head) {
     const id = head.dataset['mv'] ?? '', ids = S.sel.includes(id) ? S.sel : [id];
     const group = ids.flatMap((x) => { const m = modelOf(t).tables.find((y) => y.id === x); return m ? [{ m, ox: m.x, oy: m.y }] : []; });
@@ -614,7 +622,7 @@ export function builderDown(e: PointerEvent): boolean {
 }
 
 export function builderMove(e: PointerEvent): void {
-  if (!P) return;
+  if (noteMove(e) || !P) return;
   const t = tab();
   if (P.kind === 'pan') {
     const dx = e.clientX - P.sx, dy = e.clientY - P.sy;
@@ -653,6 +661,7 @@ export function builderMove(e: PointerEvent): void {
 }
 
 export function builderUp(e: PointerEvent): void {
+  if (noteUp()) return;
   const p = P;
   P = null;
   if (!p) return;
@@ -661,6 +670,12 @@ export function builderUp(e: PointerEvent): void {
     $('an-canvas')?.classList.remove('panning');
     panEnd = Date.now();
     if (!p.moved && p.card && p.join === null && e.button === 2) { cardMenu(p.card, { x: e.clientX, y: e.clientY }); return; }
+    if (!p.moved && e.button === 2 && p.note && !p.card && p.join === null && noteMenu(p.note, { x: e.clientX, y: e.clientY })) return;
+    if (!p.moved && e.button === 2 && !p.card && p.join === null) {               // right-click on the board: add a note there
+      const cv = $('an-canvas'), r = cv?.getBoundingClientRect(), v = t.view;
+      if (cv && r) addMenu(cv, { x: e.clientX, y: e.clientY }, { x: (e.clientX - r.left - v.x) / v.z, y: (e.clientY - r.top - v.y) / v.z });
+      return;
+    }
     if (!p.moved && p.join !== null && e.button === 2 && !readOnly(t)) { record(t); m.joins.splice(Number(p.join), 1); void changed(t); toast('Join removed. Press Run to update the result.'); }
     return;
   }
@@ -670,6 +685,7 @@ export function builderUp(e: PointerEvent): void {
     const hit = [...document.querySelectorAll<HTMLElement>('#an-board .an-tb')].filter((el) => { const b = el.getBoundingClientRect(); return p.moved && b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top; }).map((el) => el.dataset['t'] ?? '');
     S.sel = p.add ? [...new Set([...S.sel, ...hit])] : hit;
     syncSel();
+    if (p.moved) marqueeNotes(r, p.add); else if (!p.add) clearNoteSel();
     return;
   }
   if (p.kind === 'move') {
@@ -706,7 +722,8 @@ export function builderWheel(e: WheelEvent): void {
 
 export function builderKey(e: KeyboardEvent): boolean {
   const target = e.target instanceof HTMLElement ? e.target : null;
-  if (!target || /INPUT|TEXTAREA|SELECT/.test(target.tagName) || target.closest('.cm-editor')) return false;
+  if (!target || /INPUT|TEXTAREA|SELECT/.test(target.tagName) || target.closest('.cm-editor') || target.isContentEditable) return false;
+  if ((target === document.body || target.closest('#an-canvas')) && noteKey(e)) return true;
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return true; }
   if (mod && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return true; }
@@ -762,6 +779,7 @@ export async function syncFromSql(t: Tab): Promise<void> {
       if (o.cardFrom) j.cardFrom = o.cardFrom;
     }
   }
+  if (was.notes?.length) (p as Model).notes = was.notes;           // the board's notes are not in the SQL: they stay
   t.model = p as Model;
   await Promise.all(p.tables.map((x) => needInfo(t, x)));
   const loose = p.loose ?? [];
@@ -770,3 +788,5 @@ export async function syncFromSql(t: Tab): Promise<void> {
     if (owner) owner.sel.push(c);
   }
 }
+
+bindBoard({ modelOf, record, drawLines, clearCards: () => { if (S.sel.length) { S.sel = []; syncSel(); } }, cards: () => modelOf(tab()).tables });

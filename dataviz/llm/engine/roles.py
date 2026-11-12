@@ -47,7 +47,7 @@ CAN = {
     'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
               'curation, label errors, model runs + evaluation, compare',
     'analysis': 'Data Analysis (screen analysis): SQL and MongoDB queries on the user\'s databases, joins, statistics, '
-                'forecasts, dashboards',
+                'forecasts, dashboards, zones and notes on the visual builder board',
 }
 
 
@@ -200,6 +200,10 @@ def analysis_scope(user, scope):
         out.append('The editor is empty now.')
     if scope.get('page') == 'analysis':
         out.append('This is the page as of this message: earlier messages may describe an older editor.')
+    board = scope.get('board') if isinstance(scope.get('board'), dict) else None
+    if board:
+        out.append(f'The visual builder board shows {len(board.get("tables") or [])} tables and {len(board.get("notes") or [])} notes '
+                   '(read_board lists them; edit_board adds zones, text and sticky notes).')
     if scope.get('rows_ok'):
         out.append('The user allowed row samples for this session.')
     else:

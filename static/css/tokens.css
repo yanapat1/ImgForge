@@ -192,8 +192,13 @@
   --label-badge: rgba(122, 82, 196, .9);
   --on-label-badge: #f3ecff;
   --drop-bg: rgba(138, 180, 240, .06);
+  /* Data Analysis board notes (analysis/board.ts): the zone / sticky note colours, the ink on a solid note */
+  --note-blue: #4f86f7; --note-green: #3fb46a; --note-amber: #e39a2d; --note-red: #e25c5c; --note-violet: #9a6cf0;
+  --note-teal: #2cb3b3; --note-grey: #8a93a3; --note-yellow: #f3d34a; --note-ink: #1d2230;
 }
 :root[data-theme="light"] {
+  --note-blue: #2f6fe8; --note-green: #23924d; --note-amber: #c9791a; --note-red: #cc3d3d; --note-violet: #7c4fd8;
+  --note-teal: #138f90; --note-grey: #6d7686; --note-yellow: #f6d64f;
   --ok: #23833a;
   --ok-soft: rgba(35, 131, 58, .10);
   --ok-text: #1f7334;

@@ -65,5 +65,5 @@ export function markerDefs(): string {
   };
   return `<defs>${Object.entries(shapes).flatMap(([k, d]) => ['', 'w'].map((w) =>
     `<marker id="an-m${k}${w}" viewBox="-24 -8 26 16" refX="0" refY="0" markerWidth="26" markerHeight="16" markerUnits="userSpaceOnUse" orient="auto-start-reverse">` +
-    `<path d="${d}" fill="var(--surface)" style="stroke:var(${w ? '--warn' : '--accent'})" stroke-width="1.6"/></marker>`)).join('')}</defs>`;
+    `<path d="${d}" style="fill:var(--surface);stroke:var(${w ? '--warn' : '--accent'})" stroke-width="1.6"/></marker>`)).join('')}</defs>`;
 }

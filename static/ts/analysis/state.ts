@@ -38,7 +38,22 @@ export interface Join {
 }
 export interface Calc { alias: string; t: string; kind: string; expr: string; spec?: unknown }
 export interface Parts { where?: string; group?: string; having?: string; order?: string; top?: number; distinct?: boolean; parsed?: boolean }
-export interface Model { tables: MTable[]; joins: Join[]; calc: Calc[]; parts: Parts; locked: string[]; adv: string; cte?: { name: string; sql: string }[] }
+export interface Model { tables: MTable[]; joins: Join[]; calc: Calc[]; parts: Parts; locked: string[]; adv: string; cte?: { name: string; sql: string }[]; notes?: Note[] }
+/** A zone, text, sticky note or shape on the builder's board (board.ts). It never reaches the SQL. */
+export type NoteShape = 'rect' | 'round' | 'pill' | 'ellipse' | 'diamond' | 'hexagon' | 'callout' | 'none';
+export interface Note {
+  id: string; x: number; y: number; w: number; h: number;      // board px, inside the 2400 × 1600 board
+  shape: NoteShape;
+  fill: string;            // a palette key (board.ts PALETTE), '#rrggbb', or '' = no fill
+  alpha: number;           // fill opacity 0..1
+  border: 'solid' | 'dashed' | 'none';
+  text: string; size: number; bold?: boolean;
+  ha: 'left' | 'center' | 'right'; va: 'top' | 'middle' | 'bottom';
+  layer: 'back' | 'front'; // back: under the table cards (a zone); front: above them
+  locked?: boolean;        // does not move or resize
+  carry?: boolean;         // dragging this zone moves the cards inside it
+  auto?: boolean;          // made by Auto zones (the next Auto zones replaces it)
+}
 /** The whole query at once (POST /joins/overview): its rows, and the join keys of each table that reach it. */
 export interface JoinOverview { rows: number; used: Record<string, number>; key: Record<string, string> }
 export interface JoinStats { a_rows: number; b_rows: number; matched_a: number; matched_b: number; lost_a: number; lost_b: number; a_keys: number; b_keys: number; matched_keys: number; joined: number; kept: number; fan_out: boolean; a_unique?: boolean; b_unique?: boolean }

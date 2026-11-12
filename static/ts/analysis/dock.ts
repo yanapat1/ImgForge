@@ -9,6 +9,8 @@ import { openSettings } from '../settings/dialog.js';
 import { diffLines, type DiffOp } from '../core/linediff.js';
 import { render, saveTabs } from './app.js';
 import { currentResult } from './analyze.js';
+import { applyBoardOps, boardScope } from './board.js';
+import type { BoardOp } from './board.js';
 import { addCharts } from './dash.js';
 import { editorText } from './query.js';
 import { A, newTab, tab } from './state.js';
@@ -99,6 +101,13 @@ function pageAction(a: UiAction): UiResult {
     saveTabs();
     return { ok: true, result: a.args['mode'] === 'new_tab' ? { tab: tab().name } : { replaced_lines: replaced, undo: 'Ctrl+Z in the editor' } };
   }
+  if (a.action === 'edit_board') {
+    if (A.ws !== 'query') { A.ws = 'query'; render(); }
+    if (!A.layout.viz) { A.layout.viz = true; render(); }
+    const r = applyBoardOps((a.args['ops'] ?? []) as BoardOp[]);
+    const parts = [r.added && `added ${r.added}`, r.changed && `changed ${r.changed}`, r.removed && `removed ${r.removed}`].filter(Boolean);
+    return { ok: r.added + r.changed + r.removed > 0 || !r.refused.length, result: { done: parts.join(', ') || 'nothing', refused: r.refused.slice(0, 20), undo: 'Ctrl+Z on the board' } };
+  }
   if (a.action === 'build_dashboard') {
     addCharts((a.args['charts'] ?? []) as { kind: string; title: string; x?: string; y?: string; agg?: string }[]);
     A.ws = 'dash';
@@ -123,7 +132,8 @@ export function mountDock(): void {
         role: 'analysis',
         inputId: 'ai-analysis-q',
         placeholder: 'Ask about your data…  / for commands',
-        scope: () => ({ page: 'analysis', session: A.sid, connection: tab().conn, database: tab().db, result: currentResult()?.id ?? null, rows_ok: A.aiRows, ...editorScope() }),
+        scope: () => ({ page: 'analysis', session: A.sid, connection: tab().conn, database: tab().db, result: currentResult()?.id ?? null, rows_ok: A.aiRows, ...editorScope(),
+          board: A.ws === 'query' && A.layout.viz ? boardScope() : null }),
         onUiAction: withNav(pageAction),
         uiBody,
         onEvent: hk.onEvent,

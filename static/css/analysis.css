@@ -165,6 +165,59 @@ html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
 .an-canvas.panning, .an-canvas.panning * { cursor: grabbing; }
 .an-canvas.ro .an-tb, .an-canvas.ro .an-jl, .an-canvas.ro .an-jhit { pointer-events: none; }
 .an-board { position: absolute; left: 0; top: 0; width: 2400px; height: 1600px; transform-origin: 0 0; }
+/* ---------------------------------------------------------------- board notes (board.ts): zones, text, sticky notes, shapes */
+.an-nl { position: absolute; inset: 0; pointer-events: none; }
+.an-nl.front { z-index: 4; }
+.an-note { position: absolute; pointer-events: auto; box-sizing: border-box; border: 1.5px solid var(--nf); color: var(--text); user-select: none; }
+.an-note::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--nf); opacity: var(--na); pointer-events: none; }
+.an-note.b-dashed { border-style: dashed; }
+.an-note.b-none, .an-note.svg, .an-note.s-none { border-color: transparent; }
+.an-note.s-round { border-radius: 12px; }
+.an-note.s-pill { border-radius: 999px; }
+.an-note.svg::before { display: none; }
+.an-nshape { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.an-nshape path { fill: var(--nf); fill-opacity: var(--na); stroke: var(--nf); stroke-width: 1.5; }
+.an-note.svg.b-dashed .an-nshape path { stroke-dasharray: 6 4; }
+.an-note.svg.b-none .an-nshape path { stroke: none; }
+.an-ntext { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; padding: 6px 10px;
+  overflow: hidden; white-space: pre-wrap; word-break: break-word; line-height: 1.3; }
+.an-note.s-ellipse .an-ntext, .an-note.s-diamond .an-ntext, .an-note.s-hexagon .an-ntext { padding: 14% 18%; }
+.an-note.s-callout .an-ntext { padding-bottom: 28%; }
+.an-note.s-round[style*="--na:1"] .an-ntext, .an-note.s-rect[style*="--na:1"] .an-ntext { color: var(--note-ink); }
+.an-note.l-front { cursor: move; }
+.an-note.l-back { cursor: default; }
+.an-note.l-back .an-ntext { pointer-events: none; }
+.an-note.l-back::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 28px; cursor: move; }   /* the title strip */
+.an-note.locked, .an-note.locked.l-back::after { cursor: default; }
+.an-note.s-none:hover, .an-note.s-none.sel { outline: 1px dashed var(--border-strong); }
+.an-note.sel { outline: 2px solid var(--accent); outline-offset: 2px; }
+.an-note.editing { cursor: text; }
+.an-note.editing .an-ntext { pointer-events: auto; }
+.an-note.editing .an-ntext span { outline: none; user-select: text; cursor: text; min-width: 1ch; }
+.an-nlock { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; color: var(--text-muted); opacity: .65; pointer-events: none; }
+.an-nlock svg { width: 14px; height: 14px; }
+.an-nh { position: absolute; width: 9px; height: 9px; background: var(--surface); border: 1.5px solid var(--accent); border-radius: 2px; z-index: 2; }
+.an-nh.h-nw { left: -6px; top: -6px; cursor: nwse-resize; } .an-nh.h-n { left: calc(50% - 5px); top: -6px; cursor: ns-resize; }
+.an-nh.h-ne { right: -6px; top: -6px; cursor: nesw-resize; } .an-nh.h-e { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+.an-nh.h-se { right: -6px; bottom: -6px; cursor: nwse-resize; } .an-nh.h-s { left: calc(50% - 5px); bottom: -6px; cursor: ns-resize; }
+.an-nh.h-sw { left: -6px; bottom: -6px; cursor: nesw-resize; } .an-nh.h-w { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+.an-nbar { position: absolute; z-index: 7; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: min(760px, calc(100% - 8px));
+  padding: 4px 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow-2); font-size: var(--fs-xs); }
+.an-nbar.hide { visibility: hidden; }
+.an-nbar select.sm { height: 24px; font-size: var(--fs-xs); }
+.an-nbar .on { background: var(--surface-2); color: var(--accent); }
+.an-sws { display: inline-flex; gap: 2px; align-items: center; }
+.an-sw { width: 18px; height: 18px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid transparent; background: var(--nf); cursor: pointer; }
+.an-sw.on { border-color: var(--text); }
+.an-sw.none { background: linear-gradient(135deg, transparent 45%, var(--danger) 45% 55%, transparent 55%), var(--surface); border-color: var(--border-strong); }
+.an-swc { display: inline-flex; width: 20px; height: 20px; border-radius: 50%; overflow: hidden; border: 1px solid var(--border-strong); }
+.an-swc input { width: 32px; height: 32px; margin: -6px; padding: 0; border: 0; cursor: pointer; }
+.an-nop { width: 70px; }
+.an-nsz { display: inline-flex; align-items: center; gap: 2px; }
+.an-algrid { display: inline-grid; grid-template-columns: repeat(3, 12px); gap: 1px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; }
+.an-al { width: 12px; height: 10px; min-height: 0; padding: 0; border: 0; background: var(--surface-2); border-radius: 2px; display: grid; place-items: center; cursor: pointer; }
+.an-al i { width: 4px; height: 4px; border-radius: 1px; background: var(--text-faint); }
+.an-al.on i, .an-al:hover i { background: var(--accent); }
 .an-lines { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .an-jhit { pointer-events: stroke; cursor: context-menu; }
 /* a card is as wide as its name and columns (up to 560 px); collapsed (.slim) it is 200 px and long names end in … */
@@ -200,7 +253,7 @@ html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
 .an-jl { position: absolute; transform: translate(-50%, -50%); z-index: 3; height: 20px; padding: 0 var(--s2); border: 0; border-radius: 999px;
   background: var(--accent); color: var(--on-accent); font: 650 var(--fs-2xs) var(--mono); }
 .an-jl:hover:not(:disabled) { background: var(--accent-hover); }
-.an-jl.many { background: var(--warn); color: var(--on-warn, #1a1300); }
+.an-jl.many { background: var(--warn); color: var(--note-ink); }
 .an-jcheck { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 /* floating bars on the board: actions top left, zoom bottom right, computed items bottom left */
 .an-cvt { position: absolute; z-index: 6; display: flex; gap: var(--s1); align-items: center; padding: var(--s1); background: var(--surface);

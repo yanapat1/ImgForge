@@ -12,6 +12,7 @@ import { mountUserMenu } from '../views/usermenu.js';
 import { appHeader } from '../core/header.js';
 import { A_ACTIONS, analyzeChange, renderAnalyze } from './analyze.js';
 import { mountDock } from './dock.js';
+import { N_ACTIONS, noteEdit, noteInput } from './board.js';
 import { catalogChange, catalogKey, openCatalog, renderCatalog } from './catalog.js';
 import { D_ACTIONS, dashDrag, dashDrop, dashInput, renderDash } from './dash.js';
 import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
@@ -289,6 +290,7 @@ const ACTIONS: Record<string, (el: HTMLElement) => void | Promise<void>> = {
   ...A_ACTIONS,
   ...D_ACTIONS,
   ...Q_ACTIONS,
+  ...N_ACTIONS,
 };
 
 function bind(root: HTMLElement): void {
@@ -302,6 +304,7 @@ function bind(root: HTMLElement): void {
   });
   root.addEventListener('dblclick', (e) => {
     const t = e.target instanceof Element ? e.target : null;
+    if (t?.closest('#an-board') && noteEdit(t)) return;
     if (t?.closest('.an-expsz')) { fitExplorer(); return; }
     // double-click on a pane's header (not on its buttons): that pane fills the window, again: back
     const head = t && !t.closest('button, input, select') ? t.closest<HTMLElement>('.an-sqlhead, #an-rtabs') : null;
@@ -365,12 +368,12 @@ function bind(root: HTMLElement): void {
   });
   root.addEventListener('change', (e) => {
     const t = e.target as HTMLInputElement;
-    if (queryChange(t) || scriptInput(t) || analyzeChange(t) || dashInput(t)) return;
+    if (noteInput(t, true) || queryChange(t) || scriptInput(t) || analyzeChange(t) || dashInput(t)) return;
     catalogChange(t);
   });
   root.addEventListener('input', (e) => {
     const t = e.target as HTMLInputElement;
-    if (scriptInput(t) || t.dataset['text'] && dashInput(t)) return;
+    if (noteInput(t, false) || scriptInput(t) || t.dataset['text'] && dashInput(t)) return;
     if (t.id === 'an-tfind') {
       A.filter = t.value.toLowerCase();
       renderTree();
@@ -387,6 +390,7 @@ function bind(root: HTMLElement): void {
   document.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.key !== 'Enter' || A.ws !== 'query' || document.documentElement.dataset['screen'] !== 'analysis') return;
     if (document.querySelector('.ui-dlg-wrap')) return;               // a dialog's own Enter
+    if (e.target instanceof Element && e.target.closest('.an-note')) return;   // Ctrl+Enter ends a note's text
     e.preventDefault();
     e.stopPropagation();
     void runQuery().catch((err: unknown) => toast(errText(err), 'err'));

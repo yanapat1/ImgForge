@@ -267,3 +267,102 @@ register(Tool('build_dashboard', 'Page action: add charts from the last result t
                   'title': S('title'), 'x': S('column'), 'y': S('column'),
                   'agg': E('how', ['sum', 'avg', 'count', 'min', 'max'])}, 'required': ['kind', 'title']}}}, ['charts']),
               False, _ui_run, lambda b, a: f'Add {len(a.get("charts") or [])} charts', check=_ui_ok, **_U))
+
+
+# ---------------------------------------------------------------- the visual builder's board: zones, text, sticky notes
+BOARD_W, BOARD_H, BOARD_OPS = 2400, 1600, 60
+NOTE_SHAPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'hexagon', 'callout', 'none']
+NOTE_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow']
+_NOTE_ENUMS = {'shape': NOTE_SHAPES, 'layer': ['back', 'front'], 'border': ['solid', 'dashed', 'none'],
+               'ha': ['left', 'center', 'right'], 'va': ['top', 'middle', 'bottom']}
+_NOTE_NUM = {'x': (0, BOARD_W), 'y': (0, BOARD_H), 'w': (40, BOARD_W), 'h': (24, BOARD_H), 'alpha': (0, 1), 'size': (11, 48)}
+
+
+def _note_fields(i, note):
+    import re
+    if not isinstance(note, dict):
+        raise ToolError(f'ops[{i}].note must be an object')
+    out = {}
+    for k, v in note.items():
+        if k in _NOTE_ENUMS:
+            if v not in _NOTE_ENUMS[k]:
+                raise ToolError(f'ops[{i}].note.{k} must be one of {", ".join(_NOTE_ENUMS[k])}')
+            out[k] = v
+        elif k in _NOTE_NUM:
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                raise ToolError(f'ops[{i}].note.{k} must be a number') from None
+            lo, hi = _NOTE_NUM[k]
+            out[k] = round(min(hi, max(lo, f)), 3 if k == 'alpha' else 0)
+        elif k == 'fill':
+            v = str(v or '').strip().lower()
+            if v and v not in NOTE_COLORS and not re.fullmatch(r'#[0-9a-f]{6}', v):
+                raise ToolError(f'ops[{i}].note.fill: one of {", ".join(NOTE_COLORS)}, #rrggbb, or "" for none')
+            out[k] = v
+        elif k == 'text':
+            out[k] = str(v)[:2000]
+        elif k in ('bold', 'carry'):
+            out[k] = bool(v)
+        else:
+            raise ToolError(f'ops[{i}].note.{k}: not a note field (locking is the user\'s)')
+    return out
+
+
+def _board_check(ctx, a):
+    """Before the page applies edit_board: every op well-formed, sizes inside the board (the page checks locks)."""
+    ops = a.get('ops')
+    if not isinstance(ops, list) or not ops:
+        raise ToolError('ops: give 1 to 60 operations')
+    if len(ops) > BOARD_OPS:
+        raise ToolError(f'at most {BOARD_OPS} operations in one edit_board')
+    out = []
+    for i, o in enumerate(ops):
+        if not isinstance(o, dict) or o.get('op') not in ('add', 'update', 'remove'):
+            raise ToolError(f'ops[{i}].op must be add, update or remove')
+        if o['op'] != 'add' and not o.get('id'):
+            raise ToolError(f'ops[{i}]: {o["op"]} needs the note id (read_board lists them)')
+        x = {'op': o['op']}
+        if o.get('id'):
+            x['id'] = str(o['id'])[:64]
+        if o['op'] != 'remove':
+            x['note'] = _note_fields(i, o.get('note') or {})
+        out.append(x)
+    return {**a, 'ops': out}, None
+
+
+def _read_board(ctx, a):
+    b = (ctx.scope or {}).get('board')
+    if not b:
+        return {'board': None, 'note': 'The builder is closed or its board is empty: open Query with the Builder pane.'}, '→ no board'
+    return b, f'→ {len(b.get("tables") or [])} tables, {len(b.get("notes") or [])} notes'
+
+
+_NOTE_PROPS = {
+    'shape': E('rect, round (rounded), pill, ellipse, diamond, hexagon, callout (speech bubble), none (text only)', NOTE_SHAPES),
+    'layer': E('back = a zone behind the tables, front = above them (text, sticky notes)', ['back', 'front']),
+    'x': {'type': 'number', 'description': 'left, board px (0..2400)'}, 'y': {'type': 'number', 'description': 'top, board px (0..1600)'},
+    'w': {'type': 'number', 'description': 'width px (≥ 40)'}, 'h': {'type': 'number', 'description': 'height px (≥ 24)'},
+    'fill': S(f'one of {", ".join(NOTE_COLORS)}, #rrggbb, or "" for none'),
+    'alpha': {'type': 'number', 'description': 'fill opacity 0..1: zones about 0.14, sticky notes 1'},
+    'border': E('outline', ['solid', 'dashed', 'none']), 'text': S('plain text, new lines kept'),
+    'size': {'type': 'number', 'description': 'font px 11..48'}, 'bold': {'type': 'boolean', 'description': 'bold text'},
+    'ha': E('text across', ['left', 'center', 'right']), 'va': E('text up and down', ['top', 'middle', 'bottom']),
+    'carry': {'type': 'boolean', 'description': 'zones: dragging the zone moves the tables inside it'},
+}
+register(Tool('read_board', 'The visual builder\'s board: each table card (id, name, x, y, w, h), the joins (with 1:N / N:M '
+                            'when known) and the notes (zones, text, sticky notes) with their ids. Read it before edit_board.',
+              _obj({}), False, _read_board, **_R))
+register(Tool('edit_board', 'Page action: add, change or remove zones, text and sticky notes on the visual builder board, to '
+                            'group and explain tables. A zone is layer back with a light fill around its tables (leave 28 px '
+                            'above them for its title); text is shape none; a sticky note is round, yellow, alpha 1, front. '
+                            'Never moves or deletes a locked note; never removes the user\'s notes unless they asked. It does '
+                            'not change the SQL. One undo step (Ctrl+Z).',
+              _obj({'ops': {'type': 'array', 'description': 'the edits, in order (at most 60)', 'items': {
+                  'type': 'object', 'properties': {'op': E('what to do', ['add', 'update', 'remove']),
+                                                   'id': S('the note id (update, remove; optional on add)'),
+                                                   'note': {'type': 'object', 'description': 'the fields to set', 'properties': _NOTE_PROPS,
+                                                            'additionalProperties': False}},
+                  'required': ['op'], 'additionalProperties': False}},
+                    'note': S('one line: what this edit does to the board')}, ['ops']), False, _ui_run,
+              lambda b, a: a.get('note') or f'Edit the board ({len(a.get("ops") or [])} changes)', check=_board_check, **_U))

@@ -167,3 +167,29 @@ def test_set_editor_query_is_a_ui_proposal_with_its_note(prefs):
     assert t.preview(None, {'sql': 'x', 'mode': 'new_tab'}) == 'Open this query in a new tab'
     names = tools.for_role(roles.get('analysis').domains, 'plan')
     assert 'read_editor' in names and 'check_sql' in names and 'set_editor_query' not in names
+
+
+def test_edit_board_checks_its_ops_before_the_page_sees_them():
+    import pytest
+    from dataviz.llm.tools import ToolError
+    from dataviz.llm.tools import analysis as an
+    ok, _ = an._board_check(None, {'ops': [
+        {'op': 'add', 'note': {'shape': 'rect', 'layer': 'back', 'x': -50, 'y': 10, 'w': 9000, 'h': 300, 'fill': 'BLUE', 'alpha': 3, 'text': 'Sales'}},
+        {'op': 'remove', 'id': 'n1'}]})
+    note = ok['ops'][0]['note']
+    assert note['x'] == 0 and note['w'] == 2400 and note['alpha'] == 1 and note['fill'] == 'blue'      # clamped to the board
+    assert ok['ops'][1] == {'op': 'remove', 'id': 'n1'}
+    for bad in ({'ops': []}, {'ops': [{'op': 'move'}]}, {'ops': [{'op': 'update', 'note': {}}]},
+                {'ops': [{'op': 'add', 'note': {'shape': 'star'}}]}, {'ops': [{'op': 'add', 'note': {'fill': 'pink'}}]},
+                {'ops': [{'op': 'add', 'note': {'locked': True}}]}, {'ops': [{'op': 'remove', 'id': 'x'}] * 61}):
+        with pytest.raises(ToolError):
+            an._board_check(None, bad)
+
+
+def test_the_board_is_named_in_the_scope_only_when_it_has_something():
+    from dataviz.llm.tools import analysis as an
+    ctx = type('C', (), {'scope': {'board': {'tables': [{'id': 'o'}], 'notes': []}}})()
+    got, line = an._read_board(ctx, {})
+    assert got['tables'] == [{'id': 'o'}] and '1 tables' in line
+    got, line = an._read_board(type('C', (), {'scope': {}})(), {})
+    assert got['board'] is None and 'no board' in line
