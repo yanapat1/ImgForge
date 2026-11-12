@@ -365,6 +365,45 @@ def test_workspaces(server, target):  # noqa: F811
     assert not errors, errors
 
 
+def test_catalog_tab_and_enter_move_to_the_next_description(server, target):  # noqa: F811
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        page.click('.an-rail [data-k="catalog"]')
+        page.click('.an-tn:has-text("public.orders")', timeout=20000)
+        page.wait_for_selector('.an-desc[data-col="id"]', timeout=20000)
+        page.click('.an-desc[data-col="id"]')
+        page.keyboard.type('Order number')
+        page.keyboard.press('Tab')                        # saves id, the focus stays on the next box after the save
+        page.keyboard.type('Amount')
+        page.wait_for_function("document.getElementById('an-catstat').textContent.includes('id')", timeout=10000)
+        assert page.evaluate('document.activeElement.dataset.col') == 'total'
+        page.keyboard.press('Enter')                      # Enter: next one too
+        page.wait_for_function("document.getElementById('an-catstat').textContent.includes('total')", timeout=10000)
+        assert page.evaluate('document.activeElement.dataset.col') == 'note'
+        page.keyboard.press('Shift+Enter')
+        assert page.evaluate('document.activeElement.dataset.col') == 'total'
+        page.keyboard.press('Control+Enter')              # the next empty description
+        assert page.evaluate('document.activeElement.dataset.col') == 'note'
+        assert page.locator('.an-desc[data-col="id"]').input_value() == 'Order number'
+        page.reload()
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.click('.an-rail [data-k="catalog"]')
+        page.click('.an-tn:has-text("sales")')
+        page.click(f'.an-tn:has-text("{target["db"]}")')
+        page.click('.an-tn:has-text("public.orders")', timeout=20000)
+        page.wait_for_selector('.an-desc[data-col="total"]', timeout=20000)
+        assert page.locator('.an-desc[data-col="total"]').input_value() == 'Amount'
+        browser.close()
+    assert not errors, errors
+
+
 def test_plain_http_without_random_uuid(server, target):  # noqa: F811
     """A server opened over plain http at its address is not a secure context: the browser has no crypto.randomUUID.
     The page must still start and make new query tabs, scripts and dashboards (core/uuid.ts)."""

@@ -12,7 +12,7 @@ import { mountUserMenu } from '../views/usermenu.js';
 import { appHeader } from '../core/header.js';
 import { A_ACTIONS, analyzeChange, renderAnalyze } from './analyze.js';
 import { mountDock } from './dock.js';
-import { catalogChange, openCatalog, renderCatalog } from './catalog.js';
+import { catalogChange, catalogKey, openCatalog, renderCatalog } from './catalog.js';
 import { D_ACTIONS, dashDrag, dashDrop, dashInput, renderDash } from './dash.js';
 import { renderScripts, S_ACTIONS, scriptInput } from './scripts.js';
 import { addTable, builderContext, builderDown, builderKey, builderMove, builderUp, builderWheel, renderBuilder } from './builder.js';
@@ -379,6 +379,7 @@ function bind(root: HTMLElement): void {
     saveLayout();
   });
   document.addEventListener('keydown', (e) => {
+    if (A.ws === 'catalog' && catalogKey(e)) return;
     if (e.key === 'Escape' && A.layout.max) { A.layout.max = ''; applyLayout(); return; }
     if (A.ws === 'query' && builderKey(e)) return;
     if (e.altKey && /^[1-9]$/.test(e.key)) { const w = WS[Number(e.key) - 1]; if (w) { e.preventDefault(); A.ws = w[0]; render(); } }
