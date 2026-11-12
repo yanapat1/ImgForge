@@ -2,8 +2,9 @@
 // Markup is rebuilt per change, listeners are one delegated set on the root. Query lives in query.ts.
 
 import { uuid } from '../core/uuid.js';
-import { errText } from '../core/api.js';
-import { zoneOn } from '../core/auth.js';
+import { errText, isStatus } from '../core/api.js';
+import { isAdmin, zoneOn } from '../core/auth.js';
+import { openDialog } from '../views/dialog.js';
 import { $req, esc, icon } from '../core/dom.js';
 import { setTheme, THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
@@ -73,7 +74,7 @@ function renderTree(): void {
   if (!A.sources.length) h = `<p class="an-empty empty">No database connection yet. Add a PostgreSQL, SQL Server or MongoDB connection in Settings.</p><button type="button" class="sm" data-act="settings-conn">Add connection</button>`;
   for (const s of A.sources) {
     const k = `c|${s.id}`;
-    h += row(k, `${chip(s.kind)}<span class="lbl"><b>${esc(s.name)}</b></span>`, 4);
+    h += row(k, `${chip(s.kind)}<span class="lbl"><b>${esc(s.name)}</b></span>${s.example ? '<span class="pill faint an-ex" title="An example database to practise on: query it, change it, drop it">example</span>' : ''}`, 4);
     if (!A.open.has(k)) continue;
     const dbs = A.dbs.get(s.id);
     if (!dbs) { h += `<div class="an-tload">Loading…</div>`; continue; }
@@ -131,10 +132,39 @@ async function toggle(k: string): Promise<void> {
     }
   } catch (e) {
     A.open.delete(k);
-    toast(errText(e), 'err');
+    if (isStatus(e, 410)) void sampleGone(conn); else toast(errText(e), 'err');
   }
   renderTree();
 }
+
+/** The sample database was dropped: an admin can make it again here; anyone can remove the connection in Settings. */
+async function sampleGone(conn: string): Promise<void> {
+  const admin = isAdmin();
+  const ok = await openDialog({
+    title: 'The sample database was removed', ok: admin ? 'Restore sample database' : 'OK', onOk: () => null,
+    body: `<p>Someone dropped <code>sample_shop</code>. ${admin ? 'Restore it to get back the first day\'s tables and rows (it is shared by everyone on this server).' : 'An admin can restore it.'}</p><p class="faint">Not needed any more? Remove the connection in Settings › Connections.</p>`,
+  });
+  if (!ok || !admin) return;
+  try {
+    await api.restoreSample();
+    A.dbs.delete(conn);
+    [...A.tables.keys()].filter((x) => x.startsWith(`${conn}|`)).forEach((x) => A.tables.delete(x));
+    toast('The sample database is back');
+    await toggle(`c|${conn}`);
+  } catch (e) { toast(errText(e), 'err'); }
+}
+
+/** The first tab of a user's first session: on the example database, with a query to run. */
+const WELCOME_SQL = `-- Welcome! sample_shop is an example database you can query, change and delete.
+-- Ctrl+Enter runs the query. Drag tables from Objects into the Visual builder.
+SELECT o.id, c.name, o.ordered_at, o.status, o.total
+FROM orders o JOIN customers c ON c.id = o.customer_id
+ORDER BY o.ordered_at DESC;
+
+-- Remove one table:      DROP TABLE order_items;
+-- Remove the whole database (pick database "postgres" above first):
+--   DROP DATABASE sample_shop WITH (FORCE);
+`;
 
 async function openTable(el: HTMLElement): Promise<void> {
   const { conn = '', db = '', schema = '', name = '', pre = 't' } = el.dataset;
@@ -434,11 +464,14 @@ export async function start(): Promise<void> {
   loadFavs();
   void loadAiAccess().then(() => { if (document.getElementById('an-explorer')) renderTree(); });     // the ✎ / ⚙ marks
   const wanted = new URLSearchParams(location.search).get('analysis');
+  const first = !sessions.length;
   const s = sessions.find((x) => x.id === wanted) ?? sessions[0] ?? await api.newSession('My analysis');
   A.sid = s.id;
   A.name = s.name;
   const st = s.state as { tabs?: Partial<Tab>[]; active?: number };
   A.tabs = (st.tabs ?? []).map((t) => ({ ...newTab(t.name ?? 'Query', t.sql ?? '', t.conn ?? null, t.db ?? null), id: t.id ?? uuid(), model: t.model ?? null, typed: t.typed ?? !!t.sql }));
+  const ex = A.sources.find((x) => x.example);
+  if (!A.tabs.length && first && ex) A.tabs = [newTab('Welcome', WELCOME_SQL, ex.id, ex.database || null)];
   if (!A.tabs.length) A.tabs = [newTab('query 1', '', A.sources[0]?.id ?? null, A.sources[0]?.database || null)];
   A.active = Math.min(st.active ?? 0, A.tabs.length - 1);
   A.aiRows = !!(s.state as { ai_rows?: boolean }).ai_rows;

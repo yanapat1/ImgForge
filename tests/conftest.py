@@ -18,6 +18,10 @@ from pathlib import Path
 # every index build spawns hardware.workers('proc') decode processes (16 on 128 cores): 32 workers x 16 = 560 pythons
 # and the 64 GiB container was OOM-killed. Each worker is pinned to its own slice of the cores instead (sched_setaffinity
 # is what hardware._cpu_count reads, and children -- decode pools, app.py -- inherit it), with BLAS threads to match.
+# The example database (analysis/sample.py) lives on the shared test server: an app started by a test (app.py in a
+# subprocess inherits this) does not make it; tests/analysis/test_sample.py makes its own under a name of its own.
+os.environ.setdefault('DATAVIZ_SAMPLE_DB', '0')
+
 # Set before anything imports numpy. A serial run is left as it is.
 if os.environ.get('PYTEST_XDIST_WORKER_COUNT'):
     _cores = sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else list(range(os.cpu_count() or 2))

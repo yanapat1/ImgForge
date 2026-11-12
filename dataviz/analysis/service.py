@@ -30,7 +30,7 @@ from .. import db
 from ..auth import audit, tiers
 from . import aiaccess, favorites
 from ..core import logging as vlog
-from . import adapters, classify, joins, querymodel, spool
+from . import adapters, classify, joins, querymodel, sample, spool
 from . import forecast as forecast_mod
 from . import stats as stats_mod
 
@@ -202,12 +202,25 @@ def temps(user, sid):
 # ---------------------------------------------------------------- what can be queried
 def sources(user):
     _use(user)
+    _sample_connection(user)
     out = []
     for c in _Conf.ctx.datasets.connections(user['id']):
         if c.get('kind') in KINDS:
             out.append({'id': c['id'], 'name': c.get('name') or c.get('host'), 'kind': c['kind'], 'host': c.get('host'),
-                        'database': c.get('database') or ''})
+                        'database': c.get('database') or '', **({'example': True} if sample.is_sample(c) else {})})
     return out
+
+
+def _sample_connection(user):
+    """The first visit gives the user the sample database's connection (analysis/sample.py), once."""
+    prefs = user_prefs(user)
+    if prefs.get(sample.PREF):
+        return
+    try:
+        from ..server.routes.me import _put_prefs
+        sample.ensure_connection(user, _Conf.ctx.datasets, prefs, _put_prefs)
+    except Exception:  # noqa: BLE001 - the page works without the sample
+        _log.exception('could not add the sample connection')
 
 
 def tree(user, cid, database=None, refresh=False):
@@ -228,6 +241,8 @@ def tree(user, cid, database=None, refresh=False):
     except AnalysisError:
         raise
     except Exception as e:  # noqa: BLE001 - a database's own error: say what it said
+        if sample.is_sample(conn) and 'does not exist' in str(e):
+            raise AnalysisError(SAMPLE_GONE, 410) from None
         raise AnalysisError(_clean(e, conn)) from None
     finally:
         if a is not None:
@@ -235,6 +250,25 @@ def tree(user, cid, database=None, refresh=False):
     with _lock:
         _tree_cache[key] = (time.time(), value)
     return value
+
+
+SAMPLE_GONE = (f'The sample database {sample.DB} was removed. An admin can restore it (Restore sample database), '
+               'or remove this connection in Settings › Connections.')
+
+
+def restore_sample(user):
+    """An admin makes the sample database again, as on the first day (its rows and descriptions)."""
+    _use(user)
+    if not user.get('is_admin'):
+        raise AnalysisError('only an admin can restore the sample database', 403)
+    url = str(((_Conf.ctx.cfg or {}).get('database') or {}).get('url') or '')
+    if not url or url.startswith('${'):
+        raise AnalysisError('no database URL is configured', 500)
+    if not sample.reset_sample(url, _log.info):
+        raise AnalysisError(sample.state().get('reason') or 'the sample database could not be made', 409)
+    with _lock:
+        _tree_cache.clear()
+    return {'ok': True, 'database': sample.DB}
 
 
 def describe(user, cid, database, schema, table):

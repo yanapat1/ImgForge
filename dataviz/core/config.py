@@ -93,6 +93,7 @@ DEFAULTS = {
         'ai_cell_chars': 80,                # one cell
         'ai_result_chars': 4000,            # one tool result, whatever is in it
         'ai_table_columns': 200,            # columns of one describe_table page
+        'sample_database': True,            # the first start makes the example database sample_shop (analysis/sample.py)
     },
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root

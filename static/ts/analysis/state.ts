@@ -4,7 +4,7 @@
 import { uuid } from '../core/uuid.js';
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
 
-export interface Source { id: string; name: string; kind: 'postgres' | 'mssql' | 'mongo'; host: string; database: string }
+export interface Source { id: string; name: string; kind: 'postgres' | 'mssql' | 'mongo'; host: string; database: string; example?: boolean }
 export interface TableRef { schema: string; name: string; kind: string }
 export interface Column { name: string; type: string; nullable: boolean; key: string; description: string; from?: string; present?: number }
 export interface TableInfo {
@@ -125,6 +125,7 @@ export const newTab = (name: string, sql = '', conn: string | null = null, db: s
 export const api = {
   sources: () => getJSON<{ sources: Source[] }>(`${P}/sources`),
   sessions: () => getJSON<{ sessions: { id: string; name: string; state: { tabs?: Partial<Tab>[]; active?: number } }[] }>(`${P}/sessions`),
+  restoreSample: () => postJSON<{ ok: boolean; database: string }>(`${P}/sample/restore`, {}),
   newSession: (name: string) => postJSON<{ id: string; name: string; state: Record<string, unknown> }>(`${P}/sessions`, { name }),
   saveSession: (state: unknown) => sendJSON('PATCH', `${P}/sessions/${A.sid}`, { state }),
   heartbeat: () => postJSON<{ temps: TempTable[] }>(`${P}/sessions/${A.sid}/heartbeat`, {}),

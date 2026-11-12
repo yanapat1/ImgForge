@@ -212,6 +212,11 @@ def start_database(cfg, ws_root):
     except RuntimeError as e:
         sys.exit(f'\n{e}')
     bootstrap.ensure_defaults()
+    an_cfg = cfg.get('data_analysis') or {}
+    if zones.on('analysis', cfg) and an_cfg.get('sample_database', True) and os.environ.get('DATAVIZ_SAMPLE_DB', '1') != '0':
+        # the example database, once (analysis/sample.py), off the start path; DATAVIZ_SAMPLE_DB=0 skips it
+        from .analysis import sample
+        sample.ensure_soon(url, vlog.get_logger('analysis').info)
     admin, password = bootstrap.ensure_first_admin(log=dlog.info)
     try:
         bootstrap.sync_env_admin(log=dlog.info)

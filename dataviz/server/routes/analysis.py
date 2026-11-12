@@ -59,6 +59,10 @@ def router(state, ctx):
         _call(service.close_session, user, sid)
         return {'ok': True}
 
+    @r.post('/sample/restore')
+    def sample_restore(user=me):
+        return _call(service.restore_sample, user)
+
     @r.get('/tree')
     def tree(connection: str, database: str | None = None, refresh: int = 0, user=me):
         return _call(service.tree, user, connection, database, bool(refresh))
