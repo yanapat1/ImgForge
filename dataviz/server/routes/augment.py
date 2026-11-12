@@ -7,7 +7,8 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     PUT  /api/augment/recipes          {recipes: [{name, recipe}]} (at most 50)
     POST /api/augment/preview          {recipe, pick: random | per_class | names, names?, sids?, n_images, variants, seed, size}
                                        -> {items: [{name, w, h, orig, variants: [{img, boxes, dropped, applied}]}], classes}
-    POST /api/augment/one              {recipe, name, seed, variant} -> image/jpeg at full size (the lightbox)
+    POST /api/augment/one              {recipe, name, seed, variant} -> image/jpeg at full size; with json: true and size
+                                       -> {w, h, orig: {img, boxes}, img, iw, ih, boxes, dropped, applied} (the compare viewer)
     POST /api/augment/export           {recipe, format: albumentations | python | yaml} -> the text
     POST /api/augment/boxes            {recipe, m, k, seed, min_px, train_size} -> {ready, result} | {ready: false, job_id, key}
     GET  /api/augment/boxes/result     ?key= -> the box check (lost / tiny / at the edge, per class and per step)
@@ -86,6 +87,11 @@ def _jpeg(arr, quality=85):
 
 def _data_url(arr):
     return 'data:image/jpeg;base64,' + base64.b64encode(_jpeg(arr)).decode()
+
+
+def _bx(boxes):
+    """Boxes [(cls, x1, y1, x2, y2)] as JSON rows, pixels rounded to 0.1."""
+    return [[int(c), round(a, 1), round(b, 1), round(x, 1), round(y, 1)] for c, a, b, x, y in boxes]
 
 
 def pick_images(st, mode, n, seed, names=None, sids=None):
@@ -222,10 +228,10 @@ def router(state, ctx):
             for j in range(k):
                 im, bx, dropped, applied = ag.apply(rgb, boxes, recipe, seed * 1000 + ii * 10 + j, compose=compose)
                 variants.append({'img': _data_url(im), 'w': int(im.shape[1]), 'h': int(im.shape[0]),
-                                 'boxes': [[c, round(a, 1), round(b, 1), round(x, 1), round(y, 1)] for c, a, b, x, y in bx],
+                                 'boxes': _bx(bx),
                                  'dropped': dropped, 'applied': applied})
             items.append({'name': name, 'w': w, 'h': h, 'w0': w0, 'h0': h0,
-                          'orig': {'img': _data_url(rgb), 'boxes': [[int(c), round(a, 1), round(b, 1), round(x, 1), round(y, 1)] for c, a, b, x, y in boxes]},
+                          'orig': {'img': _data_url(rgb), 'boxes': _bx(boxes)},
                           'variants': variants})
         return {'items': items, 'classes': list(st.classes), 'recipe': recipe}
 
@@ -238,8 +244,14 @@ def router(state, ctx):
         if name not in st.by_image:
             raise HTTPException(404, f'no image {name!r} in this session')
         recipe = _recipe(body)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        if body.get('json'):                          # the compare viewer: both sides with their boxes, at one size
+            rgb, boxes, _, _ = load_small(st, name, _clamp(body.get('size'), 256, 2048, 1600))
+            im, bx, dropped, applied = ag.apply(rgb, boxes, recipe, seed)
+            return {'w': int(rgb.shape[1]), 'h': int(rgb.shape[0]), 'orig': {'img': _data_url(rgb), 'boxes': _bx(boxes)},
+                    'img': _data_url(im), 'iw': int(im.shape[1]), 'ih': int(im.shape[0]), 'boxes': _bx(bx), 'dropped': dropped, 'applied': applied}
         rgb, boxes, _, _ = load_small(st, name, 2048)
-        im, _, _, _ = ag.apply(rgb, boxes, recipe, _clamp(body.get('seed'), 0, 2**31 - 1, 0))
+        im, _, _, _ = ag.apply(rgb, boxes, recipe, seed)
         return Response(_jpeg(im, 90), media_type='image/jpeg', headers={'Cache-Control': 'private, max-age=300'})
 
     @r.post('/api/augment/boxes')

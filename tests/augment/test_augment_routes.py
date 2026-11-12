@@ -41,6 +41,9 @@ def test_catalog_preview_and_errors(world):
     assert c.post(f'/s/{sid}/api/augment/preview', json={'recipe': {'steps': [{'t': 'Nope'}]}}).status_code == 400
     one = c.post(f'/s/{sid}/api/augment/one', json={'recipe': flip, 'name': 'a.jpg', 'seed': 2})
     assert one.status_code == 200 and one.headers['content-type'] == 'image/jpeg'
+    j = c.post(f'/s/{sid}/api/augment/one', json={'recipe': flip, 'name': 'a.jpg', 'seed': 2, 'json': True, 'size': 300}).json()
+    assert j['orig']['img'].startswith('data:image/jpeg') and j['img'].startswith('data:image/jpeg')
+    assert max(j['w'], j['h']) <= 300 and isinstance(j['boxes'], list) and len(j['orig']['boxes']) >= len(j['boxes'])
     assert c.post(f'/s/{sid}/api/augment/one', json={'recipe': flip, 'name': 'zzz.jpg'}).status_code == 404
 
 

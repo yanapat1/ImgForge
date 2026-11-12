@@ -797,14 +797,37 @@ def test_augment_tab_previews_a_recipe(server, tmp_path):
         page.wait_for_function("[...document.querySelectorAll('.ag-cell:not(.orig) figcaption')].every(f => f.textContent.includes('Motion blur'))", timeout=20000)
         assert page.locator('.ag-cell.aug .ag-tag').count() > 0 and page.locator('.ag-cell.orig .ag-tag.orig').count() > 0   # augmented ones stand out
         page.locator('.ag-cell:not(.orig)').first.click()
-        page.wait_for_selector('.ag-wipe img.top')
+        # the compare viewer: large, in the page (no new tab); a drag on the image moves the wipe line
+        page.wait_for_selector('.ag-wipe .ag-ly.top img')
+        assert page.locator('.ui-dlg:has(.ag-lb)').bounding_box()['width'] > 900
+        page.wait_for_function("!document.querySelector('.ag-wipe.loading')", timeout=20000)   # the sharp version swapped in
+        wb = page.locator('.ag-wipe').bounding_box()
+        page.mouse.move(wb['x'] + wb['width'] * .8, wb['y'] + wb['height'] / 2)
+        page.mouse.down()
+        page.mouse.move(wb['x'] + wb['width'] * .2, wb['y'] + wb['height'] / 2, steps=5)
+        page.mouse.up()
+        page.wait_for_timeout(50)
+        assert abs(float(page.locator('.ag-wipe').evaluate("e => e.style.getPropertyValue('--wipe')").rstrip('%')) - 20) < 3
         page.keyboard.press('Escape')
+        assert len(page.context.pages) == 1
         # Boxes: the box check runs as a job and reports kept / lost per step and class
         page.click('[data-ag-act="view"][data-k="boxes"]')
+        # a big shift pushes boxes out of the frame, so some examples lose boxes
+        page.fill('#aug-body [data-ag="hi"][data-k="translate_percent"]', '0.3')
+        page.locator('#aug-body [data-ag="hi"][data-k="translate_percent"]').dispatch_event('change')
+        page.fill('#aug-body [data-ag="lo"][data-k="translate_percent"]', '0.28')
+        page.locator('#aug-body [data-ag="lo"][data-k="translate_percent"]').dispatch_event('change')
         page.click('[data-agc-act="box-run"]')
         page.wait_for_selector('#ag-main .ag-cards', timeout=30000)
         assert 'Boxes kept' in page.locator('#ag-main .ag-cards').inner_text()
         assert page.locator('#ag-main .ag-tbl tbody tr').count() == 2           # cat, dog
+        # an example that lost boxes opens in the same viewer, in the page
+        page.wait_for_selector('#ag-main .ag-strip figure img', timeout=20000)
+        page.locator('#ag-main .ag-strip figure').first.click()
+        page.wait_for_selector('.ag-wipe .ag-ly.top img')
+        page.wait_for_function("!document.querySelector('.ag-wipe.loading')", timeout=20000)
+        assert 'Lost' in page.locator('.ag-lbi').inner_text() and len(page.context.pages) == 1
+        page.keyboard.press('Escape')
         # Coverage: upload "new camera" images, run, read the verdict and the map
         night = []
         for k in range(6):

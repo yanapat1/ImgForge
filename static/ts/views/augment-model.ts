@@ -3,7 +3,7 @@
 // worth training with; one it already handles adds little.
 
 import { errText, getJSON, postJSON } from '../core/api.js';
-import { $, esc } from '../core/dom.js';
+import { $, esc, morph } from '../core/dom.js';
 import { waitJob } from '../core/jobs.js';
 import type { Job } from '../types.js';
 import type { ModelsPayload } from '../types-views.js';
@@ -42,7 +42,9 @@ function paint(): void {
   const host = $('ag-main');
   if (!host || AG.view !== 'model') return;
   if (!M.loaded) { host.innerHTML = '<div class="empty">Loading…</div>'; void load().then(paint); return; }
-  host.innerHTML = html();
+  const next = host.cloneNode(false) as HTMLElement;
+  next.innerHTML = html();
+  morph(host, next);                // in place: a click on Test the model half-way survives a recipe edit
 }
 
 async function run(): Promise<void> {

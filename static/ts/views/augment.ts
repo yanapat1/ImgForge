@@ -13,6 +13,7 @@ import { toast } from '../core/toast.js';
 import { initAugCheck } from './augment-check.js';
 import { initAugCover } from './augment-cover.js';
 import { initAugModel } from './augment-model.js';
+import { compareView, ranText, sidesOf, type OneJSON } from './augment-view.js';
 import { openDialog } from './dialog.js';
 
 export interface AugArg { k: string; kind: 'range' | 'float' | 'int' | 'choice'; min?: number; max?: number; step?: number; default: unknown; choices?: string[]; label: string; int?: boolean }
@@ -365,27 +366,15 @@ function drawBoxes(f: HTMLElement): void {
   }
 }
 
-/** The big view: a variant beside its original, a wipe between them, Space held = flicker to the original. */
+/** The big view (augment-view.ts): the variant over its original with a drag wipe; a sharp version loads in place. */
 async function lightbox(r: number, v: number): Promise<void> {
   const it = AG.items[r], x = it?.variants[v];
   if (!it || !x) return;
-  const body = `<div class="ag-lb"><div class="ag-wipe" style="--wipe:50%"><img alt="Original" src="${it.orig.img}"><img alt="Augmented" class="top" src="${x.img}"></div>` +
-    `<input type="range" min="0" max="100" value="50" aria-label="Wipe between the original and the augmented image" id="ag-wipe">` +
-    `<p class="faint">Left: original · right: augmented. Hold <kbd>Space</kbd> to see the original. Ran: ${esc(x.applied.join(', ') || 'nothing')}. <a href="#" id="ag-full">Full size</a></p></div>`;
-  await openDialog({
-    title: it.name, ok: 'Close', wide: true, body, onOk: () => null,
-    bind: (root) => {
-      const wipe = root.querySelector<HTMLElement>('.ag-wipe'), top = root.querySelector<HTMLElement>('.ag-wipe .top');
-      root.querySelector<HTMLInputElement>('#ag-wipe')?.addEventListener('input', (e) => wipe?.style.setProperty('--wipe', `${(e.target as HTMLInputElement).value}%`));
-      const key = (on: boolean) => (e: KeyboardEvent): void => { if (e.code === 'Space') { e.preventDefault(); top?.classList.toggle('hide', on); } };
-      root.addEventListener('keydown', key(true));
-      root.addEventListener('keyup', key(false));
-      root.querySelector('#ag-full')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        void api('api/augment/one', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipe: previewRecipe(), name: it.name, seed: AG.seed * 1000 + r * 10 + v }) })
-          .then((res) => res.blob()).then((b) => { window.open(URL.createObjectURL(b), '_blank', 'noopener'); }).catch((err: unknown) => toast(errText(err), 'err'));
-      });
-    },
+  const seed = AG.seed * 1000 + r * 10 + v, recipe = previewRecipe();
+  await compareView({
+    title: it.name, boxes: AG.boxes, info: ranText(x.applied, augName),
+    orig: { img: it.orig.img, w: it.w, h: it.h, boxes: it.orig.boxes }, aug: { img: x.img, w: x.w, h: x.h, boxes: x.boxes },
+    load: async () => sidesOf(await postJSON<OneJSON>('api/augment/one', { recipe, name: it.name, seed, json: true, size: 1600 })),
   });
 }
 

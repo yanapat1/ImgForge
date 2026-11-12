@@ -2,12 +2,12 @@
 // per step) and Coverage (augment-cover.ts adds it). Each runs as a server job (routes/augment.py) and is cached by
 // the recipe, so switching back and forth costs nothing.
 
-import { api, errText, getJSON, postJSON } from '../core/api.js';
-import { $, esc } from '../core/dom.js';
+import { errText, getJSON, postJSON } from '../core/api.js';
+import { $, esc, morph } from '../core/dom.js';
 import { waitJob } from '../core/jobs.js';
 import type { Job } from '../types.js';
-import { toast } from '../core/toast.js';
 import { AG, AUG_HOOKS, augName } from './augment.js';
+import { compareView, ranText, sidesOf, type OneJSON, type Side } from './augment-view.js';
 
 interface BoxRow { cls: number; name: string; in: number; kept: number; lost: number; tiny: number; edge: number; lost_pct: number; tiny_pct: number }
 interface StepRow { t: string; label: string; variants: number; in: number; lost: number; tiny: number; lost_pct: number; tiny_pct: number }
@@ -41,23 +41,45 @@ function boxesHTML(): string {
       `<div class="ag-barrow" title="${esc(`${t.variants} variants · ${t.lost} lost · ${t.tiny} too small`)}"><span>${esc(t.label)}</span>${bar(t.lost_pct + t.tiny_pct, t.lost_pct >= 5 || t.tiny_pct >= 10)}<span class="num">${t.lost_pct}% · ${t.tiny_pct}%</span></div>`).join('') || '<p class="faint">No step ran.</p>'}</div>` +
     `<h4 class="ag-sec">By class</h4><table class="list-table ag-tbl"><thead><tr><th>Class</th><th>Boxes</th><th>Lost</th><th>Too small</th><th>At the edge</th></tr></thead><tbody>${r.classes.map((c) =>
       `<tr><td>${esc(c.name)}</td><td class="num">${c.in.toLocaleString()}</td><td class="num${c.lost_pct >= 10 ? ' down' : ''}">${c.lost_pct}%</td><td class="num">${c.tiny_pct}%</td><td class="num">${c.edge}</td></tr>`).join('')}</tbody></table>` +
-    (r.examples.length ? `<h4 class="ag-sec">Examples that lost boxes</h4><div class="ag-strip">${r.examples.map((x, i) => `<figure data-agc-act="box-ex" data-i="${i}" tabindex="0" title="${esc(x.applied.map(augName).join(', '))}"><span class="ag-exph" data-ex="${i}" aria-hidden="true"></span><figcaption>${esc(x.name.split('/').pop() ?? x.name)} · −${x.lost}${x.tiny ? ` · ${x.tiny} tiny` : ''}</figcaption></figure>`).join('')}</div>` : '');
+    (r.examples.length ? `<h4 class="ag-sec">Examples that lost boxes</h4><div class="ag-strip">${r.examples.map((x, i) => `<figure data-agc-act="box-ex" data-i="${i}" tabindex="0" title="${esc(x.applied.map(augName).join(', '))}">${exPairs.has(i) ? `<img alt="${esc(x.name)}, augmented" src="${exPairs.get(i)?.aug.img ?? ''}">` : `<span class="ag-exph" data-ex="${i}" aria-hidden="true"></span>`}<figcaption>${esc(x.name.split('/').pop() ?? x.name)} · −${x.lost}${x.tiny ? ` · ${x.tiny} tiny` : ''}</figcaption></figure>`).join('')}</div>` : '');
 }
+
+/** Each example's small pair (thumbnail + the viewer's first paint), by the check it belongs to. */
+const exPairs = new Map<number, { orig: Side; aug: Side }>();
+let exFor: BoxCheck | null = null;
+const exInfo = (x: BoxCheck['examples'][number]): string =>
+  `Lost ${x.lost} box${x.lost === 1 ? '' : 'es'}${x.tiny ? ` · ${x.tiny} too small` : ''} (boxes on the left that are gone on the right) · ${ranText(x.applied, augName)}`;
+const oneJSON = (x: BoxCheck['examples'][number], size: number): Promise<OneJSON> =>
+  postJSON<OneJSON>('api/augment/one', { recipe: AG.recipe, name: x.name, seed: x.seed, json: true, size });
 
 async function exampleThumbs(): Promise<void> {
   const r = B.res;
   if (!r) return;
+  if (exFor !== r) { exPairs.clear(); exFor = r; }
   await Promise.all(r.examples.map(async (x, i) => {
-    const ph = document.querySelector<HTMLElement>(`#ag-main [data-ex="${i}"]`);
-    if (!ph) return;
+    if (exPairs.has(i)) return;
     try {
-      const res = await api('api/augment/one', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipe: AG.recipe, name: x.name, seed: x.seed }) });
+      const pair = sidesOf(await oneJSON(x, 320));
+      if (B.res !== r) return;
+      exPairs.set(i, pair);
+      const ph = document.querySelector<HTMLElement>(`#ag-main [data-ex="${i}"]`);
+      if (!ph) return;
       const img = document.createElement('img');
       img.alt = `${x.name}, augmented`;
-      img.src = URL.createObjectURL(await res.blob());
+      img.src = pair.aug.img;
       ph.replaceWith(img);
     } catch { /* the placeholder stays; the caption says which image */ }
   }));
+}
+
+/** An example in the compare viewer: the small pair at once (if loaded), the sharp one fetched in place. */
+function openExample(i: number): void {
+  const x = B.res?.examples[i];
+  if (!x) return;
+  const load = async (): Promise<{ orig: Side; aug: Side }> => sidesOf(await oneJSON(x, 1600));
+  const pair = exPairs.get(i);
+  const blank: Side = { img: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', w: 4, h: 3, boxes: [] };
+  void compareView({ title: x.name, info: exInfo(x), boxes: true, orig: pair?.orig ?? blank, aug: pair?.aug ?? blank, load });
 }
 
 async function runBoxes(): Promise<void> {
@@ -81,7 +103,9 @@ async function runBoxes(): Promise<void> {
 function paint(): void {
   const host = $('ag-main');
   if (!host || AG.view !== 'boxes') return;
-  host.innerHTML = boxesHTML();
+  const next = host.cloneNode(false) as HTMLElement;
+  next.innerHTML = boxesHTML();
+  morph(host, next);          // in place: a click on Check boxes half-way (an edit's change on blur) survives
   void exampleThumbs();
 }
 
@@ -103,11 +127,10 @@ export function initAugCheck(): void {
     if (!b) return;
     const k = b.dataset['agcAct'];
     if (k === 'box-run') void runBoxes();
-    if (k === 'box-ex') {
-      const x = B.res?.examples[Number(b.dataset['i'])];
-      const img = b.querySelector('img');
-      if (x && img?.src) window.open(img.src, '_blank', 'noopener');
-      else if (x) toast(x.name);
-    }
+    if (k === 'box-ex') openExample(Number(b.dataset['i']));
+  });
+  main?.addEventListener('keydown', (e) => {
+    const f = (e.target as Element).closest<HTMLElement>('[data-agc-act="box-ex"]');
+    if (f && e.key === 'Enter') { e.preventDefault(); openExample(Number(f.dataset['i'])); }
   });
 }
