@@ -328,9 +328,10 @@ function paintPreview(): void {
   if (!AG.items.length) { host.innerHTML = '<div class="empty">No images to show.</div>'; return; }
   const on = AG.recipe.steps.filter((s) => s.on).length;
   host.innerHTML = (on || AG.solo >= 0 ? '' : '<p class="notice">The recipe is empty: the variants are the original. Start from a preset on the left.</p>') +
-    `<div class="ag-grid" style="--ag-cols:${AG.variants + 1}">${AG.items.map((it, r) => `<div class="ag-row"><figure class="ag-cell orig" data-r="${r}" data-v="-1"><img alt="" src="${it.orig.img}"><canvas></canvas><figcaption title="${esc(it.name)}">${esc(it.name.split('/').pop() ?? it.name)}</figcaption></figure>` +
-      it.variants.map((v, j) => `<figure class="ag-cell" data-r="${r}" data-v="${j}" tabindex="0" title="${esc(v.applied.length ? `Ran: ${v.applied.join(', ')}` : 'Nothing ran on this one (each step has its chance)')}"><img alt="" src="${v.img}"><canvas></canvas>` +
-        `<figcaption>${v.applied.length ? esc(v.applied.map((a) => meta(a)?.label ?? a).join(' · ')) : '<span class="faint">unchanged</span>'}${v.dropped ? ` <span class="pill danger" title="Boxes lost: less than 30% of them stayed in the image">−${v.dropped} box${v.dropped > 1 ? 'es' : ''}</span>` : ''}</figcaption></figure>`).join('') + '</div>').join('')}</div>`;
+    `<div class="ag-grid" style="--ag-cols:${AG.variants + 1}">${AG.items.map((it, r) => `<div class="ag-row"><figure class="ag-cell orig" data-r="${r}" data-v="-1"><span class="ag-tag orig">Original</span><img alt="" src="${it.orig.img}"><canvas></canvas><figcaption title="${esc(it.name)}">${esc(it.name.split('/').pop() ?? it.name)}</figcaption></figure>` +
+      it.variants.map((v, j) => `<figure class="ag-cell ${v.applied.length ? 'aug' : 'same'}" data-r="${r}" data-v="${j}" tabindex="0" title="${esc(v.applied.length ? `Ran: ${v.applied.join(', ')}` : 'Nothing ran on this one (each step has its chance)')}">` +
+        (v.applied.length ? `<span class="ag-tag">${icon('sparkle')}Augmented</span>` : '<span class="ag-tag same">Unchanged</span>') + `<img alt="" src="${v.img}"><canvas></canvas>` +
+        `<figcaption>${v.applied.length ? v.applied.map((a) => `<span class="ag-ran">${esc(meta(a)?.label ?? a)}</span>`).join('') : '<span class="faint">nothing ran</span>'}${v.dropped ? ` <span class="pill danger" title="Boxes lost: less than 30% of them stayed in the image">−${v.dropped} box${v.dropped > 1 ? 'es' : ''}</span>` : ''}</figcaption></figure>`).join('') + '</div>').join('')}</div>`;
   host.querySelectorAll<HTMLElement>('.ag-cell').forEach((f) => {
     const img = f.querySelector('img');
     if (img?.complete) drawBoxes(f); else img?.addEventListener('load', () => drawBoxes(f), { once: true });

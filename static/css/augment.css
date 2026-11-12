@@ -47,7 +47,17 @@
 .ag-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .ag-cell img { display: block; width: 100%; height: auto; }
 .ag-cell canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
-.ag-cell figcaption { padding: 3px 6px; font-size: var(--fs-2xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* which variants changed: an augmented one has an accent outline, a badge and its steps as chips; an unchanged one is dimmed */
+.ag-cell.aug { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ag-cell.same { opacity: .7; }
+.ag-cell.same img { filter: saturate(.6); }
+.ag-tag { position: absolute; left: 6px; top: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px;
+  font-size: var(--fs-2xs); font-weight: 650; background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-1); pointer-events: none; }
+.ag-tag .ico { width: 11px; height: 11px; }
+.ag-tag.orig { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); }
+.ag-tag.same { background: var(--surface-2); color: var(--text-muted); }
+.ag-cell figcaption { display: flex; align-items: center; gap: 3px; padding: 3px 6px; font-size: var(--fs-2xs); color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+.ag-ran { flex: none; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .ag-cell .pill { font-size: var(--fs-2xs); }
 
 /* the lightbox: a wipe between the original and the variant */

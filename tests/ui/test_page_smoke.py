@@ -795,6 +795,7 @@ def test_augment_tab_previews_a_recipe(server, tmp_path):
         page.set_viewport_size({'width': 1400, 'height': 900})
         page.click(f'[data-ag-act="solo"][data-i="{idx}"]')
         page.wait_for_function("[...document.querySelectorAll('.ag-cell:not(.orig) figcaption')].every(f => f.textContent.includes('Motion blur'))", timeout=20000)
+        assert page.locator('.ag-cell.aug .ag-tag').count() > 0 and page.locator('.ag-cell.orig .ag-tag.orig').count() > 0   # augmented ones stand out
         page.locator('.ag-cell:not(.orig)').first.click()
         page.wait_for_selector('.ag-wipe img.top')
         page.keyboard.press('Escape')
