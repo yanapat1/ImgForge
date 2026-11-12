@@ -25,7 +25,7 @@
 import { continuedLabel, type ChatHandle } from './chat.js';
 import { esc, icon, morphInner } from './dom.js';
 import { LLM } from './llm.js';
-import { dataUrl, homeUrl, labelUrl, vizUrl } from './nav.js';
+import { analysisUrl, dataUrl, homeUrl, labelUrl, vizUrl } from './nav.js';
 import type { AiTurn, ChatEvent, UiAction, UiResult } from '../types-chat.js';
 
 export interface DockHost {
@@ -253,10 +253,11 @@ function reloadChat(): void {
 
 // ---------------------------------------------------------------- navigate + hand-off
 
-/** which page a URL is (the path, plus ?data / ?label=<id>): a hand-off is only taken on the page it was for */
+/** which page a URL is (the path, plus ?data / ?label=<id> / ?analysis[=<session>]): a hand-off is only taken on the page it was for */
 function pageKey(u: URL): string {
   const q = u.searchParams;
-  return `${u.pathname.replace(/\/?$/, '/')}|${q.has('label') ? `label:${q.get('label') ?? ''}` : q.has('data') ? 'data' : ''}`;
+  const where = q.has('label') ? `label:${q.get('label') ?? ''}` : q.has('data') ? 'data' : q.has('analysis') ? 'analysis' : '';
+  return `${u.pathname.replace(/\/?$/, '/')}|${where}`;
 }
 
 function peekHandoff(): Handoff | null {
@@ -279,6 +280,7 @@ function navUrl(a: Record<string, unknown>): string | null {
     case 'data': return dataUrl(s('bucket') || null, s('path') || null);
     case 'viz': return s('session_id') ? vizUrl(s('session_id')) : null;
     case 'label': return s('session_id') ? labelUrl(s('session_id')) : null;
+    case 'analysis': return analysisUrl();
     default: return null;
   }
 }

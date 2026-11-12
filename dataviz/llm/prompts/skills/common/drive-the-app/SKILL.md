@@ -17,6 +17,7 @@ when: do / show something elsewhere, or run something
 | which model is best | Visualizer › Evaluation | `run_eval_all`, `eval_summary` |
 | A vs B datasets | Visualizer › Compare (combined datasets) | `open_tab` compare, `compare_tests` |
 | boxes of one image | Labeling | `navigate` label (its own Label assistant edits boxes) |
+| SQL / MongoDB queries, joins, statistics, forecasts, dashboards | Data Analysis | `navigate` analysis (its own assistant runs the queries) |
 
 Another page: find the session (`list_sessions`) or the bucket first, then call `navigate` **last**, with a
 `goal` that says what to do there ("run yolov8s on val and rank the classes"). Say in one line where you go.

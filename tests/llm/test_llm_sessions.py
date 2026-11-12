@@ -253,7 +253,7 @@ def _events(r):
 def test_chat_route_persists_turns(client, monkeypatch, svc):  # noqa: F811
     _connect(client, ['data_center', 'assistant'])
     titles = []
-    monkeypatch.setattr(providers, 'complete', lambda p, system, msgs, json=False, max_tokens=None:
+    monkeypatch.setattr(providers, 'complete', lambda p, system, msgs, json=False, max_tokens=None, quiet=False:
                         (titles.append(max_tokens) or 'Tag the cars', {'in': 1, 'out': 1}))
     script(monkeypatch, ('', [('add_tags', {'bucket': 'cars', 'tags': ['x']})]), ('Tagged.', []))
     r = client.post('/api/llm/agent/data/chat', json={'messages': [{'role': 'user', 'text': 'tag cars'}],

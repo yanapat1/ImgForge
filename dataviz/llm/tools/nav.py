@@ -5,9 +5,10 @@ The app's pages for every ◆ assistant (domain common): find a session, and ope
                                          read: the visualize / labeling sessions the user can open (id, name, kind,
                                          tags, folder); bucket + path: only the sessions made from that folder
     navigate {screen, goal, session_id?, bucket?, path?, tab?}
-                                         ui: open another page (home | data | viz | label). The page reloads, so it
-                                         ends the turn: the SAME chat continues on the new page with `goal` (the dock
-                                         sends it there as a continued message; that page's specialist answers it).
+                                         ui: open another page (home | data | viz | label | analysis). The page
+                                         reloads, so it ends the turn: the SAME chat continues on the new page with
+                                         `goal` (the dock sends it there as a continued message; that page's
+                                         specialist answers it).
 
     consult {page, question, session_id?}
                                          read: the other page's specialist answers one question on the server
@@ -213,7 +214,8 @@ register(Tool('list_sessions', 'Sessions the user can open (viz, label), for nav
               _obj({'q': S('words in the name or a tag (default: all)'), 'kind': E('only this kind', ['viz', 'label']),
                     'bucket': S('Data Center bucket'), 'path': S('folder in it')}),
               False, _list_sessions, **_C))
-register(Tool('navigate', 'Open another page (home, data = Data Center, viz / label = a session). Ends the turn: '
+register(Tool('navigate', 'Open another page (home, data = Data Center, viz / label = a session, analysis = Data '
+                          'Analysis: SQL / MongoDB queries, statistics, dashboards). Ends the turn: '
                           'call it last; `goal` is what to do there (this chat continues there with it).',
               _obj({'screen': E('the page', SCREENS), 'goal': S('the next request there'),
                     'session_id': S('viz / label: from list_sessions'), 'bucket': S('data: bucket'),

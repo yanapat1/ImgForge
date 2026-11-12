@@ -506,7 +506,8 @@ def improve_title(user, sid, provider, question, answer, expect_title):
             from . import providers
             msgs = [{'role': 'user', 'parts': [{'text': f'User: {question[:1500]}\n\nAssistant: {answer[:1500]}'}]}]
             t, _ = providers.complete(provider, 'Write a title of at most 6 words for this chat. Answer with the '
-                                                'title only: no quotes, no full stop.', msgs, max_tokens=16)
+                                                'title only: no quotes, no full stop.', msgs, max_tokens=16,
+                                      quiet=True)
             t = re.sub(r'\s+', ' ', str(t or '')).strip().strip('"\'`*#').strip()
             if not t:
                 return

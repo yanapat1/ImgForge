@@ -28,7 +28,7 @@ def _fake_complete(monkeypatch, answers=None):
     calls = []
     it = iter(answers or [])
 
-    def complete(p, system, msgs, json=False, max_tokens=None):
+    def complete(p, system, msgs, json=False, max_tokens=None, quiet=False):
         calls.append({'system': system, 'text': msgs[0]['parts'][0]['text'], 'max_tokens': max_tokens})
         a = next(it, None)
         if isinstance(a, Exception):
@@ -203,3 +203,34 @@ def test_compact_route(client, monkeypatch, svc):  # noqa: F811
     assert client.post('/api/llm/agent/data/compact', json={'session_id': sid}).status_code == 502
     names = [c['name'] for c in client.get('/api/llm/agent/data/catalog').json()['commands']]
     assert 'compact' in names
+
+
+def test_empty_answer_retried_once_with_twice_the_room(monkeypatch):
+    calls = _fake_complete(monkeypatch, ['', '', 'never asked'])
+    with pytest.raises(LLMError, match='empty summary'):
+        summarize.summarize({'kind': 'openai'}, None, _rows(4), 8000)
+    cap = summarize.summary_cap(8000)
+    assert [c['max_tokens'] for c in calls] == [cap, 2 * cap]                # two tries, not three of the same
+    calls = _fake_complete(monkeypatch, ['', 'S'])
+    assert summarize.summarize({'kind': 'openai'}, None, _rows(4), 8000) == 'S'
+
+
+def test_quiet_thinking_leaves_room_for_the_answer():
+    from dataviz.llm.providers import _quiet_thinking, _strip_think
+    b = {'max_tokens': 600, 'temperature': 0.2}
+    _quiet_thinking({'kind': 'anthropic', 'model': 'claude-opus-5-5'}, b)     # always thinks: least of it + room
+    assert b['output_config'] == {'effort': 'low'} and b['max_tokens'] >= 600 + 4096 and 'temperature' not in b
+    b = {'max_tokens': 600}
+    _quiet_thinking({'kind': 'anthropic', 'model': 'claude-3-5-haiku'}, b)     # thinking is off by default
+    assert b == {'max_tokens': 600}
+    b = {'generationConfig': {'maxOutputTokens': 600}}
+    _quiet_thinking({'kind': 'gemini', 'model': 'gemini-2.5-flash'}, b)
+    assert b['generationConfig']['thinkingConfig'] == {'thinkingBudget': 0}
+    b = {'max_completion_tokens': 600}
+    _quiet_thinking({'kind': 'openai', 'model': 'gpt-5-mini'}, b)
+    assert b['reasoning_effort'] == 'low' and b['max_completion_tokens'] > 600
+    b = {'max_tokens': 600}
+    _quiet_thinking({'kind': 'openai_compat', 'model': 'qwen3'}, b)
+    assert b['chat_template_kwargs'] == {'enable_thinking': False}
+    assert _strip_think('<think>hmm</think>\n## Goal') == '## Goal' and _strip_think('<think>cut off') == ''
+    assert _strip_think('## Goal') == '## Goal'

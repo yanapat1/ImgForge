@@ -565,9 +565,12 @@ def _send(p, path, body, h):
     return r
 
 
-def complete(p, system, msgs, json=False, max_tokens=None):
-    """(text, usage {'in', 'out'} or None) of one non-streamed answer."""
+def complete(p, system, msgs, json=False, max_tokens=None, quiet=False):
+    """(text, usage {'in', 'out'} or None) of one non-streamed answer. quiet: a short helper answer (a summary, a
+    title): thinking off where it can be, else the least of it with room above max_tokens (_quiet_thinking)."""
     path, body, h = _request(p, system, msgs, False, json, max_tokens)
+    if quiet:
+        _quiet_thinking(p, body)
     r = _send(p, path, body, h)
     if r.status_code >= 400:
         raise _fail(p, r, f'{p.get("model")}')
@@ -576,7 +579,43 @@ def complete(p, system, msgs, json=False, max_tokens=None):
     except ValueError:
         raise LLMError('the provider answered something that is not JSON', 502) from None
     text, usage = _parse_answer(p['kind'], data)
+    if p['kind'] == 'openai_compat':
+        text = _strip_think(text)
     return text, usage or {'in': 0, 'out': 0}
+
+
+def _strip_think(text):
+    """A compatible server without a reasoning parser puts the thinking in the text as <think>…</think>: only
+    what follows it is the answer ('' when the answer was cut off inside the thinking)."""
+    t = str(text or '')
+    if not t.lstrip().startswith('<think>'):
+        return t
+    i = t.find('</think>')
+    return t[i + len('</think>'):].lstrip() if i >= 0 else ''
+
+
+def _quiet_thinking(p, body):
+    """Thinking settings of a short non-streamed helper answer. A model that thinks by default (every Claude 5.x,
+    Gemini 2.5, OpenAI reasoning models, Qwen3 / DeepSeek-R1 templates) otherwise spends a small max_tokens on
+    thinking and returns no text. Refused settings are dropped and remembered by _send, as for streams."""
+    kind = p.get('kind')
+    if kind == 'anthropic':
+        _, always = _claude_thinking(p.get('model'))
+        if always:                                      # cannot be off: the least of it, room above the answer
+            body['output_config'] = {'effort': 'low'}
+            body['max_tokens'] = max(body['max_tokens'] + _ROOM, _ADAPTIVE_MAX['low'])
+            body.pop('temperature', None)
+    elif kind == 'gemini':
+        cfg = body['generationConfig']
+        cfg['thinkingConfig'] = {'thinkingBudget': 0}   # models that always think refuse it: dropped, remembered
+        cfg['maxOutputTokens'] += _ROOM
+    elif kind == 'openai':
+        if _openai_reasoning(p.get('model')):
+            body['reasoning_effort'] = 'low'
+            body.pop('temperature', None)
+            body['max_completion_tokens'] += _ROOM
+    else:
+        body['chat_template_kwargs'] = {'enable_thinking': False}
 
 
 def _parse_tool_calls(kind, body):

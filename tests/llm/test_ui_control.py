@@ -175,6 +175,9 @@ def test_navigate_is_checked_and_ends_the_turn(monkeypatch, svc):  # noqa: F811
     assert clean == {'screen': 'viz', 'goal': 'run yolov8s', 'session_id': 's1', 'tab': 'model'} and label == 'Open Visualizer › model'
     with pytest.raises(tools.ToolError, match="no visualize session 'zz'"):
         tools.prepare(ctx, 'navigate', {'screen': 'viz', 'goal': 'x', 'session_id': 'zz'}, tools.REGISTRY)
+    monkeypatch.setattr(nav, '_need_zone', lambda screen: None)
+    clean, label = tools.prepare(ctx, 'navigate', {'screen': 'analysis', 'goal': 'count orders'}, tools.REGISTRY)
+    assert clean == {'screen': 'analysis', 'goal': 'count orders'} and label == 'Open Data Analysis'
     # the engine: applied in ask mode, no second provider step (the page reloads)
     script(monkeypatch, ('Opening the visualizer.', [('navigate', {'screen': 'viz', 'goal': 'run yolov8s', 'session_id': 's1'})]))
     opts = react.options({'mode': 'ask'}, OPENAI)

@@ -128,10 +128,13 @@ def _chunks(rows, max_tokens):
 
 
 def _call(provider, system, user_text, cap):
+    """One summary call. A transient error is retried after a pause; an empty answer (a model that spent its room
+    on thinking) is asked again once with twice the room, never several times the same (each try can take long)."""
     msgs = [{'role': 'user', 'parts': [{'text': user_text}]}]
+    room, empty = cap, False
     for n in range(RETRIES + 1):
         try:
-            text, _ = providers.complete(provider, system, msgs, max_tokens=cap)
+            text, _ = providers.complete(provider, system, msgs, max_tokens=room, quiet=True)
         except LLMError as e:
             if not getattr(e, 'transient', False) or n == RETRIES:
                 raise
@@ -140,9 +143,11 @@ def _call(provider, system, user_text, cap):
         text = str(text or '').strip()
         if text:
             return text
-        if n == RETRIES:
-            raise LLMError('the model returned an empty summary', 502)
-    raise LLMError('no summary', 502)          # not reached
+        if empty or n == RETRIES:
+            break
+        empty, room = True, room * 2
+    raise LLMError('the model returned an empty summary (a thinking model may spend its room on thinking: '
+                   'choose a model without thinking for this chat, or /compact again)', 502)
 
 
 def summarize(provider, prev, rows, limit, focus=None):
