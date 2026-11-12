@@ -174,10 +174,10 @@ def test_edit_board_checks_its_ops_before_the_page_sees_them():
     from dataviz.llm.tools import ToolError
     from dataviz.llm.tools import analysis as an
     ok, _ = an._board_check(None, {'ops': [
-        {'op': 'add', 'note': {'shape': 'rect', 'layer': 'back', 'x': -50, 'y': 10, 'w': 9000, 'h': 300, 'fill': 'BLUE', 'alpha': 3, 'text': 'Sales'}},
+        {'op': 'add', 'note': {'shape': 'rect', 'layer': 'back', 'x': -50, 'y': -99999, 'w': 9000, 'h': 300, 'fill': 'BLUE', 'alpha': 3, 'text': 'Sales'}},
         {'op': 'remove', 'id': 'n1'}]})
     note = ok['ops'][0]['note']
-    assert note['x'] == 0 and note['w'] == 2400 and note['alpha'] == 1 and note['fill'] == 'blue'      # clamped to the board
+    assert note['x'] == -50 and note['y'] == -20000 and note['w'] == 2400 and note['alpha'] == 1 and note['fill'] == 'blue'   # left / above is fine; sizes clamped
     assert ok['ops'][1] == {'op': 'remove', 'id': 'n1'}
     for bad in ({'ops': []}, {'ops': [{'op': 'move'}]}, {'ops': [{'op': 'update', 'note': {}}]},
                 {'ops': [{'op': 'add', 'note': {'shape': 'star'}}]}, {'ops': [{'op': 'add', 'note': {'fill': 'pink'}}]},

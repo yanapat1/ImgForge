@@ -42,7 +42,7 @@ export interface Model { tables: MTable[]; joins: Join[]; calc: Calc[]; parts: P
 /** A zone, text, sticky note or shape on the builder's board (board.ts). It never reaches the SQL. */
 export type NoteShape = 'rect' | 'round' | 'pill' | 'ellipse' | 'diamond' | 'hexagon' | 'callout' | 'none';
 export interface Note {
-  id: string; x: number; y: number; w: number; h: number;      // board px, inside the 2400 × 1600 board
+  id: string; x: number; y: number; w: number; h: number;      // board px, the table cards' space (may be negative)
   shape: NoteShape;
   fill: string;            // a palette key (board.ts PALETTE), '#rrggbb', or '' = no fill
   alpha: number;           // fill opacity 0..1

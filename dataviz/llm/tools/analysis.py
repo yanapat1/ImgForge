@@ -275,7 +275,8 @@ NOTE_SHAPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'hexagon', 'callou
 NOTE_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow']
 _NOTE_ENUMS = {'shape': NOTE_SHAPES, 'layer': ['back', 'front'], 'border': ['solid', 'dashed', 'none'],
                'ha': ['left', 'center', 'right'], 'va': ['top', 'middle', 'bottom']}
-_NOTE_NUM = {'x': (0, BOARD_W), 'y': (0, BOARD_H), 'w': (40, BOARD_W), 'h': (24, BOARD_H), 'alpha': (0, 1), 'size': (11, 48)}
+BOARD_SPAN = 20000                              # notes go anywhere on the board, like the table cards
+_NOTE_NUM = {'x': (-BOARD_SPAN, BOARD_SPAN), 'y': (-BOARD_SPAN, BOARD_SPAN), 'w': (40, BOARD_W), 'h': (24, BOARD_H), 'alpha': (0, 1), 'size': (11, 48)}
 
 
 def _note_fields(i, note):
@@ -341,7 +342,7 @@ def _read_board(ctx, a):
 _NOTE_PROPS = {
     'shape': E('rect, round (rounded), pill, ellipse, diamond, hexagon, callout (speech bubble), none (text only)', NOTE_SHAPES),
     'layer': E('back = a zone behind the tables, front = above them (text, sticky notes)', ['back', 'front']),
-    'x': {'type': 'number', 'description': 'left, board px (0..2400)'}, 'y': {'type': 'number', 'description': 'top, board px (0..1600)'},
+    'x': {'type': 'number', 'description': 'left, board px (the same space as the table cards, read_board)'}, 'y': {'type': 'number', 'description': 'top, board px'},
     'w': {'type': 'number', 'description': 'width px (≥ 40)'}, 'h': {'type': 'number', 'description': 'height px (≥ 24)'},
     'fill': S(f'one of {", ".join(NOTE_COLORS)}, #rrggbb, or "" for none'),
     'alpha': {'type': 'number', 'description': 'fill opacity 0..1: zones about 0.14, sticky notes 1'},

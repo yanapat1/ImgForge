@@ -227,7 +227,7 @@ function zoomAt(f: number, cx: number, cy: number): void {
 }
 
 export function fitView(): void {
-  const c = $('an-canvas'), els = [...document.querySelectorAll<HTMLElement>('#an-board .an-tb, #an-board .an-remote')], t = tab();
+  const c = $('an-canvas'), els = [...document.querySelectorAll<HTMLElement>('#an-board .an-tb, #an-board .an-remote, #an-board .an-note')], t = tab();
   if (!c || !els.length) return;
   const x0 = Math.min(...els.map((e) => e.offsetLeft)), y0 = Math.min(...els.map((e) => e.offsetTop));
   const x1 = Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth)), y1 = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight));

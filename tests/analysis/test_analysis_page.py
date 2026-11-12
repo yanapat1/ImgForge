@@ -583,6 +583,42 @@ def test_board_notes_zones_text_lock_and_auto_zones(server, target):  # noqa: F8
         page.mouse.move(sb['x'] + 130, sb['y'] + 70, steps=6)
         page.mouse.up()
         assert sticky.bounding_box()['x'] > sb['x'] + 50
+        # left and up as far as wanted: past the board's first corner too (like the table cards). Shift+arrows bring
+        # each note near the corner, then a mouse drag takes it across
+        def to_corner(sel):
+            left, top = page.eval_on_selector(sel, 'e => [parseFloat(e.style.left), parseFloat(e.style.top)]')
+            for _ in range(int(left // 8)):
+                page.keyboard.press('Shift+ArrowLeft')
+            for _ in range(int(top // 8)):
+                page.keyboard.press('Shift+ArrowUp')
+            cv = page.locator('#an-canvas').bounding_box()                  # pan: the corner out from under the toolbar
+            px, py = cv['x'] + cv['width'] - 140, cv['y'] + cv['height'] - 160
+            page.mouse.move(px, py)
+            page.mouse.down(button='right')
+            page.mouse.move(px + 250, py + 200, steps=6)
+            page.mouse.up(button='right')
+            return page.locator(sel).bounding_box()
+
+        page.click('.an-note.l-front', position={'x': 30, 'y': 30})
+        sb = to_corner('.an-note.l-front')
+        page.mouse.move(sb['x'] + 30, sb['y'] + 30)
+        page.mouse.down()
+        page.mouse.move(sb['x'] - 60, sb['y'] - 60, steps=8)
+        page.mouse.up()
+        left, top = page.eval_on_selector('.an-note.l-front', 'e => [parseFloat(e.style.left), parseFloat(e.style.top)]')
+        assert left < 0 and top < 0, (left, top)
+        zc = zone.bounding_box()
+        page.mouse.click(zc['x'] + 40, zc['y'] + 8)                          # the zone too, once unlocked (Ctrl+L)
+        page.keyboard.press('Control+l')
+        zb2 = to_corner('.an-note.l-back')
+        gx = zb2['x'] + zb2['width'] - 50                                    # its strip right of the sticky note (also in the corner)
+        page.mouse.move(gx, zb2['y'] + 8)
+        page.mouse.down()
+        page.mouse.move(gx - 100, zb2['y'] - 60, steps=8)
+        page.mouse.up()
+        zl, zt = page.eval_on_selector('.an-note.l-back', 'e => [parseFloat(e.style.left), parseFloat(e.style.top)]')
+        assert zl < 0 and zt < 0, (zl, zt)
+        page.keyboard.press('Control+l')                                    # locked again, as the rest of the test expects
         assert page.locator('#an-sql .cm-content').text_content() == sql_before
         # Auto zones: orders + customers are joined, one schema: one zone around both; the user's locked zone stays
         page.click('[data-act="n-add"]')
@@ -593,6 +629,11 @@ def test_board_notes_zones_text_lock_and_auto_zones(server, target):  # noqa: F8
         page.reload()
         page.wait_for_selector('.an-note.l-back:has-text("Sales area")', timeout=20000)
         assert page.locator('.an-note').count() == 3
+        page.click('[data-act="b-fit"]')                                    # Fit shows the notes too, wherever they are
+        for sel in ('.an-note.l-front', '.an-note.l-back'):
+            b = page.locator(sel).first.bounding_box()
+            cv = page.locator('#an-canvas').bounding_box()
+            assert cv['x'] - 1 <= b['x'] and cv['y'] - 1 <= b['y'], (sel, b, cv)
         # Ctrl+Z on the board undoes the last board change
         page.click('.an-note.l-front')
         page.keyboard.press('Delete')

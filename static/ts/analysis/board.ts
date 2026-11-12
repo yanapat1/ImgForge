@@ -13,6 +13,8 @@ import { tab } from './state.js';
 import type { MTable, Model, Note, NoteShape, Tab } from './state.js';
 
 export const BOARD_W = 2400, BOARD_H = 1600, MAX_NOTES = 300, MAX_TEXT = 2000;
+/** Notes go anywhere on the board, like the table cards (left of and above its first corner too), within this. */
+export const SPAN = 20000;
 export const PALETTE = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow'] as const;
 const SHAPES: [NoteShape, string][] = [['rect', 'Rectangle'], ['round', 'Rounded'], ['pill', 'Pill'], ['ellipse', 'Ellipse'], ['diamond', 'Diamond'],
   ['hexagon', 'Hexagon'], ['callout', 'Callout'], ['none', 'Text only']];
@@ -48,7 +50,7 @@ export function cleanNote(x: Partial<Note>, id?: string): Note {
   const w = clamp(Number(x.w) || 240, MIN_W, BOARD_W), h = clamp(Number(x.h) || 140, MIN_H, BOARD_H);
   const n: Note = {
     id: String(x.id || id || newId()).slice(0, 64), shape,
-    x: clamp(Math.round(Number(x.x) || 0), 0, BOARD_W - w), y: clamp(Math.round(Number(x.y) || 0), 0, BOARD_H - h), w: Math.round(w), h: Math.round(h),
+    x: clamp(Math.round(Number(x.x) || 0), -SPAN, SPAN), y: clamp(Math.round(Number(x.y) || 0), -SPAN, SPAN), w: Math.round(w), h: Math.round(h),
     fill: typeof x.fill === 'string' && ((PALETTE as readonly string[]).includes(x.fill) || /^#[0-9a-f]{6}$/i.test(x.fill)) ? x.fill : '',
     alpha: clamp(x.alpha === undefined ? 0.14 : Number(x.alpha), 0, 1),
     border: x.border === 'dashed' || x.border === 'none' ? x.border : 'solid',
@@ -311,14 +313,14 @@ export function noteMove(e: PointerEvent): boolean {
     if (!lead) return true;
     const ddx = snap(lead.ox + dx, on) - lead.ox, ddy = snap(lead.oy + dy, on) - lead.oy;
     for (const g of D.notes) {
-      g.n.x = clamp(g.ox + ddx, 0, BOARD_W - g.n.w);
-      g.n.y = clamp(g.oy + ddy, 0, BOARD_H - g.n.h);
+      g.n.x = clamp(g.ox + ddx, -SPAN, SPAN);
+      g.n.y = clamp(g.oy + ddy, -SPAN, SPAN);
       const el = document.querySelector<HTMLElement>(`.an-note[data-n="${CSS.escape(g.n.id)}"]`);
       if (el) { el.style.left = `${g.n.x}px`; el.style.top = `${g.n.y}px`; }
     }
     for (const g of D.cards) {
-      g.m.x = Math.max(0, g.ox + ddx);
-      g.m.y = Math.max(0, g.oy + ddy);
+      g.m.x = g.ox + ddx;
+      g.m.y = g.oy + ddy;
       const el = document.querySelector<HTMLElement>(`.an-tb[data-t="${CSS.escape(g.m.id)}"]`);
       if (el) { el.style.left = `${g.m.x}px`; el.style.top = `${g.m.y}px`; }
     }
@@ -332,7 +334,7 @@ export function noteMove(e: PointerEvent): boolean {
     if (h.includes('n')) { y = snap(o.y + dy, on); hh = o.h + (o.y - y); }
     if (w < MIN_W) { if (h.includes('w')) x -= MIN_W - w; w = MIN_W; }
     if (hh < MIN_H) { if (h.includes('n')) y -= MIN_H - hh; hh = MIN_H; }
-    Object.assign(n, { x: clamp(x, 0, BOARD_W - MIN_W), y: clamp(y, 0, BOARD_H - MIN_H), w: Math.min(w, BOARD_W), h: Math.min(hh, BOARD_H) });
+    Object.assign(n, { x: clamp(x, -SPAN, SPAN), y: clamp(y, -SPAN, SPAN), w: Math.min(w, BOARD_W), h: Math.min(hh, BOARD_H) });
     const el = document.querySelector<HTMLElement>(`.an-note[data-n="${CSS.escape(n.id)}"]`);
     if (el) Object.assign(el.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px` });
   }
@@ -406,7 +408,7 @@ export function noteKey(e: KeyboardEvent): boolean {
   if (d && !mod) {
     e.preventDefault();
     const s = e.shiftKey ? SNAP : 1;
-    change((n) => { if (!n.locked) { n.x = clamp(n.x + d[0] * s, 0, BOARD_W - n.w); n.y = clamp(n.y + d[1] * s, 0, BOARD_H - n.h); } });
+    change((n) => { if (!n.locked) { n.x = clamp(n.x + d[0] * s, -SPAN, SPAN); n.y = clamp(n.y + d[1] * s, -SPAN, SPAN); } });
     return true;
   }
   return false;
@@ -473,7 +475,6 @@ export function boardScope(): Record<string, unknown> | null {
     }),
     joins: m.joins.slice(0, 60).map((j) => ({ a: j.a.join('.'), b: j.b.join('.'), ...(j.card ? { card: j.card } : {}) })),
     notes: (m.notes ?? []).slice(0, 80).map((n) => ({ id: n.id, shape: n.shape, layer: n.layer, x: n.x, y: n.y, w: n.w, h: n.h, fill: n.fill, text: n.text.slice(0, 80), ...(n.locked ? { locked: true } : {}) })),
-    board: { w: BOARD_W, h: BOARD_H },
   };
   let s = JSON.stringify(out);
   while (s.length > 4000 && out.notes.length) { out.notes.pop(); s = JSON.stringify(out); }
