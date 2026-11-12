@@ -130,8 +130,6 @@ async function loadBuckets(): Promise<void> {
 // ---------------------------------------------------------------- paint
 
 function render(): void {
-  const n = $('dc-nav-n');
-  if (n) n.textContent = D.buckets.length ? String(D.buckets.length) : '';
   renderTree();
   if (D.search) renderSearch();
   else if (D.bid) renderFolder();

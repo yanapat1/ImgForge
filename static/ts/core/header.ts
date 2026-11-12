@@ -32,7 +32,7 @@ export function appHeader(o: HeaderOpts): string {
     '<h1>Dataset Visualizer</h1></a>' +
     '<nav class="hdr-nav" aria-label="Pages">' +
     (hasSessions() ? link(o.page === 'home', homeUrl(), 'layers', 'Sessions') : '') +
-    link(o.page === 'data', dataUrl(), 'db', 'Data', '<span id="dc-nav-n" class="count num"></span>') +
+    link(o.page === 'data', dataUrl(), 'db', 'Data') +
     (zoneOn('analysis') ? link(o.page === 'analysis', analysisUrl(), 'search', 'Analysis') : '') +
     '</nav><span class="grow"></span>' + (o.middle ?? '') +
     `<div id="${esc(o.actionsId)}" class="header-actions">${o.actions ?? ''}` +

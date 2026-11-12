@@ -16,8 +16,6 @@
 .hdr-nav a:hover { color: var(--text); }
 .hdr-nav a.on { color: var(--accent-text); border-bottom-color: var(--accent); }
 .hdr-nav a.on .ico { color: var(--accent); }
-.hdr-nav .count { font: 600 var(--fs-2xs) var(--mono); padding: 1px 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); }
-.hdr-nav .count:empty { display: none; }
 
 /* ---------------------------------------------------------------- tabs: a row of [role=tab] buttons */
 .tabbar { display: flex; gap: 2px; border-bottom: 1px solid var(--border-strong); overflow-x: auto; flex: none; }
