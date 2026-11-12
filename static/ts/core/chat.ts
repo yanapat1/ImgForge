@@ -343,7 +343,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'think': {
         const live = b.ms === null && t.status === 'streaming';
         return actRow(key, live ? '<span class="ct-spin"></span>' : icon('sparkle'), live ? 'Thinking…' : 'Thought', esc(firstLine(b.text)),
-          live ? since(b.t0) : esc(fmtMs(b.ms)), () => `<div class="ct-act-text">${esc(b.text)}</div>`, `k-think${live ? ' live' : ''}`, live);
+          live ? since(b.t0) : esc(fmtMs(b.ms)), () => `<div class="ct-act-text" data-tk="${key}">${esc(b.text)}</div>`, `k-think${live ? ' live' : ''}`, live);
       }
       case 'tools': return b.items.map((it) => actRow(keyOf(ti, bi, it.id), okIcon(it.ok), `<code class="ct-fn">${esc(it.name)}</code>`,
         esc(it.summary || argsShort(it.args)), esc(fmtMs(it.ms)), () => itemDetail(it), `k-tool${it.ok === false ? ' bad' : ''}${it.ok === null ? ' live' : ''}`)).join('');
@@ -686,11 +686,19 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     // the open activity list scrolls on its own: keep its place, or follow the newest step when it was at the end
     const list = el.querySelector<HTMLElement>('.ct-act-list');
     const listTop = list ? list.scrollTop : 0, listEnd = !list || list.scrollHeight - list.scrollTop - list.clientHeight < 24;
+    // so does each open text box (the live thinking): it follows its newest line unless the user scrolled up in it
+    const boxes = new Map<string, { top: number; end: boolean }>();
+    for (const b of el.querySelectorAll<HTMLElement>('.ct-act-text[data-tk]')) boxes.set(b.dataset['tk'] ?? '', { top: b.scrollTop, end: b.scrollHeight - b.scrollTop - b.clientHeight < 24 });
     // patched in place, not replaced: a streaming answer re-renders every frame, and a new element each time made a
     // click on the activity header / a row miss (mousedown and mouseup on different nodes) and restarted the spinners
     morphHTML(el, entryHTML(e, i));
     const next = logEl.querySelector<HTMLElement>(`.chat-turn[data-ti="${i}"] .ct-act-list`);
     if (next) next.scrollTop = listEnd ? next.scrollHeight : listTop;
+    for (const b of logEl.querySelectorAll<HTMLElement>(`.chat-turn[data-ti="${i}"] .ct-act-text[data-tk]`)) {
+      const was = boxes.get(b.dataset['tk'] ?? '');
+      const live = !!b.closest('.ct-act-row.live');                     // a finished thought opens at its start
+      b.scrollTop = was ? (was.end && live ? b.scrollHeight : was.top) : live ? b.scrollHeight : 0;
+    }
     if (stick) toBottom();
     else if (!S.fresh && i === C.live && logEl.scrollHeight > h0) { S.fresh = true; renderJump(); }
   }

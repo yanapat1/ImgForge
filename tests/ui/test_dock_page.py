@@ -298,7 +298,8 @@ def _slow_thinker():
 
 def test_streaming_answer_stays_clickable(server):  # noqa: F811 - the fixture
     """While the answer streams (an event every 40 ms) the turn is patched in place, not replaced: the activity header
-    opens on a click, the live Thinking row's text shows, and the spinner stays the same element (it does not restart)."""
+    folds and opens on a click, the live Thinking row's text shows and follows its newest line, and the spinner stays
+    the same element (it does not restart)."""
     from test_models import _serve
     fake, url = _serve(_slow_thinker())
     errors = []
@@ -319,17 +320,30 @@ def test_streaming_answer_stays_clickable(server):  # noqa: F811 - the fixture
             head = page.locator('#ai-page .ct-act.live > .ct-act-h')
             page.wait_for_selector('#ai-page .ct-act.live .ct-act-now:has-text("Thinking")', timeout=15000)
             page.evaluate("document.querySelector('#ai-page .ct-act.live .ct-spin').__mark = 1")
-            # a slow click (mousedown, 150 ms, mouseup) lands although several events arrive in between
-            b = head.bounding_box()
-            page.mouse.move(b['x'] + 40, b['y'] + b['height'] / 2)
-            page.mouse.down()
-            page.wait_for_timeout(150)
-            page.mouse.up()
+            # it is open while the answer runs; a slow click (mousedown, 150 ms, mouseup) lands although several
+            # events arrive in between: one folds it, the next opens it again
+            page.wait_for_selector('#ai-page .ct-act.live.open', timeout=3000)
+            for want in ('false', 'true'):
+                b = head.bounding_box()
+                page.mouse.move(b['x'] + 40, b['y'] + b['height'] / 2)
+                page.mouse.down()
+                page.wait_for_timeout(150)
+                page.mouse.up()
+                page.wait_for_function(f"document.querySelector('#ai-page .ct-act.live > .ct-act-h')?.getAttribute('aria-expanded') === '{want}'", timeout=3000)
             page.wait_for_selector('#ai-page .ct-act.live.open .ct-act-row.k-think .ct-act-text', timeout=3000)
             assert 'of my thinking' in page.inner_text('#ai-page .ct-act.live .ct-act-text')
             page.wait_for_timeout(400)
             assert page.evaluate("document.querySelector('#ai-page .ct-act.live .ct-spin').__mark") == 1, \
                 'the spinner was replaced (its animation restarts)'
+            # the live thinking box follows its newest line once it overflows; scrolled up, it stays where the user is
+            box = '#ai-page .ct-act.live .ct-act-row.k-think .ct-act-text'
+            page.wait_for_function(f"(b => b && b.scrollHeight > b.clientHeight + 40)(document.querySelector('{box}'))", timeout=10000)
+            page.wait_for_timeout(200)
+            gap = f"(b => b.scrollHeight - b.scrollTop - b.clientHeight)(document.querySelector('{box}'))"
+            assert page.evaluate(gap) < 24, 'the thinking box does not show its newest text'
+            page.evaluate(f"document.querySelector('{box}').scrollTop = 0")
+            page.wait_for_timeout(300)
+            assert page.evaluate(f"document.querySelector('{box}').scrollTop") == 0
             # it stays open through the end of the answer
             page.wait_for_selector('#ai-page .ai-msg.bot:has-text("Done thinking.")', timeout=20000)
             assert page.get_attribute('#ai-page .ct-act > .ct-act-h', 'aria-expanded') == 'true'
