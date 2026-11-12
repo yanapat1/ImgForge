@@ -3,10 +3,10 @@ The assistant's tools: one registry, filled by every module of this folder (each
 a new tool is a new function in the right file, nothing else.
 
     REGISTRY = {name: Tool}           every tool, all domains
-    TOOLS    = {name: Tool}           the Data Center agent's set (data + control), the CLI and SKILL.md
+    TOOLS    = {name: Tool}           the Bucket page agent's set (data + control), the CLI and SKILL.md
     for_role(role, mode)              the tools one agent may call (llm/engine/roles.py picks the domains)
 
-A tool has a `domain` ('data' Data Center, 'visual' the visualizer, 'web', 'common' skills / docs, 'control' the
+A tool has a `domain` ('bucket' the Bucket page, 'data' the Data page, 'visual' the visualizer, 'web', 'common' skills / docs, 'control' the
 turn enders and the planner checklist, 'plugin' a user's HTTP tool) and a `risk`:
 
     read     runs at once, its compact result goes back to the model
@@ -19,7 +19,7 @@ A read tool may also have `confirm_if(ctx, clean)`: when it says True the call i
 `confirm_risk`: 'web' for web search, 'query' for a database query in mode ask / plan) like a change, and the user
 may edit its arguments before it runs.
 
-The two agents never share data tools: the visual agent's domains do not include 'data', so a Data Center call
+The two agents never share data tools: the visual agent's domains do not include 'bucket', so a Bucket call
 from it is an unknown tool, checked on the server. `run` takes (user, args) for the data tools (the CLI shares
 them) and (ctx, args) for the tools marked `ctx=True` (they need the session, the role, the user's skills).
 """
@@ -51,7 +51,7 @@ class Tool:
     preview: object = None                  # (bucket dict | None, args) -> one line for a confirm card
     control: bool = False                   # ask_user / cannot_do / todo / submit_plan: handled by the engine
     s3_ok: bool = False                     # allowed on a read-only (S3) bucket
-    domain: str = 'data'
+    domain: str = 'bucket'
     risk: str = ''                          # '' = derived: control / change / read
     danger_if: object = None                # (clean args) -> True when this call is dangerous (an overwrite ...)
     check: object = None                    # (user | ctx, clean args) -> (clean, bucket | None): before a proposal
@@ -79,7 +79,7 @@ class Tool:
 
 
 def _svc():
-    """The Data Center service (lazy: optional at import time, and tests swap it through this name)."""
+    """The Bucket page service (lazy: optional at import time, and tests swap it through this name)."""
     from ...bucket import service
     return service
 
@@ -145,13 +145,13 @@ def validate(tool, args):
 
 # ---------------------------------------------------------------- registry
 REGISTRY = {}
-TOOLS = {}                      # the Data Center set, in registration order (data + control)
+TOOLS = {}                      # the Bucket page set, in registration order (data + control)
 
 
 def register(t):
     assert t.name not in REGISTRY, f'tool {t.name} registered twice'
     REGISTRY[t.name] = t
-    if t.domain in ('data', 'control') and t.name not in CONTROL_ONLY_ENGINE:
+    if t.domain in ('bucket', 'control') and t.name not in CONTROL_ONLY_ENGINE:
         TOOLS[t.name] = t
     return t
 
@@ -248,10 +248,10 @@ def run(user, name, args, tools=None):
     return t.run(_who(t, user), clean)
 
 
-# every module of this folder registers its tools (datacenter first: TOOLS keeps the order the CLI shows)
-from . import datacenter  # noqa: E402
-from .datacenter import resolve_bucket  # noqa: E402,F401  (the CLI and tests use it from here)
+# every module of this folder registers its tools (bucket first: TOOLS keeps the order the CLI shows)
+from . import bucket  # noqa: E402
+from .bucket import resolve_bucket  # noqa: E402,F401  (the CLI and tests use it from here)
 
 for _m in pkgutil.iter_modules(__path__):
-    if _m.name != 'datacenter':
+    if _m.name != 'bucket':
         importlib.import_module(f'{__name__}.{_m.name}')

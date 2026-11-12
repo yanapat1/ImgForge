@@ -1,6 +1,11 @@
-# Dataset Visualizer
+# DataViz
 
-A FiftyOne-style explorer for YOLO datasets. Every bounding box becomes a dot in a 2D projection
+Three pages, always in this order in the header: **Bucket** (your files: managed folders, linked folders, S3),
+**Image** (sessions: **Visualize** a dataset on an embeddings plot, or **Label** its boxes) and **Data** (SQL / MongoDB
+queries, statistics, forecasts and dashboards on your own databases). The logo opens **Home**, one card per page with
+its counts and recent items. `ARCHITECTURE.md` maps each page to its code.
+
+The Image › Visualize page is a FiftyOne-style explorer for YOLO datasets. Every bounding box becomes a dot in a 2D projection
 (15 methods, grouped Linear: PCA / SVD / ICA / FA · Non-linear: UMAP / PaCMAP / t-SNE / Isomap / LLE / … ·
 Other: MDS / random projection / random trees — see [`dataviz/ml/README.md`](dataviz/ml/README.md)) of a feature space you pick (OpenCLIP, SigLIP 2, DINOv2, your own YOLO
 weights, colour histogram, HOG, box geometry — or any model you add in Settings › Models with "Use in the plot": your
@@ -12,15 +17,15 @@ disk or in S3 / RustFS buckets.
 Not only images: an **embeddings session** plots vectors you computed anywhere (audio, video, text, sensors,
 tables) from a folder of `.npy` files plus a `meta.csv`. Rows show as playable audio cards, videos that play on
 hover, text or image thumbnails, and any metadata column colours the plot. Format:
-[`dataviz/data/README.md`](dataviz/data/README.md#embeddings-folders-any-modality); try it with
+[`dataviz/image/README.md`](dataviz/image/README.md#embeddings-folders-any-modality); try it with
 `python examples/make_embeddings_demo.py` and *New visualize session › Embeddings folder*.
 
-**Videos → frames.** Put a video (mp4, mov, mkv, webm, …) in a Data Center bucket and double-click it: *Extract frames*
+**Videos → frames.** Put a video (mp4, mov, mkv, webm, …) in a bucket and double-click it: *Extract frames*
 cuts it into images, N per second, the first N of each second, bursts (15 frames from 1 s every 2 s), every Nth, all,
 a total count, keyframes only, scene changes or the N most varied (smart), for a time range, skipping near-duplicates,
 into a YOLO-ready folder (optionally split train / val / test by time block) with a `frames.csv` back to the video.
 A bucket can also cut every new video by itself (auto-extract). Then Send to Label or Visualize as usual
-([`dataviz/datacenter/README.md`](dataviz/datacenter/README.md)).
+([`dataviz/bucket/README.md`](dataviz/bucket/README.md)).
 
 ```bash
 npm install && npm run build                                    # compile static/ts -> static/js (once, and after TS edits; `npm run watch` while developing)
@@ -65,7 +70,7 @@ Built in: **Viewer** (nothing: opens what is shared with them), **Member** (defa
 **Contributor** (everything: adds data and models to label and visualize with). Admins have every permission;
 sharing roles (Viewer / Labeler below) still decide what someone may do on another person's session.
 
-The page opens on **Sessions**: one card per session (a dataset to **visualize** — a local folder, an S3 / RustFS
+The **Image** page (`?image`) shows one card per session (a dataset to **visualize** — a local folder, an S3 / RustFS
 prefix or a labeling task — or a **label** session). Every session has an owner and is **private** (only the owner
 and the people they add) or **global** (every user can view it). The owner adds members as **Viewer** (look only)
 or **Labeler** (also label, fix boxes, run curation fixes). Admins can open every session. Cards show the owner's
@@ -98,7 +103,7 @@ by the first admin and private; the old files are left untouched.
 │   ├── workspace.py    per-dataset cache folders <name>__<fingerprint>
 │   ├── paths.py        every derived path, in one place
 │   ├── core/           config, logging, job queue, worker processes  → core/README.md
-│   ├── data/           data sources (local / S3), sessions (saved datasets), indexer → data/README.md
+│   ├── data/           data sources (local / S3), sessions (saved datasets), indexer → image/README.md
 │   ├── ml/             feature extractors, projections, k-NN, groups      → ml/README.md
 │   ├── models/         detectors: registry, loaders, API client, predict job, evaluation → models/README.md
 │   └── server/         FastAPI app, middleware, route modules             → server/README.md
@@ -126,7 +131,7 @@ browser ── GET /api/projection ──▶ server/routes/projections.py
 
 Opening a session builds a new `State` and swaps it into `server.app.Ctx`; every route reads the current
 one through a proxy, so the swap needs no restart. With no session open (`ctx.state is None`, the
-Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/jobs`, `/api/datasets`,
+Home or Image page) the proxy answers 409 "no session open"; `/api/status`, `/api/jobs`, `/api/datasets`,
 `/api/models` and the S3 / folder browsers work without one.
 
 ## Where to change …
@@ -136,28 +141,28 @@ Sessions home) the proxy answers 409 "no session open"; `/api/status`, `/api/job
 | add a feature model | `config.yaml` `features.models` (code: `dataviz/ml/features.py` `model_spec`) |
 | add a projection method | `dataviz/ml/analysis.py` `METHODS` (with its `category`) + `project()` / `_sklearn_estimator()`; page params: `static/ts/views/controls.ts` `PARAM_INFO` |
 | add an API endpoint | the matching `dataviz/server/routes/*.py` (`router(state, ctx)` factory) |
-| support another storage backend | `dataviz/data/sources.py` (implement the source interface), `connections.py` `source()` |
+| support another storage backend | `dataviz/image/sources.py` (implement the source interface), `connections.py` `source()` |
 | change colours / theme | `static/css/tokens.css`, `static/css/palettes.css` for the named palettes (+ `ui.palette` / `ui.palette_light` in `config.yaml`) |
 | change plot behaviour (lasso, pan, zoom) | `static/ts/plot/interactions.ts` |
 | change what the plot draws | `static/ts/plot/render.ts`, overlays in `plot/marks.ts` |
-| install fewer zones (an analyst image without the visualizer) | `dataviz/zones.py` (`ZONES`, `FILES`), `requirements/<zone>.txt`, Docker `--build-arg ZONES=datacenter,analysis`; checks in `tests/zones/test_install.py` |
+| install fewer zones (an analyst image without the visualizer) | `dataviz/zones.py` (`ZONES`, `FILES`), `requirements/<zone>.txt`, Docker `--build-arg ZONES=bucket,data`; checks in `tests/zones/test_install.py` |
 | add a settings section | `static/ts/settings/forms.ts` (renderer) + `dialog.ts` (`SECTIONS`, actions) |
 | support another model format / family | `dataviz/models/runners.py` (`load_runner`), allowed combos: `models/registry.py` `MATRIX`; page form: `static/ts/settings/models.ts` |
 | add a finding / chart to the Evaluation tab | `dataviz/models/insights.py` (`findings()` rules, `dataset_insights()`), `static/ts/views/eval.ts` |
 | add a chart to the Model tab | `dataviz/models/evaluate.py` (numbers), `static/ts/views/model.ts` (`renderCharts`), a card in `index.html` `#tab-model` |
 | change text search (prompt, tokenizer, k) | `dataviz/ml/features.py` `TextEncoder` / `prompt()`, `state.py` `text_search()`; page: `static/ts/viz/boot.ts` + `views/controls.ts` (`#text-search`) |
-| change train / val leakage detection | `dataviz/data/curation.py` `_leak_items` (`leak_sim`); splits: `models.split_source` → `models/splits.py` |
+| change train / val leakage detection | `dataviz/image/curation.py` `_leak_items` (`leak_sim`); splits: `models.split_source` → `models/splits.py` |
 | change the model A-vs-B compare | `dataviz/models/insights.py` `compare()`, `static/ts/views/eval.ts` (`loadCompare` / `renderCompare`) |
-| change how an embeddings row looks (card, hover tip, dialog) or add a preview kind | `static/ts/views/preview.ts`, row dialog `views/modal.ts` `openRow`; server: `dataviz/data/embedding_source.py` (`PREVIEW_COLS`, MIME types), `routes/samples.py` `/api/preview` |
+| change how an embeddings row looks (card, hover tip, dialog) or add a preview kind | `static/ts/views/preview.ts`, row dialog `views/modal.ts` `openRow`; server: `dataviz/image/embedding_source.py` (`PREVIEW_COLS`, MIME types), `routes/samples.py` `/api/preview` |
 | hide or show a control per session kind | `dataviz/server/deps.py` `capabilities()` → `html.no-boxes` (`static/ts/viz/boot.ts`) hides every `.needs-boxes` element (`static/css/states.css`) |
 | change the image browser (no selection) | `static/ts/views/image-grid.ts`; server lists / thumbnails: `dataviz/server/routes/samples.py` (`/api/images`, `/api/img/*`) |
 | change the image viewer (box toggles, right-click copy) | `static/ts/views/viewer.ts`, the dialog around it `views/modal.ts` |
-| change the box editor in the visualizer | `static/ts/views/box-editor.ts`; ops + save path: `dataviz/data/curation.py` (`apply_ops` `set_box` / `add`, `Curation.edit`) |
+| change the box editor in the visualizer | `static/ts/views/box-editor.ts`; ops + save path: `dataviz/image/curation.py` (`apply_ops` `set_box` / `add`, `Curation.edit`) |
 | support another annotation import format / source | `dataviz/labeling/importers.py` (parsers → Records), routes `dataviz/server/routes/label_import.py`, form `static/ts/label/import.ts` |
 | use a Settings › Models model on the label page / gate it | `dataviz/models/hub.py` (adapters), `dataviz/server/routes/labeling.py` (`adapter_for`, `activate_model`), `static/ts/label/model.ts` |
 | change the ◆ AI assistant (providers, features, prompts, token budget) | backend `dataviz/llm/` (`store.py` switches + `FEATURES`, `providers.py` OpenAI / compatible / Claude / Gemini, `budget.py`, `context.py`, `tasks.py`) → `dataviz/llm/README.md`, routes `dataviz/server/routes/llm.py`; page `static/ts/core/llm.ts` (visibility), `settings/llm.ts`, `views/assistant.ts`, `label/assist.ts` |
-| change the optional review (card bar + checklist, Review button, Review all) | `dataviz/labeling/store.py` `set_review` / `stats`, route `/api/label/projects/{pid}/review`; card `static/ts/views/home.ts` (`taskHTML`, `checklistHTML`, `reviewAll`); label page `static/ts/label/app.ts` (`setReview`, `reviewAll`), `panels.ts` (`renderReview`); colours `--prog-review` / `--prog-bulk` in `css/tokens.css` |
-| change video → frames (pick modes, speed, layouts, auto-extract) | `dataviz/datacenter/video.py` (pure), `service.py` `extract_frames` / `set_video_auto`; dialog `static/ts/datacenter/frames.ts`; ◆ tools `extract_frames` / `set_video_auto` in `dataviz/llm/tools/datacenter.py` |
+| change the optional review (card bar + checklist, Review button, Review all) | `dataviz/labeling/store.py` `set_review` / `stats`, route `/api/label/projects/{pid}/review`; card `static/ts/views/image.ts` (`taskHTML`, `checklistHTML`, `reviewAll`); label page `static/ts/label/app.ts` (`setReview`, `reviewAll`), `panels.ts` (`renderReview`); colours `--prog-review` / `--prog-bulk` in `css/tokens.css` |
+| change video → frames (pick modes, speed, layouts, auto-extract) | `dataviz/bucket/video.py` (pure), `service.py` `extract_frames` / `set_video_auto`; dialog `static/ts/bucket/frames.ts`; ◆ tools `extract_frames` / `set_video_auto` in `dataviz/llm/tools/bucket.py` |
 | change terminal logging | `dataviz/core/logging.py` (tags, colours), HTTP lines in `dataviz/server/app.py` |
 
 ## Conventions (whole project)
@@ -188,7 +193,7 @@ fixtures and helpers (`conftest.py`, `conftest_io.py`, `authutil.py`, `vizutil.p
 | Folder | What it tests |
 |---|---|
 | `auth/` | sign-in, accounts, admin, tiers, sharing, route guards, role matrix, open sign-up hardening |
-| `datacenter/` | the Data Center (`test_dc_*`): buckets, formats, uploads, S3 links, web sources, text, video, the page |
+| `bucket/` | the Bucket page (`test_bucket_*`): buckets, formats, uploads, S3 links, web sources, text, video, the page |
 | `labeling/` | the label page: store, routes, import, writers / formats, image-strip filter, curation, the image editor |
 | `models/` | model-assisted labeling, the model hub, label-all process, prediction speed, image models, own-model features |
 | `visualizer/` | visualize sessions: combined datasets, promote, live feed, many sessions, Objects / Full images, image-only and embeddings sessions, reuse, jobs, the DVC1 transport |
@@ -196,7 +201,7 @@ fixtures and helpers (`conftest.py`, `conftest_io.py`, `authutil.py`, `vizutil.p
 | `ml/` | projections + Generate, pgvector, feature / index speed, GPU vs CPU, cleanlab label quality |
 | `llm/` | the ◆ assistants: providers, prompts & skills, saved chats, streaming, tools, the agent engine, web search, chat reducer under node |
 | `storage/` | databases (export, schema vs migrations, legacy import, repositories) and image I/O sources / sinks |
-| `ui/` | page smoke tests, Sessions home, error pages, pre-paint colours, filter / editor under node |
+| `ui/` | page smoke tests, Home, the Image page, error pages, pre-paint colours, filter / editor under node |
 | `bench/` | benchmarks, not tests (`bench_labeling.py`, `bench_label_quality.py`) |
 
 | Tests | Cover |
@@ -238,7 +243,7 @@ this host only at `127.0.0.1:${PG_PORT:-15432}`, user / database `dataviz`). Bac
 without the key the stored passwords and API keys cannot be read. Other settings in `.env`: `DATASET_DIR`,
 `DATAVIZ_DEVICE`, `HF_TOKEN`; `COMPOSE_FILE` selects the compose files.
 
-**Data Center files live in `/workspace/data`** (`storage.data_root`, `DATAVIZ_DATA_ROOT`): managed buckets, S3 links
+**Bucket files live in `/workspace/data`** (`storage.data_root`, `DATAVIZ_DATA_ROOT`): managed buckets, S3 links
 loaded "local", web imports and the trash. The compose files mount it (`dc_data` volume, or
 `/home/jovyan/work/image-tools-data/data/` on the persistent-path server), so `down` / `up --build` keeps it; the log
 warns when the root is on the container's writable layer. An S3 link in local mode whose copy was lost comes back

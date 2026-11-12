@@ -1,4 +1,4 @@
-"""The per-user repositories (data/connections.py, llm/store.py, models/registry.py) and the routes over them:
+"""The per-user repositories (image/connections.py, llm/store.py, models/registry.py) and the routes over them:
 secrets encrypted at rest and masked in every response, one user never lists / uses / deletes another's
 connections, providers or models, a member of a shared session reads it through the owner's connection without
 seeing it, env: secrets are admin-only, local folders stay inside storage.allowed_roots, and the rows the legacy

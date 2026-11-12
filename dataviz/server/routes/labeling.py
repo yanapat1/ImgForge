@@ -50,7 +50,7 @@ from ..models import (ModelActivateIn, AnnotationsPut, DuplicateIn, ExportIn, La
                       LabelTaskPatch, ModelDetectIn, PredictAllIn, PredictIn, RemoveModelLabelsIn, TaskModelIn)
 
 _log = vlog.get_logger('labeling')
-IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')    # = data/sources.IMAGE_EXTS (what the import reads)
+IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')    # = image/sources.IMAGE_EXTS (what the import reads)
 CHUNK = 1 << 20                     # upload copy size: 1 MiB
 PROBE_THREADS = 8                   # header reads are I/O bound (remote: one round trip each)
 INSERT_BATCH = 500
@@ -149,8 +149,8 @@ def router(state, ctx):
         return connections.allowed_roots(ctx.cfg)
 
     def source_roots():
-        """Where a local image source may lie: the allowed roots plus the Data Center's managed store (New label ›
-        Data Center reads a managed bucket in place)."""
+        """Where a local image source may lie: the allowed roots plus the Bucket page's managed store (New label ›
+        Bucket reads a managed bucket in place)."""
         from ...bucket import store as dcstore
         return dcstore.roots(ctx.cfg)
 
@@ -898,7 +898,7 @@ def router(state, ctx):
         return {'job_id': job.id}
 
     def label_all_fn(pid, entry, task, link, scope, conf):
-        """fn(job) of the label-all job (also run inside the Data Center's autolabel job)."""
+        """fn(job) of the label-all job (also run inside the Bucket page's autolabel job)."""
         st = store(pid)
         tid = task['id']
 

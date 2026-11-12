@@ -1,4 +1,4 @@
-"""Smoke test of the Data Center page (?data, static/ts/datacenter/): the real app.py with a fresh PostgreSQL database,
+"""Smoke test of the Bucket page (?bucket, static/ts/bucket/): the real app.py with a fresh PostgreSQL database,
 headless Chromium signed in as the first admin. A managed bucket is created and filled through the API
 (dataviz/bucket/API.md); the page must show it in the tree and as a card, open it, and switch between
 Thumbnails and Names only (the choice survives a reload: it is a user pref). Fails on any page error or console
@@ -42,7 +42,7 @@ def _upload(url, files):
 def server(pg, tmp_path):
     ds, cfg = _make(tmp_path)
     conf = json.loads(cfg.read_text())
-    conf['storage'] = {'allowed_roots': [str(tmp_path)], 'data_root': str(tmp_path / 'dc-data')}   # imports land here
+    conf['storage'] = {'allowed_roots': [str(tmp_path)], 'data_root': str(tmp_path / 'bk-data')}   # imports land here
     cfg.write_text(json.dumps(conf))
     port = _free_port()
     env = {**os.environ, 'DATABASE_URL': pg, 'DATAVIZ_SECRET_KEY': TEST_SECRET_KEY,
@@ -73,16 +73,16 @@ def server(pg, tmp_path):
             proc.kill()
 
 
-def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
-    b = _send(f'{server}/api/dc/buckets', {'name': 'smoke-bucket', 'kind': 'managed', 'tags': ['smoke']})
+def test_bucket_tree_cards_and_view_toggle(server, tmp_path):
+    b = _send(f'{server}/api/bucket/buckets', {'name': 'smoke-bucket', 'kind': 'managed', 'tags': ['smoke']})
     bid = b['id']
     imgs = []
     for k in range(6):
         p = tmp_path / f'up{k}.jpg'
         make_jpeg(p, 64, 48, color=(40 * k, 200 - 20 * k, 90))
         imgs.append((p.name, p.read_bytes()))
-    _upload(f'{server}/api/dc/buckets/{bid}/upload?path=', imgs)
-    assert _get(f'{server}/api/dc/buckets/{bid}/ls?path=')['total'] == 6
+    _upload(f'{server}/api/bucket/buckets/{bid}/upload?path=', imgs)
+    assert _get(f'{server}/api/bucket/buckets/{bid}/ls?path=')['total'] == 6
 
     errors = []
     with sync_api.sync_playwright() as p:
@@ -90,62 +90,62 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
         page = browser.new_page(viewport={'width': 1600, 'height': 1000})
         page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
         page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-        page.goto(f'{server}/?data')
-        assert page.evaluate('document.documentElement.dataset.screen') == 'data'
-        # tree row + card for the bucket; the Data tab is the current one
-        page.wait_for_selector(f'#dc-tree .t-row[data-bid="{bid}"]', timeout=30000)
-        page.wait_for_selector(f'#dc-body .dc-bcard[data-bid="{bid}"]')
-        assert 'smoke-bucket' in page.locator(f'#dc-body .dc-bcard[data-bid="{bid}"]').inner_text()
-        assert page.locator('.dc-header .hdr-nav a.on').inner_text().startswith('Data')
-        assert page.locator('#home').is_hidden()
+        page.goto(f'{server}/?bucket')
+        assert page.evaluate('document.documentElement.dataset.screen') == 'bucket'
+        # tree row + card for the bucket; the Bucket tab is the current one
+        page.wait_for_selector(f'#bk-tree .t-row[data-bid="{bid}"]', timeout=30000)
+        page.wait_for_selector(f'#bk-body .bk-bcard[data-bid="{bid}"]')
+        assert 'smoke-bucket' in page.locator(f'#bk-body .bk-bcard[data-bid="{bid}"]').inner_text()
+        assert page.locator('.bk-header .hdr-nav a.on').inner_text().strip() == 'Bucket'
+        assert page.locator('#home').is_hidden() and page.locator('#image').is_hidden()
         # a click focuses it (details on the right), its name opens it
-        page.click(f'#dc-body .dc-bcard[data-bid="{bid}"] .dc-mosaic')
-        page.wait_for_selector('#dc-details .d-title h3:has-text("smoke-bucket")')
-        page.click(f'#dc-body .dc-bcard[data-bid="{bid}"] .bc-name')
-        page.wait_for_function(f'location.search.includes("data={bid}")')
+        page.click(f'#bk-body .bk-bcard[data-bid="{bid}"] .bk-mosaic')
+        page.wait_for_selector('#bk-details .d-title h3:has-text("smoke-bucket")')
+        page.click(f'#bk-body .bk-bcard[data-bid="{bid}"] .bc-name')
+        page.wait_for_function(f'location.search.includes("bucket={bid}")')
         # thumbnails: 6 tiles, the visible ones load ?w= thumbnails
-        page.wait_for_selector('#dc-grid .dc-th')
-        assert page.locator('#dc-grid .dc-th').count() == 6
-        page.wait_for_selector('#dc-grid .dc-th img[src*="w=256"]', timeout=15000)
+        page.wait_for_selector('#bk-grid .bk-th')
+        assert page.locator('#bk-grid .bk-th').count() == 6
+        page.wait_for_selector('#bk-grid .bk-th img[src*="w=256"]', timeout=15000)
         # Names only: a list row per file, no tiles; remembered across a reload (user pref)
-        page.click('#dc-view-names')
-        page.wait_for_selector('#dc-grid .dc-lrow')
-        assert page.locator('#dc-grid .dc-lrow').count() == 6
-        assert page.locator('#dc-grid .dc-th').count() == 0
-        assert page.get_attribute('#dc-view-names', 'aria-pressed') == 'true'
+        page.click('#bk-view-names')
+        page.wait_for_selector('#bk-grid .bk-lrow')
+        assert page.locator('#bk-grid .bk-lrow').count() == 6
+        assert page.locator('#bk-grid .bk-th').count() == 0
+        assert page.get_attribute('#bk-view-names', 'aria-pressed') == 'true'
         page.wait_for_timeout(800)                  # the pref PUT is debounced
         page.reload()
-        page.wait_for_selector('#dc-grid .dc-lrow', timeout=30000)
-        assert page.get_attribute('#dc-view-names', 'aria-pressed') == 'true'
+        page.wait_for_selector('#bk-grid .bk-lrow', timeout=30000)
+        assert page.get_attribute('#bk-view-names', 'aria-pressed') == 'true'
         # selection: click + Ctrl-click -> the bulk bar and the selection details
-        rows = page.locator('#dc-grid .dc-lrow')
+        rows = page.locator('#bk-grid .bk-lrow')
         top = rows.nth(2).bounding_box()['y']
         rows.nth(0).click()
         rows.nth(2).click(modifiers=['Control'])
-        page.wait_for_selector('#dc-selbar:not(.hidden)')
-        assert '2 selected' in page.locator('#dc-selbar').inner_text()
+        page.wait_for_selector('#bk-selbar:not(.hidden)')
+        assert '2 selected' in page.locator('#bk-selbar').inner_text()
         assert rows.nth(2).bounding_box()['y'] == top     # the bar lies over the folder bar: the list does not move
         page.keyboard.press('Escape')
-        page.wait_for_selector('#dc-selbar.hidden', state='attached')
+        page.wait_for_selector('#bk-selbar.hidden', state='attached')
         # back to Thumbnails
-        page.click('#dc-view-thumbs')
-        page.wait_for_selector('#dc-grid .dc-th')
-        assert page.locator('#dc-grid .dc-lrow').count() == 0
+        page.click('#bk-view-thumbs')
+        page.wait_for_selector('#bk-grid .bk-th')
+        assert page.locator('#bk-grid .bk-lrow').count() == 0
         # right-click menu: a left click anywhere outside it closes it, even on the tile that opened it or on the
         # empty folder area (the menu's anchor there is the whole body)
-        tile = page.locator('#dc-grid .dc-th').nth(1)
+        tile = page.locator('#bk-grid .bk-th').nth(1)
         tile.click(button='right')
-        page.wait_for_selector('#dc-menu:not(.hidden)')
+        page.wait_for_selector('#bk-menu:not(.hidden)')
         tile.click()
-        page.wait_for_selector('#dc-menu.hidden', state='attached')
-        box = page.locator('#dc-body').bounding_box()
+        page.wait_for_selector('#bk-menu.hidden', state='attached')
+        box = page.locator('#bk-body').bounding_box()
         page.mouse.click(box['x'] + box['width'] - 20, box['y'] + box['height'] - 20, button='right')
-        page.wait_for_selector('#dc-menu:not(.hidden)')
+        page.wait_for_selector('#bk-menu:not(.hidden)')
         page.mouse.click(box['x'] + box['width'] - 40, box['y'] + box['height'] - 40)
-        page.wait_for_selector('#dc-menu.hidden', state='attached')
+        page.wait_for_selector('#bk-menu.hidden', state='attached')
         # the browser's back button returns to All buckets
         page.go_back()
-        page.wait_for_selector(f'#dc-body .dc-bcard[data-bid="{bid}"]')
+        page.wait_for_selector(f'#bk-body .bk-bcard[data-bid="{bid}"]')
         browser.close()
     assert not errors, '\n'.join(errors)
 
@@ -153,7 +153,7 @@ def test_data_center_tree_cards_and_view_toggle(server, tmp_path):
 def test_bucket_card_delete_and_edit_actions(server, tmp_path):
     """A card has ✎ Edit and 🗑 Delete; the Edit dialog's Actions are tiles plus a separate Delete strip; the card's 🗑
     asks first, then removes the bucket."""
-    bid = _send(f'{server}/api/dc/buckets', {'name': 'card-bucket', 'kind': 'managed'})['id']
+    bid = _send(f'{server}/api/bucket/buckets', {'name': 'card-bucket', 'kind': 'managed'})['id']
     shots = os.environ.get('DC_SHOTS')              # a folder: also save screenshots of the dialog and card
     errors = []
     with sync_api.sync_playwright() as p:
@@ -161,8 +161,8 @@ def test_bucket_card_delete_and_edit_actions(server, tmp_path):
         page = browser.new_page(viewport={'width': 1600, 'height': 1000})
         page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
         page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-        page.goto(f'{server}/?data')
-        card = page.locator(f'#dc-body .dc-bcard[data-bid="{bid}"]')
+        page.goto(f'{server}/?bucket')
+        card = page.locator(f'#bk-body .bk-bcard[data-bid="{bid}"]')
         card.wait_for(timeout=30000)
         card.hover()
         dele = card.locator('button.bc-del[data-act="delete-bucket"]')
@@ -171,12 +171,12 @@ def test_bucket_card_delete_and_edit_actions(server, tmp_path):
             card.screenshot(path=f'{shots}/card.png')
         # the Edit dialog: four action tiles, then the Delete strip
         card.locator('button[data-act="edit-bucket"]').click()
-        dlg = page.locator('.ui-dlg:has(.dc-edit)')
+        dlg = page.locator('.ui-dlg:has(.bk-edit)')
         dlg.wait_for()
-        assert [t.get_attribute('data-ed') for t in dlg.locator('.dc-edit-acts .dc-edit-act').all()] == \
+        assert [t.get_attribute('data-ed') for t in dlg.locator('.bk-edit-acts .bk-edit-act').all()] == \
             ['export', 'export-to', 'redetect', 'autolabel']
-        assert 'Delete this bucket' in dlg.locator('.dc-edit-danger').inner_text()
-        assert dlg.locator('.dc-edit-act .ico').first.bounding_box()['width'] > 0
+        assert 'Delete this bucket' in dlg.locator('.bk-edit-danger').inner_text()
+        assert dlg.locator('.bk-edit-act .ico').first.bounding_box()['width'] > 0
         if shots:
             dlg.screenshot(path=f'{shots}/edit.png')
             page.emulate_media(color_scheme='dark')
@@ -194,13 +194,13 @@ def test_bucket_card_delete_and_edit_actions(server, tmp_path):
         conf.locator('[data-dlg="ok"]').click()
         card.wait_for(state='detached', timeout=15000)
         browser.close()
-    assert all(x['id'] != bid for x in _get(f'{server}/api/dc/buckets'))
+    assert all(x['id'] != bid for x in _get(f'{server}/api/bucket/buckets'))
     assert not errors, '\n'.join(errors)
 
 
-def test_data_center_assistant_dock_chat(server):
-    """The ◆ assistant in the right-side dock (datacenter/ai.ts on core/dock.ts + core/chat.ts): the answer of a fake
-    OpenAI-compatible model streams in, the Tools fold lists the catalogue's tools, Shift+Tab in #dc-ai-q switches
+def test_bucket_assistant_dock_chat(server):
+    """The ◆ assistant in the right-side dock (bucket/ai.ts on core/dock.ts + core/chat.ts): the answer of a fake
+    OpenAI-compatible model streams in, the Tools fold lists the catalogue's tools, Shift+Tab in #bk-ai-q switches
     the mode chip (and the mode sent), and the chat is saved (History)."""
     from test_llm import REPLY, fake_app
     from test_models import _serve
@@ -210,75 +210,75 @@ def test_data_center_assistant_dock_chat(server):
         p = _send(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
                                                   'model': 'gpt-x', 'vision': True})['provider']
         assert _send(f'{server}/api/llm/test', {'id': p['id']})['ok']
-        _send(f'{server}/api/llm/config', {'features': {'data_center': True}}, 'PUT')
+        _send(f'{server}/api/llm/config', {'features': {'bucket_data': True}}, 'PUT')
         errors = []
         with sync_api.sync_playwright() as pw:
             browser = _browser(pw)
             page = browser.new_page(viewport={'width': 1600, 'height': 1000})
             page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
             page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-            page.goto(f'{server}/?data')
-            page.wait_for_selector('#ai-dock #dc-ai #dc-ai-q', timeout=30000)
-            page.fill('#dc-ai-q', 'Which buckets are there?')
-            page.press('#dc-ai-q', 'Enter')
-            page.wait_for_selector('#dc-ai .chat .ai-msg.bot:has-text("fake model")', timeout=20000)
-            page.click('#dc-ai [data-dcai="tools"]')
-            page.wait_for_selector('#dc-ai .dc-ai-tools .tchip', timeout=10000)
-            assert page.inner_text('#dc-ai .chat-chip.mode').strip() == 'ask'
-            page.focus('#dc-ai-q')
+            page.goto(f'{server}/?bucket')
+            page.wait_for_selector('#ai-dock #bk-ai #bk-ai-q', timeout=30000)
+            page.fill('#bk-ai-q', 'Which buckets are there?')
+            page.press('#bk-ai-q', 'Enter')
+            page.wait_for_selector('#bk-ai .chat .ai-msg.bot:has-text("fake model")', timeout=20000)
+            page.click('#bk-ai [data-dcai="tools"]')
+            page.wait_for_selector('#bk-ai .bk-ai-tools .tchip', timeout=10000)
+            assert page.inner_text('#bk-ai .chat-chip.mode').strip() == 'ask'
+            page.focus('#bk-ai-q')
             page.keyboard.press('Shift+Tab')
-            assert page.inner_text('#dc-ai .chat-chip.mode').strip() == 'auto'
-            page.fill('#dc-ai-q', 'And now?')
-            with page.expect_request(lambda r: '/api/llm/agent/data/chat' in r.url) as req:
-                page.press('#dc-ai-q', 'Enter')
+            assert page.inner_text('#bk-ai .chat-chip.mode').strip() == 'auto'
+            page.fill('#bk-ai-q', 'And now?')
+            with page.expect_request(lambda r: '/api/llm/agent/bucket/chat' in r.url) as req:
+                page.press('#bk-ai-q', 'Enter')
             sent = json.loads(req.value.post_data)
             assert sent['mode'] == 'auto' and sent['session_id'] and 'selection' in sent['scope'], sent
-            page.wait_for_function("document.querySelectorAll('#dc-ai .chat-turn.ai').length >= 2 && "
-                                   "document.querySelector('#dc-ai .chat').getAttribute('aria-busy') === 'false'", timeout=20000)
-            page.click('#dc-ai [data-ca="history"]')
-            page.wait_for_selector('#dc-ai .chat-hrow.cur', timeout=5000)      # the title may be improved by a title call
+            page.wait_for_function("document.querySelectorAll('#bk-ai .chat-turn.ai').length >= 2 && "
+                                   "document.querySelector('#bk-ai .chat').getAttribute('aria-busy') === 'false'", timeout=20000)
+            page.click('#bk-ai [data-ca="history"]')
+            page.wait_for_selector('#bk-ai .chat-hrow.cur', timeout=5000)      # the title may be improved by a title call
             browser.close()
         assert not errors, '\n'.join(errors)
     finally:
         fake.should_exit = True
 
 
-def test_data_center_extract_frames(server, tmp_path):
+def test_bucket_extract_frames(server, tmp_path):
     """A video tile shows its poster; double-click opens Extract frames (player, meta, live estimate + film strip);
     the "burst" preset runs as a job and the page opens the new frames folder."""
     from test_bucket_video import make_clip
     clip = Path(make_clip(tmp_path / 'walk.mp4', secs=4))
-    b = _send(f'{server}/api/dc/buckets', {'name': 'video-bucket', 'kind': 'managed'})
+    b = _send(f'{server}/api/bucket/buckets', {'name': 'video-bucket', 'kind': 'managed'})
     bid = b['id']
-    _upload(f'{server}/api/dc/buckets/{bid}/upload?path=', [(clip.name, clip.read_bytes())])
+    _upload(f'{server}/api/bucket/buckets/{bid}/upload?path=', [(clip.name, clip.read_bytes())])
     errors = []
     with sync_api.sync_playwright() as p:
         browser = _browser(p)
         page = browser.new_page(viewport={'width': 1500, 'height': 1000})
         page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
         page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-        page.goto(f'{server}/?data={bid}')
-        tile = page.locator('#dc-grid .dc-th[data-path="walk.mp4"]')
+        page.goto(f'{server}/?bucket={bid}')
+        tile = page.locator('#bk-grid .bk-th[data-path="walk.mp4"]')
         tile.wait_for(timeout=30000)
-        page.wait_for_selector('#dc-grid .dc-th[data-path="walk.mp4"] img[src*="w="]', timeout=15000)
-        assert page.locator('#dc-grid .dc-th[data-path="walk.mp4"] .vb').count() == 1
+        page.wait_for_selector('#bk-grid .bk-th[data-path="walk.mp4"] img[src*="w="]', timeout=15000)
+        assert page.locator('#bk-grid .bk-th[data-path="walk.mp4"] .vb').count() == 1
         # one click: the details pane plays it and offers Extract frames
         tile.click()
-        page.wait_for_selector('#dc-details video.dc-d-video')
+        page.wait_for_selector('#bk-details video.bk-d-video')
         tile.dblclick()
-        page.wait_for_selector('.ui-dlg .dc-fr video.dc-fr-player')
-        page.wait_for_selector('.dc-fr-meta:has-text("160×96")', timeout=15000)
-        page.wait_for_selector('#dc-fr-est .status-line.ok:has-text("4 frames")', timeout=15000)   # 1 per second
-        page.click('.dc-fr [data-preset="burst"]')
-        page.wait_for_selector('#dc-fr-est .status-line.ok:has-text("30 frames")', timeout=15000)  # 15 from 1 s every 2 s
-        page.wait_for_function('[...document.querySelectorAll(".dc-fr-strip img")].filter((i) => i.complete && i.naturalWidth > 0).length === 8',
+        page.wait_for_selector('.ui-dlg .bk-fr video.bk-fr-player')
+        page.wait_for_selector('.bk-fr-meta:has-text("160×96")', timeout=15000)
+        page.wait_for_selector('#bk-fr-est .status-line.ok:has-text("4 frames")', timeout=15000)   # 1 per second
+        page.click('.bk-fr [data-preset="burst"]')
+        page.wait_for_selector('#bk-fr-est .status-line.ok:has-text("30 frames")', timeout=15000)  # 15 from 1 s every 2 s
+        page.wait_for_function('[...document.querySelectorAll(".bk-fr-strip img")].filter((i) => i.complete && i.naturalWidth > 0).length === 8',
                                timeout=20000)
         page.screenshot(path=str(tmp_path / 'frames-dialog.png'))
         page.click('.ui-dlg button.primary:has-text("Extract frames")')
-        page.wait_for_function(f'location.search.includes("data={bid}") && location.search.includes("walk-frames")', timeout=30000)
-        page.wait_for_selector('#dc-grid .dc-th[data-path="walk-frames/images"]', timeout=15000)
+        page.wait_for_function(f'location.search.includes("bucket={bid}") && location.search.includes("walk-frames")', timeout=30000)
+        page.wait_for_selector('#bk-grid .bk-th[data-path="walk-frames/images"]', timeout=15000)
         browser.close()
-    ls = _get(f'{server}/api/dc/buckets/{bid}/ls?path=walk-frames/images')
+    ls = _get(f'{server}/api/bucket/buckets/{bid}/ls?path=walk-frames/images')
     assert ls['total'] == 30
     assert not errors, '\n'.join(errors)
 
@@ -290,9 +290,9 @@ def test_compare_with_cloud_dialog(server, tmp_path, s3_server, s3_bucket):
     for i in range(40):
         client.put_object(Bucket=bucket, Key=f'cats/im{i:02d}.jpg', Body=make_jpeg_bytes(i))
     conn = _send(f'{server}/api/connections', {**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'})
-    b = _send(f'{server}/api/dc/buckets', {'name': 'zoo', 'kind': 's3', 'connection_id': conn['id'], 's3_bucket': bucket, 'prefix': ''})
+    b = _send(f'{server}/api/bucket/buckets', {'name': 'zoo', 'kind': 's3', 'connection_id': conn['id'], 's3_bucket': bucket, 'prefix': ''})
     bid = b['id']
-    job = _send(f'{server}/api/dc/buckets/{bid}/local', {'paths': ['cats']})['job_id']
+    job = _send(f'{server}/api/bucket/buckets/{bid}/local', {'paths': ['cats']})['job_id']
     for _ in range(200):
         if _get(f'{server}/api/jobs/{job}').get('status') in ('done', 'error'):
             break
@@ -306,20 +306,20 @@ def test_compare_with_cloud_dialog(server, tmp_path, s3_server, s3_bucket):
         page = browser.new_page(viewport={'width': 1500, 'height': 950})
         page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
         page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-        page.goto(f'{server}/?data={bid}&path=cats')
+        page.goto(f'{server}/?bucket={bid}&path=cats')
         page.wait_for_selector('[data-act="compare-cloud"]', timeout=30000)
         page.click('[data-act="compare-cloud"]')
-        page.wait_for_selector('.dc-cmp-card.s-same b:has-text("40")', timeout=30000)
-        assert page.locator('.dc-cmp-card.s-new_cloud b').inner_text() == '1'
-        page.click('.dc-cmp-tabs [data-f="cloud"]')
-        page.wait_for_selector('.dc-cmp-row.s-new_cloud:has-text("cats/new.jpg")')
-        page.click('.dc-cmp-tabs [data-f="all"]')
-        page.wait_for_selector('.dc-cmp-row.s-same')
-        n = page.locator('.dc-cmp-row').count()
+        page.wait_for_selector('.bk-cmp-card.s-same b:has-text("40")', timeout=30000)
+        assert page.locator('.bk-cmp-card.s-new_cloud b').inner_text() == '1'
+        page.click('.bk-cmp-tabs [data-f="cloud"]')
+        page.wait_for_selector('.bk-cmp-row.s-new_cloud:has-text("cats/new.jpg")')
+        page.click('.bk-cmp-tabs [data-f="all"]')
+        page.wait_for_selector('.bk-cmp-row.s-same')
+        n = page.locator('.bk-cmp-row').count()
         assert 0 < n < 41, 'only the rows in view (+ a few) are drawn'
-        page.click('.dc-cmp-card.s-same')
+        page.click('.bk-cmp-card.s-same')
         page.fill('[data-cmp="q"]', 'im3')
-        page.wait_for_function("document.querySelectorAll('.dc-cmp-row:not(.ghost)').length === 10")
+        page.wait_for_function("document.querySelectorAll('.bk-cmp-row:not(.ghost)').length === 10")
         page.screenshot(path=str(tmp_path / 'compare.png'))
         browser.close()
     assert not errors, errors

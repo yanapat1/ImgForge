@@ -1,4 +1,4 @@
-// The shared ◆ chat of both assistants (Data Center drawer: datacenter/ai.ts, role 'data'; visualizer tab:
+// The shared ◆ chat of both assistants (Bucket drawer: bucket/ai.ts, role 'bucket'; visualizer tab:
 // views/assistant.ts, role 'visual'). mountChat(root, opts) draws a session header, the transcript and the composer
 // into `root` and talks to POST api/llm/agent/<role>/chat (NDJSON, dataviz/llm/engine/events.py), /confirm, /stop,
 // /catalog and /models, and to the chat sessions (api/llm/sessions*).
@@ -67,12 +67,12 @@ const badge = (risk: string): string => `<span class="ct-badge r-${esc(risk)}">$
 const since = (t0: number): string => `<span class="num" data-since="${t0}">${fmtSince(Math.max(0, performance.now() - t0))}</span>`;
 
 const MODE_HINT: Record<ChatRole, Record<ChatMode, string>> = {
-  analysis: {
+  data: {
     ask: 'ask: every change waits for your OK',
     auto: '⏵⏵ auto: reads run, changes still ask',
     plan: '⏸ plan: read-only research, then a plan to approve',
   },
-  data: {
+  bucket: {
     ask: 'ask: every change waits for your OK',
     auto: '⏵⏵ auto: changes run, deletes still ask',
     plan: '⏸ plan: read-only research, then a plan to approve',
@@ -266,7 +266,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   };
   const modelLabel = (): string => C.prefs.model || provider()?.model || 'model';
   const scopeKey = (): string | null => { const s = opts.sessionScope?.(); const v = s ? Object.values(s)[0] : null; return v || null; };
-  const scopeWord = opts.scopeName || (role === 'data' ? 'bucket' : 'dataset');
+  const scopeWord = opts.scopeName || (role === 'bucket' ? 'bucket' : 'dataset');
 
   // ---------------------------------------------------------------- render: head
   function renderHead(): void {
@@ -1406,7 +1406,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const bid = bucket || str(opts.scope()['bucket']);
     if (!bid) { toast('Undo: which bucket?', 'err'); return; }
     try {
-      await postJSON(`api/dc/buckets/${encodeURIComponent(bid)}/undo`, { undo_id: undoId });
+      await postJSON(`api/bucket/buckets/${encodeURIComponent(bid)}/undo`, { undo_id: undoId });
       C.turns = C.turns.map((e) => (e.role === 'ai' ? reduce(e, { type: 'x_undone', undo_id: undoId }) : e));
       renderLog();
       toast('Undone', 'ok');

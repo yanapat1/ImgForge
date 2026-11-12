@@ -67,7 +67,7 @@ def run(ctx, name, args=None):
 
 
 # ---------------------------------------------------------------- read tools
-def test_tools_are_visual_ctx_tools_without_the_data_center():
+def test_tools_are_visual_ctx_tools_without_the_bucket():
     names = {t.name for t in tools.REGISTRY.values() if t.domain == 'visual'}
     assert names == {'view_state', 'dataset_summary', 'class_stats', 'eval_summary', 'compare_shift', 'compare_stress', 'compare_tests', 'list_features', 'list_methods',
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
@@ -78,8 +78,9 @@ def test_tools_are_visual_ctx_tools_without_the_data_center():
     assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS) - set(visual.RUN_ACTIONS)
     assert {n for n in names if tools.REGISTRY[n].risk == 'run'} == set(visual.RUN_ACTIONS)
     src = Path(visual.__file__).read_text()
-    assert 'datacenter' not in re.sub(r'""".*?"""', '', src, flags=re.S) and '_svc' not in src
-    assert not set(tools.for_role(roles.get('visual').domains)) & {t for t in tools.TOOLS if tools.TOOLS[t].domain == 'data'}
+    code = re.sub(r'""".*?"""', '', src, flags=re.S)
+    assert '...bucket' not in code and 'bucket.service' not in code and '_svc' not in src
+    assert not set(tools.for_role(roles.get('visual').domains)) & {t for t in tools.TOOLS if tools.TOOLS[t].domain == 'bucket'}
 
 
 def test_view_state(session):
@@ -325,7 +326,7 @@ def test_visual_knowledge_names_only_real_features_and_methods():
 def test_skills_name_only_real_tools():
     names = set(tools.REGISTRY) | PLANNED_TOOLS
     args = {k for t in tools.REGISTRY.values() for k in (t.schema.get('properties') or {})}
-    vocab = _vocab() | set(prompting.skills('data')) | args         # a tool's own argument names are fine too
+    vocab = _vocab() | set(prompting.skills('bucket')) | args         # a tool's own argument names are fine too
     call = re.compile(r'^([a-z_][a-z0-9_]*)(\(.*\))?$')
     files = sorted((PROMPTS / 'skills').glob('*/*/SKILL.md'))
     assert len(files) == 28
@@ -344,15 +345,15 @@ def test_skills_name_only_real_tools():
         assert used, f'{f.parent.name} names no tool'
         role = f.parent.parent.name
         if role != 'common':                            # a skill never names the other agent's tools
-            other = {t.name for t in tools.REGISTRY.values() if t.domain == ('visual' if role == 'data' else 'data')}
+            other = {t.name for t in tools.REGISTRY.values() if t.domain == ('visual' if role == 'bucket' else 'bucket')}
             assert not used & other, f'{f.parent.name}: {used & other}'
     assert set(prompting.skills('visual')) >= {'choose-feature-and-method', 'find-label-errors', 'read-the-map',
                                                'near-duplicates', 'compare-models', 'curate-a-class', 'web-research'}
-    assert set(prompting.skills('data')) >= {'organise-yolo-dataset', 'split-train-val-test', 'clean-up-duplicates',
+    assert set(prompting.skills('bucket')) >= {'organise-yolo-dataset', 'split-train-val-test', 'clean-up-duplicates',
                                              's3-local-and-sync', 'export-dataset', 'tag-taxonomy', 'import-from-web'}
 
 
-@pytest.mark.parametrize('role', ['visual', 'data'])
+@pytest.mark.parametrize('role', ['visual', 'bucket'])
 def test_prompt_stays_small(role):
     r = roles.get(role)
     tset = tools.for_role(r.domains, 'ask')

@@ -1,5 +1,5 @@
 """
-"Promote to labeling" of a combined dataset (data/promote.py), under /s/<union id>/ like every session route:
+"Promote to labeling" of a combined dataset (image/promote.py), under /s/<union id>/ like every session route:
 
     POST /api/promote   {target, name, project_id, task_id, dedup, labels, priority, include_background, create_viz}
                         -> {job_id}; the job's result: {project_id, task_id, viz_session_id, n_media, n_skipped_dup,
@@ -33,7 +33,7 @@ def router(state, ctx):
             raise HTTPException(501, 'labeling sessions are not enabled in this server')
         st = ctx.current()
         if getattr(st.source, 'kind', None) != 'union':
-            raise HTTPException(409, 'promote needs a combined dataset (pick 2+ datasets on the home page)')
+            raise HTTPException(409, 'promote needs a combined dataset (pick 2+ datasets on the Image page)')
         opts = dict(body or {})
         if opts.get('target', 'new') not in ('new', 'existing') or \
                 opts.get('dedup', 'hash') not in ('hash', 'none') or \

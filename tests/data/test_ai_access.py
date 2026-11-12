@@ -1,4 +1,4 @@
-"""Per-table AI access (analysis/aiaccess.py): what the ◆ assistant may change in each table, checked on the parsed
+"""Per-table AI access (data/aiaccess.py): what the ◆ assistant may change in each table, checked on the parsed
 statements. Read only (default) allows reads, CAST and temp tables; Edit rows adds INSERT / UPDATE / DELETE / MERGE;
 Change structure adds ALTER / TRUNCATE / DROP TABLE. Permanent new tables, unreadable SQL and other objects are
 refused at every level."""

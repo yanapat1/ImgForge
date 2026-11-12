@@ -163,7 +163,7 @@ PRESETS = {
                   _step('Perspective', 0.2)]),
 }
 
-# the image-conditions advice (data/shift.py, data/stress.py) names albumentations transforms: map them to catalog steps
+# the image-conditions advice (image/shift.py, image/stress.py) names albumentations transforms: map them to catalog steps
 _ADVICE = {'RandomBrightnessContrast': 'RandomBrightnessContrast', 'RandomGamma': 'RandomGamma', 'RandomShadow': 'RandomShadow',
            'RandomFog': 'RandomFog', 'RGBShift': 'RGBShift', 'MotionBlur': 'MotionBlur', 'ISONoise': 'ISONoise',
            'GaussNoise': 'GaussNoise', 'ImageCompression': 'ImageCompression', 'GaussianBlur': 'GaussianBlur', 'Downscale': 'Downscale',

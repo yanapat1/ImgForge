@@ -24,15 +24,15 @@ def manifest(**kw):
     m = {'name': 'acme', 'version': '1.0', 'description': 'Acme tracker',
          'secrets': ['TOKEN'],
          'skills': [{'name': 'file-a-bug', 'description': 'How to file a bug', 'when': 'the user reports a bug',
-                     'body': '1. search\n2. create', 'role': 'data'}],
+                     'body': '1. search\n2. create', 'role': 'bucket'}],
          'prompts': [{'name': 'house style', 'role': 'visual', 'body': 'Answer in British English.'}],
-         'tools': [{'name': 'search', 'description': 'Search issues', 'risk': 'read', 'roles': ['data', 'visual'],
+         'tools': [{'name': 'search', 'description': 'Search issues', 'risk': 'read', 'roles': ['bucket', 'visual'],
                     'parameters': {'type': 'object', 'properties': {'q': {'type': 'string'}, 'n': {'type': 'integer'}},
                                    'required': ['q']},
                     'http': {'method': 'GET', 'url': 'https://api.acme.test/issues/{{q}}',
                              'query': {'limit': '{{n}}', 'fixed': 'yes'},
                              'headers': {'Authorization': 'Bearer ${secret:TOKEN}'}}},
-                   {'name': 'acme__create', 'description': 'Create an issue', 'risk': 'change', 'roles': ['data'],
+                   {'name': 'acme__create', 'description': 'Create an issue', 'risk': 'change', 'roles': ['bucket'],
                     'parameters': {'type': 'object', 'properties': {'title': {'type': 'string'},
                                                                     'labels': {'type': 'array', 'items': {'type': 'string'}}},
                                    'required': ['title']},
@@ -51,7 +51,7 @@ def users(pg):
 # ---------------------------------------------------------------- prompts and skills
 def test_items_crud_and_isolation(users):
     alice, bob, _ = users
-    p = assets.create_item(alice, {'kind': 'prompt', 'role': 'data', 'name': 'Short', 'body': 'Be brief.'})
+    p = assets.create_item(alice, {'kind': 'prompt', 'role': 'bucket', 'name': 'Short', 'body': 'Be brief.'})
     s = assets.create_item(alice, {'kind': 'skill', 'role': 'all', 'name': 'triage', 'description': 'Sort the inbox',
                                    'when': 'asked to triage', 'body': 'step 1'})
     assert s['when'] == 'asked to triage' and s['body'] == 'step 1' and s['enabled']
@@ -157,10 +157,10 @@ def test_zip_package(users):
     with zipfile.ZipFile(buf, 'w') as z:
         z.writestr('acme/plugin.json', json.dumps(m))
         z.writestr('acme/skills/close-bug/SKILL.md', '---\nname: close-bug\ndescription: Close a bug\nwhen: done\n'
-                                                     'role: data\n---\nSteps to close.\n')
+                                                     'role: bucket\n---\nSteps to close.\n')
     p = assets.install(alice, buf.getvalue())
     assert [s['name'] for s in p['skills']] == ['close-bug']
-    sk = assets.for_run(alice, 'data')['skills']
+    sk = assets.for_run(alice, 'bucket')['skills']
     assert sk == [{'name': 'close-bug', 'description': 'Close a bug', 'when': 'done', 'body': 'Steps to close.',
                    'source': 'plugin acme'}]
     with pytest.raises(assets.AssetError, match='plugin.json'):
@@ -172,23 +172,23 @@ def test_zip_package(users):
 
 def test_for_run_filters_roles_and_switches(users):
     alice, bob, _ = users
-    assets.create_item(alice, {'kind': 'prompt', 'role': 'data', 'name': 'D', 'body': 'data only'})
+    assets.create_item(alice, {'kind': 'prompt', 'role': 'bucket', 'name': 'D', 'body': 'data only'})
     assets.create_item(alice, {'kind': 'prompt', 'role': 'all', 'name': 'A', 'body': 'both'})
     off = assets.create_item(alice, {'kind': 'prompt', 'role': 'all', 'name': 'Off', 'body': 'x', 'enabled': False})
     assets.create_item(alice, {'kind': 'skill', 'role': 'visual', 'name': 'V', 'description': 'vis', 'body': 'v'})
     p = assets.install(alice, manifest())
-    d, v = assets.for_run(alice, 'data'), assets.for_run(alice, 'visual')
+    d, v = assets.for_run(alice, 'bucket'), assets.for_run(alice, 'visual')
     assert {x['name'] for x in d['prompts']} == {'D', 'A'} and off['name'] not in {x['name'] for x in v['prompts']}
     assert {x['name'] for x in v['prompts']} == {'A', 'house style'}
     assert {x['name'] for x in d['skills']} == {'file-a-bug'} and {x['name'] for x in v['skills']} == {'V'}
     assert {t.name for t in d['tools']} == {'acme__search', 'acme__create'}
     assert {t.name for t in v['tools']} == {'acme__search'}
     t = next(t for t in d['tools'] if t.name == 'acme__create')
-    assert t.domain == 'plugin' and t.ctx and t.risk == 'change' and t.roles == ('data',)
+    assert t.domain == 'plugin' and t.ctx and t.risk == 'change' and t.roles == ('bucket',)
     assets.update_plugin(alice, p['id'], {'enabled': False})
-    d = assets.for_run(alice, 'data')
+    d = assets.for_run(alice, 'bucket')
     assert d['tools'] == [] and {x['name'] for x in d['skills']} == set()
-    assert assets.for_run(bob, 'data') == {'prompts': [], 'skills': [], 'tools': []}
+    assert assets.for_run(bob, 'bucket') == {'prompts': [], 'skills': [], 'tools': []}
 
 
 # ---------------------------------------------------------------- HTTP tools
@@ -252,7 +252,7 @@ def test_http_tool_against_a_local_server(users, fake_server):
     root = users[2]
     p = assets.install(root, manifest(tools=_local_tools(fake_server)))
     assets.update_plugin(root, p['id'], {'secrets': {'TOKEN': 'abc-123'}})
-    ts = {t.name: t for t in assets.for_run(root, 'data')['tools']}
+    ts = {t.name: t for t in assets.for_run(root, 'bucket')['tools']}
     from dataviz.llm import tools
     out, summary = tools.run(object(), 'acme__get', {'id': 'a b/c', 'n': 3}, ts)
     assert out['status'] == 200 and out['json']['ok'] and summary.startswith('→ HTTP 200')
@@ -272,12 +272,12 @@ def test_missing_secret_and_private_hosts(users, monkeypatch):
     alice = users[0]
     from dataviz.bucket.sources import fetch
     p = assets.install(alice, manifest())
-    ts = {t.name: t for t in assets.for_run(alice, 'data')['tools']}
+    ts = {t.name: t for t in assets.for_run(alice, 'bucket')['tools']}
     from dataviz.llm import tools
     with pytest.raises(ToolError, match='secret TOKEN is not set'):
         tools.run(object(), 'acme__search', {'q': 'x'}, ts)
     assets.update_plugin(alice, p['id'], {'secrets': {'TOKEN': 'tok-SECRET-123'}})
-    ts = {t.name: t for t in assets.for_run(alice, 'data')['tools']}
+    ts = {t.name: t for t in assets.for_run(alice, 'bucket')['tools']}
     monkeypatch.setattr(fetch, 'resolve_host', lambda h: ['127.0.0.1'])       # a public-looking name on loopback
     with pytest.raises(ToolError, match='private'):
         tools.run(object(), 'acme__search', {'q': 'x'}, ts)
@@ -318,9 +318,9 @@ def test_change_plugin_tool_goes_through_confirm(users, monkeypatch):
             yield 'tool_call', {'id': '', 'name': n, 'args': a}
         yield 'usage', {'in': 1, 'out': 1}
     monkeypatch.setattr(providers, 'stream_tools', stream_tools)
-    a = assets.for_run(alice, 'data')
+    a = assets.for_run(alice, 'bucket')
     opts = react.options({}, OPENAI)
-    run = react.prepare(alice, 'data', OPENAI, react.history([{'role': 'user', 'text': 'file a bug'}]), {}, opts,
+    run = react.prepare(alice, 'bucket', OPENAI, react.history([{'role': 'user', 'text': 'file a bug'}]), {}, opts,
                         user_prompts=a['prompts'], user_skills=a['skills'], plugin_tools=a['tools'])
     evs = []
     for ev in react.events(run):

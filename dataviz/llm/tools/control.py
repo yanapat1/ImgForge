@@ -14,7 +14,7 @@ from . import A, S, Tool, _obj, register
 ITEM = {'type': 'object', 'additionalProperties': False, 'required': ['text', 'state'],
         'properties': {'text': S('one step, short'),
                        'state': {'type': 'string', 'enum': ['pending', 'active', 'done', 'skipped']},
-                       'page': {'type': 'string', 'enum': ['home', 'data', 'viz', 'label'],
+                       'page': {'type': 'string', 'enum': ['home', 'image', 'bucket', 'viz', 'label', 'data'],
                                 'description': 'where the step happens, when not here'}}}
 
 register(Tool('ask_user', 'Ask the user a clarifying question with 2-5 concrete options instead of guessing. Ends your turn.',

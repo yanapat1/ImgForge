@@ -2,9 +2,9 @@
 
 It opens from the gear at the bottom of the activity bar, or from the dataset name in the header. The labeling page opens it with `openSettings('labeling')`, and the Sessions home from its gear. The
 sections that need an open visualizer session (Models, Plot, Workspace: `data-needs="session"` in `index.html`) are
-hidden on the home and the labeling page. The Sessions home opens it in **solo mode** (`openSettings('datasets', { solo: true, view: 'add' | edit: id })`):
+hidden on Home, the Image page and the labeling page. The Image page opens it in **solo mode** (`openSettings('datasets', { solo: true, view: 'add' | edit: id })`):
 no section nav, just the new / edit session forms; Cancel steps back to the two tiles or closes, and a
-save without opening closes it and fires `sessions-changed` so the home redraws its cards.
+save without opening closes it and fires `sessions-changed` so the Image page redraws its cards.
 
 | File | What it does |
 |---|---|

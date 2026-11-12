@@ -1,5 +1,5 @@
 // A small message at the bottom of the page for non-fatal problems (every screen, the label page and Curation too),
-// and actionToast: a toast with buttons (Undo) used by the Data Center (datacenter/ops.ts).
+// and actionToast: a toast with buttons (Undo) used by the Bucket page (bucket/ops.ts).
 
 import { $, esc, ICONS } from './dom.js';
 

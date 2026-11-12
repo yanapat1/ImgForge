@@ -1,5 +1,5 @@
 """
-Saved connections (Settings › Connections, Data Center, labeling): list, save, delete, test, browse (S3 buckets,
+Saved connections (Settings › Connections, Bucket, labeling): list, save, delete, test, browse (S3 buckets,
 FTP / SFTP folders, database SELECT 1); and the browser of the server's allowed folders (storage.allowed_roots only).
 Core: every zone reads its data through these.
 

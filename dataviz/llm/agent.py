@@ -1,7 +1,7 @@
 """
-The Data Center agent: a short native tool-calling loop over llm/tools.py.
+The Bucket page agent: a short native tool-calling loop over llm/tools.py.
 
-    run(user, provider, messages, scope)  -> iterator of the NDJSON events of /api/llm/dc/chat (datacenter/API.md)
+    run(user, provider, messages, scope)  -> iterator of the NDJSON events of /api/llm/bucket/chat (bucket/API.md)
     confirm(user, plan_id, action_ids)    -> {results, retagged}: runs only the actions the user checked
 
 Each step asks the provider once (providers.complete_tools). Read-only calls run at once and their compact
@@ -30,7 +30,7 @@ MAX_PLANS = 100                 # kept at once (oldest dropped first) ...
 MAX_USER_PLANS = 10             # ... and per user, so one busy user cannot push out everyone else's
 MAX_TURNS = 40
 MAX_RESULT = 6000               # characters of one tool result fed back to the model
-PROMPT = Path(__file__).with_name('prompts') / 'datacenter.md'
+PROMPT = Path(__file__).with_name('prompts') / 'bucket-agent.md'
 
 _plans = OrderedDict()          # plan_id -> {user_id, actions, created}
 _plans_lock = threading.Lock()
@@ -51,7 +51,7 @@ def _scope_text(user, scope):
     bid, path = scope.get('bucket'), str(scope.get('path') or '')
     sel = [str(x) for x in scope.get('selection') or [] if isinstance(x, str)]
     if not bid:
-        return 'The user is on the Data Center overview (no bucket open).'
+        return 'The user is on the Bucket page overview (no bucket open).'
     name = None
     try:
         b = tools._svc().get_bucket(user, bid)

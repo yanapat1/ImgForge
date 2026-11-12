@@ -5,7 +5,7 @@
 
 import { apiFetch, errText, getJSON, postJSON } from '../core/api.js';
 import { $req, esc, icon } from '../core/dom.js';
-import { homeUrl } from '../core/nav.js';
+import { imageUrl } from '../core/nav.js';
 import { userKey } from '../core/auth.js';
 import { mountUserMenu } from '../views/usermenu.js';
 import { waitJob } from '../core/jobs.js';
@@ -83,7 +83,7 @@ function markup(): string {
   const ib = (id: string, ic: string, label: string, extra = ''): string => `<button id="${id}" class="icon-btn ghost" aria-label="${label}" title="${label}" ${extra}>${icon(ic)}</button>`;
   return `<div id="lb-app" class="lb-app">
   <header class="lb-top">
-    <a id="lb-back" class="lb-back" href="${esc(homeUrl())}" title="All sessions" aria-label="Back to all sessions">${icon('chev-l')}<span>Sessions</span></a>
+    <a id="lb-back" class="lb-back" href="${esc(imageUrl('label'))}" title="Image: all sessions" aria-label="Back to Image (all sessions)">${icon('chev-l')}<span>Image</span></a>
     <h1 id="lb-name" class="lb-name"></h1>
     <nav class="lb-nav" aria-label="Images">
       ${ib('lb-prev', 'chev-l', 'Previous image')}
@@ -868,7 +868,7 @@ async function emptyState(): Promise<void> {
   const canRescan = !!(L.project && L.project.source && L.project.source.kind !== 'upload');
   msg(`${icon('image')}<div><b>No images in this session yet</b><div class="muted">Add images from the Sessions home (edit this session),` +
     `${canRescan ? ' or rescan its source folder.' : ' by uploading a folder there.'}</div></div>` +
-    `<a class="lb-msg-btn" href="${esc(homeUrl())}">${icon('chev-l')}Sessions</a>${canRescan ? `<button id="lb-rescan">${icon('refresh')}Rescan source</button>` : ''}`, 'empty');
+    `<a class="lb-msg-btn" href="${esc(imageUrl('label'))}">${icon('chev-l')}Image</a>${canRescan ? `<button id="lb-rescan">${icon('refresh')}Rescan source</button>` : ''}`, 'empty');
 }
 
 async function followImport(jid: number): Promise<void> {
@@ -1062,6 +1062,6 @@ export async function start(projectId: string): Promise<void> {
   try {
     await loadProject();
   } catch (e) {
-    msg(`${icon('alert')}<div><b>Could not open this labeling session</b><div class="muted">${esc(errText(e))}</div></div><a class="lb-msg-btn" href="${esc(homeUrl())}">${icon('chev-l')}Sessions</a>`, 'err');
+    msg(`${icon('alert')}<div><b>Could not open this labeling session</b><div class="muted">${esc(errText(e))}</div></div><a class="lb-msg-btn" href="${esc(imageUrl('label'))}">${icon('chev-l')}Image</a>`, 'err');
   }
 }

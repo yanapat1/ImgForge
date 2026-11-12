@@ -1,6 +1,6 @@
 // Augment › Coverage: does this dataset, with the recipe, look like another set of images (another place, a new camera)?
-// Pick the images to compare against (an upload, or a folder of a Data Center bucket), run the job
-// (routes/augment.py on data/augment_run.py + augment_cover.py), and read: the share of those images covered before
+// Pick the images to compare against (an upload, or a folder of a bucket), run the job
+// (routes/augment.py on image/augment_run.py + augment_cover.py), and read: the share of those images covered before
 // and after the recipe, how far apart the sets are, which steps helped, the images still not covered and what they
 // differ in, with steps to add. A second saved recipe can be run against the same target for an A/B.
 
@@ -31,9 +31,9 @@ interface Report {
 }
 interface Tune { recipe: AugRecipe; history: { step: string; label: string; p: number; coverage: number }[]; before: number; start: number; after: number }
 interface Curve { points: { strength: number; coverage: number; off_domain: number; score: number }[]; best: number; before: number }
-type TargetSpec = { kind: 'upload'; id: string; label: string } | { kind: 'dc'; bucket: string; path: string; label: string }
+type TargetSpec = { kind: 'upload'; id: string; label: string } | { kind: 'bucket'; bucket: string; path: string; label: string }
   | { kind: 'session'; id: string; label: string };
-const targetBody = (t: TargetSpec): Record<string, string> => (t.kind === 'dc' ? { kind: t.kind, bucket: t.bucket, path: t.path } : { kind: t.kind, id: t.id });
+const targetBody = (t: TargetSpec): Record<string, string> => (t.kind === 'bucket' ? { kind: t.kind, bucket: t.bucket, path: t.path } : { kind: t.kind, id: t.id });
 
 const C = {
   targets: [] as Target[], target: null as TargetSpec | null, quality: 'quick' as 'quick' | 'deep', m: 300, k: 2,
@@ -53,7 +53,7 @@ function targetRow(): string {
   const dcOpt = cur && cur.kind !== 'upload' ? `<option value="${esc(val)}" selected>${esc(cur.label)}</option>` : '';
   return `<div class="ag-target"><label class="m-lbl" for="agv-t">Compare against</label><select id="agv-t" data-agv="t"><option value="">pick the new images…</option>` +
     C.targets.map((t) => `<option value="u:${esc(t.id)}" ${val === `u:${t.id}` ? 'selected' : ''}>${esc(t.name)} · ${t.n} images</option>`).join('') + dcOpt + '</select>' +
-    `<button type="button" class="sm" data-agv-act="upload">Upload images…</button><button type="button" class="sm" data-agv-act="dc">Data Center folder…</button><button type="button" class="sm" data-agv-act="session" title="The images of another visualizer session you can open">Another session…</button>` +
+    `<button type="button" class="sm" data-agv-act="upload">Upload images…</button><button type="button" class="sm" data-agv-act="dc">Bucket folder…</button><button type="button" class="sm" data-agv-act="session" title="The images of another visualizer session you can open">Another session…</button>` +
     `<label class="m-lbl" for="agv-q" title="Quick: colour + edge features on the CPU, in seconds. Deep: the session's deep features (DINOv2 / CLIP), better at what things look like; slow without a GPU.">Features</label>` +
     `<select id="agv-q" data-agv="q"><option value="quick" ${C.quality === 'quick' ? 'selected' : ''}>quick</option><option value="deep" ${C.quality === 'deep' ? 'selected' : ''}>deep</option></select>` +
     `<label class="m-lbl" for="agv-m">images</label><select id="agv-m" data-agv="m">${[100, 300, 600, 1000].map((n) => `<option ${n === C.m ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
@@ -117,7 +117,7 @@ export function paintCoverage(): void {
   if (!host || AG.view !== 'coverage') return;
   if (!C.loaded) { void loadTargets().then(paintCoverage); host.innerHTML = '<div class="empty">Loading…</div>'; return; }
   host.innerHTML = targetRow() + (C.tune ? tuneHTML(C.tune) : '') + (C.curve ? curveHTML(C.curve) : '') + (C.err ? `<div class="empty">${esc(C.err)}</div>` : C.res ? resultHTML(C.res)
-    : '<p class="faint">Pick images from the new place or camera (upload them, or a Data Center folder). The check embeds this dataset, its augmented copies and the new images, and says how much of the new images the recipe covers, and what is still missing.</p>');
+    : '<p class="faint">Pick images from the new place or camera (upload them, or a Bucket folder). The check embeds this dataset, its augmented copies and the new images, and says how much of the new images the recipe covers, and what is still missing.</p>');
   if (C.res && !C.err) drawMap(C.res);
   if (C.curve) drawCurve(C.curve);
   bindDrop();
@@ -237,20 +237,20 @@ function pickFiles(): void {
 async function pickDc(): Promise<void> {
   let buckets: { id: string; name: string; kind: string }[] = [];
   try {
-    const r = await getJSON<{ id: string; name: string; kind: string }[] | { buckets: { id: string; name: string; kind: string }[] }>('api/dc/buckets');
+    const r = await getJSON<{ id: string; name: string; kind: string }[] | { buckets: { id: string; name: string; kind: string }[] }>('api/bucket/buckets');
     buckets = Array.isArray(r) ? r : r.buckets;
   } catch (e) { toast(errText(e), 'err'); return; }
-  if (!buckets.length) { toast('No Data Center bucket yet', 'err'); return; }
+  if (!buckets.length) { toast('No bucket yet', 'err'); return; }
   let spec: TargetSpec | null = null;
   await openDialog({
-    title: 'Compare against a Data Center folder', ok: 'Use this folder', focus: '#agv-b',
+    title: 'Compare against a Bucket folder', ok: 'Use this folder', focus: '#agv-b',
     body: `<label class="fld"><span>Bucket</span><select id="agv-b">${buckets.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></label>` +
       '<label class="fld"><span>Folder in it (empty = all of it)</span><input type="text" class="txt" id="agv-p" placeholder="e.g. camera2/images"></label>' +
       '<p class="hint">Images in the folder and its subfolders, up to 2000. A streamed S3 folder must be downloaded first.</p>',
     onOk: (root) => {
       const b = root.querySelector<HTMLSelectElement>('#agv-b'), p = root.querySelector<HTMLInputElement>('#agv-p')?.value.trim() ?? '';
       const name = b?.selectedOptions[0]?.textContent ?? '';
-      spec = { kind: 'dc', bucket: b?.value ?? '', path: p, label: `${name}${p ? ` / ${p}` : ''}` };
+      spec = { kind: 'bucket', bucket: b?.value ?? '', path: p, label: `${name}${p ? ` / ${p}` : ''}` };
       return null;
     },
   });

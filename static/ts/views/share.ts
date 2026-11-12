@@ -9,7 +9,7 @@ import { avatarHTML, userName } from '../core/avatar.js';
 import type { AvatarUser } from '../core/avatar.js';
 import { ME } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
-import type { SessionMember, SessionPerson, Visibility } from '../types-home.js';
+import type { SessionMember, SessionPerson, Visibility } from '../types-image.js';
 import { openDialog } from './dialog.js';
 
 interface Sharing { visibility: Visibility; owner: SessionPerson | null; members: SessionMember[] }

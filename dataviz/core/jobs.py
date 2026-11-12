@@ -5,7 +5,7 @@ Jobs run on lanes (LANES), each with its own worker thread(s), so a long job on 
 lane wait. "main" has one worker: the GPU models and numba (UMAP) must not run concurrently anyway, and it keeps
 progress easy to follow. "io" runs a session's network / disk work (S3 sync, curation scans, label imports in
 FIFO order). "open" builds the index of a session being opened (four workers: several accounts open sessions at
-once, and opening never waits behind an import or a frame extraction). "dc" runs the Data Center's bulk jobs
+once, and opening never waits behind an import or a frame extraction). "bucket" runs the Bucket page's bulk jobs
 (import, video frames, sync, export, ...) as a fair lane: one running job per account, up to three accounts at
 once, so one person's long trim never makes someone else's import wait, while one person's own jobs still run
 in order. "model" runs the labeling page's model jobs (remote inference), so a long label-all never blocks an
@@ -148,7 +148,7 @@ class Job:
 
 
 # lane -> (worker threads, running jobs allowed per owner; None = plain FIFO)
-LANES = {'main': (1, None), 'io': (1, None), 'open': (4, None), 'dc': (3, 1), 'model': (1, None)}
+LANES = {'main': (1, None), 'io': (1, None), 'open': (4, None), 'bucket': (3, 1), 'model': (1, None)}
 
 
 class _Fifo(queue.Queue):

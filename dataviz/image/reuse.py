@@ -13,7 +13,7 @@ sample (-1: computed), and State.get_features fills those rows from the donor's 
 computing only the rest.
 
 Used by: a labeling session's re-index (the fingerprint changes on every edit: the previous workspace is the donor),
-"Promote to labeling" (data/promote.py: the union's workspace seeds the live session's) and the live catch-up.
+"Promote to labeling" (image/promote.py: the union's workspace seeds the live session's) and the live catch-up.
 """
 
 import json

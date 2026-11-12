@@ -35,23 +35,23 @@ def test_dock_on_home(server):  # noqa: F811 - the fixture
             page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
             page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
             # nothing connected: no dock
-            page.goto(f'{server}/')
-            page.wait_for_selector('#home .app-header')
+            page.goto(f'{server}/?image')
+            page.wait_for_selector('#image .app-header')
             page.wait_for_function(f"{_DOCK} === 'off'", timeout=10000)
             assert page.is_hidden('#ai-dock') and page.is_hidden('#ai-fab')
 
             p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
                                                      'model': 'gpt-x', 'vision': True})['provider']
             assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
-            _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+            _put(f'{server}/api/llm/config', {'features': {'bucket_data': True}})
             page.evaluate("window.dispatchEvent(new Event('llm-changed'))")
             page.wait_for_selector('#ai-dock #ai-page #ai-page-q', timeout=10000)
             assert page.evaluate(_DOCK) == 'open'
             dock = page.locator('#ai-dock').bounding_box()
             assert abs(dock['x'] + dock['width'] - 1400) <= 1 and 320 <= dock['width'] <= 640
-            hdr = page.locator('#home .app-header').bounding_box()
+            hdr = page.locator('#image .app-header').bounding_box()
             assert hdr['x'] + hdr['width'] <= dock['x'] + 1, 'the page reflows beside the dock'
-            assert 'Home' in page.inner_text('#ai-dock .dock-head')
+            assert 'Image' in page.inner_text('#ai-dock .dock-head')
 
             # a streamed answer in the dock
             page.fill('#ai-page-q', 'What can you do?')
@@ -221,7 +221,7 @@ def test_agent_drives_the_visualizer(server):  # noqa: F811 - the fixture
 
 
 def test_one_chat_across_pages(server):  # noqa: F811 - the fixture
-    """Data Center: "open session X" -> the agent navigates; the visualizer opens the SAME chat (the first message
+    """Bucket: "open session X" -> the agent navigates; the visualizer opens the SAME chat (the first message
     is there), sends the goal as a continued message and its specialist opens the Model tab; Home shows that chat."""
     from test_models import _serve
     from test_page_smoke import _get
@@ -232,26 +232,26 @@ def test_one_chat_across_pages(server):  # noqa: F811 - the fixture
         p = _post(f'{server}/api/llm/providers', {'name': 'one', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
                                                  'model': 'gpt-x'})['provider']
         assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
-        _put(f'{server}/api/llm/config', {'features': {'assistant': True, 'data_center': True}})
+        _put(f'{server}/api/llm/config', {'features': {'assistant': True, 'bucket_data': True}})
         before = _get(f'{server}/api/llm/sessions?role=app')['count']
         with sync_api.sync_playwright() as pw:
             browser = _browser(pw)
             page = browser.new_page(viewport={'width': 1500, 'height': 950})
             page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
             page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-            page.goto(f'{server}/?data')
-            page.wait_for_selector('#ai-dock #dc-ai-q', timeout=30000)
-            page.fill('#dc-ai-q', f'open session {sid} in the visualizer')
+            page.goto(f'{server}/?bucket')
+            page.wait_for_selector('#ai-dock #bk-ai-q', timeout=30000)
+            page.fill('#bk-ai-q', f'open session {sid} in the visualizer')
             with page.expect_navigation(url=lambda u: f'/s/{sid}/' in u, timeout=30000):
-                page.press('#dc-ai-q', 'Enter')
-            # the same chat on the visualizer: the Data Center message is there, the goal continues it
+                page.press('#bk-ai-q', 'Enter')
+            # the same chat on the visualizer: the Bucket page message is there, the goal continues it
             page.wait_for_selector('#ai-side .chat-turn.user:has-text("open session")', timeout=60000)
             page.wait_for_selector('#ai-side .chat-turn.user:has-text("Continued")', timeout=20000)
             page.wait_for_selector('#ai-side .ai-msg.bot:has-text("Model is open")', timeout=30000)
             assert page.evaluate("document.querySelector('main').dataset.tab") == 'model'
             _shot(page, 'one-chat-viz')
-            # Home: the same chat again (one current chat for the whole app)
-            page.goto(f'{server}/')
+            # the Image page: the same chat again (one current chat for the whole app)
+            page.goto(f'{server}/?image')
             page.wait_for_selector('#ai-page .chat-turn.user:has-text("open session")', timeout=30000)
             assert page.locator('#ai-page .ai-msg.bot:has-text("Model is open")').count() == 1
             # a question about the visualizer from Home: consult answers it here, the page stays
@@ -307,13 +307,13 @@ def test_streaming_answer_stays_clickable(server):  # noqa: F811 - the fixture
         p = _post(f'{server}/api/llm/providers', {'name': 'slow', 'kind': 'openai_compat', 'base_url': f'{url}/v1',
                                                  'model': 'gpt-x'})['provider']
         assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
-        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        _put(f'{server}/api/llm/config', {'features': {'bucket_data': True}})
         with sync_api.sync_playwright() as pw:
             browser = _browser(pw)
             page = browser.new_page(viewport={'width': 1400, 'height': 900})
             page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
             page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
-            page.goto(f'{server}/')
+            page.goto(f'{server}/?image')
             page.wait_for_selector('#ai-dock #ai-page #ai-page-q', timeout=15000)
             page.fill('#ai-page-q', 'Think about it')
             page.press('#ai-page-q', 'Enter')

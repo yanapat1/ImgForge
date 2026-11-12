@@ -1,5 +1,5 @@
 """
-The Compare tab of a combined dataset (data/union.py): data/diff.py over the open State, cached, kept current
+The Compare tab of a combined dataset (image/union.py): image/diff.py over the open State, cached, kept current
 while boxes are edited, plus the "quick shared map" (one member's saved view, the others placed by neighbours).
 
     inputs     DiffInput built once per index from the State's samples + the union images.json (every image,
@@ -10,9 +10,9 @@ while boxes are edited, plus the "quick shared map" (one member's saved view, th
     patched()  State.on_boxes_patched(images) -> diff.update() on every result in memory (milliseconds), the
                changed statuses kept for the live feed / the next /api/compare poll
     stress     _stress_plan / stress_run / stress_cached: a model on member A's images under graded light, blur,
-               noise, colour, JPEG and resolution changes (data/stress.py), B placed on each axis by the shift report
-    shift()    "Image conditions": data/imgstats.py tables of A's and B's images (a sample, cached in each member's
-               own workspace) -> data/shift.py report (+ the appearance AUC of a computed feature, + the fit of
+               noise, colour, JPEG and resolution changes (image/stress.py), B placed on each axis by the shift report
+    shift()    "Image conditions": image/imgstats.py tables of A's and B's images (a sample, cached in each member's
+               own workspace) -> image/shift.py report (+ the appearance AUC of a computed feature, + the fit of
                every model that already predicted this dataset); in memory (LRU 4) by shift_key()
 """
 
@@ -44,7 +44,7 @@ class CompareService:
         self.results = OrderedDict()     # (a, b, pkey) -> {'key', 'res'}
         self.changes = {}                # (a, b, pkey) -> {sid: status} since the client last asked
         self.shifts = OrderedDict()      # shift key -> {'report', 'arrays', 'a', 'b'}
-        self.stresses = OrderedDict()    # stress key -> result (data/stress.py)
+        self.stresses = OrderedDict()    # stress key -> result (image/stress.py)
 
     # ------------------------------------------------------------ inputs
     def aliases(self):
@@ -479,7 +479,7 @@ class CompareService:
                 'n_b': len(ids[1]), 'coverage': cov, 'frechet': shiftlib.frechet(za, zb), '_uncovered': uncovered}
 
     def shift(self, a, b, sample=SHIFT_SAMPLE, feature=None, models=(), key=None, job=None):
-        """The image-conditions report of A vs B (data/shift.py). models: [(model dict, evaluate.Data, conf)] of
+        """The image-conditions report of A vs B (image/shift.py). models: [(model dict, evaluate.Data, conf)] of
         models that already predicted this dataset. Memoised under `key` (shift_key)."""
         if a == b:
             raise ValueError('pick two different members to compare')
@@ -584,7 +584,7 @@ class CompareService:
         return buf.getvalue(), prm
 
 
-# ------------------------------------------------------------ stress test (data/stress.py)
+# ------------------------------------------------------------ stress test (image/stress.py)
 def _stress_plan(svc, member, m, fp, n, axes, conf):
     """(key, names, labelled) of a stress run: `n` images of `member` (the labelled ones when it has labels), the
     same deterministic sample every time."""

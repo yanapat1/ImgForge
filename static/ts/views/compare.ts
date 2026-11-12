@@ -1,4 +1,4 @@
-// The Compare tab of a combined dataset (a union of 2+ visualizer sessions, data/union.py): pick members A and B,
+// The Compare tab of a combined dataset (a union of 2+ visualizer sessions, image/union.py): pick members A and B,
 // run the server's diff (POST api/compare/run, cached per key) and read its per-box columns (binary DVC1:
 // status / pair / iou per box id). Summary cards load the image browser (image categories) or the gallery (box
 // categories); the map shows A / B / both / only the changes, coloured by origin or by diff kind, over an optional

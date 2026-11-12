@@ -9,4 +9,4 @@ services:
       - /home/jovyan/work/image-tools-data/dataviz_cache:/workspace/.dataviz_cache
       - /home/jovyan/work/image-tools-data/hf_cache:/workspace/.hf_cache
       - ${DATASET_DIR:-./folder-server}:/workspace/folder-server
-      - /home/jovyan/work/image-tools-data/data:/workspace/data      # Data Center buckets (lost on rebuild without it)
+      - /home/jovyan/work/image-tools-data/data:/workspace/data      # buckets (lost on rebuild without it)

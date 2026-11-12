@@ -1,6 +1,6 @@
 """
 The user's favorite tables and their categories, as the ◆ assistant sees them. The page keeps them in the user prefs
-(key `analysis_favorites`, written by static/ts/analysis/favorites.ts); these helpers read that blob, validated the same
+(key `data_favorites`, written by static/ts/data/favorites.ts); these helpers read that blob, validated the same
 way as the page's loadFavs, and stay free of the database so they are cheap and easy to test.
 
 Token budget: the system prompt carries only `index_line` (category names and counts, capped); a category's tables come
@@ -9,7 +9,7 @@ with the list_favorites tool when the model needs them.
 
 import unicodedata
 
-KEY = 'analysis_favorites'
+KEY = 'data_favorites'
 LIMITS = {'items': 300, 'groups': 40, 'name': 60}
 INDEX_CHARS = 500
 

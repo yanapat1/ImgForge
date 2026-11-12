@@ -1,4 +1,4 @@
-"""data/stress.py: every perturbation is neutral at its neutral level and moves its metric the right way; a run with a
+"""image/stress.py: every perturbation is neutral at its neutral level and moves its metric the right way; a run with a
 fake model that only finds objects in bright enough images draws the curve that falls on the dark side, the safe
 window ends between the right levels, B (half as bright as A) lands on the curve with the expected drop and advice,
 the label-free consistency mode gives the same picture, and a cancelled job stops."""

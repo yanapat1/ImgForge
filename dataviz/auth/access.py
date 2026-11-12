@@ -1,5 +1,5 @@
 """
-Who may do what with a session (a card of the home page, either kind):
+Who may do what with a session (a card of the Image page, either kind):
 
     owner    the session's owner, or any admin       everything (rename, tags, sharing, delete, structure)
     labeler  a member added as labeler                view + label / fix boxes / curation fixes / predict
@@ -56,7 +56,7 @@ _PARTS_SQL = text('SELECT member_id FROM app.union_members WHERE union_id = :sid
 
 
 def viz_role(user, sid, conn=None):
-    """role() of a visualize session; a combined dataset (data/union.py) also needs access to EVERY member: a
+    """role() of a visualize session; a combined dataset (image/union.py) also needs access to EVERY member: a
     union shared with someone who cannot see one of its datasets is a 404 to them (no member leaks through it).
     Writes through a union are checked per member again (UnionSource.check_write)."""
     if conn is None:

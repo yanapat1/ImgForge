@@ -270,7 +270,7 @@ class LocalSource:
     def image_ref(self, name):
         return str(self.image_path(name))
 
-    # -- content identity (data/imagehash.py)
+    # -- content identity (image/imagehash.py)
     def image_sig(self, name):
         """Cheap identity of an image file (size + mtime): a stored hash is still valid while it is unchanged."""
         st = os.stat(self.image_path(name))
@@ -532,7 +532,7 @@ class S3Source:
     def image_ref(self, name):
         return self.local.image_ref(name) if self.local else f'{self.uri}/{self.image_key(name)}'
 
-    # -- content identity (data/imagehash.py); from the listing in both modes, like the fingerprint
+    # -- content identity (image/imagehash.py); from the listing in both modes, like the fingerprint
     def image_sig(self, name):
         size, etag = self.listing().get(self.image_key(name), (None, None))
         return f'{size}:{etag}'
@@ -662,7 +662,7 @@ def count_images(path, cap=IMAGE_COUNT_CAP):
 
 
 def _has_embeddings(d):
-    """Looks like an embeddings session folder (data/embedding_source.py): a metadata table next to .npy files."""
+    """Looks like an embeddings session folder (image/embedding_source.py): a metadata table next to .npy files."""
     return ((d / 'meta.csv').is_file() or (d / 'meta.parquet').is_file()) and any(d.glob('*.npy'))
 
 

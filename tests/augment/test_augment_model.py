@@ -1,4 +1,4 @@
-"""Augment › Model (data/augment_model.py) with a stand-in detector: it finds bright rectangles, so mirroring the image is
+"""Augment › Model (image/augment_model.py) with a stand-in detector: it finds bright rectangles, so mirroring the image is
 handled (the labels move with it) and darkening it is not."""
 
 import numpy as np

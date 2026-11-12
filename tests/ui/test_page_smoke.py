@@ -425,8 +425,8 @@ def test_review_card_label_page_review_all_and_every_theme(server, tmp_path):
         page.select_option('#lb-strip-filter', 'review:bulk')
         page.wait_for_function("document.querySelector('#lb-strip-n').textContent.trim().startsWith('1 /')", timeout=10000)
         # the card: second bar (solid + hatched) and the checklist
-        page.goto(f'{server}/')
-        page.click('#home-tab-label')
+        page.goto(f'{server}/?image')
+        page.click('#image-tab-label')
         card = page.locator('.label-card', has_text='Reviewed')
         card.locator('.lp-review i.manual').wait_for(timeout=15000)
         assert card.locator('.lp-review i.bulk').count() == 1
@@ -450,7 +450,7 @@ def test_review_card_label_page_review_all_and_every_theme(server, tmp_path):
         page.evaluate("() => { const d = document.documentElement; d.dataset.theme = 'dark'; d.dataset.palette = 'default'; d.dataset.look = 'default'; }")
         # Review all from the ⋯ menu: p0 becomes bulk, p3 (to do) is left alone
         card.locator('[data-act="lmore"]').click()
-        page.click('#home-cardmenu [data-m="review"]')
+        page.click('#image-cardmenu [data-m="review"]')
         page.wait_for_selector('.ui-dlg [data-dlg="ok"]')               # the shared dialog (views/dialog.ts)
         assert 'Review 1' in page.inner_text('.ui-dlg [data-dlg="ok"]')
         page.click('.ui-dlg [data-dlg="ok"]')
@@ -502,7 +502,8 @@ def test_accounts_signup_sharing_owner_card_and_viewer(server):
             pw2.nth(1).fill('bob-password-123')
         page.click('#lg-up-go')
         page.wait_for_url(lambda u: '/login' not in u, timeout=20000)
-        page.wait_for_selector('#home', timeout=20000)
+        page.goto(f'{server}/?image')
+        page.wait_for_selector('#image .session-grid', state='attached', timeout=20000)
         page.wait_for_load_state('networkidle')
         assert page.locator(f'.session-card[data-id="{sid}"]').count() == 0        # private: invisible to bob
         bob = page.evaluate("fetch('api/auth/me').then(r => r.json())")['user']
@@ -514,9 +515,9 @@ def test_accounts_signup_sharing_owner_card_and_viewer(server):
         assert card.get_attribute('data-role') == 'viewer'
         assert 'Admin' in card.locator('.owner-chip').inner_text()
         assert card.locator('.owner-chip img').count() == 1                     # the uploaded avatar
-        page.click('#home-scope [data-scope="mine"]')
+        page.click('#image-scope [data-scope="mine"]')
         page.wait_for_function(f'!document.querySelector(\'.session-card[data-id="{sid}"]\')', timeout=10000)
-        page.click('#home-scope [data-scope="shared"]')
+        page.click('#image-scope [data-scope="shared"]')
         page.wait_for_selector(f'.session-card[data-id="{sid}"]', timeout=10000)
         page.goto(f'{server}/s/{sid}/')
         page.wait_for_function("document.documentElement.dataset.role === 'viewer'", timeout=30000)
@@ -736,8 +737,8 @@ def test_settings_prompts_and_skills_section(server):
         errors = []
         page.on('pageerror', lambda e: errors.append(str(e)))
         page.on('dialog', lambda d: errors.append(f'browser dialog: {d.message}'))
-        page.goto(f'{server}/')
-        page.click('#home-settings')                  # the Sessions home's gear
+        page.goto(f'{server}/?image')
+        page.click('#image-settings')                  # the Image page's gear
         page.click('.snav[data-sec="prompts"]')
         page.click('[data-act="pr-new"]')
         page.fill('.pr-form [data-pr-f="name"]', 'Short answers')

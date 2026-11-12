@@ -1,4 +1,4 @@
-"""Donor reuse (data/reuse.py): a re-index takes unchanged images from an earlier index (no decode, crops
+"""Donor reuse (image/reuse.py): a re-index takes unchanged images from an earlier index (no decode, crops
 hard-linked, same samples as a full rebuild) and the feature matrix takes the donor's rows."""
 
 import os

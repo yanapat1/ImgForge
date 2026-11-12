@@ -1,5 +1,5 @@
 """
-Images with no labels in the visualizer (data/views.py): the S3 browser counts images, a flat S3 prefix / local folder
+Images with no labels in the visualizer (image/views.py): the S3 browser counts images, a flat S3 prefix / local folder
 is a source of its own (layout 'flat'), and ImageView indexes one point per image through the normal indexer.
 """
 

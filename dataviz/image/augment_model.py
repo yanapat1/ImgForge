@@ -8,7 +8,7 @@ A step that costs the model a lot is one to train with; a step it already handle
 
 load(name) -> (uint8 image with long side <= target, boxes [(cls, x1, y1, x2, y2)] in its pixels);
 predict(list of PIL images) -> list of (N, 6) [x1 y1 x2 y2 score cls] in those pixels, model class ids.
-Scores come from data/stress._scores (models/evaluate: mAP50, mAP, P and R at `conf`).
+Scores come from image/stress._scores (models/evaluate: mAP50, mAP, P and R at `conf`).
 """
 
 import numpy as np

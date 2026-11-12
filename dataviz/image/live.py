@@ -7,7 +7,7 @@ labeling session, or a combined dataset with labeling members), one pump per fee
                             fingerprint the index was built from (a stale index cannot be patched: reindex)
     feed_for(state)         the State's LiveFeed (state.live_feed), made on first use
     feed.pull()             sync: the media changed since the cursor (ProjectStore.changed_media), their live
-                            rows diffed against the State -> one patch applied (data/patching.py), logged
+                            rows diffed against the State -> one patch applied (image/patching.py), logged
     await feed.poll(since, wait)   the long poll of GET /api/live (server/routes/live.py)
 
 Patch (one log entry, what the page applies):

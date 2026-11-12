@@ -186,7 +186,7 @@ def _crop_boxes(img, boxes, img_name, label_name, thumb_size, pad):
             'brightness': round(brightness, 2),
             'blur': round(blur, 2),
             'session': session,
-            'yolo': [round(cx, 6), round(cy, 6), round(w, 6), round(h, 6)],   # the line's geometry (data/reuse.py)
+            'yolo': [round(cx, 6), round(cy, 6), round(w, 6), round(h, 6)],   # the line's geometry (image/reuse.py)
         })
     return samples, crops
 
@@ -214,7 +214,7 @@ def _to_original(samples, scale, size0):
 
 
 def _hash_meta(data, size0, sig=None):
-    """images.json record (data/imagehash.py) of an image whose bytes the indexer holds anyway: ~1 ms / MB."""
+    """images.json record (image/imagehash.py) of an image whose bytes the indexer holds anyway: ~1 ms / MB."""
     return {'q': imagehash.quick_bytes(data), 'h': imagehash.full(data), 'w': size0[0], 'hh': size0[1], 'sig': sig}
 
 
@@ -296,7 +296,7 @@ _held = threading.local()
 
 @contextmanager
 def index_lock(cache_dir):
-    """Exclusive lock on a workspace while its index is built or read for assembly (data/union.py): a build
+    """Exclusive lock on a workspace while its index is built or read for assembly (image/union.py): a build
     deletes the crops first, so two builds (or a build and a union linking the crops) must not overlap.
     flock on <ws>/.index.lock: across processes and threads; re-entrant on one thread."""
     import fcntl
@@ -338,8 +338,8 @@ def _build_index(source, cache_dir, thumb_size=224, pad=0.1, rebuild=False, log=
     progress(done, total, stage) is called while indexing (optional).
     workers: config index.workers ('auto' or int). Local image files are decoded in worker processes (no GIL);
     S3 stream mode and non-file sources use threads (network bound), as does any process-pool failure.
-    Images whose bytes are read are hashed on the way (<cache_dir>/images.json, data/imagehash.py).
-    donor: a data/reuse.Donor - images unchanged since an earlier index take their boxes from it (no decode).
+    Images whose bytes are read are hashed on the way (<cache_dir>/images.json, image/imagehash.py).
+    donor: a image/reuse.Donor - images unchanged since an earlier index take their boxes from it (no decode).
     """
     if not hasattr(source, 'list_labels'):
         source = LocalSource(source)
@@ -361,7 +361,7 @@ def _build_index(source, cache_dir, thumb_size=224, pad=0.1, rebuild=False, log=
                 lg.info(f'cache hit: {len(cached["samples"]):,} boxes')
                 return cached
 
-    if callable(donor):                     # data/reuse.previous_donor: read only on a cache miss
+    if callable(donor):                     # image/reuse.previous_donor: read only on a cache miss
         donor = donor()
     if donor is not None and Path(donor.ws).resolve() == cache_dir.resolve():
         donor = None                        # its crops are about to be deleted
@@ -383,7 +383,7 @@ def _build_index(source, cache_dir, thumb_size=224, pad=0.1, rebuild=False, log=
     else:
         texts = [source.read_label(n) for n in label_names]
     jobs = []
-    # a view (data/views.py) names each label's image itself and may crop without padding / from a draft decode
+    # a view (image/views.py) names each label's image itself and may crop without padding / from a draft decode
     image_for = getattr(source, 'image_for_label', None)
     pad = getattr(source, 'index_pad', pad)
     draft = thumb_size if getattr(source, 'index_draft', False) else 0

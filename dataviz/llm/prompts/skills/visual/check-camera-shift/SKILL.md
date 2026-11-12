@@ -4,7 +4,7 @@ description: tell whether a model trained on one dataset will fit new data from 
 when: new camera / lighting, will the old model fit, a stress test
 ---
 1. It needs a combined dataset of the old (A, training) and new (B) data: if this session is not one, say how
-   (home page: pick both datasets, Combine) and stop.
+   (Image page: pick both datasets, Combine) and stop.
 2. `compare_shift`: no report yet → `open_tab` `compare` and tell the user to expand **Image conditions**, set A =
    training data, B = new data, and press **Analyse conditions** (a background job; 3,000 images per side by default).
 3. Read the verdict and score, then the moved metrics in this order: light (brightness, contrast, clipped shadows /

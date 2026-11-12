@@ -1,4 +1,4 @@
-"""The live change feed (data/live.py, db/listen.py, GET /api/live): labeling edits reach an open visualize session
+"""The live change feed (image/live.py, db/listen.py, GET /api/live): labeling edits reach an open visualize session
 as patches (cls / deleted / restored / moved / new) without a re-index; bulk changes ask for a re-index."""
 
 import asyncio

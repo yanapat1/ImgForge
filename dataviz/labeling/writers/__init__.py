@@ -1,5 +1,5 @@
 """
-The label format registry, shared by the session export (export.py) and the Data Center's "Label with model".
+The label format registry, shared by the session export (export.py) and the Bucket page's "Label with model".
 
     REGISTRY                         {key: Writer class}
     get(key)                         the class (KeyError on an unknown key)

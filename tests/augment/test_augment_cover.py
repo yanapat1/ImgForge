@@ -1,4 +1,4 @@
-"""Coverage maths (data/augment_cover.py) on synthetic embeddings with a known answer (tight clusters: real features are
+"""Coverage maths (image/augment_cover.py) on synthetic embeddings with a known answer (tight clusters: real features are
 L2-normalised, so what matters is the direction)."""
 
 import numpy as np

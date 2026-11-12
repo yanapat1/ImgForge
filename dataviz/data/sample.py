@@ -1,16 +1,16 @@
 """
-The sample database: on the first start of an install with the Data Analysis zone, the app's own PostgreSQL server gets
+The sample database: on the first start of an install with the Data zone, the app's own PostgreSQL server gets
 a small example database, so a new user has something to query, join and draw before connecting their own.
 
     database  sample_shop        owned by the role sample_shop_user, so a user may change or drop any of it
     tables    customers (200) · customer_profiles (150, 1 : 0..1) · products (40) · orders (1 500, N : 1)
               · order_items (~4 000, the N : M bridge of orders and products) · view monthly_sales
-    setting   app.app_settings['analysis_sample'] = {status: ready | removed | unavailable, host, port, password (encrypted)}
+    setting   app.app_settings['data_sample'] = {status: ready | removed | unavailable, host, port, password (encrypted)}
 
     ensure_sample(url, log)   create it once (a no-op when the setting says it was made, removed or cannot be made)
     ensure_connection(user)   give a user the "Sample shop (example)" connection once (deleting it never brings it back)
     is_sample(conn)           whether a saved connection is the sample one
-    remove_sample(log) / reset_sample(log)   for `python -m dataviz analysis-sample remove|reset` and an admin's Restore
+    remove_sample(log) / reset_sample(log)   for `python -m dataviz data-sample remove|reset` and an admin's Restore
 
 The role owns only its database: it gets CONNECT there and nothing on the app's own tables, so the sample's password
 cannot read the app's data. The server's user needs CREATEROLE + CREATEDB (a superuser in the shipped docker compose);
@@ -27,9 +27,9 @@ from sqlalchemy import text
 
 from .. import db
 
-DB, ROLE, KEY = 'sample_shop', 'sample_shop_user', 'analysis_sample'
+DB, ROLE, KEY = 'sample_shop', 'sample_shop_user', 'data_sample'
 NAME = 'Sample shop (example)'
-PREF = 'analysis_sample_added'
+PREF = 'data_sample_added'
 TIMEOUT_MS = 60_000
 _lock = threading.Lock()
 
@@ -255,7 +255,7 @@ def remove_sample(url, log=print):
 
 
 def reset_sample(url, log=print):
-    """Make it again from scratch (an admin's Restore, `analysis-sample reset`): the rows as on the first day."""
+    """Make it again from scratch (an admin's Restore, `data-sample reset`): the rows as on the first day."""
     with _lock:
         return _create(url, log, reuse=False)
 
@@ -285,11 +285,11 @@ def ensure_connection(user, registry, prefs, put_prefs):
 
 
 def cli(argv):
-    """`python -m dataviz analysis-sample status|reset|remove [--config path]`: with the app stopped or running."""
+    """`python -m dataviz data-sample status|reset|remove [--config path]`: with the app stopped or running."""
     import argparse
 
     from ..core import config as vconfig
-    ap = argparse.ArgumentParser(prog='python -m dataviz analysis-sample', description='The Data Analysis example database.')
+    ap = argparse.ArgumentParser(prog='python -m dataviz data-sample', description='The Data example database.')
     ap.add_argument('action', choices=['status', 'reset', 'remove'], help='status: what it is now; reset: make it again; remove: drop it')
     ap.add_argument('--config', default=None)
     a = ap.parse_args(argv)

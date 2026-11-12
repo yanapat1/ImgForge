@@ -346,8 +346,8 @@
 .lbm-row .sw, .lbm-affected .sw, .lbx-chip .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
 
 /* Sessions home: a labeling card's ⋯ menu and the card a duplicate just created */
-.home-cardmenu { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); }
-.home-cardmenu .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-cardmenu { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); }
+.image-cardmenu .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lp-more span { font-size: var(--fs-lg); line-height: 1; }
 .session-card.flash { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: no-preference) { .session-card.flash { animation: lbm-flash 1.2s var(--ease) 2; } }

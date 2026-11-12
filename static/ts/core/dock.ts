@@ -1,4 +1,4 @@
-// The ◆ assistant dock: one right-side column on every screen (home, Data Center, visualizer, labeling). The page
+// The ◆ assistant dock: one right-side column on every screen (home, Bucket, visualizer, labeling). The page
 // keeps its own layout; the dock is position:fixed on the right and <body> gets padding-right of its width
 // (html[data-dock] = open | rail | off), so every screen reflows the same way without knowing about it.
 //
@@ -6,7 +6,7 @@
 //          settings · collapse
 //   tasks  while the agent works: "◆ is driving › Model tab › Run yolov8s" + Stop, its checklist (todo), running
 //          jobs, confirmations waiting for you; after the answer the checklist stays, folded to "Tasks n/m"
-//   body   the page's host section (#ai-side, #dc-ai, #ai-home): the shared ◆ chat (core/chat.ts)
+//   body   the page's host section (#ai-side, #bk-ai, #ai-home): the shared ◆ chat (core/chat.ts)
 //
 // Collapsed it is a 44 px rail (◆ to open, the ring, a pending badge). Below 900 px it is a full-screen sheet over
 // the page, opened from a floating ◆ button. The left edge drags the width (320 – min(640, 55% of the window)).
@@ -16,7 +16,7 @@
 // as its onUiAction: the agent's `navigate` opens another page.
 //
 // One chat, every page: the dock remembers ONE current chat for the whole app (localStorage CURRENT), so Home,
-// the Data Center, every visualizer session and the labeling page open the same chat; the page only decides which
+// the Bucket page, every visualizer session and the labeling page open the same chat; the page only decides which
 // specialist answers (the server's router). When the agent navigates, the turn ends; the goal, the chat id and the
 // mode go into sessionStorage (HANDOFF, with the target page), and the dock of that page opens the same chat and
 // sends the goal as a continued message. A page with unsaved work (an edited file, uploads) asks first. Other tabs
@@ -25,13 +25,13 @@
 import { continuedLabel, type ChatHandle } from './chat.js';
 import { esc, icon, morphInner } from './dom.js';
 import { LLM } from './llm.js';
-import { analysisUrl, dataUrl, homeUrl, labelUrl, vizUrl } from './nav.js';
+import { bucketUrl, dataUrl, homeUrl, imageUrl, labelUrl, vizUrl } from './nav.js';
 import type { AiTurn, ChatEvent, UiAction, UiResult } from '../types-chat.js';
 
 export interface DockHost {
   /** the host section's id (tests and other modules find it by id) */
   id: string;
-  /** the page's name in the head ("Visualizer", "Data Center"…) */
+  /** the page's name in the head ("Visualizer", "Bucket"…) */
   label: () => string;
   /** the assistant is usable here (an LLM is connected and the page's feature is on) */
   enabled: () => boolean;
@@ -56,7 +56,7 @@ export interface Handoff { sid: string | null; goal: string; to: string; tab?: s
 
 type DockState = 'open' | 'rail';
 interface TaskStep { text: string; state: string; page?: string }
-const PAGE_NAME: Record<string, string> = { home: 'Home', data: 'Data Center', viz: 'Visualizer', label: 'Labeling' };
+const PAGE_NAME: Record<string, string> = { home: 'Home', bucket: 'Bucket', image: 'Image', viz: 'Visualizer', label: 'Labeling', data: 'Data' };
 
 const KEY = 'dataviz.dock';
 const CURRENT = 'dataviz.chat.current';                  // the one chat every page opens
@@ -253,10 +253,11 @@ function reloadChat(): void {
 
 // ---------------------------------------------------------------- navigate + hand-off
 
-/** which page a URL is (the path, plus ?data / ?label=<id> / ?analysis[=<session>]): a hand-off is only taken on the page it was for */
+/** which page a URL is (the path, plus ?bucket / ?image / ?data[=<session>] / ?label=<id>): a hand-off is only taken on the page it was for */
 function pageKey(u: URL): string {
   const q = u.searchParams;
-  const where = q.has('label') ? `label:${q.get('label') ?? ''}` : q.has('data') ? 'data' : q.has('analysis') ? 'analysis' : '';
+  const where = q.has('label') ? `label:${q.get('label') ?? ''}` : q.has('bucket') ? 'bucket' : q.has('image') ? 'image'
+    : q.has('data') ? 'data' : '';
   return `${u.pathname.replace(/\/?$/, '/')}|${where}`;
 }
 
@@ -277,10 +278,11 @@ function navUrl(a: Record<string, unknown>): string | null {
   const s = (k: string): string => (typeof a[k] === 'string' ? String(a[k]) : '');
   switch (s('screen')) {
     case 'home': return homeUrl();
-    case 'data': return dataUrl(s('bucket') || null, s('path') || null);
+    case 'image': return imageUrl();
+    case 'bucket': return bucketUrl(s('bucket') || null, s('path') || null);
     case 'viz': return s('session_id') ? vizUrl(s('session_id')) : null;
     case 'label': return s('session_id') ? labelUrl(s('session_id')) : null;
-    case 'analysis': return analysisUrl();
+    case 'data': return dataUrl();
     default: return null;
   }
 }

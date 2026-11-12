@@ -21,18 +21,21 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
 - **Where it is**: a dock on the right of every page; Ctrl+. or its collapse button folds it to a slim rail whose ◆ opens it again, its left edge resizes
   it, a floating ◆ opens it on a phone. Head ring = how full this chat's context is now (the latest model call's input of the limit; it moves while an answer runs and is kept after a reload; compaction at 80%), not the tokens billed (`/cost` sums those over every step); Tasks strip = the checklist,
   "is driving …" and Stop.
-- **One chat, every page**: the same chat (history, summary) is open on Home, the Data Center, every visualizer
-  session and labeling; the page decides which specialist answers and which tools it has (visualizer: maps,
-  stats, models; elsewhere: data). Asked for something on another page, the assistant navigates there and the
+- **The pages**, in the header's order: **Bucket** (buckets of files), **Image** (the visualize and label sessions,
+  one tab each; a visualizer session and the labeling page open from it) and **Data** (database queries,
+  statistics, dashboards). The DataViz logo opens **Home**, the overview with one card per page.
+- **One chat, every page**: the same chat (history, summary) is open on Home, Bucket, Image, every visualizer
+  session, labeling and Data; the page decides which specialist answers and which tools it has (visualizer: maps,
+  stats, models; Data: queries; elsewhere: buckets). Asked for something on another page, the assistant navigates there and the
   chat goes on ("↪ Continued"). One answer at a time per chat: another tab waits. A page with unsaved work asks
   before it is left. A task over several pages keeps its checklist with the chat (Tasks strip, each step with
-  its page). From the Data Center a folder with no visualize session is sent there first (approved in ask; a
+  its page). From the Bucket page a folder with no visualize session is sent there first (approved in ask; a
   labeling project is always confirmed); from the visualizer the assistant finds the dataset's folder in the
-  Data Center (and the folders above it) and opens it there. A plain question about another page ("mAP of
-  yolov8s in a1?" from the Data Center) is answered without leaving: the other page's specialist looks it up
+  Bucket (and the folders above it) and opens it there. A plain question about another page ("mAP of
+  yolov8s in a1?" from the Bucket page) is answered without leaving: the other page's specialist looks it up
   read-only ("Asking the Visualizer" in the Tasks strip).
 - **Modes**: ask (every change confirmed), auto (changes run, dangerous ones confirmed), plan (read-only, then a plan
-  to approve). In Data Analysis a database query of the assistant (`run_query`) is confirmed too in ask and plan
+  to approve). In Data a database query of the assistant (`run_query`) is confirmed too in ask and plan
   (its SQL can be edited on the card) and runs at once in auto. In auto, a big, unclear or far-reaching request
   makes the assistant switch itself to plan mode first ("Switched to plan mode: …", the mode chip says plan):
   it looks things up read-only, asks what is the user's choice, and shows a plan; Approve · auto runs it.
@@ -57,4 +60,4 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
 - **App-wide**: press **?** (not while typing) for the keyboard shortcuts of the page on screen (the labeling page
   lists the user's own hotkeys). Removing a session, a labeling session, a model or a connection is undone with the
   **Undo** button on the message that follows (about 8 s); after that it is gone.
-- **Parts of the product (zones)**: core, Data Center, Data Analysis, Visualizer, Labeling. An install can hold only some of them (for example Data Center + Data Analysis, without the Visualizer and its GPU libraries): an admin builds it with `ZONES=datacenter,analysis` in `.env` / `--build-arg ZONES=...`, or picks them at start with `DATAVIZ_ZONES`. Pages and tools of a zone that is not installed do not exist; say so instead of suggesting them.
+- **Parts of the product (zones)**: core, Bucket, Image (Visualize = zone visualizer, Label = zone labeling), Data. An install can hold only some of them (for example Bucket + Data, without the Visualizer and its GPU libraries): an admin builds it with `ZONES=bucket,data` in `.env` / `--build-arg ZONES=...`, or picks them at start with `DATAVIZ_ZONES`. Pages and tools of a zone that is not installed do not exist; say so instead of suggesting them.

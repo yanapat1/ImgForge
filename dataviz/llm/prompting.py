@@ -119,9 +119,9 @@ def plain(system):
 def app_intro():
     """One line on what this install has (zones): a page never reads about parts that are not installed."""
     from .. import zones
-    parts = {'datacenter': 'the **Data Center** keeps datasets in buckets', 'visualizer': 'the **visualizer** maps image '
-             'datasets (features → 2D projection) to find label errors, duplicates and outliers', 'labeling':
-             'the **labeling** pages edit boxes', 'analysis': '**Data Analysis** queries the user\'s databases'}
+    parts = {'bucket': '**Bucket** keeps datasets in buckets', 'visualizer': '**Image › Visualize** maps image '
+             'datasets (features → 2D) to find label errors, duplicates and outliers', 'labeling':
+             '**Image › Label** edits boxes', 'data': '**Data** queries the user\'s databases'}
     have = [v for k, v in parts.items() if zones.on(k)]
     return ('In this install: ' + '; '.join(have) + '.') if have else ''
 

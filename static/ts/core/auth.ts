@@ -48,8 +48,8 @@ export function setMe(u: Me): void {
 
 /** Whether this install has a zone. Before the user is loaded, or on an old server: yes. */
 export const zoneOn = (zone: string): boolean => !ZONES || ZONES.includes(zone);
-/** The Sessions home lists visualize and labeling sessions: without those zones it has nothing to show. */
-export const hasSessions = (): boolean => zoneOn('visualizer') || zoneOn('labeling');
+/** The Image page lists visualize and label sessions: without those zones it has nothing to show. */
+export const hasImage = (): boolean => zoneOn('visualizer') || zoneOn('labeling');
 export const isAdmin = (): boolean => !!ME && !!ME.is_admin;
 /** Whether the user's tier grants `perm` (e.g. 'dataset.create'); the server checks it again. Unknown (an older
  *  server without tiers): allowed. */

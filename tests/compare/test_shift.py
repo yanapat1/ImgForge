@@ -1,4 +1,4 @@
-"""data/shift.py: KS equals scipy, PSI on a known split, alike sets fit, a darker / noisier B is flagged on exactly those
+"""image/shift.py: KS equals scipy, PSI on a known split, alike sets fit, a darker / noisier B is flagged on exactly those
 metrics with the matching recommendation, the separability AUC, the verdict levels, model_fit per side with the
 masked ap_stats, and simulate() moving an image toward B's medians."""
 

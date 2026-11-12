@@ -72,8 +72,8 @@ export function renderDatasetsSec(): string {
     const tile = (act: string, cls: string, ico: string, title: string, text: string): string =>
       `<button class="tile" data-act="${act}"><span class="ds-icon${cls ? ` ${cls}` : ''}">${icon(ico)}</span><b>${title}</b><span>${text}</span></button>`;
     return '<section>' + (add ? '' : `<p class="sec-note">${esc(cannot('add new datasets'))}. You can still combine the ones you can open.</p>`) +
-      '<div class="tiles">' + (add ? tile('new-dc', 'dcsrc', 'db', 'From Data Center',
-        'A bucket (or one of its folders) you keep in Data Center: uploaded, a linked folder or S3. Read in place, nothing is copied.') +
+      '<div class="tiles">' + (add ? tile('new-dc', 'dcsrc', 'db', 'From Bucket',
+        'A bucket (or one of its folders) you keep in Bucket: uploaded, a linked folder or S3. Read in place, nothing is copied.') +
       tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
         'A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.') +
       tile('new-local', '', 'folder', 'Local folder',
@@ -277,31 +277,31 @@ function renderLocalForm(): string {
     `<button class="primary" data-act="save-local" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
 }
 
-// ---- a Data Center bucket folder: opened through POST /api/dc/send (target visualize), which saves the dataset
+// ---- a bucket folder: opened through POST /api/bucket/send (target visualize), which saves the dataset
 const DC_VISUAL = new Set(['yolo-detect', 'yolo-seg', 'yolo-pose', 'yolo-obb', 'images', 'classification', 'embeddings']);
 
 function renderDcForm(): string {
   const f = formOf('dc');
-  if (f.buckets === null) return `<section>${statusHTML(f.status || { kind: 'busy', text: 'loading the Data Center buckets…' })}</section>`;
+  if (f.buckets === null) return `<section>${statusHTML(f.status || { kind: 'busy', text: 'loading the buckets…' })}</section>`;
   const b = f.buckets.find((x) => x.id === f.bid);
   const parts = f.path ? f.path.split('/') : [];
   const fk = f.format ? String(f.format.format) : '';
   const ok = !!b && !!f.format && DC_VISUAL.has(fk);
   const pick = f.buckets.length
-    ? `<label class="fld">Bucket<select data-f="bid" data-act-change="dc-bucket">${f.buckets.map((x) =>
+    ? `<label class="fld">Bucket<select data-f="bid" data-act-change="bk-bucket">${f.buckets.map((x) =>
       `<option value="${esc(x.id)}"${x.id === f.bid ? ' selected' : ''}>${esc(x.name)}${x.format ? ` · ${esc(x.format.label)}` : ''}${x.stats?.images != null ? ` · ${x.stats.images.toLocaleString('en-US')} img` : ''}</option>`).join('')}</select></label>`
-    : `<div class="status-line">${icon('db')}<span>No buckets yet: add data in Data Center first.</span></div>`;
+    : `<div class="status-line">${icon('db')}<span>No buckets yet: add data in Bucket first.</span></div>`;
   const st = f.status || (f.format ? (ok ? { kind: 'ok' as const, text: `${f.format.label}${f.format.classes ? ` · ${f.format.classes} classes` : ''}` }
     : { kind: 'err' as const, text: `${f.format.label}: the visualizer opens YOLO folders, plain image folders, classification folders and embeddings${fk === 'coco' || fk === 'voc' ? ' (convert it to YOLO first)' : ''}` }) : null);
-  return '<section><div class="form-card done"><div class="step-head">' + icon('db') + 'A folder of a Data Center bucket</div>' + pick +
-    (b ? `<div class="browser">${crumbsHTML(b.name, parts, 'dc-crumb')}${foldersHTML((f.dirs ?? []).map((n) => ({ name: n })), 'dc-folder', f.dirs ? 'no sub-folders here' : '…')}</div>` : '') +
+  return '<section><div class="form-card done"><div class="step-head">' + icon('db') + 'A folder of a bucket</div>' + pick +
+    (b ? `<div class="browser">${crumbsHTML(b.name, parts, 'bk-crumb')}${foldersHTML((f.dirs ?? []).map((n) => ({ name: n })), 'bk-folder', f.dirs ? 'no sub-folders here' : '…')}</div>` : '') +
     statusHTML(st) + '<p class="sec-note">Read in place from the bucket: nothing is copied.</p></div>' +
     `<div class="form-card"><label class="fld">Display name<input type="text" data-f="name" value="${esc(f.name)}" placeholder="${esc(b ? b.name + (f.path ? ` · ${f.path}` : '') : '')}"></label>${dsTagsHTML(f)}</div>` +
     `<div class="form-foot">${statusHTML(f.saveStatus)}<span class="grow"></span><button class="ghost" data-act="back">Cancel</button>` +
     `<button class="primary" data-act="save-dc" ${ok ? '' : 'disabled'}>${icon('play')}Create &amp; open</button></div></section>`;
 }
 
-// ---- embeddings folder: <name>.npy vector files + meta.csv (dataviz/data/embedding_source.py), read in place
+// ---- embeddings folder: <name>.npy vector files + meta.csv (dataviz/image/embedding_source.py), read in place
 export const MODALITY_ICON: Record<string, string> = { image: 'image', audio: 'wave', video: 'film', text: 'text', vector: 'vectors' };
 const COL_TYPE: Record<string, string> = { num: 'number', cat: 'category', text: 'free text' };
 
@@ -345,7 +345,7 @@ function renderEmbeddingsForm(): string {
     `<button class="primary" data-act="save-embeddings" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
 }
 
-// ---- labeling-backed dataset: a labeling session + one of its box tasks, read live (dataviz/data/labeling_source.py)
+// ---- labeling-backed dataset: a labeling session + one of its box tasks, read live (dataviz/image/labeling_source.py)
 export const VIZ_TASKS = new Set(['object_detection', 'segmentation', 'keypoints']);
 const TASK_NAMES: Record<string, string> = { object_detection: 'detection', segmentation: 'segmentation', keypoints: 'keypoints', classification: 'classification' };
 
@@ -389,11 +389,11 @@ function renderLabelingForm(): string {
     `<button class="primary" data-act="save-labeling" data-open="1" ${ok ? '' : 'disabled'}>${icon('play')}Save &amp; open</button></div></section>`;
 }
 
-// ---- combined dataset (kind 'union', data/union.py): 2–8 visualize sessions in priority order, each with an alias.
+// ---- combined dataset (kind 'union', image/union.py): 2–8 visualize sessions in priority order, each with an alias.
 // The order is the priority (the first member's class order and image wins); the alias prefixes its class names (A:cat).
 // The Sessions home builds one from 2+ selected cards (Compare / Combine); this form edits it, or builds one by hand.
 export const UNION_MAX = 8;
-const ALIAS_RE = /^[A-Za-z0-9_-]{1,24}$/;                 // = data/union.py ALIAS_RE
+const ALIAS_RE = /^[A-Za-z0-9_-]{1,24}$/;                 // = image/union.py ALIAS_RE
 export const defaultAlias = (i: number): string => (i < 26 ? String.fromCharCode(65 + i) : `M${i + 1}`);
 /** The name the server gives a combined dataset with no name of its own: 'A vs B', or 'A + B + C'. */
 export const unionName = (names: string[]): string => names.join(names.length === 2 ? ' vs ' : ' + ');
@@ -496,16 +496,16 @@ export const CONN_KINDS: Record<ConnKind, { label: string; icon: string; port?: 
   s3: { label: 'S3 / RustFS', icon: 'cloud', note: 'Buckets for datasets, labeling images and exports' },
   ftp: { label: 'FTP', icon: 'folder', port: 21, note: 'Labeling images and exports over FTP / FTPS' },
   sftp: { label: 'SFTP', icon: 'folder', port: 22, note: 'Labeling images and exports over SSH' },
-  postgres: { label: 'PostgreSQL', icon: 'db', port: 5432, note: 'Data Analysis and labeling exports' },
-  mssql: { label: 'SQL Server', icon: 'db', port: 1433, note: 'Data Analysis and labeling exports. Leave Database blank to list every database' },
-  mongo: { label: 'MongoDB', icon: 'db', port: 27017, note: 'Data Analysis. Leave Database blank to list every database' },
+  postgres: { label: 'PostgreSQL', icon: 'db', port: 5432, note: 'Data and labeling exports' },
+  mssql: { label: 'SQL Server', icon: 'db', port: 1433, note: 'Data and labeling exports. Leave Database blank to list every database' },
+  mongo: { label: 'MongoDB', icon: 'db', port: 27017, note: 'Data. Leave Database blank to list every database' },
   model: { label: 'Model', icon: 'robot', note: 'Your model server: labels images for you (YOLO serving or the generic API)' },
-  kaggle: { label: 'Kaggle', icon: 'download', note: 'Your Kaggle API token: download datasets and competitions in Data Center' },
+  kaggle: { label: 'Kaggle', icon: 'download', note: 'Your Kaggle API token: download datasets and competitions in Bucket' },
   huggingface: { label: 'Hugging Face', icon: 'download', note: 'An access token for gated or private Hugging Face datasets' },
   roboflow: { label: 'Roboflow', icon: 'download', note: 'Your Roboflow API key: download dataset versions in any format' },
   zenodo: { label: 'Zenodo', icon: 'download', note: 'A Zenodo token, only for restricted records' },
 };
-/** The token kinds: a web dataset source of Data Center › From the web (dataviz/datacenter/sources). */
+/** The token kinds: a web dataset source of Bucket › From the web (dataviz/bucket/sources). */
 export const TOKEN_KINDS: ReadonlySet<ConnKind> = new Set<ConnKind>(['kaggle', 'huggingface', 'roboflow', 'zenodo']);
 const TOKEN_HELP: Partial<Record<ConnKind, [string, string]>> = {
   kaggle: ['https://www.kaggle.com/settings', 'kaggle.com › Settings › API › Create New Token (downloads kaggle.json)'],

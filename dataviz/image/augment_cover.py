@@ -5,7 +5,7 @@ target (the new images).
 
     run(train, aug, target, aug_steps, train_stats, target_stats) -> the report the Augment tab draws
 
-The measure is the visualizer's coverage (data/shift.py): a target image is *covered* when its nearest neighbour in
+The measure is the visualizer's coverage (image/shift.py): a target image is *covered* when its nearest neighbour in
 the reference set is no farther than train's own 95th-percentile nearest-neighbour distance. The threshold comes from
 train alone and stays fixed, so adding augmented images cannot lower the bar: "after" is the share of target images
 within that distance of train ∪ aug. Next to it: the Frechet distance (FID formula) and a domain classifier's AUC
@@ -109,7 +109,7 @@ def gap(train_stats, target_stats):
 
 
 def _suggest(k, a, b):
-    """The catalog step (data/augment.py) that moves train toward b on `k`, and a sentence saying why."""
+    """The catalog step (image/augment.py) that moves train toward b on `k`, and a sentence saying why."""
     if k == 'brightness':
         d = (b - a) / 255.0
         lo, hi = (round(min(-0.05, d * 1.3), 2), 0.05) if d < 0 else (-0.05, round(max(0.05, d * 1.3), 2))

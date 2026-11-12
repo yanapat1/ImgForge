@@ -1,5 +1,5 @@
 """
-Embeddings folders between their three layouts (the Data Center's Convert… on a bucket detected as embeddings):
+Embeddings folders between their three layouts (the Bucket page's Convert… on a bucket detected as embeddings):
 
     npy       meta.csv + <space>.npy (N, D) per feature space    the app's embeddings folder (data/README.md)
     parquet   embeddings.parquet: the meta columns + one list<float32> column per space (needs pyarrow)

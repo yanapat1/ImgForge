@@ -21,4 +21,4 @@ core: false
   shows images per predicted class (per dataset in a combined one) and the top-confidence histogram. **Compare with
   another model** gives the agreement table, the % of images where both agree (classes matched by name) and Cohen's
   κ, and can load the images they disagree on. Colour the map with `ip_cls` / `ip_score`. Nothing is scored right
-  or wrong, and nothing is written to the labels (to make labels from a model use Data Center › Label with model).
+  or wrong, and nothing is written to the labels (to make labels from a model use Bucket › Label with model).

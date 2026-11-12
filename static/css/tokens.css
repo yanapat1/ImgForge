@@ -192,7 +192,7 @@
   --label-badge: rgba(122, 82, 196, .9);
   --on-label-badge: #f3ecff;
   --drop-bg: rgba(138, 180, 240, .06);
-  /* Data Analysis board notes (analysis/board.ts): the zone / sticky note colours, the ink on a solid note */
+  /* Data board notes (data/board.ts): the zone / sticky note colours, the ink on a solid note */
   --note-blue: #4f86f7; --note-green: #3fb46a; --note-amber: #e39a2d; --note-red: #e25c5c; --note-violet: #9a6cf0;
   --note-teal: #2cb3b3; --note-grey: #8a93a3; --note-yellow: #f3d34a; --note-ink: #1d2230;
 }
@@ -833,7 +833,7 @@
   --shadow-3: 0 4px 10px rgba(0, 0, 0, 0.28), 0 24px 56px rgba(0, 0, 0, 0.5);
 }
 
-/* syntax colours: the Data Center's text editor (CodeMirror, static/vendor-src/editor.ts) and its JSON / YAML tree */
+/* syntax colours: the Bucket page's text editor (CodeMirror, static/vendor-src/editor.ts) and its JSON / YAML tree */
 :root {
   --syn-key: #8ab4f8;
   --syn-string: #9ad08f;

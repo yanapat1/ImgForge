@@ -1,5 +1,5 @@
 """
-Session names and tags, shared by the Visualize sessions (data/connections.py) and the Label sessions
+Session names and tags, shared by the Visualize sessions (image/connections.py) and the Label sessions
 (labeling/projects.py). Names are unique within each list, compared case-insensitively; tags are short
 free-text labels the user types, at most MAX_TAGS per session.
 """

@@ -17,8 +17,8 @@ const code = (s: string): string => s.split(' ').map((c) => `<code>${esc(c)}</co
 
 const PARTS: Part[] = [
   { id: 'header', title: 'Page header', classes: '.app-header .brand .hdr-nav .header-actions',
-    use: 'Top of every page. The brand goes home, the links switch pages (the current one is underlined), settings and theme sit on the right. Built by appHeader() in core/header.ts.',
-    demo: `<div class="ui-frame">${appHeader({ page: 'analysis', actionsId: 'ui-hact' })}</div>` },
+    use: 'Top of every page. The DataViz brand opens Home, the links switch pages (Bucket · Image · Data, always in that order) (the current one is underlined), settings and theme sit on the right. Built by appHeader() in core/header.ts.',
+    demo: `<div class="ui-frame">${appHeader({ page: 'data', actionsId: 'ui-hact' })}</div>` },
   { id: 'activity', title: 'Activity bar', classes: '.activity-bar .act .act.active .act-sep .act-bottom',
     use: 'The icon column on the left of a work page: one icon per view, the active one filled with a bar at its edge. Groups are split by .act-sep; settings or a panel toggle sit at the bottom.',
     demo: `<nav class="activity-bar ui-rail" aria-label="Example views"><button class="act active" title="Query">${icon('search')}</button><button class="act" title="Catalog">${icon('db')}</button>` +
@@ -41,7 +41,7 @@ const PARTS: Part[] = [
       `<div class="ui-grid2"><label class="fld">Name<input type="text" value="Orders by customer"><span class="help">Shown on the tab and in History.</span></label><label class="check"><input type="checkbox" checked> Let AI read sample rows</label></div>` +
       `<div class="form-stack" style="max-width:420px"><label>Column<select><option>total</option></select></label><label>Cast to<input type="text" value="int"></label><label class="check"><input type="checkbox"> Use TRY_CAST</label></div>` },
   { id: 'tabs', title: 'Tabs', classes: '.tabbar [role=tab][aria-selected] .tabbar.sm',
-    use: 'Pages of one area. .tabbar on a page (the Sessions home); .tabbar.sm inside a panel (query tabs, Results | Joins | Cost), with small actions at its end.',
+    use: 'Pages of one area. .tabbar on a page (the Image page: Visualize | Label); .tabbar.sm inside a panel (query tabs, Results | Joins | Cost), with small actions at its end.',
     demo: `<div class="tabbar" role="tablist"><button role="tab" aria-selected="true">${icon('scatter')}Visualize<span class="count-badge">4</span></button><button role="tab" aria-selected="false">${icon('tag')}Label<span class="count-badge">2</span></button></div>` +
       `<div class="tabbar sm" role="tablist"><button role="tab" aria-selected="true">Results</button><button role="tab" aria-selected="false">Joins</button><button role="tab" aria-selected="false">Cost</button><span class="grow"></span><span class="pill"><b>1.24 s</b>ran in</span></div>` },
   { id: 'toolbar', title: 'Toolbar', classes: '.toolbar .grow .sep',

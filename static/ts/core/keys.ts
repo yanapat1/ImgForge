@@ -24,7 +24,7 @@ const sections: Section[] = [
     ['J / ↓, K / ↑', 'Next / previous issue'], ['F or Enter', 'Apply the first fix'], ['I', 'Ignore the issue'], ['U', 'Undo the last fix']] },
   { title: 'Compare viewer', when: () => screen() === 'viz' && !!document.querySelector('.cmpv-wrap:not(.hidden)'), rows: () => [
     ['← / →', 'Previous / next image'], ['1 / 2 / 3', 'Side by side / flicker / swipe'], ['Space', 'Start / stop flicker'], ['0', 'Reset the zoom']] },
-  { title: 'Data Center', when: () => screen() === 'data', rows: () => [
+  { title: 'Bucket', when: () => screen() === 'bucket', rows: () => [
     ['/', 'Search files, folders, tags'], ['Arrow keys', 'Move in the tree or the file grid'], ['→ / ←', 'Open / close a folder in the tree'],
     ['Space', 'Select the focused file'], ['Shift+arrows', 'Extend the selection'], ['Enter', 'Open'], ['Ctrl+A', 'Select all'],
     ['Delete', 'Delete the selection (with Undo)'], ['F2', 'Rename'], ['Menu key / Shift+F10', 'Actions of the focused file'], ['Esc', 'Clear the selection']] },

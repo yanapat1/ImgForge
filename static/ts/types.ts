@@ -72,11 +72,11 @@ export interface DatasetInfo {
  *  metadata instead of boxes in images, so no curation, no models and no image viewer. */
 export interface Caps {
   boxes: boolean; images: boolean; curation: boolean; models: boolean | 'predict'; meta: boolean;
-  /** what one point is: a labelled box, a whole image (data/views.py ImageView) or a row of an embeddings session */
+  /** what one point is: a labelled box, a whole image (image/views.py ImageView) or a row of an embeddings session */
   unit?: 'box' | 'image' | 'embeddings';
   /** local / S3: 'yolo' (images/ + labels/) or 'flat' (plain images) */
   layout?: 'yolo' | 'flat' | null;
-  /** a combined dataset (data/union.py): the Compare tab, origin / diff colours */
+  /** a combined dataset (image/union.py): the Compare tab, origin / diff colours */
   union?: boolean;
   /** the session has a live change feed (GET api/live: labeling sessions, promoted unions) */
   live?: boolean;
@@ -400,7 +400,7 @@ export interface CmpState {
   keysFor: string;                     // what `keys` was built for ('' = stale)
 }
 
-// ---------------------------------------------------------------- Compare › Image conditions (data/shift.py)
+// ---------------------------------------------------------------- Compare › Image conditions (image/shift.py)
 export type ShiftSeverity = 'ok' | 'minor' | 'moderate' | 'major' | 'n/a';
 export type ShiftGroup = 'light' | 'sharpness' | 'noise' | 'colour' | 'capture';
 export interface ShiftQ { med: number; p5: number; p95: number; mean: number }
@@ -421,7 +421,7 @@ export interface ShiftModel {
   id: string; name: string; a: ShiftModelSide | null; b: ShiftModelSide | null; conf: number; hist_bins: number[];
   drop?: number; map_drop?: number; conf_vs?: Record<string, ShiftCurve>;
   map_vs?: Record<string, { x: number[]; map50: Array<number | null>; labels: number[] }>;
-  /** is the drop real? (data/shift.py model_fit, ml/stats.py) */
+  /** is the drop real? (image/shift.py model_fit, ml/stats.py) */
   tests?: { top_conf: StatTest; none_found: StatTest };
 }
 export interface ShiftRec { key: string; severity: ShiftSeverity; text: string; aug?: Record<string, string | number> }
@@ -448,7 +448,7 @@ export interface ShiftReport {
 }
 export type ShiftResult = { ready: true; key: string; report: ShiftReport } | NotReady;
 
-/** Compare › Image conditions › Stress test (data/stress.py). */
+/** Compare › Image conditions › Stress test (image/stress.py). */
 export interface StressAxisInfo { key: string; label: string; levels: number[]; neutral: number; unit: string; metric: string }
 export interface StressScores { mean_top: number; none_found: number; per_image: number; map50?: number; map?: number; p?: number; r?: number }
 export interface StressRow extends StressScores { level: number }

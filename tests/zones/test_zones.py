@@ -33,19 +33,19 @@ def test_every_zone_by_default():
 
 
 def test_config_list_and_core_is_always_there():
-    assert zones.selected({'zones': ['datacenter']}) == ('core', 'datacenter')
-    assert zones.on('core', {'zones': ['datacenter']})
-    assert not zones.on('visualizer', {'zones': ['datacenter']})
+    assert zones.selected({'zones': ['bucket']}) == ('core', 'bucket')
+    assert zones.on('core', {'zones': ['bucket']})
+    assert not zones.on('visualizer', {'zones': ['bucket']})
 
 
 def test_the_environment_wins_over_the_config(monkeypatch):
-    monkeypatch.setenv('DATAVIZ_ZONES', ' core , datacenter,labeling ')
-    assert zones.selected({'zones': ['datacenter', 'visualizer']}) == ('core', 'datacenter', 'labeling')
+    monkeypatch.setenv('DATAVIZ_ZONES', ' core , bucket,labeling ')
+    assert zones.selected({'zones': ['bucket', 'visualizer']}) == ('core', 'bucket', 'labeling')
 
 
 def test_empty_environment_means_not_set(monkeypatch):
     monkeypatch.setenv('DATAVIZ_ZONES', '  ')
-    assert zones.selected({'zones': ['datacenter']}) == ('core', 'datacenter')
+    assert zones.selected({'zones': ['bucket']}) == ('core', 'bucket')
 
 
 def test_unknown_zone_is_refused():
@@ -54,7 +54,7 @@ def test_unknown_zone_is_refused():
 
 
 def test_missing_requirement_is_refused():
-    with pytest.raises(ValueError, match='zone visualizer needs datacenter'):
+    with pytest.raises(ValueError, match='zone visualizer needs bucket'):
         zones.selected({'zones': ['visualizer']})
 
 
@@ -90,9 +90,9 @@ def built_app(chosen, libs=VISUALIZER_LIBS):
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
-def test_data_center_install_runs_without_the_visualizer_libraries():
-    got = built_app('core,datacenter')
-    assert {'/api/dc/summary', '/api/connections', '/api/fs/browse', '/api/status', '/api/jobs'} <= set(got['paths'])
+def test_bucket_install_runs_without_the_visualizer_libraries():
+    got = built_app('core,bucket')
+    assert {'/api/bucket/summary', '/api/connections', '/api/fs/browse', '/api/status', '/api/jobs'} <= set(got['paths'])
     assert '/api/points' not in got['paths'] and '/api/datasets' not in got['paths']
     assert not any(p.startswith('/api/label/') for p in got['paths'])
     assert 'dataviz.state' not in got['mods']
@@ -101,12 +101,12 @@ def test_data_center_install_runs_without_the_visualizer_libraries():
 
 
 def test_full_install_keeps_every_route():
-    got = built_app('core,datacenter,labeling,visualizer', libs=())
+    got = built_app('core,bucket,labeling,visualizer', libs=())
     assert {'/api/points', '/api/meta', '/api/settings', '/api/workspace', '/api/datasets', '/api/fs/embeddings',
-            '/api/connections', '/api/fs/browse', '/api/dc/summary'} <= set(got['paths'])
+            '/api/connections', '/api/fs/browse', '/api/bucket/summary'} <= set(got['paths'])
 
 
-# the real start-up (dataviz/cli.py) with the visualizer libraries blocked: database, sign-in and Data Center all work
+# the real start-up (dataviz/cli.py) with the visualizer libraries blocked: database, sign-in and Bucket all work
 SERVE = '''
 import sys
 class Block:
@@ -121,7 +121,7 @@ main()
 '''
 
 
-def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_path):
+def test_bucket_server_starts_and_serves_without_the_visualizer(pg, tmp_path):
     jar = http.cookiejar.CookieJar()
     http_ = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
     headers = {'Content-Type': 'application/json', 'X-Requested-With': 'dataviz'}
@@ -136,7 +136,7 @@ def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_pat
     cfg = tmp_path / 'config.yaml'
     cfg.write_text(json.dumps({'dataset': {'workspace_root': str(tmp_path / 'ws')}, 'workers': {'enabled': False},
                                'logging': {'level': 'WARNING'}}))
-    env = {**os.environ, 'DATAVIZ_ZONES': 'core,datacenter', 'DATABASE_URL': pg, 'DATAVIZ_SECRET_KEY': TEST_SECRET_KEY,
+    env = {**os.environ, 'DATAVIZ_ZONES': 'core,bucket', 'DATABASE_URL': pg, 'DATAVIZ_SECRET_KEY': TEST_SECRET_KEY,
            'DATAVIZ_ADMIN_USERNAME': 'admin', 'DATAVIZ_ADMIN_PASSWORD': 'zone-test-password-1', 'PYTHONPATH': str(APP_DIR)}
     proc = subprocess.Popen([sys.executable, '-c', SERVE, ','.join(VISUALIZER_LIBS), '--config', str(cfg),
                              '--host', '127.0.0.1', '--port', str(port)], cwd=APP_DIR, env=env,
@@ -155,19 +155,19 @@ def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_pat
         body = json.dumps({'login': 'admin', 'password': 'zone-test-password-1'}).encode()
         http_.open(urllib.request.Request(base + '/api/auth/login', data=body, headers=headers), timeout=10)
         assert get('/api/status')['methods'] == []
-        assert isinstance(get('/api/dc/summary'), dict)
-        assert get('/api/dc/buckets') == []
+        assert isinstance(get('/api/bucket/summary'), dict)
+        assert get('/api/bucket/buckets') == []
         assert get('/api/connections') == {'connections': []}
         assert b'<html' in http_.open(base + '/', timeout=10).read().lower()
         with pytest.raises(urllib.error.HTTPError) as e:
             get('/api/datasets')
         assert e.value.code == 404
-        made = http_.open(urllib.request.Request(base + '/api/dc/buckets', data=json.dumps({'name': 'x'}).encode(),
+        made = http_.open(urllib.request.Request(base + '/api/bucket/buckets', data=json.dumps({'name': 'x'}).encode(),
                                                  headers=headers), timeout=10)
         bid = json.loads(made.read())['id']
         send = {'bucket': bid, 'paths': [''], 'target': 'visualize'}
         with pytest.raises(urllib.error.HTTPError) as e:          # hiding the button is not enough: the server refuses
-            http_.open(urllib.request.Request(base + '/api/dc/send', data=json.dumps(send).encode(), headers=headers),
+            http_.open(urllib.request.Request(base + '/api/bucket/send', data=json.dumps(send).encode(), headers=headers),
                        timeout=10)
         assert 'no visualizer zone' in e.value.read().decode()
     finally:
@@ -179,44 +179,44 @@ def test_data_center_server_starts_and_serves_without_the_visualizer(pg, tmp_pat
 
 
 @pytest.fixture
-def data_center_install(monkeypatch):
-    monkeypatch.setenv('DATAVIZ_ZONES', 'core,datacenter')
+def bucket_install(monkeypatch):
+    monkeypatch.setenv('DATAVIZ_ZONES', 'core,bucket')
 
 
-def test_tier_permissions_follow_the_zones(data_center_install):
-    assert zones.perms_off() == {'dataset.create', 'model.add', 'model.upload', 'label.create', 'analysis.use',
-                                 'analysis.write'}
+def test_tier_permissions_follow_the_zones(bucket_install):
+    assert zones.perms_off() == {'dataset.create', 'model.add', 'model.upload', 'label.create', 'data.use',
+                                 'data.write'}
 
 
 def test_a_shared_permission_stays_while_one_of_its_zones_is_there(monkeypatch):
-    monkeypatch.setenv('DATAVIZ_ZONES', 'core,datacenter,labeling')
-    assert zones.perms_off() == {'dataset.create', 'analysis.use', 'analysis.write'}
+    monkeypatch.setenv('DATAVIZ_ZONES', 'core,bucket,labeling')
+    assert zones.perms_off() == {'dataset.create', 'data.use', 'data.write'}
 
 
-def test_the_assistant_only_knows_the_installed_specialists(data_center_install):
+def test_the_assistant_only_knows_the_installed_specialists(bucket_install):
     from dataviz.llm.engine import roles
-    assert set(roles.installed()) == {'data'}
-    card = roles.other_pages('data')
-    assert 'no Dataset Visualizer, Data Analysis, Labeling' in card and 'screen viz' not in card and 'consult' not in card
+    assert set(roles.installed()) == {'bucket'}
+    card = roles.other_pages('bucket')
+    assert 'no Image · Visualize, Image · Label, Data' in card and 'screen viz' not in card and 'consult' not in card
 
 
 def test_full_install_card_is_unchanged():
     from dataviz.llm.engine import roles
-    assert set(roles.installed()) == {'data', 'visual', 'analysis'}
-    card = roles.other_pages('data')
+    assert set(roles.installed()) == {'bucket', 'visual', 'data'}
+    card = roles.other_pages('bucket')
     assert 'screen viz' in card and 'This install has no' not in card
 
 
 def test_analyst_install_has_no_visualizer_code_loaded():
-    got = built_app('core,datacenter,analysis')
-    assert {'/api/analysis/run', '/api/analysis/tree', '/api/dc/summary'} <= set(got['paths'])
+    got = built_app('core,bucket,data')
+    assert {'/api/data/run', '/api/data/tree', '/api/bucket/summary'} <= set(got['paths'])
     assert 'dataviz.state' not in got['mods'] and '/api/points' not in got['paths']
 
 
-def test_the_assistant_cannot_go_to_a_missing_zone(data_center_install):
+def test_the_assistant_cannot_go_to_a_missing_zone(bucket_install):
     from types import SimpleNamespace
     from dataviz.llm.tools import ToolError, nav
-    ctx = SimpleNamespace(role='data', user={'id': 'u'}, depth=0)
+    ctx = SimpleNamespace(role='bucket', user={'id': 'u'}, depth=0)
     with pytest.raises(ToolError, match='no Visualizer'):
         nav._check_nav(ctx, {'screen': 'viz', 'goal': 'open it', 'session_id': 'x'})
     with pytest.raises(ToolError, match='no Labeling'):

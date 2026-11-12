@@ -1,9 +1,10 @@
 """
 The specialists behind the one ◆ chat. The chat follows the user over every page (llm/sessions.py role 'app'); the
-page a message comes from picks the specialist that answers it (the router, no model call): the Data specialist on
-the home page, the Data Center and the labeling page, the Visual specialist in a visualizer session. A role fixes
+page a message comes from picks the specialist that answers it (the router, no model call): the Bucket specialist on
+the Home page, the Bucket page, the Image page and the labeling page, the Visual specialist in a visualizer session,
+the Data specialist on the Data page. A role fixes
 which tool domains its specialist may call, which feature switch gates it, whether it needs the visualizer session,
-and how "where the user is" is described in its prompt. The specialists never share page tools: 'data' is not among
+and how "where the user is" is described in its prompt. The specialists never share page tools: 'bucket' is not among
 the visual role's domains (and back), the route builds the tool set from the role on the server, and the prompt
 only names what the other pages can do (other_pages), so the model navigates there instead of guessing.
 
@@ -29,25 +30,25 @@ class Role:
 
 
 ROLES = {
-    'data': Role('data', 'Data Center', ('data', 'web', 'common', 'control', 'plugin'), 'data_center', False,
-                 'datacenter', 'data'),
+    'bucket': Role('bucket', 'Bucket', ('bucket', 'web', 'common', 'control', 'plugin'), 'bucket_data', False,
+                   'bucket', 'bucket'),
     'visual': Role('visual', 'Visualizer', ('visual', 'web', 'common', 'control', 'plugin'), 'assistant', True,
                    'visualizer', 'viz'),
-    'analysis': Role('analysis', 'Data Analysis', ('analysis', 'web', 'common', 'control', 'plugin'), 'data_center', False,
-                     'analysis', 'analysis', always=('read_editor', 'list_sources', 'search_catalog')),
+    'data': Role('data', 'Data', ('data', 'web', 'common', 'control', 'plugin'), 'bucket_data', False,
+                 'data', 'data', always=('read_editor', 'list_sources', 'search_catalog')),
 }
 
 
-SCREEN_ROLE = {'home': 'data', 'data': 'data', 'label': 'data', 'viz': 'visual', 'analysis': 'analysis'}
-SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling', 'analysis': 'Data Analysis'}
+SCREEN_ROLE = {'home': 'bucket', 'bucket': 'bucket', 'image': 'bucket', 'label': 'bucket', 'viz': 'visual', 'data': 'data'}
+SCREEN_LABEL = {'home': 'Home', 'bucket': 'Bucket', 'image': 'Image', 'viz': 'Visualizer', 'label': 'Labeling', 'data': 'Data'}
 # what each specialist's pages do, for the other one's prompt (one line: the tools stay with their page)
 CAN = {
-    'data': 'Data Center (screen data; Home lists the sessions): buckets, folders, files, tags, S3, import / export, '
-            'send a folder to the visualizer or labeling',
+    'bucket': 'Bucket (screen bucket; image = the sessions, home = overview): buckets, folders, files, tags, S3, '
+              'import / export, send a folder to the visualizer or labeling',
     'visual': 'Visualizer (screen viz, one session): maps (t-SNE, UMAP, PCA ...), colour / filter, class stats, '
               'curation, label errors, model runs + evaluation, compare, augmentation (Albumentations) preview and coverage',
-    'analysis': 'Data Analysis (screen analysis): SQL and MongoDB queries on the user\'s databases, joins, statistics, '
-                'forecasts, dashboards, zones and notes on the visual builder board',
+    'data': 'Data (screen data): SQL and MongoDB queries on the user\'s databases, joins, statistics, '
+            'forecasts, dashboards, zones and notes on the visual builder board',
 }
 
 
@@ -59,7 +60,7 @@ def installed():
 def get(name):
     r = ROLES.get(str(name or ''))
     if r is None:
-        raise KeyError(f'no agent {name!r}: data or visual')
+        raise KeyError(f'no agent {name!r}: bucket, visual or data')
     return r
 
 
@@ -76,17 +77,17 @@ def page_of(role, scope, bound=None):
         if isinstance(tab, str) and tab:
             out['tab'] = tab
         return out
-    screen = scope.get('page') if scope.get('page') in ('home', 'label') else 'data'
-    if role == 'analysis':
-        return {'role': 'analysis', 'screen': 'analysis', 'label': SCREEN_LABEL['analysis']}
-    out = {'role': 'data', 'screen': screen, 'label': SCREEN_LABEL[screen]}
+    screen = scope.get('page') if scope.get('page') in ('home', 'image', 'label') else 'bucket'
+    if role == 'data':
+        return {'role': 'data', 'screen': 'data', 'label': SCREEN_LABEL['data']}
+    out = {'role': 'bucket', 'screen': screen, 'label': SCREEN_LABEL[screen]}
     if screen == 'label' and scope.get('label_project'):
         out['session_id'] = str(scope['label_project'])
-    if screen == 'data' and scope.get('bucket'):
+    if screen == 'bucket' and scope.get('bucket'):
         out['bucket'] = str(scope['bucket'])
         if scope.get('path'):
             out['path'] = str(scope['path'])
-            out['label'] = f'Data Center · {str(scope["path"]).rstrip("/").rsplit("/", 1)[-1]}'
+            out['label'] = f'Bucket · {str(scope["path"]).rstrip("/").rsplit("/", 1)[-1]}'
     return out
 
 
@@ -105,7 +106,7 @@ def other_pages(role):
 
 
 # ---------------------------------------------------------------- "where the user is"
-def data_scope(user, scope):
+def bucket_scope(user, scope):
     """The open bucket / folder / selection, where it is read from and whether it can be changed (looked up, best
     effort): makes "this folder" resolvable and keeps the agent from proposing a full S3 load for one prefix."""
     from .. import tools
@@ -114,13 +115,16 @@ def data_scope(user, scope):
     sel = [str(x) for x in scope.get('selection') or [] if isinstance(x, str)]
     page = scope.get('page')
     if page == 'home':
-        return 'The user is on the sessions home page (the list of visualize and labeling sessions), not in the Data Center.'
+        return ('The user is on the Home page (the overview: one card each for Bucket, Image and Data, with counts and '
+                'recent items), not in the Bucket page.')
+    if page == 'image':
+        return 'The user is on the Image page (the list of visualize and label sessions), not in the Bucket page.'
     if page == 'label':
         pid = str(scope.get('label_project') or '')[:64]
         return (f'The user is on the labeling page of project {pid!r} (editing boxes; its own Label assistant handles '
                 'boxes there). You can answer about the data behind it.')
     if not bid:
-        return 'The user is on the Data Center overview (no bucket open).'
+        return 'The user is on the Bucket page overview (no bucket open).'
     st = None
     try:
         st = tools._svc().folder_state(user, bid, path)
@@ -177,7 +181,7 @@ def visual_scope(user, scope):
 INLINE_SQL = 1500                   # editor SQL up to this many characters is in the prompt itself (no read_editor step)
 
 
-def analysis_scope(user, scope):
+def data_scope(user, scope):
     """What the page has open: the connection and database, the provider's syntax, the last result."""
     from ...data import service
     scope = scope if isinstance(scope, dict) else {}
@@ -196,9 +200,9 @@ def analysis_scope(user, scope):
                        f'{sql.replace("```", chr(39) * 3)}\n```{failed}')
         else:
             out.append(f'The editor holds {n} line{"s" if n > 1 else ""} of SQL now (read_editor shows it).{failed}')
-    elif scope.get('page') == 'analysis':
+    elif scope.get('page') == 'data':
         out.append('The editor is empty now.')
-    if scope.get('page') == 'analysis':
+    if scope.get('page') == 'data':
         out.append('This is the page as of this message: earlier messages may describe an older editor.')
     board = scope.get('board') if isinstance(scope.get('board'), dict) else None
     if board:
@@ -215,4 +219,4 @@ def analysis_scope(user, scope):
     return ' '.join(out) + ''.join(f'\n{x}' for x in (line, access) if x)
 
 
-SCOPES = {'data': data_scope, 'visual': visual_scope, 'analysis': analysis_scope}
+SCOPES = {'bucket': bucket_scope, 'visual': visual_scope, 'data': data_scope}

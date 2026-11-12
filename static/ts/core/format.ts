@@ -1,4 +1,4 @@
-// Small formatters and the file download used across the app (one copy each; datacenter/state.ts re-exports the
+// Small formatters and the file download used across the app (one copy each; bucket/state.ts re-exports the
 // time ones for its modules). Times are epoch seconds or ms, or a workspace.json "YYYY-MM-DD HH:MM:SS" string.
 
 /** Epoch ms of a time value; NaN when it is missing or unreadable. */
@@ -18,6 +18,15 @@ export function timeAgo(t: number | string | null | undefined): string {
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   if (s < 172800) return 'yesterday';
   return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+}
+
+/** A byte size: "812 B", "4.2 MB", "1.4 TB"; '—' when missing. */
+export function fmtSize(b: number | null | undefined): string {
+  if (b == null || !Number.isFinite(b)) return '—';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = b, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${i === 0 ? v : v >= 100 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
 }
 
 /** A count with thousands separators; a missing value counts as 0. */

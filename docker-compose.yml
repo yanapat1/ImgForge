@@ -29,7 +29,7 @@ services:
       context: .
       args:
         BASE_IMAGE: ${BASE_IMAGE:-python:3.12-slim}   # see the Dockerfile: an earlier build skips reinstalling torch
-        ZONES: ${ZONES:-}                                # empty = every zone; datacenter,analysis = an analyst image
+        ZONES: ${ZONES:-}                                # empty = every zone; bucket,data = an analyst image
     image: image-tools:latest
     container_name: image-tools
     restart: unless-stopped
@@ -54,7 +54,7 @@ services:
       - dataviz_cache:/workspace/.dataviz_cache  # crops, features, projections (caches) + uploaded images
       - hf_cache:/workspace/.hf_cache            # downloaded Hugging Face models
       - ${DATASET_DIR:-./folder-server}:/workspace/folder-server   # live bind mount: new files/folders show up instantly
-      - dc_data:/workspace/data                  # Data Center buckets, S3 local copies, imports, trash (storage.data_root)
+      - dc_data:/workspace/data                  # buckets, S3 local copies, imports, trash (storage.data_root)
       # - ./runs:/workspace/runs:ro              # uncomment to offer your YOLO runs/**/weights/best.pt as features
 
   # Free web search for the ◆ assistants (JSON API, used when a user has not set their own engine). Reachable only

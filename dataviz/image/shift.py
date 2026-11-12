@@ -1,7 +1,7 @@
 """
 Domain shift between two members A (what a model was trained on) and B (new camera / new lighting) of a combined
-dataset, from their image-condition tables (data/imgstats.py). Pure numpy + scikit-learn; the Compare tab's
-"Image conditions" section (data/compare.py CompareService.shift) and the assistant's compare_shift tool read it.
+dataset, from their image-condition tables (image/imgstats.py). Pure numpy + scikit-learn; the Compare tab's
+"Image conditions" section (image/compare.py CompareService.shift) and the assistant's compare_shift tool read it.
 
 Per metric (A vs B):
     median / p5 / p95 per side, delta and delta %, effect = delta of medians / robust scale (IQR / 1.349, on log10

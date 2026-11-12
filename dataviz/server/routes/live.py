@@ -1,7 +1,7 @@
 """
 The live change feed of a labeling session (or a combined dataset with labeling members), under /s/<id>/:
 
-    GET /api/live   ?since=&wait=25&proj=  long poll (data/live.py LiveFeed.poll):
+    GET /api/live   ?since=&wait=25&proj=  long poll (image/live.py LiveFeed.poll):
                     {gen, live, patches: [{gen, cls, deleted, restored, moved, new, diff?, pending_new}], pending_new,
                      reindex?, resync?}; without `since`: {gen, live} (where the page starts)
                     sessions with no labeling source: {live: false, gen: 0} at once

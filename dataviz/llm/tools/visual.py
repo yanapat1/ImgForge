@@ -1,6 +1,6 @@
 """
 The Visual agent's tools (domain 'visual'): they read the open visualizer session (`ctx.state`, a State) and the
-server context (`ctx.app`: curation, models). None of them reaches the Data Center (no datacenter.service import),
+server context (`ctx.app`: curation, models). None of them reaches the Bucket page (no bucket.service import),
 and none changes data: page changes are UI actions the page applies through its own controls. Work the page
 starts (a map, a model run, a scan) is risk 'run': confirmed in ask mode, run in auto, and the page reports how it
 ended (engine/uiwait.py), so the agent reads the outcome instead of assuming it.
@@ -63,7 +63,7 @@ views/assistant.ts, applies `args` through its existing controls). Names, args a
     show_issue {issue: str}               a Find issues view (its data-view):
         suspicious | far | far2d | dups | cl-issues | cl-low | cl-ood | cl-swap | cl-badloc | sel-outliers
     fit_view {}                           the plot's Fit button (#btn-fit)
-    set_augment_recipe {recipe: object}   the Augment tab's recipe (data/augment.validate shape), then the tab opens
+    set_augment_recipe {recipe: object}   the Augment tab's recipe (image/augment.validate shape), then the tab opens
 
 Each one's `preview(None, args)` is the Apply button's label. Mode ask: an Apply button (applied false); mode
 auto: applied at once (applied true); mode plan: not offered. `check(ctx, args)` validates the session-dependent
@@ -320,7 +320,7 @@ def _compare_tests(ctx, a):
     embedding MMD when the user ran it)."""
     st = _state(ctx)
     if not getattr(st, 'members', None):
-        return {'tests': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (home page: pick '
+        return {'tests': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (Image page: pick '
                                        'them, Combine)'}, '→ not combined'
     from ...image import compare
     svc = compare.service(st)
@@ -341,7 +341,7 @@ def _compare_shift(ctx, a):
     """The newest Image-conditions report of this combined dataset (optionally of members a / b), compacted."""
     st = _state(ctx)
     if not getattr(st, 'members', None):
-        return {'report': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (home page: pick '
+        return {'report': None, 'note': 'not a combined dataset: Compare needs 2+ datasets joined (Image page: pick '
                                         'them, Combine)'}, '→ not combined'
     from ...image import compare
     svc = compare.service(st)
@@ -875,7 +875,7 @@ register(Tool('compute_stats', 'Open Class stats (computes the features first if
               _obj({}), False, _ui_run(_check_stats), lambda b, a: 'Compute class stats', check=_check_stats, **_RUN))
 
 
-# ---------------------------------------------------------------- the Augment tab (data/augment.py)
+# ---------------------------------------------------------------- the Augment tab (image/augment.py)
 from ...image.augment import GROUPS as _AUG_GROUPS  # noqa: E402 - no albumentations at import
 
 

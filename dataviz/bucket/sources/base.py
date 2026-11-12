@@ -1,5 +1,5 @@
 """
-The shape every web dataset source has (datacenter/sources/*.py).
+The shape every web dataset source has (bucket/sources/*.py).
 
     class Source:
         key       'kaggle' | 'huggingface' | 'roboflow' | 'url' | 'zenodo' | 'openml'

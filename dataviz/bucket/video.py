@@ -1,5 +1,5 @@
 """
-Video files of the Data Center: probe, a poster frame, and cutting a video into image frames (service.video_info,
+Video files of the Bucket page: probe, a poster frame, and cutting a video into image frames (service.video_info,
 service.extract_frames). Pure: no database and no service; paths are absolute and already checked by the caller.
 
 Decoding is PyAV (FFmpeg with frame + slice threads); OpenCV's VideoCapture is the fallback for a file PyAV cannot
@@ -611,7 +611,7 @@ class _Writer:
         self.params = {'jpg': [cv2.IMWRITE_JPEG_QUALITY, q], 'png': [cv2.IMWRITE_PNG_COMPRESSION, 1],
                        'webp': [cv2.IMWRITE_WEBP_QUALITY, q]}[o['format']]
         self.n = workers or max(1, min(8, os.cpu_count() or 1))
-        self.pool = ThreadPoolExecutor(self.n, thread_name_prefix='dc-frames')
+        self.pool = ThreadPoolExecutor(self.n, thread_name_prefix='bk-frames')
         self.pending = deque()
         self.bytes = 0
 
@@ -841,7 +841,7 @@ def finish(base, layout, videos, o):
             os.makedirs(os.path.join(base, 'labels'), exist_ok=True)
             lines = ['path: .', 'train: images', 'val: images']
         with open(os.path.join(base, 'data.yaml'), 'w', encoding='utf-8') as f:
-            f.write('# frames cut from video by the Data Center: add classes, then label\n' +
+            f.write('# frames cut from video by the Bucket page: add classes, then label\n' +
                     '\n'.join(lines + ['nc: 0', 'names: []']) + '\n')
     with open(os.path.join(base, 'frames.csv'), 'w', newline='', encoding='utf-8') as f:
         wr = csv.writer(f)

@@ -1,15 +1,15 @@
 """
-The ◆ agents API (/api/llm/agent/*): one streamed chat per assistant (role data = Data Center, visual = the
+The ◆ agents API (/api/llm/agent/*): one streamed chat per assistant (role data = Bucket, visual = the
 visualizer), the confirmation of a paused change, stop, and the catalogue the chat box shows (tools, skills,
 commands, models). Events: llm/engine/events.py.
 
 Both roles run on the caller's providers and switches (llm/store.py). The visual role needs the visualizer session
-the request is bound to (/s/<id>/); the data role needs none: its tools act through datacenter/service.py as the
-caller, which also checks data.manage. Handlers are plain `def` (thread pool); the chat streams NDJSON from a sync
+the request is bound to (/s/<id>/); the data role needs none: its tools act through bucket/service.py as the
+caller, which also checks bucket.manage. Handlers are plain `def` (thread pool); the chat streams NDJSON from a sync
 generator, so a run waiting for a confirmation holds one worker thread (pings keep the connection open).
 
 One chat, every page: the route's role is the specialist of the page the request comes from (the router: data on
-home / Data Center / labeling, visual in a visualizer session); the chat itself is role 'app' and continues on any
+home / Bucket / labeling, visual in a visualizer session); the chat itself is role 'app' and continues on any
 page (body.session_id may be a chat started on another page). Each message is stored with its page
 (roles.page_of), the history marks where the user moved, and only this page's tools are offered. One turn at a
 time per chat: a second request while another tab's run still answers the same chat is refused (409).

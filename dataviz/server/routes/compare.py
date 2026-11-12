@@ -1,5 +1,5 @@
 """
-The Compare tab of a combined dataset (data/compare.py over data/diff.py), under /s/<id>/ like every session route:
+The Compare tab of a combined dataset (image/compare.py over image/diff.py), under /s/<id>/ like every session route:
 
     POST /api/compare/run       {a, b, params?} -> {ready, key, summary} (computed inline: ~1 s at 500k boxes)
     GET  /api/compare/result    ?key= -> summary + the image names of every image category
@@ -7,12 +7,12 @@ The Compare tab of a combined dataset (data/compare.py over data/diff.py), under
     GET  /api/compare/image     ?key=&name= -> both sides of one image: boxes with status / partner
     POST /api/compare/quickmap  {ref, feature} -> {ready, key, id, x, y, info} + novel (similarity to ref) or a job
     POST /api/compare/shift     {a, b, sample?, feature?} -> {ready, key, report} or {ready: false, job_id}: the
-                                "Image conditions" report (data/shift.py); measuring images is an io-lane job
+                                "Image conditions" report (image/shift.py); measuring images is an io-lane job
     GET  /api/compare/shift/images   ?key=&which=outside|low|high|most_b|uncovered&metric=&side=a|b -> {names}
     GET  /api/compare/shift/lut      ?key= -> the B -> A correction LUT (JSON download, with a cv2.LUT snippet)
     GET  /api/compare/shift/preview  ?key=&name=&strength=&mode= -> image/jpeg: as_b = an A image as B's conditions
                                      would make it, correct = a B image through the LUT; X-Shift-Params = the params
-    GET  /api/compare/stress/axes    the stress-test axes and levels (data/stress.py)
+    GET  /api/compare/stress/axes    the stress-test axes and levels (image/stress.py)
     POST /api/compare/stress    {member, model, n?, axes?, conf?, key? (a shift report: B's position)} -> {ready, key,
                                 result, summary} or {ready: false, job_id}: a model under graded light / blur / noise /
                                 colour / JPEG / resolution changes (main lane; io for API models)
@@ -51,7 +51,7 @@ def router(state, ctx):
         g.need_index()
         st = ctx.current()
         if getattr(st.source, 'kind', None) != 'union' or not st.members:
-            raise HTTPException(409, 'compare needs a combined dataset (pick 2+ datasets on the home page)')
+            raise HTTPException(409, 'compare needs a combined dataset (pick 2+ datasets on the Image page)')
         return compare.service(st)
 
     def result_or_404(s, key):

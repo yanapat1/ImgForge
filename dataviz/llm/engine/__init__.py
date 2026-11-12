@@ -1,5 +1,5 @@
 """
-The agent engine shared by every ◆ chat (Data Center and visualizer):
+The agent engine shared by every ◆ chat (Bucket and visualizer):
 
     react.py     the ReAct loop (≤ 50 steps, ≤ 50 retries per run, loop guard, modes ask / auto / plan, effort)
     confirm.py   pause / resume while the user approves a change

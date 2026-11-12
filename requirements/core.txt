@@ -16,5 +16,5 @@ alembic>=1.13        # accounts + PostgreSQL storage: migrations, pgvector, pass
 pgvector>=0.3
 argon2-cffi>=23.1
 cryptography>=42
-pymssql>=2.3         # SQL Server without an ODBC driver (FreeTDS in the wheel): exports, connection Test, Data Analysis
+pymssql>=2.3         # SQL Server without an ODBC driver (FreeTDS in the wheel): exports, connection Test, Data
 paramiko>=3.4        # SFTP: export targets

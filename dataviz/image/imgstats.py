@@ -1,6 +1,6 @@
 """
 Image conditions: per-image light / sharpness / noise / colour / capture metrics, what the Compare tab's "Image
-conditions" section (data/shift.py) compares between two members of a combined dataset to tell whether a model
+conditions" section (image/shift.py) compares between two members of a combined dataset to tell whether a model
 trained on A will meet the same pictures in B (a new camera, new lighting).
 
 One decode per image (PIL, then cv2 / numpy, which release the GIL: a thread pool):

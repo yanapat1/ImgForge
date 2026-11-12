@@ -1,5 +1,5 @@
 """
-Tags of the Data Center: app.dc_tags rows on (bucket, path), path '' = the bucket itself.
+Tags of the Bucket page: app.bucket_tags rows on (bucket, path), path '' = the bucket itself.
 
 Two kinds: user tags (cleaned like session tags, core/names.clean_tags) and the one AUTO tag `format:<key>` on the
 bucket root, written only here from format detection. revalidate() runs after every change to a bucket (ops,
@@ -29,7 +29,7 @@ def get(bid, path='', conn=None):
     if conn is None:
         with db.connect() as c:
             return get(bid, path, c)
-    return _shape(conn.execute(text('SELECT tag, auto FROM app.dc_tags WHERE bucket_id = :b AND path = :p'),
+    return _shape(conn.execute(text('SELECT tag, auto FROM app.bucket_tags WHERE bucket_id = :b AND path = :p'),
                                {'b': bid, 'p': path}).all())
 
 
@@ -38,7 +38,7 @@ def for_buckets(bids, conn):
     out = {b: [] for b in bids}
     if not bids:
         return out
-    rows = conn.execute(text("SELECT bucket_id, tag, auto FROM app.dc_tags WHERE bucket_id = ANY(:b) AND path = ''"),
+    rows = conn.execute(text("SELECT bucket_id, tag, auto FROM app.bucket_tags WHERE bucket_id = ANY(:b) AND path = ''"),
                         {'b': list(bids)}).all()
     by = {}
     for r in rows:
@@ -56,13 +56,13 @@ def set_user(bid, path, add=(), remove=()):
         if t.casefold().startswith(AUTO_PREFIX):
             raise BucketError(f'“{t}”: format:* tags are set automatically by format detection')
     with db.begin() as c:
-        cur = c.execute(text('SELECT tag, auto FROM app.dc_tags WHERE bucket_id = :b AND path = :p'),
+        cur = c.execute(text('SELECT tag, auto FROM app.bucket_tags WHERE bucket_id = :b AND path = :p'),
                         {'b': bid, 'p': path}).all()
         autos = {r.tag.casefold() for r in cur if r.auto}
         for t in remove:
             if t.casefold() in autos or t.casefold().startswith(AUTO_PREFIX):
                 raise BucketError(f'“{t}” is an automatic format tag: it cannot be removed')
-        c.execute(text('DELETE FROM app.dc_tags WHERE bucket_id = :b AND path = :p AND NOT auto '
+        c.execute(text('DELETE FROM app.bucket_tags WHERE bucket_id = :b AND path = :p AND NOT auto '
                        'AND lower(tag) = ANY(:t)'), {'b': bid, 'p': path, 't': [t.casefold() for t in remove]})
         users = {r.tag.casefold() for r in cur if not r.auto} - {t.casefold() for t in remove}
         new = [t for t in add if t.casefold() not in users | autos]
@@ -71,13 +71,13 @@ def set_user(bid, path, add=(), remove=()):
         except ValueError as e:
             raise BucketError(str(e).replace('a session', 'a path')) from None
         for t in new:
-            c.execute(text('INSERT INTO app.dc_tags(bucket_id, path, tag, auto) VALUES (:b, :p, :t, false) '
+            c.execute(text('INSERT INTO app.bucket_tags(bucket_id, path, tag, auto) VALUES (:b, :p, :t, false) '
                            'ON CONFLICT DO NOTHING'), {'b': bid, 'p': path, 't': t})
         return get(bid, path, c)
 
 
 def current_format(bid, conn):
-    r = conn.execute(text("SELECT tag FROM app.dc_tags WHERE bucket_id = :b AND path = '' AND auto"),
+    r = conn.execute(text("SELECT tag FROM app.bucket_tags WHERE bucket_id = :b AND path = '' AND auto"),
                      {'b': bid}).first()
     return r.tag[len(AUTO_PREFIX):] if r is not None else None
 
@@ -87,10 +87,10 @@ def set_auto(bid, fmt, conn):
     old = current_format(bid, conn)
     if old != fmt:
         c = conn
-        c.execute(text("DELETE FROM app.dc_tags WHERE bucket_id = :b AND path = '' AND auto"), {'b': bid})
-        c.execute(text("DELETE FROM app.dc_tags WHERE bucket_id = :b AND path = '' AND lower(tag) = lower(:t)"),
+        c.execute(text("DELETE FROM app.bucket_tags WHERE bucket_id = :b AND path = '' AND auto"), {'b': bid})
+        c.execute(text("DELETE FROM app.bucket_tags WHERE bucket_id = :b AND path = '' AND lower(tag) = lower(:t)"),
                   {'b': bid, 't': auto_tag(fmt)})
-        c.execute(text("INSERT INTO app.dc_tags(bucket_id, path, tag, auto) VALUES (:b, '', :t, true)"),
+        c.execute(text("INSERT INTO app.bucket_tags(bucket_id, path, tag, auto) VALUES (:b, '', :t, true)"),
                   {'b': bid, 't': auto_tag(fmt)})
     return old
 
@@ -107,7 +107,7 @@ def apply_format(bid, fmt_result):
 
 def move_paths(bid, old, new, conn):
     """Tags (and cached detections) below `old` follow a move / rename to `new`."""
-    for table in ('dc_tags', 'dc_format_cache'):
+    for table in ('bucket_tags', 'bucket_format_cache'):
         conn.execute(text(f"""UPDATE app.{table} SET path = :new || substr(path, length(:old) + 1)
                               WHERE bucket_id = :b AND path <> '' AND (path = :old OR path LIKE :like)"""),
                      {'b': bid, 'old': old, 'new': new, 'like': _like(old)})
@@ -115,17 +115,17 @@ def move_paths(bid, old, new, conn):
 
 def take_paths(bid, path, conn):
     """Remove the user tags at / below `path` (a delete) -> the rows, so an undo can put them back."""
-    rows = conn.execute(text("""DELETE FROM app.dc_tags WHERE bucket_id = :b AND NOT auto AND path <> ''
+    rows = conn.execute(text("""DELETE FROM app.bucket_tags WHERE bucket_id = :b AND NOT auto AND path <> ''
                                 AND (path = :p OR path LIKE :like) RETURNING path, tag"""),
                         {'b': bid, 'p': path, 'like': _like(path)}).all()
-    conn.execute(text("DELETE FROM app.dc_format_cache WHERE bucket_id = :b AND path <> '' "
+    conn.execute(text("DELETE FROM app.bucket_format_cache WHERE bucket_id = :b AND path <> '' "
                       "AND (path = :p OR path LIKE :like)"), {'b': bid, 'p': path, 'like': _like(path)})
     return [[r.path, r.tag] for r in rows]
 
 
 def put_back(bid, rows, conn):
     for p, t in rows or []:
-        conn.execute(text('INSERT INTO app.dc_tags(bucket_id, path, tag, auto) VALUES (:b, :p, :t, false) '
+        conn.execute(text('INSERT INTO app.bucket_tags(bucket_id, path, tag, auto) VALUES (:b, :p, :t, false) '
                           'ON CONFLICT DO NOTHING'), {'b': bid, 'p': p, 't': t})
 
 
@@ -138,7 +138,7 @@ def all_tags(bucket_ids):
     if not bucket_ids:
         return []
     with db.connect() as c:
-        rows = c.execute(text("""SELECT min(tag) AS tag, bool_or(auto) AS auto, count(*) AS n FROM app.dc_tags
+        rows = c.execute(text("""SELECT min(tag) AS tag, bool_or(auto) AS auto, count(*) AS n FROM app.bucket_tags
                                  WHERE bucket_id = ANY(:b) GROUP BY lower(tag) ORDER BY count(*) DESC, min(tag)"""),
                          {'b': list(bucket_ids)}).all()
     return [{'tag': r.tag, 'count': int(r.n), 'auto': bool(r.auto)} for r in rows]
@@ -148,7 +148,7 @@ def paths_with(bucket_ids, wanted):
     """[(bucket id, path)] carrying ALL the `wanted` tags (case-insensitive)."""
     wanted = [t.casefold() for t in wanted]
     with db.connect() as c:
-        rows = c.execute(text("""SELECT bucket_id, path FROM app.dc_tags WHERE bucket_id = ANY(:b)
+        rows = c.execute(text("""SELECT bucket_id, path FROM app.bucket_tags WHERE bucket_id = ANY(:b)
                                  AND lower(tag) = ANY(:t) GROUP BY bucket_id, path
                                  HAVING count(DISTINCT lower(tag)) = :n"""),
                          {'b': list(bucket_ids), 't': wanted, 'n': len(set(wanted))}).all()

@@ -1,4 +1,4 @@
-"""Data Center "From the web" (datacenter/sources): Kaggle (Basic and Bearer auth, the redirect to storage without
+"""Bucket "From the web" (bucket/sources): Kaggle (Basic and Bearer auth, the redirect to storage without
 the key, the competition-rules 403, a missing token), a direct link (tar.gz with a nested zip, ranged parallel
 download, resume after a dropped connection, the SSRF guard), Hugging Face (tree + per-file download), Roboflow
 (export polling), Zenodo (md5 check), OpenML (parquet + description.json), import into an existing folder,
@@ -18,7 +18,7 @@ import httpx
 import pytest
 
 from conftest import jpeg_bytes, wait_job
-from test_bucket_routes import dc, new_bucket  # noqa: F401 - the Data Center fixture
+from test_bucket_routes import dc, new_bucket  # noqa: F401 - the Bucket page fixture
 
 from dataviz.bucket import store
 from dataviz.bucket.sources import fetch, huggingface
@@ -71,7 +71,7 @@ def token(c, kind, **kw):
 
 
 def run(c, body, ok=True):
-    r = c.post('/api/dc/import', json=body)
+    r = c.post('/api/bucket/import', json=body)
     assert r.status_code == 200, r.text
     out = r.json()
     j = wait_job(c, out['job_id'], timeout=60) if out['job_id'] is not None else {'status': 'done', 'result': out['result']}
@@ -104,7 +104,7 @@ def test_kaggle_dataset_basic_auth_redirect_and_unzip(dc, web):
     out, j = run(c, {'source': 'kaggle', 'ref': 'https://www.kaggle.com/datasets/owner/my-ds/versions/2'})
     assert auth['kaggle'] == 'Basic ' + base64.b64encode(b'alice:k123').decode()
     assert auth['storage'] is None                                  # the key never leaves kaggle.com
-    b = c.get(f'/api/dc/buckets/{out["bucket"]}').json()
+    b = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()
     assert b['name'] == 'my-ds' and b['format']['format'] == 'yolo-detect'
     assert b['source']['kind'] == 'kaggle' and b['source']['ref'] == 'owner/my-ds/versions/2' and b['source']['imported_at']
     assert files_of(b['root']) == ['data.yaml', 'images/train/im0.jpg', 'images/train/im1.jpg',
@@ -114,19 +114,19 @@ def test_kaggle_dataset_basic_auth_redirect_and_unzip(dc, web):
 
 def test_kaggle_errors_and_bearer_token(dc, web):
     _, c = dc
-    r = c.post('/api/dc/import', json={'source': 'kaggle', 'ref': 'owner/ds'})
+    r = c.post('/api/bucket/import', json={'source': 'kaggle', 'ref': 'owner/ds'})
     assert r.status_code == 400 and 'token' in r.json()['detail']
-    assert c.post('/api/dc/import', json={'source': 'kaggle', 'ref': 'not a ref!'}).status_code == 400
-    assert c.post('/api/dc/import', json={'source': 'nope', 'ref': 'x'}).status_code == 400
+    assert c.post('/api/bucket/import', json={'source': 'kaggle', 'ref': 'not a ref!'}).status_code == 400
+    assert c.post('/api/bucket/import', json={'source': 'nope', 'ref': 'x'}).status_code == 400
     cid = token(c, 'kaggle', api_key='KGAT_abc')
     seen = {}
     web.on('www.kaggle.com', '/api/v1/competitions/data/download-all/titanic',
            lambda req: seen.update(a=req.headers.get('authorization')) or httpx.Response(403, json={'message': 'rules'}))
-    n = len(c.get('/api/dc/buckets').json())
+    n = len(c.get('/api/bucket/buckets').json())
     _, j = run(c, {'source': 'kaggle', 'ref': 'competitions/titanic', 'connection_id': cid}, ok=False)
     assert seen['a'] == 'Bearer KGAT_abc'
     assert j['status'] == 'error' and 'accept the competition rules' in j['error']
-    assert len(c.get('/api/dc/buckets').json()) == n                 # the new bucket went with the failure
+    assert len(c.get('/api/bucket/buckets').json()) == n                 # the new bucket went with the failure
 
 
 def test_kaggle_inspect(dc, web):
@@ -137,12 +137,12 @@ def test_kaggle_inspect(dc, web):
         'versions': [{'versionNumber': 3}, {'versionNumber': 2}]}))
     web.on('www.kaggle.com', '/api/v1/datasets/list/owner/ds',
            lambda r: httpx.Response(200, json={'datasetFiles': [{'name': 'a.csv'}, {'name': 'b.csv'}]}))
-    r = c.post('/api/dc/sources/inspect', json={'source': 'kaggle', 'ref': 'owner/ds'})
+    r = c.post('/api/bucket/sources/inspect', json={'source': 'kaggle', 'ref': 'owner/ds'})
     assert r.status_code == 200, r.text
     d = r.json()
     assert d['title'] == 'My data' and d['size'] == 1234 and d['license'] == 'CC0' and d['files'] == 2
     assert d['name'] == 'ds' and [v['version'] for v in d['versions']] == [3, 2]
-    src = c.get('/api/dc/sources').json()['sources']
+    src = c.get('/api/bucket/sources').json()['sources']
     kg = next(s for s in src if s['key'] == 'kaggle')
     assert kg['token'] == 'required' and len(kg['connections']) == 1
     assert {s['key'] for s in src} == {'kaggle', 'huggingface', 'roboflow', 'url', 'zenodo', 'openml'}
@@ -163,21 +163,21 @@ def test_url_tarball_with_nested_zip_and_ssrf(dc, web):
     web.on('files.example.com', '/d/pack.tar.gz',
            lambda r: httpx.Response(200, content=tb.getvalue(), headers={'content-disposition': 'attachment; filename="pack.tar.gz"'}))
     out, j = run(c, {'source': 'url', 'ref': 'https://files.example.com/d/pack.tar.gz', 'opts': {'nested': True}})
-    root = c.get(f'/api/dc/buckets/{out["bucket"]}').json()['root']
+    root = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()['root']
     got = files_of(root)
     assert 'readme.md' in got and 'train/images/train/im0.jpg' in got and 'train/data.yaml' in got
     assert 'link' not in got and not any(g.endswith('.zip') for g in got)
     assert j['result']['added'] >= 6
     # private targets are refused, before and after DNS
     for bad in ('http://127.0.0.1/x.zip', 'http://10.0.0.5/x.zip', 'http://[::1]/x', 'file:///etc/passwd'):
-        r = c.post('/api/dc/import', json={'source': 'url', 'ref': bad})
+        r = c.post('/api/bucket/import', json={'source': 'url', 'ref': bad})
         assert r.status_code == 400, bad
     fetch.resolve_host  # the fixture's fake DNS says public; a host that resolves private:
     import dataviz.bucket.sources.fetch as f
     real = f.resolve_host
     f.resolve_host = lambda host: ['192.168.1.9']
     try:
-        r = c.post('/api/dc/import', json={'source': 'url', 'ref': 'https://intranet.example.com/a.zip'})
+        r = c.post('/api/bucket/import', json={'source': 'url', 'ref': 'https://intranet.example.com/a.zip'})
         assert r.status_code == 400 and 'private' in r.json()['detail']
     finally:
         f.resolve_host = real
@@ -200,7 +200,7 @@ def test_url_parallel_ranges_and_resume(dc, web, monkeypatch, tmp_path):
         return httpx.Response(206, content=data[a:b + 1], headers={**h, 'content-range': f'bytes {a}-{b}/{len(data)}'})
     web.on('files.example.com', '/blob.bin', big)
     out, _ = run(c, {'source': 'url', 'ref': 'https://files.example.com/blob.bin'})
-    root = c.get(f'/api/dc/buckets/{out["bucket"]}').json()['root']
+    root = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()['root']
     assert open(os.path.join(root, 'blob.bin'), 'rb').read() == data
     assert len(ranges) == fetch.PARTS                                # split over parallel ranged requests
 
@@ -248,10 +248,10 @@ def test_huggingface_tree_and_files(dc, web, monkeypatch):
         return p
     monkeypatch.setattr(huggingface, 'hf_api', lambda token=None: Api())
     monkeypatch.setattr(huggingface, 'hf_download', download)
-    d = c.post('/api/dc/sources/inspect', json={'source': 'huggingface', 'ref': 'https://huggingface.co/datasets/user/set/tree/v2'}).json()
+    d = c.post('/api/bucket/sources/inspect', json={'source': 'huggingface', 'ref': 'https://huggingface.co/datasets/user/set/tree/v2'}).json()
     assert d['files'] == 3 and d['license'] == 'mit' and d['size'] == 13
     out, _ = run(c, {'source': 'huggingface', 'ref': 'user/set@v2', 'opts': {'patterns': 'data/*.csv'}})
-    root = c.get(f'/api/dc/buckets/{out["bucket"]}').json()['root']
+    root = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()['root']
     assert files_of(root) == ['data/test.csv', 'data/train.csv']
 
 
@@ -272,7 +272,7 @@ def test_roboflow_polls_until_the_export_exists(dc, web, monkeypatch):
     web.on('storage.roboflow.example', '/e.zip', lambda r: httpx.Response(200, content=yolo_zip('cars-4/')))
     out, _ = run(c, {'source': 'roboflow', 'ref': 'https://universe.roboflow.com/ws/cars/dataset/4'})
     assert n['k'] == 3
-    b = c.get(f'/api/dc/buckets/{out["bucket"]}').json()
+    b = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()
     assert b['format']['format'] == 'yolo-detect' and b['name'] == 'cars-v4'
 
 
@@ -285,7 +285,7 @@ def test_zenodo_md5_and_openml(dc, web):
     web.on('zenodo.org', '/api/records/42', lambda r: httpx.Response(200, json=rec))
     web.on('zenodo.org', '/api/records/42/files/z.zip/content', lambda r: httpx.Response(200, content=good))
     out, _ = run(c, {'source': 'zenodo', 'ref': 'https://doi.org/10.5281/zenodo.42'})
-    assert c.get(f'/api/dc/buckets/{out["bucket"]}').json()['format']['format'] == 'yolo-detect'
+    assert c.get(f'/api/bucket/buckets/{out["bucket"]}').json()['format']['format'] == 'yolo-detect'
     rec['files'][0]['checksum'] = 'md5:' + '0' * 32
     _, j = run(c, {'source': 'zenodo', 'ref': '42', 'name': 'z-bad'}, ok=False)
     assert j['status'] == 'error' and 'damaged' in j['error']
@@ -295,7 +295,7 @@ def test_zenodo_md5_and_openml(dc, web):
         'parquet_url': 'https://data.openml.example/iris.pq', 'url': 'https://www.openml.org/data/v1/download/61'}}))
     web.on('data.openml.example', '/iris.pq', lambda r: httpx.Response(200, content=b'PAR1fakePAR1'))
     out, _ = run(c, {'source': 'openml', 'ref': 'https://www.openml.org/d/61'})
-    root = c.get(f'/api/dc/buckets/{out["bucket"]}').json()['root']
+    root = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()['root']
     assert files_of(root) == ['description.json', 'iris.parquet']
     assert json.load(open(os.path.join(root, 'description.json')))['default_target_attribute'] == 'class'
 
@@ -311,12 +311,12 @@ def test_import_into_a_folder_and_reimport(dc, web):
     p = os.path.join(b['root'], 'docs', 'notes.txt')
     assert open(p).read() == 'v1'
     v['n'] = 2
-    r = c.post(f'/api/dc/buckets/{b["id"]}/reimport')
+    r = c.post(f'/api/bucket/buckets/{b["id"]}/reimport')
     assert r.status_code == 200, r.text
     assert wait_job(c, r.json()['job_id'])['status'] == 'done'
     assert open(p).read() == 'v2'                                     # newer file replaces the older one
     other = new_bucket(c, name='plain')
-    assert c.post(f'/api/dc/buckets/{other["id"]}/reimport').status_code == 400
+    assert c.post(f'/api/bucket/buckets/{other["id"]}/reimport').status_code == 400
 
 
 def test_token_connections_are_masked_and_tested(dc, web):
@@ -402,7 +402,7 @@ def test_upload_unpacks_a_tarball(dc):
             ti = tarfile.TarInfo(name)
             ti.size = len(data)
             t.addfile(ti, io.BytesIO(data))
-    r = c.post(f'/api/dc/buckets/{b["id"]}/upload', params={'path': ''},
+    r = c.post(f'/api/bucket/buckets/{b["id"]}/upload', params={'path': ''},
                files=[('files', ('imgs.tar.gz', tb.getvalue(), 'application/gzip')),
                       ('files', ('keep.csv.gz', gzip.compress(b'x'), 'application/gzip'))])
     assert r.status_code == 200, r.text

@@ -5,7 +5,7 @@ The app's pages for every ◆ assistant (domain common): find a session, and ope
                                          read: the visualize / labeling sessions the user can open (id, name, kind,
                                          tags, folder); bucket + path: only the sessions made from that folder
     navigate {screen, goal, session_id?, bucket?, path?, tab?}
-                                         ui: open another page (home | data | viz | label | analysis). The page
+                                         ui: open another page (home | bucket | image | viz | label | data). The page
                                          reloads, so it ends the turn: the SAME chat continues on the new page with
                                          `goal` (the dock sends it there as a continued message; that page's
                                          specialist answers it).
@@ -14,12 +14,12 @@ The app's pages for every ◆ assistant (domain common): find a session, and ope
                                          read: the other page's specialist answers one question on the server
                                          (read-only tools, <= 6 steps, its answer cut to 1500 characters; its tokens
                                          count for this turn): no page change, no extra tools in this prompt
-    data_location {}                     read, Visualizer only: the Data Center bucket + folder of the open dataset
-                                         (datacenter/service.locate) and the folders above it, for navigate
+    data_location {}                     read, Visualizer only: the bucket + folder of the open dataset
+                                         (bucket/service.locate) and the folders above it, for navigate
 
 navigate is checked here (the session must exist and be visible to the user, the bucket must resolve, the target
 page's assistant must be on) and applied by the page (core/dock.ts withNav builds the URL with core/nav.ts). A
-folder with no session yet is sent first (the Data Center's send_to_session: confirmed in ask, a labeling project
+folder with no session yet is sent first (the Bucket page's send_to_session: confirmed in ask, a labeling project
 always), then navigate opens it.
 """
 
@@ -27,9 +27,9 @@ import os
 
 from . import E, S, Tool, ToolError, _obj, register
 
-SCREENS = ('home', 'data', 'viz', 'label', 'analysis')
-SCREEN_ZONE = {'data': 'datacenter', 'viz': 'visualizer', 'label': 'labeling', 'analysis': 'analysis'}
-SCREEN_LABEL = {'home': 'Home', 'data': 'Data Center', 'viz': 'Visualizer', 'label': 'Labeling', 'analysis': 'Data Analysis'}
+SCREENS = ('home', 'bucket', 'image', 'viz', 'label', 'data')
+SCREEN_ZONE = {'bucket': 'bucket', 'viz': 'visualizer', 'label': 'labeling', 'data': 'data'}
+SCREEN_LABEL = {'home': 'Home', 'bucket': 'Bucket', 'image': 'Image', 'viz': 'Visualizer', 'label': 'Labeling', 'data': 'Data'}
 VIZ_TABS = ('explore', 'stats', 'curation', 'model', 'eval', 'compare')
 MAX_SESSIONS = 40
 
@@ -68,9 +68,9 @@ def _list_sessions(ctx, a):
     kinds = [a['kind']] if a.get('kind') else ['viz', 'label']
     q = str(a.get('q') or '').strip().lower()
     want = None
-    if a.get('bucket'):                         # the sessions made from this Data Center folder (send_to_session)
+    if a.get('bucket'):                         # the sessions made from this Bucket folder (send_to_session)
         from . import _svc
-        from .datacenter import resolve_bucket
+        from .bucket import resolve_bucket
         b = resolve_bucket(ctx.user, a['bucket'])
         want = _svc().folder_source(ctx.user, b['id'], a.get('path') or '')
         kinds = ['viz']
@@ -91,6 +91,8 @@ def _list_sessions(ctx, a):
 
 def _need_zone(screen):
     from ... import zones
+    if screen == 'image' and not (zones.on('visualizer') or zones.on('labeling')):
+        raise ToolError('this install has no Image page (no visualize or label sessions): tell the user')
     if screen in SCREEN_ZONE and not zones.on(SCREEN_ZONE[screen]):
         raise ToolError(f'this install has no {SCREEN_LABEL[screen]}: tell the user')
 
@@ -118,9 +120,9 @@ def _check_nav(ctx, a):
             if a['tab'] not in VIZ_TABS:
                 raise ToolError(f'tab must be one of {", ".join(VIZ_TABS)}')
             out['tab'] = a['tab']
-    elif scr == 'data':
+    elif scr == 'bucket':
         if a.get('bucket'):
-            from .datacenter import resolve_bucket
+            from .bucket import resolve_bucket
             b = resolve_bucket(ctx.user, a['bucket'])
             out['bucket'] = b['id']
             if a.get('path'):
@@ -143,11 +145,11 @@ def _data_location(ctx, a):
     did = getattr(ctx.state, 'dataset_id', None)
     reg = getattr(ctx.app, 'datasets', None)
     if not did or reg is None:
-        raise ToolError('this session was not opened from a saved dataset, so it has no Data Center folder')
+        raise ToolError('this session was not opened from a saved dataset, so it has no Bucket folder')
     try:
         ds = reg.dataset(did)
     except KeyError:
-        raise ToolError('this session has no saved dataset row: it has no Data Center folder') from None
+        raise ToolError('this session has no saved dataset row: it has no Bucket folder') from None
     from . import _svc
     kind = ds.get('kind')
     if kind in ('local', 'embeddings'):
@@ -155,10 +157,10 @@ def _data_location(ctx, a):
     elif kind == 's3':
         loc = _svc().locate(ctx.user, s3_bucket=ds.get('bucket'), prefix=ds.get('prefix'))
     else:
-        raise ToolError(f'this session is a {kind} dataset, not a folder: it has no Data Center folder')
+        raise ToolError(f'this session is a {kind} dataset, not a folder: it has no Bucket folder')
     if loc is None:
-        raise ToolError('no Data Center bucket you can see holds this dataset\'s folder (the user can add it as '
-                        'a bucket in the Data Center)')
+        raise ToolError('no bucket you can see holds this dataset\'s folder (the user can add it as '
+                        'a bucket in the Bucket page)')
     return loc, f'→ {loc["bucket_name"]}/{loc["path"] or "(root)"}'
 
 
@@ -172,7 +174,7 @@ def _consult(ctx, a):
     """Another page's specialist answers one question, read-only, on the server: its tools and steps stay in its
     own run, only the answer comes back (no page change, no extra tools in this prompt)."""
     from ..engine import roles, subrun
-    target = 'visual' if a['page'] == 'viz' else 'data'
+    target = 'visual' if a['page'] == 'viz' else 'bucket'
     _need_zone(a['page'])
     if getattr(ctx, 'depth', 0):
         raise ToolError('a consult cannot consult again: answer with your tools')
@@ -196,7 +198,7 @@ def _consult(ctx, a):
             raise ToolError(f'session {sid!r} cannot be opened: {str(e)[:200]}') from None
         if getattr(state, 'index', True) is None:
             raise ToolError(f'session {sid!r} is still being indexed: try again in a moment, or navigate there')
-    here = roles.SCREEN_LABEL.get((ctx.scope or {}).get('page') or ('viz' if ctx.role == 'visual' else 'data'), 'other')
+    here = roles.SCREEN_LABEL.get((ctx.scope or {}).get('page') or ('viz' if ctx.role == 'visual' else 'bucket'), 'other')
     q = f'{a["question"].strip()[:1500]}\n\n{CONSULT_NOTE.format(here=here)}'
     got = subrun.run_sub(ctx, target, q, state=state, steps=CONSULT_STEPS, chars=CONSULT_CHARS,
                          label=f'{SCREEN_LABEL[a["page"]]} assistant')
@@ -212,21 +214,22 @@ _C = dict(domain='common', ctx=True)
 register(Tool('list_sessions', 'Sessions the user can open (viz, label), for navigate; bucket + path: the ones '
                                'of that folder.',
               _obj({'q': S('words in the name or a tag (default: all)'), 'kind': E('only this kind', ['viz', 'label']),
-                    'bucket': S('Data Center bucket'), 'path': S('folder in it')}),
+                    'bucket': S('bucket'), 'path': S('folder in it')}),
               False, _list_sessions, **_C))
-register(Tool('navigate', 'Open another page (home, data = Data Center, viz / label = a session, analysis = Data '
-                          'Analysis: SQL / MongoDB queries, statistics, dashboards). Ends the turn: '
+register(Tool('navigate', 'Open another page (home = the overview, bucket = Bucket, image = the list of '
+                          'visualize / label sessions, viz / label = one session, data = Data: SQL / MongoDB '
+                          'queries, statistics, dashboards). Ends the turn: '
                           'call it last; `goal` is what to do there (this chat continues there with it).',
               _obj({'screen': E('the page', SCREENS), 'goal': S('the next request there'),
-                    'session_id': S('viz / label: from list_sessions'), 'bucket': S('data: bucket'),
-                    'path': S('data: folder'), 'tab': E('viz: view', VIZ_TABS)}, ['screen', 'goal']),
+                    'session_id': S('viz / label: from list_sessions'), 'bucket': S('bucket: bucket id or name'),
+                    'path': S('bucket: folder'), 'tab': E('viz: view', VIZ_TABS)}, ['screen', 'goal']),
               False, _nav_run, _nav_label, check=_check_nav, risk='ui', **_C))
 register(Tool('consult', "Ask another page's specialist one question, read-only, without leaving (viz needs "
                          'session_id). To show or change something there: navigate.',
-              _obj({'page': E('whose specialist', ['data', 'viz']), 'question': S('the full question, with names'),
+              _obj({'page': E('whose specialist', ['bucket', 'viz']), 'question': S('the full question, with names'),
                     'session_id': S('viz: from list_sessions')}, ['page', 'question']),
               False, _consult, **_C))
 # the visualizer's way back to its folder (domain visual: only the Visual specialist has it; it only reads)
-register(Tool('data_location', 'The Data Center bucket + folder of this dataset; parents[0] = "..", '
+register(Tool('data_location', 'The bucket + folder of this dataset; parents[0] = "..", '
                                'parents[1] = "../..".',
               _obj({}), False, _data_location, domain='visual', ctx=True))

@@ -6,7 +6,7 @@ import { $, $req, esc, icon, syncRanges } from '../core/dom.js';
 import { setWheelMode, wheelModeHTML } from '../core/gesture.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { vizUrl } from '../core/nav.js';
-import * as dcApi from '../datacenter/api.js';
+import * as dcApi from '../bucket/api.js';
 import { setLook, setPalette, setTheme, THEME } from '../core/theme.js';
 import type { BrowseResult, ConnectionsPayload, ConnTestResult, DatasetItem, DatasetsPayload, EmbeddingsSummary, LabProject, LabelingForm, OpenSettingsOpts, S3Form,
   SectionId, SetAction, SetChange, SetState, TagFields, UnionForm } from '../types-settings.js';
@@ -341,8 +341,8 @@ const SET_ACTIONS: Record<string, SetAction> = {
   back,
   'new-s3': () => newS3Form(null),
   'new-dc': () => { SET.view = 'dc'; SET.form = { form: 'dc', buckets: null, bid: '', path: '', dirs: null, format: null, name: '' }; renderSettings(); void dcLoad(); },
-  'dc-crumb': (b) => dcBrowse(dd(b, 'to')),
-  'dc-folder': (b) => { const f = formOf('dc'); return dcBrowse([f.path, dd(b, 'name')].filter(Boolean).join('/')); },
+  'bk-crumb': (b) => dcBrowse(dd(b, 'to')),
+  'bk-folder': (b) => { const f = formOf('dc'); return dcBrowse([f.path, dd(b, 'name')].filter(Boolean).join('/')); },
   'save-dc': () => {
     const f = formOf('dc');
     const name = f.name.trim();
@@ -515,7 +515,7 @@ const SET_CHANGES: Record<string, SetChange> = {
   },
   'conn-pick': () => { const f = formOf('s3'); f.buckets = null; f.browse = null; f.connStatus = null; renderSettings(); if (f.connId !== 'new') void testConn(); },
   'bucket-pick': () => { formOf('s3').prefix = ''; void s3Browse(); },
-  'dc-bucket': () => { void dcBrowse(''); },
+  'bk-bucket': () => { void dcBrowse(''); },
   'lds-project': () => { pickLabelingTask(formOf('labeling')); renderSettings(); },
   'lds-task': () => renderSettings(),
   'mode-pick': () => document.querySelectorAll('.radio-card').forEach((c) => c.classList.toggle('sel', !!c.querySelector<HTMLInputElement>('input')?.checked)),
@@ -610,7 +610,7 @@ export function bindSettings(): void {
   });
   const gear = $('btn-settings');                 // the visualizer's activity bar: not in an install without it
   if (gear) gear.onclick = () => openSettings('datasets');
-  const homeBtn = $('home-settings');
+  const homeBtn = $('image-settings');
   if (homeBtn) homeBtn.onclick = () => openSettings('datasets');
   const themeBtn = $('btn-theme');                // the visualizer's activity bar
   if (themeBtn) themeBtn.onclick = () => setTheme(THEME.name === 'dark' ? 'light' : 'dark');

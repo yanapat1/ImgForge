@@ -99,7 +99,7 @@ def render_index(static_dir, prefix=''):
 
     prefix: put in front of every static URL (stamped src / href, import map keys and values, preloads, the icon
     sprite's <use href>): '../../' for the visualizer under /s/<id>/, so every session shares one browser cache of
-    /static/ instead of downloading the page code again per dataset. '' for the home and login pages."""
+    /static/ instead of downloading the page code again per dataset. '' for the Home, Image and login pages."""
     root = static_dir.resolve()
     html = _for_install((root / 'index.html').read_text(encoding='utf-8'), root)
 

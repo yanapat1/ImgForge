@@ -6,7 +6,7 @@ tests all read this file through DuckDB, so paging, sorting and filtering never 
     page(path, offset, limit, sort, desc, q)     -> {rows, total}
     stats(path)                                  -> {column: {type, nulls, distinct, min, max, mean}}
 
-Files live in .dataviz_cache/analysis/<user>/<session>/ and leave with the session.
+Files live in .dataviz_cache/data/<user>/<session>/ and leave with the session.
 """
 
 import datetime as dt
@@ -101,8 +101,26 @@ def _fit(table, schema):
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
+SUBDIR = 'data_results'          # under datasets.root; was 'analysis' (moved once on first use)
+_moved = set()
+
+
+def results_dir(root):
+    """<datasets.root>/data_results: every user's result files, one folder per user and session."""
+    p = Path(root) / SUBDIR
+    if str(p) not in _moved:
+        _moved.add(str(p))
+        old = Path(root) / 'analysis'
+        if old.is_dir() and not p.exists():
+            try:
+                old.rename(p)
+            except OSError:
+                pass
+    return p
+
+
 def new_path(root, user_id, session_id):
-    return Path(root) / 'analysis' / str(user_id) / str(session_id) / f'{uuid.uuid4().hex}.parquet'
+    return results_dir(root) / str(user_id) / str(session_id) / f'{uuid.uuid4().hex}.parquet'
 
 
 def _q(name):

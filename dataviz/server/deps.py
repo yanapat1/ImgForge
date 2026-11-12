@@ -79,7 +79,7 @@ def kind_of(state):
 def capabilities(state):
     """What the page may offer for the open session: one place instead of kind checks spread over the page."""
     emb = kind_of(state) == 'embeddings'
-    # one point per image (data/views.py ImageView): no boxes to edit / fix / score a model against (yet)
+    # one point per image (image/views.py ImageView): no boxes to edit / fix / score a model against (yet)
     img = getattr(getattr(state, 'source', None), 'unit', None) == 'image'
     src = getattr(state, 'source', None)
     union = kind_of(state) == 'union'

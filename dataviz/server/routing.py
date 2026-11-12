@@ -31,7 +31,7 @@ _S = re.compile(r'^/s/([^/]+)(/.*)?$')
 log = vlog.get_logger('sessions')
 _MISSING_TITLE = "This session's folder is missing"
 _MISSING_TEXT = ('The dataset folder was moved, renamed or deleted, so the session cannot load. Point the session at '
-                 'its new place from Edit on its card, or find the data in Data Center.')
+                 'its new place from Edit on its card, or find the data in Bucket.')
 
 
 def strip_raw(raw):

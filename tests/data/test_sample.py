@@ -18,7 +18,7 @@ def smp(pg, tmp_path, monkeypatch):
     monkeypatch.setattr(sample, 'DB', f'sample_shop_{tag}')          # the test server is shared: names of this test only
     monkeypatch.setattr(sample, 'ROLE', f'sample_shop_user_{tag}')
     reg = connections.Registry(tmp_path)
-    service.configure(SimpleNamespace(cfg={'data_analysis': {}, 'database': {'url': pg}}, datasets=reg))
+    service.configure(SimpleNamespace(cfg={'data': {}, 'database': {'url': pg}}, datasets=reg))
     yield SimpleNamespace(s=sample, svc=service, url=pg, reg=reg)
     sample.remove_sample(pg, log=lambda *_: None)
 

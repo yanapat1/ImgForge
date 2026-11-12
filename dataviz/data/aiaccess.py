@@ -1,7 +1,7 @@
 """
 What the ◆ assistant may change in a table, per user and per table. The user sets it in the object explorer (a
 table's right-click menu › AI access); the assistant cannot change it. Kept in the user prefs (key
-`analysis_ai_access`: {"items": [{c, d, s, t, level}]}, only tables above the default).
+`data_ai_access`: {"items": [{c, d, s, t, level}]}, only tables above the default).
 
     Read only         (read, the default)   SELECT, CAST / CONVERT inside a query, this session's temp tables
     Edit rows         (rows)                + INSERT / UPDATE / DELETE / MERGE on that table
@@ -21,7 +21,7 @@ from sqlglot.errors import SqlglotError
 
 from . import classify
 
-KEY = 'analysis_ai_access'
+KEY = 'data_ai_access'
 LEVELS = ('read', 'rows', 'schema')
 LABEL = {'read': 'Read only', 'rows': 'Edit rows', 'schema': 'Change structure'}
 MAX_ITEMS = 500
@@ -185,5 +185,5 @@ def gate(levels, cid, database, statements, conn_kind):
             name = '.'.join(p for p in (schema, table) if p)
             raise AccessError(
                 f'{op} on {name} needs AI access "{LABEL[need]}", and this table is "{LABEL[have]}" for the assistant. '
-                f'Tell the user: they can raise it in Data Analysis (right-click the table in the object explorer › '
+                f'Tell the user: they can raise it in Data (right-click the table in the object explorer › '
                 f'AI access). If the table lives in another schema, write its full schema.table name.')

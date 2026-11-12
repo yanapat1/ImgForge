@@ -181,10 +181,10 @@ class LabelingSource:
             task = self.check()
             cmap, names = formats.class_map(task['classes'])
             ttype = task['task_type']
-            # the change-feed cursor BEFORE the read: a write committed meanwhile is replayed (data/live.py)
+            # the change-feed cursor BEFORE the read: a write committed meanwhile is replayed (image/live.py)
             seq = self._store().change_cursor(self.task_id)
             images, uris, mids, labels, refs, sigs, label_image = [], {}, {}, {}, {}, {}, {}
-            # a cheap identity per image (data/reuse.py): uploaded files never change in place, so their media row
+            # a cheap identity per image (image/reuse.py): uploaded files never change in place, so their media row
             # is enough; a folder / bucket file can be replaced under the same row, so without a checksum: none
             # (reuse then compares content hashes instead)
             immutable = ((self.labeling.get(self.pid).get('source') or {}).get('kind') or 'upload') == 'upload'
@@ -236,11 +236,11 @@ class LabelingSource:
 
     def snapshot_info(self):
         """What the index of this source was built from: the change-feed cursor + the shapes behind every label
-        line ({label: [ann ids per line]}) and the media id of every label (data/live.py)."""
+        line ({label: [ann ids per line]}) and the media id of every label (image/live.py)."""
         snap = self._snapshot()
         return {'seq': snap['seq'], 'refs': snap['refs'], 'mids': snap['mids']}
 
-    # -- content identity (data/imagehash.py)
+    # -- content identity (image/imagehash.py)
     def image_sig(self, name):
         return self._snapshot()['sigs'].get(name)
 

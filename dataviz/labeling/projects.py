@@ -3,7 +3,7 @@ ProjectRegistry: the labeling sessions index and the per-project folders (images
 under <workspace_root>/labeling/<pid>/).
 
 The index lives in PostgreSQL: one app.sessions row per label session (kind 'label': owner, name, tags,
-visibility, sharing — the access model both kinds of card share, data/sessions.py), its app.label_projects row
+visibility, sharing — the access model both kinds of card share, image/sessions.py), its app.label_projects row
 (description, source, export_default, n_media, task_ids, model_connections, review) and its lbl.projects row
 (the annotation store's root, labeling/store.py). Deleting the session row cascades to every lbl row.
 
@@ -250,7 +250,7 @@ class ProjectRegistry:
                 'visibility': e['visibility']}
 
     def card(self, e):
-        """Sessions home card: counts from one grouped status query + the first 4 media ids as the cover."""
+        """Image page card: counts from one grouped status query + the first 4 media ids as the cover."""
         s = self.store(e['id'])
         st = s.stats()
         tasks = [{'id': t['id'], 'name': t['name'], 'task_type': t['task_type'], 'n_classes': len(t['classes']),
@@ -261,7 +261,7 @@ class ProjectRegistry:
                 'tags': e.get('tags') or [], 'review': bool(e.get('review'))}
 
     def list(self, user=None, scope='all'):
-        """The cards `user` sees in `scope` (data/sessions.py listing: newest opened first), each with the card
+        """The cards `user` sees in `scope` (image/sessions.py listing: newest opened first), each with the card
         header {owner, members, visibility, my_role, opened_at}. user None = an internal caller: every session."""
         if user is None:
             user, scope = {'id': '', 'is_admin': True}, 'everyone'

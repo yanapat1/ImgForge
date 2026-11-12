@@ -1,11 +1,11 @@
-# `dataviz/analysis/`: the Data Analysis zone
+# `dataviz/data/`: the Data zone
 
 SQL and NoSQL queries on the user's own connections. `service.py` is the one entry point: routes and assistant tools call it.
 
 | File | What it does |
 |---|---|
 | `classify.py` | The safety gate. A statement runs at once only when it is proven to be a plain read; anything else, including anything that cannot be parsed, needs a confirm. |
-| `aiaccess.py` | What the ◆ assistant may change in each table, per user (Read only / Edit rows / Change structure, in the user prefs). `service.ai_access_check` gates every `run_change` on the parsed statements, before its confirm card and again before it runs. Routes: `GET` / `PUT /api/analysis/ai-access`. |
+| `aiaccess.py` | What the ◆ assistant may change in each table, per user (Read only / Edit rows / Change structure, in the user prefs). `service.ai_access_check` gates every `run_change` on the parsed statements, before its confirm card and again before it runs. Routes: `GET` / `PUT /api/data/ai-access`. |
 | `adapters.py` | One interface over PostgreSQL, SQL Server and MongoDB: databases, tables, describe, streamed run, explain, cancel. |
 | `spool.py` | Results go to a Parquet file. The grid, statistics and charts read that file through DuckDB, so they never query the user's database again. |
 | `forecast.py` | A measure over time, forecast ahead from the saved result: steps built and filled in DuckDB, four classic models (naive, seasonal naive, Holt, Holt-Winters, on numpy and scipy) tested on held-back history, an 80% / 95% range, warnings and unusual steps. |

@@ -1,4 +1,4 @@
-// Create / edit a labeling session: a modal wizard (#lw), loaded on demand by views/home.js.
+// Create / edit a labeling session: a modal wizard (#lw), loaded on demand by views/image.js.
 // New: 1 Name · 2 Images (drop files / folders, a local folder, an S3 prefix, an FTP / SFTP path) · 3 Tasks · 4 Export
 // default; Create = POST api/label/projects, then (dropped files) 3 parallel multipart uploads + finalize, then the
 // import job's progress, then ?label=<pid> (core/nav.ts labelUrl). Edit: name, tasks (rename existing, add classes / tasks, reorder) and
@@ -7,8 +7,8 @@
 // data-fk), inputs write into W without a render, one delegated listener per event type on #lw.
 
 import { api, errText, getJSON, postJSON, postXHR } from '../core/api.js';
-import { dataUrl, labelUrl } from '../core/nav.js';
-import * as dcApi from '../datacenter/api.js';
+import { bucketUrl, labelUrl } from '../core/nav.js';
+import * as dcApi from '../bucket/api.js';
 import { $, $req, esc, fmtEta, icon, sleep } from '../core/dom.js';
 import { setBar, waitJob } from '../core/jobs.js';
 import { bindTagFields, commitTagDraft, sameTags, tagFieldHTML, tagState } from '../core/tag-field.js';
@@ -20,8 +20,8 @@ import type { ConnDraft, ConnItem, ConnKind, StatusLine } from '../types-setting
 import type { ImportCtx, ImportPreview, ImportState, ImportTask, JobStarted } from '../types-label-ui.js';
 import type { TaskConfig, TaskType } from '../types-label.js';
 import type { Job } from '../types.js';
-import type { Bucket, DcSource } from '../types-datacenter.js';
-import type { WizardOpts } from '../types-home.js';
+import type { Bucket, DcSource } from '../types-bucket.js';
+import type { WizardOpts } from '../types-image.js';
 import { confirmDialog, trapTab } from './dialog.js';
 
 const IMAGE_RE = /\.(jpe?g|png|bmp|webp|tiff?)$/i;
@@ -30,7 +30,7 @@ const UP = { files: 8, bytes: 16 * 1024 * 1024, parallel: 3, retries: 2 };
 type StepId = 'name' | 'images' | 'tasks' | 'labels' | 'export';
 type SrcTab = 'drop' | 'dc' | 'local' | 's3' | 'remote';
 const STEP_TEXT: Record<StepId, string> = { name: 'Name', images: 'Images', tasks: 'Tasks', labels: 'Labels', export: 'Export' };
-const SRC_TABS: ReadonlyArray<readonly [SrcTab, string, string]> = [['drop', 'upload', 'Drop files'], ['dc', 'db', 'Data Center'], ['local', 'folder', 'Local folder'], ['s3', 'cloud', 'S3'], ['remote', 'plug', 'FTP / SFTP']];
+const SRC_TABS: ReadonlyArray<readonly [SrcTab, string, string]> = [['drop', 'upload', 'Drop files'], ['dc', 'db', 'Bucket'], ['local', 'folder', 'Local folder'], ['s3', 'cloud', 'S3'], ['remote', 'plug', 'FTP / SFTP']];
 const EXPORT_KINDS: ReadonlyArray<readonly [string, string]> = [['', 'None (choose when exporting)'], ['zip', 'Download a zip'], ['local', 'Local folder'], ['s3', 'S3 bucket'],
   ['ftp', 'FTP server'], ['sftp', 'SFTP server'], ['db', 'Database (PostgreSQL / SQL Server)']];
 const CLOSE_DE = 0.06;                 // OKLab distance under which two class colours count as "too close"
@@ -57,7 +57,7 @@ type WState = {
   tab: SrcTab;
   drop: { files: Map<string, File>; bytes: number; ignored: number; scanning: number; sent: Set<string> };
   local: { path: string; browse: WBrowse | null; recursive: boolean; status: StatusLine | null };
-  /** a Data Center bucket folder: its sub-folders, and the resolved source (GET /api/dc/buckets/{bid}/source) */
+  /** a bucket folder: its sub-folders, and the resolved source (GET /api/bucket/buckets/{bid}/source) */
   dc: { buckets: Bucket[] | null; bid: string; path: string; dirs: string[] | null; src: DcSource | null; status: StatusLine | null; filled: boolean };
   s3: { connId: string; buckets: string[] | null; bucket: string; prefix: string; browse: WBrowse | null; status: StatusLine | null };
   remote: { connId: string; conn: ConnDraft; browse: WBrowse | null; status: StatusLine | null };
@@ -336,18 +336,18 @@ function localHTML(): string {
 
 function dcHTML(): string {
   const C = wz().dc;
-  if (C.buckets === null) return statusHTML(C.status || { kind: 'busy', text: 'loading the Data Center buckets…' });
+  if (C.buckets === null) return statusHTML(C.status || { kind: 'busy', text: 'loading the buckets…' });
   if (!C.buckets.length) {
-    return `<div class="status-line">${icon('db')}<span>No buckets yet: add data in <a href="${esc(dataUrl())}">Data Center</a> (upload, a local folder or S3), then pick it here.</span></div>`;
+    return `<div class="status-line">${icon('db')}<span>No buckets yet: add data in <a href="${esc(bucketUrl())}">Bucket</a> (upload, a local folder or S3), then pick it here.</span></div>`;
   }
   const b = C.buckets.find((x) => x.id === C.bid);
   const parts = C.path ? C.path.split('/') : [];
   const src = C.src;
   const sel = src ? `Selected: ${src.name}${src.format ? ` · ${src.format.label}` : ''}${b?.stats?.images != null && !C.path ? ` · ${fmt(b.stats.images)} images` : ''}` +
     (src.classes.length ? ` · ${src.classes.length} classes from data.yaml` : '') : '';
-  return `<label class="fld">Bucket<select data-f="dc.bid" data-change="dc-bucket" data-fk="dc-bucket">${C.buckets.map((x) =>
+  return `<label class="fld">Bucket<select data-f="dc.bid" data-change="bk-bucket" data-fk="bk-bucket">${C.buckets.map((x) =>
     `<option value="${esc(x.id)}" ${x.id === C.bid ? 'selected' : ''}>${esc(x.name)} · ${esc(x.kind === 's3' ? (x.mode === 'local' && x.local_ready ? 'S3, local copy' : 'S3') : x.kind)}${x.stats?.images != null ? ` · ${fmt(x.stats.images)} img` : ''}</option>`).join('')}</select></label>` +
-    (b ? `<div class="browser">${crumbsHTML(b.name, parts, 'dc-crumb')}${folderList(C.dirs?.map((n) => ({ name: n })), 'dc-folder', 'no sub-folders here')}</div>` : '') +
+    (b ? `<div class="browser">${crumbsHTML(b.name, parts, 'bk-crumb')}${folderList(C.dirs?.map((n) => ({ name: n })), 'bk-folder', 'no sub-folders here')}</div>` : '') +
     statusHTML(C.status || (src ? { kind: 'ok', text: sel } : null)) +
     '<p class="sec-note">Read in place from the bucket: nothing is copied. Classes in the folder’s data.yaml are added to the first task.</p>';
 }
@@ -1032,8 +1032,8 @@ const WACT: Record<string, Act> = {
   'local-up': () => { void localBrowse(wz().local.browse?.parent); },
   'local-crumb': (b) => { void localBrowse('/' + (b.dataset['to'] ?? '')); },
   'local-folder': (b) => { void localBrowse(joinPath(wz().local.browse?.path, b.dataset['name'] ?? '')); },
-  'dc-crumb': (b) => { void dcBrowse(b.dataset['to'] ?? ''); },
-  'dc-folder': (b) => { const C = wz().dc; void dcBrowse([C.path, b.dataset['name']].filter(Boolean).join('/')); },
+  'bk-crumb': (b) => { void dcBrowse(b.dataset['to'] ?? ''); },
+  'bk-folder': (b) => { const C = wz().dc; void dcBrowse([C.path, b.dataset['name']].filter(Boolean).join('/')); },
   's3-go': () => { if (wz().s3.bucket) void s3Browse(); },
   's3-crumb': (b) => { wz().s3.prefix = b.dataset['to'] ?? ''; void s3Browse(); },
   's3-folder': (b) => { const S = wz().s3; S.prefix = [S.prefix, b.dataset['name']].filter(Boolean).join('/'); void s3Browse(); },
@@ -1097,7 +1097,7 @@ const WCHG: Record<string, Chg> = {
   },
   's3-conn': () => { if (wz().s3.connId) void s3Test(); },
   's3-bucket': () => { wz().s3.prefix = ''; void s3Browse(); },
-  'dc-bucket': () => { void dcBrowse(''); },
+  'bk-bucket': () => { void dcBrowse(''); },
   'remote-conn': () => { const W = wz(); W.remote.browse = null; W.remote.status = null; render(); if (W.remote.connId !== 'new') void remoteBrowse(''); },
   'exp-kind': () => { wz().exp.connId = ''; render(); },
   'task-type': () => render(),
@@ -1107,7 +1107,7 @@ const WCHG: Record<string, Chg> = {
 function onTab(): void {
   const W = wz();
   if (W.tab === 'local' && !W.local.browse && !W.local.status) void localBrowse(W.local.path);
-  if (W.tab === 'dc' && W.dc.buckets === null && !W.dc.status) { W.dc.status = { kind: 'busy', text: 'loading the Data Center buckets…' }; void dcLoad(); }
+  if (W.tab === 'dc' && W.dc.buckets === null && !W.dc.status) { W.dc.status = { kind: 'busy', text: 'loading the buckets…' }; void dcLoad(); }
   if (W.tab === 's3' && !W.s3.connId) {
     const c = W.conns.find((x) => connKind(x) === 's3');
     if (c) { W.s3.connId = c.id; void s3Test(); }

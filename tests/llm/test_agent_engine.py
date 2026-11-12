@@ -1,5 +1,5 @@
 """The ◆ agent engine (llm/engine): the ReAct loop's limits (50 steps, 50 retries, loop guard), modes ask / auto /
-plan with confirm-and-continue, role separation (the visual agent has no Data Center tool), effort, small models,
+plan with confirm-and-continue, role separation (the visual agent has no Bucket tool), effort, small models,
 and the prompt built from llm/prompts/. The model is scripted through providers.stream_tools."""
 
 import copy
@@ -41,7 +41,7 @@ def script(monkeypatch, *steps):
     return seen
 
 
-def start(text, role='data', scope=None, provider=OPENAI, **body):
+def start(text, role='bucket', scope=None, provider=OPENAI, **body):
     opts = react.options(body, provider)
     return react.prepare(ALICE, role, provider, react.history([{'role': 'user', 'text': text}]), scope or {}, opts)
 
@@ -240,13 +240,13 @@ def test_bad_change_in_a_step_proposes_none(monkeypatch, svc):
 
 
 # ---------------------------------------------------------------- roles, effort, small models, prompts
-def test_visual_agent_has_no_data_center_tools(monkeypatch, svc):
+def test_visual_agent_has_no_bucket_tools(monkeypatch, svc):
     seen = script(monkeypatch, ('', [('delete', {'bucket': 'cars', 'paths': ['a']})]), ('I cannot.', []))
     evs = drain(start('delete a', role='visual'))
     names = {s['name'] for s in seen[0]['specs']}
     assert not names & set(tools.TOOLS) - {'ask_user', 'cannot_do'}
     res = seen[1]['msgs'][-1]['parts'][0]['tool_result']
-    assert res['is_error'] and 'Data Center tool' in res['content'] and 'navigate' in res['content']
+    assert res['is_error'] and 'Bucket tool' in res['content'] and 'navigate' in res['content']
     assert not svc.calls and 'confirm' not in types(evs)
     assert 'Visual assistant' in seen[0]['system']
 
@@ -276,7 +276,7 @@ def test_effort_sets_thinking_and_verify(monkeypatch, svc):
 
 
 def test_todo_and_skills(monkeypatch, svc):
-    sk = prompting.skills('data', [{'name': 'mine', 'description': 'my steps', 'body': 'Step 1: be nice.'}])
+    sk = prompting.skills('bucket', [{'name': 'mine', 'description': 'my steps', 'body': 'Step 1: be nice.'}])
     assert sk['mine']['source'] == 'yours'
     seen = script(monkeypatch, ('', [('todo', {'items': [{'text': 'look', 'state': 'active'}]}),
                                      ('read_docs', {'topic': 'formats'})]), ('Done.', []))
@@ -287,15 +287,15 @@ def test_todo_and_skills(monkeypatch, svc):
 
 def test_user_prompts_are_appended_last(monkeypatch, svc):
     opts = react.options({}, OPENAI)
-    run = react.prepare(ALICE, 'data', OPENAI, react.history([{'role': 'user', 'text': 'hi'}]), {}, opts,
-                        user_prompts=[{'name': 'Tone', 'body': 'Answer in Thai.', 'role': 'data'},
+    run = react.prepare(ALICE, 'bucket', OPENAI, react.history([{'role': 'user', 'text': 'hi'}]), {}, opts,
+                        user_prompts=[{'name': 'Tone', 'body': 'Answer in Thai.', 'role': 'bucket'},
                                       {'name': 'Other', 'body': 'Visual only.', 'role': 'visual'}])
     assert run.system.rstrip().endswith('Answer in Thai.') and 'Visual only.' not in run.system
     assert run.system.index('## Your own instructions') > run.system.index('## Tools')
 
 
 def test_roles():
-    assert roles.get('data').feature == 'data_center' and roles.get('visual').needs_session
+    assert roles.get('bucket').feature == 'bucket_data' and roles.get('visual').needs_session
     with pytest.raises(KeyError):
         roles.get('labeling')
     assert 'view_state' in roles.visual_scope(None, {}) or 'did not report' in roles.visual_scope(None, {})
@@ -314,18 +314,18 @@ def _connect(client, features):
 def test_agent_routes(client, monkeypatch, svc):
     import json as _json
     body = {'messages': [{'role': 'user', 'text': 'tag cars'}], 'scope': {}}
-    assert client.post('/api/llm/agent/data/chat', json=body).status_code == 403       # switch off
+    assert client.post('/api/llm/agent/bucket/chat', json=body).status_code == 403       # switch off
     assert client.post('/api/llm/agent/nope/chat', json=body).status_code == 404
-    p = _connect(client, ['data_center', 'assistant'])
+    p = _connect(client, ['bucket_data', 'assistant'])
     seen = script(monkeypatch, ('', [('add_tags', {'bucket': 'cars', 'tags': ['x']})]), ('Tagged.', []))
-    r = client.post('/api/llm/agent/data/chat', json={**body, 'mode': 'auto', 'effort': 'low',
+    r = client.post('/api/llm/agent/bucket/chat', json={**body, 'mode': 'auto', 'effort': 'low',
                                                       'model': {'provider_id': p['id'], 'model': 'gpt-y'}})
     evs = [_json.loads(x) for x in r.text.splitlines() if x]
     assert r.status_code == 200 and evs[0]['type'] == 'meta' and evs[0]['model'] == 'gpt-y' and evs[-1]['type'] == 'done'
     assert ('set_tags', 'b1', '', ('x',), ()) in svc.calls and seen[0]['p']['model'] == 'gpt-y'
     # the visual agent needs a visualizer session
     assert client.post('/api/llm/agent/visual/chat', json=body).status_code == 409
-    cat = client.get('/api/llm/agent/data/catalog').json()
+    cat = client.get('/api/llm/agent/bucket/catalog').json()
     assert {'delete', 'list_buckets', 'use_skill'} <= {t['name'] for t in cat['tools']}
     assert any(c['name'] == 'model' for c in cat['commands']) and cat['limits'] == {'max_steps': 50, 'max_retries': 50}
     vis = client.get('/api/llm/agent/visual/catalog').json()
@@ -333,8 +333,8 @@ def test_agent_routes(client, monkeypatch, svc):
     assert client.post('/api/llm/agent/confirm', json={'confirm_id': 'zz', 'approve': []}).status_code == 404
     assert client.post('/api/llm/agent/stop', json={'run_id': 'zz'}).status_code == 404
     # remembered chat settings (what /model and the chips save)
-    client.put('/api/llm/config', json={'chat': {'data': {'mode': 'plan', 'effort': 'bad', 'provider_id': p['id']}}})
-    assert client.get('/api/llm/agent/data/catalog').json()['chat'] == {'mode': 'plan', 'provider_id': p['id']}
+    client.put('/api/llm/config', json={'chat': {'bucket': {'mode': 'plan', 'effort': 'bad', 'provider_id': p['id']}}})
+    assert client.get('/api/llm/agent/bucket/catalog').json()['chat'] == {'mode': 'plan', 'provider_id': p['id']}
 
 
 def test_the_run_limit_follows_the_model_and_the_setting(client, monkeypatch, svc):
@@ -342,7 +342,7 @@ def test_the_run_limit_follows_the_model_and_the_setting(client, monkeypatch, sv
     import json as _json
     from dataviz.llm import providers
     providers._limits.clear()
-    p = _connect(client, ['data_center'])
+    p = _connect(client, ['bucket_data'])
     s, u = client.ctx.llm, client.user
     s.upsert({**p, 'context_window': 64000}, u)                     # the card's Model context (gpt-x is not in the table)
     s.record_test(p['id'], {'ok': True}, u)
@@ -352,7 +352,7 @@ def test_the_run_limit_follows_the_model_and_the_setting(client, monkeypatch, sv
 
     def limit_of_a_turn():
         script(monkeypatch, ('ok', []))
-        r = client.post('/api/llm/agent/data/chat', json={'messages': [{'role': 'user', 'text': 'hi'}], 'scope': {},
+        r = client.post('/api/llm/agent/bucket/chat', json={'messages': [{'role': 'user', 'text': 'hi'}], 'scope': {},
                                                           'ephemeral': True, 'session_id': None})
         return next(e for e in map(_json.loads, r.text.splitlines()) if e['type'] == 'meta')['limit']
     assert limit_of_a_turn() == lim['ceiling']

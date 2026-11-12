@@ -100,7 +100,7 @@ class State:
         self.pools = pools or compute.InlinePools()      # main() passes worker-process pools
         self.rebuild = rebuild
         self.refresh = refresh                          # True: re-index now even if an older cache could be shown
-        self.unit_pref = unit if unit in views.UNITS else 'auto'   # what one point is (data/views.py)
+        self.unit_pref = unit if unit in views.UNITS else 'auto'   # what one point is (image/views.py)
         self.class_from_folder = bool(class_from_folder)
         # 'images': the "Full images" points of a labelled session (/s/<sid>@images/): one point per image, its class
         # the image's most frequent box class; None: the session as saved
@@ -129,9 +129,9 @@ class State:
         self.pending_new = {}                           # image -> boxes the image editor added (no dot until re-index)
         self.stale_ids = set()                          # boxes the image editor moved (crop / features from before)
         self._image_names = None                        # (fingerprint, sorted names, set): image_names()
-        self.members, self.origin = [], None            # combined dataset (data/union.py): member blocks, per box
-        self.live_base = None                           # labeling parts at index time (data/live.py capture)
-        self.live_feed = None                           # data/live.py LiveFeed, made by the first /api/live
+        self.members, self.origin = [], None            # combined dataset (image/union.py): member blocks, per box
+        self.live_base = None                           # labeling parts at index time (image/live.py capture)
+        self.live_feed = None                           # image/live.py LiveFeed, made by the first /api/live
         self._cached_keys = set()
 
     @property
@@ -163,7 +163,7 @@ class State:
 
     def start(self, precompute=(), auto_compute=False):
         """Queue the index build; with auto_compute also the one startup projection; precomputed feature spaces always."""
-        # its own lane: opening never waits behind a UMAP, an S3 sync or a Data Center import / frame extraction
+        # its own lane: opening never waits behind a UMAP, an S3 sync or a Bucket import / frame extraction
         self.index_job = self.submit(f'index:{self.tag}', f'Open dataset · {self.source.name}', self._index_job,
                                      lane='open')
         if auto_compute:
@@ -274,7 +274,7 @@ class State:
         return idx
 
     def _build_index(self, job, src):
-        if src.kind == 'union':                       # assembled from the members' own indexes (data/union.py)
+        if src.kind == 'union':                       # assembled from the members' own indexes (image/union.py)
             return src.build_index(self.cache_dir, thumb_size=int(self.cfg['index']['thumb_size']),
                                    pad=float(self.cfg['index']['crop_pad']), rebuild=self.rebuild,
                                    progress=job.progress, workers=self.cfg['index'].get('workers', 'auto'))
@@ -295,7 +295,7 @@ class State:
         self.classes = idx['classes']
         self.fingerprint = idx['fingerprint']
         self.labels = np.array([s['cls'] for s in self.samples], dtype=np.int64)
-        # combined dataset: the member each box comes from (data/union.py), the members' blocks
+        # combined dataset: the member each box comes from (image/union.py), the members' blocks
         self.members = idx.get('members') or []
         self.origin = np.array([s.get('origin', 0) for s in self.samples], dtype=np.uint8) if self.members else None
         self.by_image = {}
@@ -363,7 +363,7 @@ class State:
                     self.features[key] = emb
                     return emb
             if emb is None and job is not None:
-                # an index that reused a donor (data/reuse.py): its rows + only the missing ones computed
+                # an index that reused a donor (image/reuse.py): its rows + only the missing ones computed
                 from .image import reuse
                 emb = reuse.transplant_features(self, key, job.progress)
                 if emb is not None:
@@ -728,7 +728,7 @@ class State:
 
     def on_boxes_patched(self, images):
         """Boxes of `images` changed in place (curation fix / undo, the image editor, the live feed): keep the
-        Compare tab's diffs current (data/compare.py). Returns {comparison key: {status, summary}}."""
+        Compare tab's diffs current (image/compare.py). Returns {comparison key: {status, summary}}."""
         svc = getattr(self, '_compare', None)
         return svc.patched(images) if svc is not None else {}
 

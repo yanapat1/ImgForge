@@ -1,7 +1,7 @@
 /* Responsive overrides (loaded last so they win) and reduced motion.
    Breakpoints used across the files: 1920 (large monitors, below), 1280 / 1100 / 900 / 600 (the visualizer, here),
-   1100 / 760 (Data Center: details then tree become overlays), 720 / 560 (dialogs, wizard). Containers that change
-   with their own width (filter bar, bar search, Data Center panes) use container queries instead. */
+   1100 / 760 (Bucket: details then tree become overlays), 720 / 560 (dialogs, wizard). Containers that change
+   with their own width (filter bar, bar search, Bucket panes) use container queries instead. */
 
 /* ---------------------------------------------------------------- responsive */
 /* a 2560px-wide monitor: the image viewer uses the room instead of a 1500px box in the middle */

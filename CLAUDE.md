@@ -11,7 +11,7 @@ so the in-app assistants can still use the feature and explain it correctly. Upd
 - `dataviz/llm/prompts/base.md`, `<role>/system.md`: rules and scope
 - `dataviz/llm/prompts/skills/<role|common>/<name>/SKILL.md`: how-to workflows
 - `dataviz/llm/tools/*.py` (descriptions, args, risk), `engine/roles.py`, `tasks.py`
-- `.claude/skills/datacenter/SKILL.md` and `dataviz/llm/prompts/datacenter.md` (the old Data Center agent)
+- `.claude/skills/bucket/SKILL.md` and `dataviz/llm/prompts/bucket-agent.md` (the old Bucket agent)
 
 Then run `.venv/bin/python -m pytest -q tests/llm`. In the final report, say what was checked and updated, or "no assistant
 impact".

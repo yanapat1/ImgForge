@@ -17,7 +17,7 @@ FastAPI app that serves the page (`static/`) and the JSON API the page uses.
 
 | URL | What |
 |---|---|
-| `/` | the home page (session cards); `/?session=<id>` (old links) → 302 `s/<id>/` |
+| `/` | the Home page (overview) and every screen chosen by the query (`?bucket`, `?image`, `?data`, `?label=`); `/?session=<id>` (old links) → 302 `s/<id>/` |
 | `/s/<id>/` | the visualizer of session `<id>`; its relative `api/…` calls hit `/s/<id>/api/…` |
 | `/api/…` outside `/s/` | account, home, jobs, models, labeling: not bound to a visualizer session |
 

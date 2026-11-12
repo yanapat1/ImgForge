@@ -1,7 +1,7 @@
 """
 Command line: read the config (flags win over config.yaml), bind the port, connect to PostgreSQL (migrate,
 secret key, default settings, the first admin, the one-time import of the old JSON / SQLite stores), start the
-worker pools and serve. The page opens on the Sessions home; sessions load on first use at /s/<id>/ (up to
+worker pools and serve. The page opens on the Image page; sessions load on first use at /s/<id>/ (up to
 sessions.max_loaded at once). --dataset (or config.yaml dataset.path) saves that folder as a session of the
 first admin and loads it at start.
 """
@@ -155,7 +155,7 @@ def main():
     if vb:
         ctx.open_dataset = vb.dataset_opener(cfg, ctx, registry, pools, ws_root)
 
-    # no dataset at start: the page opens on the Sessions home. --dataset / dataset.path opens one (saved as a
+    # no dataset at start: the page opens on the Image page. --dataset / dataset.path opens one (saved as a
     # session, matched by its folder, so restarting with the same flag never adds duplicates)
     state = None
     if dataset_dir is not None:
@@ -171,7 +171,7 @@ def main():
     rows = [('sessions', f'{n_sessions} saved' + (' · create one in the page' if not n_sessions else ''))]
     if admin_pw:
         rows.append(('admin', f'{admin["username"]} / {admin_pw}  (generated: shown once, change it in the page)'))
-    vlog.banner('Dataset Visualizer', rows + [
+    vlog.banner('DataViz', rows + [
         ('open', f'{state.source.name}  ({state.source.uri}) · /s/{ds["id"]}/' if state else
                  'none (pick a session in the page)'),
         ('workspaces', ws_root),
@@ -212,11 +212,11 @@ def start_database(cfg, ws_root):
     except RuntimeError as e:
         sys.exit(f'\n{e}')
     bootstrap.ensure_defaults()
-    an_cfg = cfg.get('data_analysis') or {}
-    if zones.on('analysis', cfg) and an_cfg.get('sample_database', True) and os.environ.get('DATAVIZ_SAMPLE_DB', '1') != '0':
-        # the example database, once (analysis/sample.py), off the start path; DATAVIZ_SAMPLE_DB=0 skips it
+    an_cfg = cfg.get('data') or {}
+    if zones.on('data', cfg) and an_cfg.get('sample_database', True) and os.environ.get('DATAVIZ_SAMPLE_DB', '1') != '0':
+        # the example database, once (data/sample.py), off the start path; DATAVIZ_SAMPLE_DB=0 skips it
         from .data import sample
-        sample.ensure_soon(url, vlog.get_logger('analysis').info)
+        sample.ensure_soon(url, vlog.get_logger('data').info)
     admin, password = bootstrap.ensure_first_admin(log=dlog.info)
     try:
         bootstrap.sync_env_admin(log=dlog.info)

@@ -1,6 +1,6 @@
 // Anchored popovers: a trigger button + a .popover panel (in a .popover-anchor). Click toggles, a click outside or
 // Escape closes (focus back on the trigger), aria-expanded follows. Used by the bar above the plot and the filter bar.
-// floatPopover: the same behaviour for a panel shown next to a trigger that is re-rendered (Data Center menus, tag editor).
+// floatPopover: the same behaviour for a panel shown next to a trigger that is re-rendered (Bucket menus, tag editor).
 
 import { $req } from './dom.js';
 

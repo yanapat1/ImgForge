@@ -1,4 +1,4 @@
-"""An analyst install: Data Center + Data Analysis with the visualizer's files left out (`python -m dataviz.zones prune`,
+"""An analyst install: Bucket + Data with the visualizer's files left out (`python -m dataviz.zones prune`,
 the Docker image's ZONES build argument). The kept code must never import a pruned file, and a pruned copy must start
 and serve its pages with the visualizer's libraries absent."""
 
@@ -20,7 +20,7 @@ import pytest
 from conftest import TEST_SECRET_KEY
 from test_zones import APP_DIR, SERVE, VISUALIZER_LIBS
 
-ANALYST = 'core,datacenter,analysis'
+ANALYST = 'core,bucket,data'
 PASSWORD = 'zone-test-password-1'
 TS = APP_DIR / 'static' / 'ts'
 _STATIC_IMPORT = re.compile(r"^\s*import\s+(?!type\b)(?:[^'\"]*?from\s+)?['\"](\.[^'\"]+)['\"]", re.M)
@@ -109,14 +109,14 @@ def test_prune_removes_the_files_and_their_build(tmp_path, analyst):
     from dataviz import zones
     for rel in ('dataviz/state.py', 'dataviz/ml/features.py', 'static/ts/plot/render.ts', 'static/js/plot/render.js',
                 'static/js/plot/render.js.map', 'static/js/views/gallery.js', 'dataviz/data/service.py',
-                'static/js/analysis/app.js', 'static/js/main.js'):
+                'static/js/data/app.js', 'static/js/main.js'):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text('x')
     gone = zones.prune(tmp_path)
     assert 'dataviz/state.py' in gone and 'dataviz/ml/' in gone
     assert not (tmp_path / 'dataviz/ml').exists() and not (tmp_path / 'static/js/plot').exists()
     assert not (tmp_path / 'static/js/views/gallery.js').exists()
-    for kept in ('dataviz/data/service.py', 'static/js/analysis/app.js', 'static/js/main.js'):
+    for kept in ('dataviz/data/service.py', 'static/js/data/app.js', 'static/js/main.js'):
         assert (tmp_path / kept).exists()
 
 
@@ -148,7 +148,7 @@ def pruned_server(pg, tmp_path):
                                'logging': {'level': 'WARNING'}}))
     env.update({'DATABASE_URL': pg, 'DATAVIZ_SECRET_KEY': TEST_SECRET_KEY, 'DATAVIZ_ADMIN_USERNAME': 'admin',
                 'DATAVIZ_ADMIN_PASSWORD': PASSWORD, 'DATAVIZ_PROJECT_ROOT': str(tmp_path)})
-    libs = [x for x in VISUALIZER_LIBS if x != 'scipy']          # Data Analysis uses scipy for its statistic tests
+    libs = [x for x in VISUALIZER_LIBS if x != 'scipy']          # Data uses scipy for its statistic tests
     proc = subprocess.Popen([sys.executable, '-c', SERVE, ','.join(libs), '--config', str(cfg), '--host', '127.0.0.1',
                              '--port', str(port)], cwd=app, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True)
@@ -183,18 +183,20 @@ def test_a_pruned_analyst_install_serves_its_pages(pruned_server):
                 if r.status >= 400 and '/api/auth/me' not in r.url else None)
         page.request.post(f'{pruned_server}/api/auth/login', data={'login': 'admin', 'password': PASSWORD},
                           headers={'X-Requested-With': 'dataviz'})
-        page.goto(pruned_server)
-        page.wait_for_url('**/?data*', timeout=20000)             # no sessions yet: the install opens on its data
-        page.wait_for_selector('.dc-header', timeout=20000)
+        page.goto(pruned_server)                                    # Home of an analyst install: Bucket and Data, in that order
+        page.wait_for_selector('#door-data .door-recent, #door-data .door-empty', timeout=20000)
+        assert [x.strip() for x in page.locator('.door h2').all_inner_texts()] == ['Bucket', 'Data']
+        page.goto(f'{pruned_server}/?bucket')
+        page.wait_for_selector('.bk-header', timeout=20000)
         html = page.content()
         assert '<main class="viz-only">' not in html, re.findall(r'.{0,120}<main class="viz-only">', html)[:1]
         assert 'curation.css' not in html and 'compare.css' not in html
-        page.click('.dc-header [data-act="settings"]')            # Settings opens without the visualizer's markup
+        page.click('.bk-header [data-act="settings"]')            # Settings opens without the visualizer's markup
         page.wait_for_selector('.snav[data-sec="connections"].active', timeout=10000)
         page.keyboard.press('Escape')
-        page.goto(f'{pruned_server}/?analysis')
-        page.wait_for_selector('.an-main', timeout=20000)
-        page.wait_for_selector('#an-sql .cm-content', timeout=20000)
+        page.goto(f'{pruned_server}/?data')
+        page.wait_for_selector('.dt-main', timeout=20000)
+        page.wait_for_selector('#dt-sql .cm-content', timeout=20000)
         page.wait_for_timeout(800)
         browser.close()
     assert not problems, problems

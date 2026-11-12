@@ -1,6 +1,6 @@
 """
 Visualize sessions (saved datasets: local folders, S3 / RustFS prefixes, a task of a labeling session): the
-Sessions home cards (stats and a crop mosaic from the session's workspace, the card header: owner, members,
+Image page cards (stats and a crop mosaic from the session's workspace, the card header: owner, members,
 visibility, my role, last opened by me, loaded on the server), loading one (it is shared by every user who opens it)
 and cache-mode sync. Saved connections and the local folder browser are in connections.py.
 
@@ -76,7 +76,7 @@ def router(state, ctx):
 
     def dataset_uris(d):
         """Every uri a workspace of this session may carry: one point per image stores '<uri>#images'
-        (data/views.py ImageView), which an 'auto' session becomes when its folder has no labels."""
+        (image/views.py ImageView), which an 'auto' session becomes when its folder has no labels."""
         base = dataset_uri(d)
         if d['kind'] not in ('local', 's3') or not base:
             return [base]
@@ -213,7 +213,7 @@ def router(state, ctx):
         if not body.get('id') and body.get('kind') != 'union':     # combining what they can already open: no tier
             tiers.check(user, 'dataset.create')
         if body.get('kind') == 'union' and not body.get('id') and body.get('reuse'):
-            # Compare / Combine on the home page: the caller's existing union over the same members, if any
+            # Compare / Combine on the Image page: the caller's existing union over the same members, if any
             ids = [(m.get('id') if isinstance(m, dict) else m) for m in (body.get('parts') or [])]
             found = await run_io(reg.find_union, user['id'], ids)
             if found is not None:

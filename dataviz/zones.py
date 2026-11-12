@@ -1,12 +1,12 @@
 """
 Zones: the parts of the product an install can have. Core is always there; the others can be left out, so an analyst
-can run Data Center + Data Analysis without the visualizer and its GPU libraries. See ARCHITECTURE.md.
+can run Bucket + Data without the visualizer and its GPU libraries. See ARCHITECTURE.md.
 
     configure(cfg)       remember the server's config: code without a cfg at hand (the assistant) then gets the same answer
     selected(cfg)        the zones of this install, in dependency order (core first)
     on(zone, cfg)        is this zone part of the install?
     route_modules(cfg)   the server/routes modules of those zones, in the order they are included
-    send_targets(cfg)    the Data Center "Send to" targets of those zones
+    send_targets(cfg)    the Bucket "Send to" targets of those zones
     bucket_session_finders(cfg)   what lists each zone's sessions on a bucket card
     perms_off(cfg)       the tier permissions that mean nothing in this install
 
@@ -27,19 +27,19 @@ class Zone:
     id: str
     title: str
     requires: tuple = ()
-    send_target: str = ''           # the Data Center's "Send to" target this zone receives
+    send_target: str = ''           # the Bucket's "Send to" target this zone receives
     bucket_sessions: str = ''       # 'module:function': (rows, conn, out) adds this zone's sessions to the bucket cards
     perms: tuple = ()               # the tier permissions (auth/tiers.py) that only mean something with this zone
 
 
 ZONES = {z.id: z for z in (
     Zone('core', 'Core'),
-    Zone('datacenter', 'Data Center', requires=('core',), perms=('data.manage',)),
-    Zone('visualizer', 'Dataset Visualizer', requires=('datacenter',), send_target='visualize',
+    Zone('bucket', 'Bucket', requires=('core',), perms=('bucket.manage',)),
+    Zone('visualizer', 'Image · Visualize', requires=('bucket',), send_target='visualize',
          bucket_sessions='dataviz.image.bucket_sessions:find', perms=('dataset.create', 'model.add', 'model.upload')),
-    Zone('analysis', 'Data Analysis', requires=('datacenter',), perms=('analysis.use', 'analysis.write')),
-    Zone('labeling', 'Labeling', requires=('datacenter',), send_target='label',
+    Zone('labeling', 'Image · Label', requires=('bucket',), send_target='label',
          bucket_sessions='dataviz.labeling.bucket_sessions:find', perms=('label.create', 'model.add', 'model.upload')),
+    Zone('data', 'Data', requires=('bucket',), perms=('data.use', 'data.write')),
 )}
 
 # (server/routes module, its zone), in include order. auth.py, users.py, admin.py, me.py and sharing.py are not here:
@@ -60,8 +60,8 @@ ROUTES = (
     ('augment', 'visualizer'),
     ('live', 'visualizer'),
     ('promote', 'visualizer'),
-    ('datacenter', 'datacenter'),
-    ('analysis', 'analysis'),
+    ('bucket', 'bucket'),
+    ('data', 'data'),
     ('agent', 'core'),
     ('sessions', 'core'),
     ('assets', 'core'),
@@ -131,12 +131,12 @@ def route_modules(cfg=None):
 
 # ---------------------------------------------------------------------------------------------------- what an install holds
 # The files that only a zone uses, so an install without that zone can leave them out: `python -m dataviz.zones prune`
-# deletes them (the Docker image does it for ZONES=datacenter,analysis). A row's zones are the ones that need it: the
+# deletes them (the Docker image does it for ZONES=bucket,data). A row's zones are the ones that need it: the
 # file goes only when none of them is installed. tests/zones/test_install.py checks that the kept code never imports a
 # pruned file at load time and that a pruned copy starts and serves its pages.
 #
 # Frontend rows name the TypeScript source under static/ts/; the built static/js/ copy (.js and .js.map) goes with it.
-# Most of dataviz/labeling stays in every install: the Data Center reuses its sinks, writers, media, formats and projects.
+# Most of dataviz/labeling stays in every install: the Bucket page reuses its sinks, writers, media, formats and projects.
 VIZ = ('visualizer',)
 VIZ_OR_LABEL = ('visualizer', 'labeling')
 FILES = (

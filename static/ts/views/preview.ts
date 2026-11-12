@@ -1,4 +1,4 @@
-// Embeddings sessions (dataset kind 'embeddings', dataviz/data/embedding_source.py): a dot is a row of the user's own
+// Embeddings sessions (dataset kind 'embeddings', dataviz/image/embedding_source.py): a dot is a row of the user's own
 // table, not a box in an image. This module draws what a row looks like in a gallery card, the plot's hover tip and the
 // detail dialog: its image thumbnail, an audio clip, a video, its text, or (no preview at all) its id and columns.
 // Audio plays through one shared <audio> element, so starting a clip stops the last one.
@@ -8,7 +8,7 @@ import { pts, S } from '../core/state.js';
 
 /** True in an embeddings session (rows with metadata, no boxes / images / models). */
 export const isRows = (): boolean => S.status?.dataset?.kind === 'embeddings';
-/** One point per image (data/views.py ImageView): images with no labels, each "box" is the whole image. */
+/** One point per image (image/views.py ImageView): images with no labels, each "box" is the whole image. */
 export const isImageUnit = (): boolean => S.status?.caps?.unit === 'image';
 
 /** "3 boxes" in a YOLO session, "3 rows" in an embeddings one. */

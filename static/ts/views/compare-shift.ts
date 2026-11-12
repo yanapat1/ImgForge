@@ -1,6 +1,6 @@
 // Compare › Image conditions: will a model trained on A meet the same pictures in B (a new camera, new lighting)?
 // POST api/compare/shift measures A's and B's images (a job, cached per member) and answers with a report
-// (data/shift.py): a verdict, per-metric drift (light, sharpness, noise, colour, capture: KS / PSI / B outside A's
+// (image/shift.py): a verdict, per-metric drift (light, sharpness, noise, colour, capture: KS / PSI / B outside A's
 // range), the light curve and RGB curves, scatter plots, the cameras, the shift-detector AUC, the fit of every model
 // that already ran here, recommendations with an Ultralytics hyp snippet, and a preview of an A image as B's
 // conditions would make it (api/compare/shift/preview), or of a B image through the B -> A correction LUT

@@ -188,7 +188,7 @@ def plan_section(items):
 def history(messages):
     """[{role, text, page?}] -> provider messages (text only, starting with the user's). One chat follows the user
     over the pages: a user message written on another page than the one before it starts with a short marker
-    ("[on Data Center]"), and the newest one says the tools changed with the page, so the model never mixes up
+    ("[on Bucket]"), and the newest one says the tools changed with the page, so the model never mixes up
     which page's tools it has."""
     out = []
     msgs = (messages or [])[-MAX_TURNS:]
@@ -321,7 +321,7 @@ PAGE_OF_DOMAIN = {r.name: (r.title, r.screen) for r in roles.ROLES.values()}
 def _missing_tool(run, name):
     """Why a call names a tool this run does not have: another page's (navigate there), not in this mode, unknown."""
     t = tools.REGISTRY.get(name)
-    here = (run.ctx.scope or {}).get('page') or ('viz' if run.role.name == 'visual' else 'data')
+    here = (run.ctx.scope or {}).get('page') or run.role.screen
     if t is not None and t.domain in PAGE_OF_DOMAIN and t.domain not in run.role.domains:
         where, screen = PAGE_OF_DOMAIN[t.domain]
         if t.domain not in roles.installed():

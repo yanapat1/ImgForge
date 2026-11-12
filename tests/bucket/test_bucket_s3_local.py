@@ -1,4 +1,4 @@
-"""Data Center: a streamed S3 link downloads only the folders picked (a local copy, edited in place: a downloaded
+"""Bucket: a streamed S3 link downloads only the folders picked (a local copy, edited in place: a downloaded
 folder lists from disk and takes mkdir / move / rename / delete / undo / text edits / uploads, S3 untouched; the
 rest stays read-only). ls badges every entry (fresh / partial / stream only), a check against S3 counts new / changed / removed files,
 Update fetches them and removes files S3 no longer has only with mirror, downloaded files are read from disk, and
@@ -44,7 +44,7 @@ def _link(c, s3_server, s3_bucket):
             client.put_object(Bucket=bucket, Key=f'{d}/im{i}.jpg', Body=jpeg_bytes())
     client.put_object(Bucket=bucket, Key='readme.txt', Body=b'hello')
     conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'}).json()
-    b = c.post('/api/dc/buckets', json={'name': 'zoo', 'kind': 's3', 'connection_id': conn['id'],
+    b = c.post('/api/bucket/buckets', json={'name': 'zoo', 'kind': 's3', 'connection_id': conn['id'],
                                         's3_bucket': bucket, 'prefix': ''}).json()
     wait_job(c, b['scan_job_id'])
     return b['id'], client, bucket
@@ -52,7 +52,7 @@ def _link(c, s3_server, s3_bucket):
 
 def _ls(c, bid, path='', **kw):
     for _ in range(100):                                    # the listing fills in the background
-        r = c.get(f'/api/dc/buckets/{bid}/ls', params={'path': path, **kw})
+        r = c.get(f'/api/bucket/buckets/{bid}/ls', params={'path': path, **kw})
         assert r.status_code == 200, r.text
         j = r.json()
         if not j.get('partial'):
@@ -69,7 +69,7 @@ def test_download_folders_badges_update_and_mirror(dc, s3_server, s3_bucket):
     c = dc
     bid, client, bucket = _link(c, s3_server, s3_bucket)
     assert _states(_ls(c, bid)) == {'cats': None, 'dogs': None, 'birds': None, 'readme.txt': None}
-    r = c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats', 'dogs/im0.jpg', 'cats/im1.jpg']})
+    r = c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats', 'dogs/im0.jpg', 'cats/im1.jpg']})
     assert r.status_code == 200, r.text
     assert r.json()['paths'] == ['cats', 'dogs/im0.jpg']                  # cats/im1.jpg is inside cats
     j = wait_job(c, r.json()['job_id'])
@@ -78,9 +78,9 @@ def test_download_folders_badges_update_and_mirror(dc, s3_server, s3_bucket):
     assert _states(top) == {'cats': 'fresh', 'dogs': 'partial', 'birds': None, 'readme.txt': None}
     assert top['local_folders'] == 2
     assert _states(_ls(c, bid, 'dogs')) == {'im0.jpg': 'fresh', 'im1.jpg': None, 'im2.jpg': None}
-    b = c.get(f'/api/dc/buckets/{bid}').json()
+    b = c.get(f'/api/bucket/buckets/{bid}').json()
     assert b['local_folders'] == 2 and b['local_outdated'] == 0 and not b['writable']
-    j = c.post(f'/api/dc/buckets/{bid}/ops', json={'ops': [{'op': 'mkdir', 'path': 'birds/x'}]}).json()
+    j = c.post(f'/api/bucket/buckets/{bid}/ops', json={'ops': [{'op': 'mkdir', 'path': 'birds/x'}]}).json()
     assert not j['applied'] and 'read-only' in j['errors'][0]['error']      # birds is not downloaded
 
     # S3 changes: one replaced, one new, one deleted -> file badges at once, the check counts them
@@ -91,37 +91,37 @@ def test_download_folders_badges_update_and_mirror(dc, s3_server, s3_bucket):
     s3dir.invalidate(bid)
     cats = _ls(c, bid, 'cats')                                          # the copy, as it is on disk
     assert _states(cats) == {'im0.jpg': 'fresh', 'im1.jpg': 'fresh', 'im2.jpg': 'fresh'} and cats['writable']
-    j = wait_job(c, c.post(f'/api/dc/buckets/{bid}/local/check').json()['job_id'])
+    j = wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local/check').json()['job_id'])
     assert j['result']['folders']['cats'] == {'state': 'outdated', 'new': 1, 'changed': 1, 'removed': 1}, j
     here = _ls(c, bid, 'cats')['here']
     assert here['state'] == 'outdated' and here['diff']['removed'] == 1
-    assert c.get(f'/api/dc/buckets/{bid}').json()['local_outdated'] == 1
+    assert c.get(f'/api/bucket/buckets/{bid}').json()['local_outdated'] == 1
 
     # Update without mirror keeps the file S3 lost; with mirror it goes
-    j = wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
+    j = wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
     assert (j['result']['downloaded'], j['result']['skipped'], j['result']['removed']) == (2, 1, 0), j
     assert set(_states(_ls(c, bid, 'cats'))) == {'im0.jpg', 'im1.jpg', 'im2.jpg', 'im9.jpg'}
-    j = wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats'], 'mirror': True}).json()['job_id'])
+    j = wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats'], 'mirror': True}).json()['job_id'])
     assert j['result']['removed'] == 1
     assert _states(_ls(c, bid, 'cats')) == {'im0.jpg': 'fresh', 'im1.jpg': 'fresh', 'im9.jpg': 'fresh'}
 
     # a downloaded file is read from disk: still readable once S3 lost it
     client.delete_object(Bucket=bucket, Key='cats/im1.jpg')
-    r = c.get(f'/api/dc/buckets/{bid}/file', params={'path': 'cats/im1.jpg'})
+    r = c.get(f'/api/bucket/buckets/{bid}/file', params={'path': 'cats/im1.jpg'})
     assert r.status_code == 200 and r.content == jpeg_bytes()
-    assert c.get(f'/api/dc/buckets/{bid}/file', params={'path': 'cats/im1.jpg', 'w': 64}).status_code == 200
+    assert c.get(f'/api/bucket/buckets/{bid}/file', params={'path': 'cats/im1.jpg', 'w': 64}).status_code == 200
 
     # remove the local copy: streams again
-    r = c.post(f'/api/dc/buckets/{bid}/local/remove', json={'paths': ['cats/im0.jpg']})
+    r = c.post(f'/api/bucket/buckets/{bid}/local/remove', json={'paths': ['cats/im0.jpg']})
     assert r.status_code == 400 and 'part of the downloaded folder cats' in r.json()['detail']
-    assert c.post(f'/api/dc/buckets/{bid}/local/remove', json={'paths': ['cats']}).json() == {'removed': ['cats']}
+    assert c.post(f'/api/bucket/buckets/{bid}/local/remove', json={'paths': ['cats']}).json() == {'removed': ['cats']}
     assert _states(_ls(c, bid))['cats'] is None
 
 
 def test_offline_lists_only_downloaded_folders_until_retry(dc, s3_server, s3_bucket, monkeypatch):
     c = dc
     bid, client, bucket = _link(c, s3_server, s3_bucket)
-    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['birds']}).json()['job_id'])
+    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['birds']}).json()['job_id'])
     from dataviz.bucket import s3dir, service
     reg = service._datasets()
     real = reg.connection
@@ -131,11 +131,11 @@ def test_offline_lists_only_downloaded_folders_until_retry(dc, s3_server, s3_buc
     top = _ls(c, bid)
     assert top['offline'] and _states(top) == {'birds': 'fresh'} and 'unreachable' in top['error']
     assert _states(_ls(c, bid, 'birds')) == {'im0.jpg': 'fresh', 'im1.jpg': 'fresh', 'im2.jpg': 'fresh'}
-    r = c.get(f'/api/dc/buckets/{bid}/ls', params={'path': 'cats'})
+    r = c.get(f'/api/bucket/buckets/{bid}/ls', params={'path': 'cats'})
     assert r.status_code == 503 and 'only downloaded folders' in r.json()['detail']
-    assert c.get(f'/api/dc/buckets/{bid}/file', params={'path': 'birds/im0.jpg', 'w': 64}).status_code == 200
+    assert c.get(f'/api/bucket/buckets/{bid}/file', params={'path': 'birds/im0.jpg', 'w': 64}).status_code == 200
     t0 = time.time()
-    assert c.get(f'/api/dc/buckets/{bid}/file', params={'path': 'cats/im0.jpg'}).status_code == 503
+    assert c.get(f'/api/bucket/buckets/{bid}/file', params={'path': 'cats/im0.jpg'}).status_code == 503
     assert time.time() - t0 < 1                                         # the breaker answers at once
     monkeypatch.setattr(reg, 'connection', real)                        # S3 is back: a retry lists it again
     back = _ls(c, bid, retry=1)
@@ -155,7 +155,7 @@ def _idle(prefix):
 def test_a_failed_check_or_scan_is_not_queued_again_by_every_ls(dc, s3_server, s3_bucket, monkeypatch):
     c = dc
     bid, *_ = _link(c, s3_server, s3_bucket)
-    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['birds']}).json()['job_id'])
+    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['birds']}).json()['job_id'])
     from sqlalchemy import text
     from dataviz import db
     from dataviz.bucket import service
@@ -169,26 +169,26 @@ def test_a_failed_check_or_scan_is_not_queued_again_by_every_ls(dc, s3_server, s
     monkeypatch.setattr(service, '_compare', boom('compare'))
     monkeypatch.setattr(service, '_scan', boom('scan'))
     with db.begin() as x:                                   # the check is due, cats was never scanned
-        x.execute(text("UPDATE app.dc_s3_local SET checked_at = now() - interval '1 hour' WHERE bucket_id = :b"),
+        x.execute(text("UPDATE app.bucket_s3_local SET checked_at = now() - interval '1 hour' WHERE bucket_id = :b"),
                   {'b': bid})
-        x.execute(text("DELETE FROM app.dc_format_cache WHERE bucket_id = :b AND path = 'cats'"), {'b': bid})
+        x.execute(text("DELETE FROM app.bucket_format_cache WHERE bucket_id = :b AND path = 'cats'"), {'b': bid})
     for _ in range(3):                                      # the page polls ls while a folder lists
         _ls(c, bid, 'cats')
-        _idle(f'dc-check:{bid}')
-        _idle(f'dc-scan:{bid}:')
+        _idle(f'bk-check:{bid}')
+        _idle(f'bk-scan:{bid}:')
     assert calls == {'compare': 1, 'scan': 1}
     monkeypatch.setattr(service, '_quiet', {})              # the backoff over: queued again
     _ls(c, bid, 'cats')
-    _idle(f'dc-check:{bid}')
-    _idle(f'dc-scan:{bid}:')
+    _idle(f'bk-check:{bid}')
+    _idle(f'bk-scan:{bid}:')
     assert calls == {'compare': 2, 'scan': 2}
 
 
 def test_edit_inside_a_downloaded_folder_only(dc, s3_server, s3_bucket):
     c = dc
     bid, client, bucket = _link(c, s3_server, s3_bucket)
-    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
-    ops = lambda *o: c.post(f'/api/dc/buckets/{bid}/ops', json={'ops': list(o)})      # noqa: E731
+    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
+    ops = lambda *o: c.post(f'/api/bucket/buckets/{bid}/ops', json={'ops': list(o)})      # noqa: E731
     r = ops({'op': 'mkdir', 'path': 'cats/sub'}, {'op': 'move', 'path': 'cats/im0.jpg', 'to': 'cats/sub'},
             {'op': 'rename', 'path': 'cats/im1.jpg', 'name': 'one.jpg'}, {'op': 'delete', 'path': 'cats/im2.jpg'},
             {'op': 'move', 'path': 'cats/one.jpg', 'to': 'dogs'}, {'op': 'delete', 'path': 'cats'},
@@ -208,20 +208,20 @@ def test_edit_inside_a_downloaded_folder_only(dc, s3_server, s3_bucket):
     assert _ls(c, bid)['location'] == f's3://{bucket}' and not _ls(c, bid)['writable']
 
     # undo puts the copy back; text edits and uploads land in the copy; the rest stays read-only
-    u = c.post(f'/api/dc/buckets/{bid}/undo', json={'undo_id': j['undo_id']})
+    u = c.post(f'/api/bucket/buckets/{bid}/undo', json={'undo_id': j['undo_id']})
     assert u.status_code == 200 and not u.json()['errors'], u.text
     assert set(_states(_ls(c, bid, 'cats'))) == {'im0.jpg', 'im1.jpg', 'im2.jpg'}
-    w = c.put(f'/api/dc/buckets/{bid}/text', json={'path': 'cats/notes.txt', 'text': 'hi', 'create': True})
+    w = c.put(f'/api/bucket/buckets/{bid}/text', json={'path': 'cats/notes.txt', 'text': 'hi', 'create': True})
     assert w.status_code == 200, w.text
-    t = c.get(f'/api/dc/buckets/{bid}/text', params={'path': 'cats/notes.txt'}).json()
+    t = c.get(f'/api/bucket/buckets/{bid}/text', params={'path': 'cats/notes.txt'}).json()
     assert t['text'] == 'hi' and t['editable']
-    assert not c.get(f'/api/dc/buckets/{bid}/text', params={'path': 'readme.txt'}).json()['editable']
-    assert c.put(f'/api/dc/buckets/{bid}/text', json={'path': 'readme.txt', 'text': 'x'}).status_code == 400
-    up = c.post(f'/api/dc/buckets/{bid}/upload', params={'path': 'cats'},
+    assert not c.get(f'/api/bucket/buckets/{bid}/text', params={'path': 'readme.txt'}).json()['editable']
+    assert c.put(f'/api/bucket/buckets/{bid}/text', json={'path': 'readme.txt', 'text': 'x'}).status_code == 400
+    up = c.post(f'/api/bucket/buckets/{bid}/upload', params={'path': 'cats'},
                 files=[('files', ('new.jpg', jpeg_bytes(), 'image/jpeg'))])
     assert up.status_code == 200, up.text
     assert 'new.jpg' in _states(_ls(c, bid, 'cats'))
-    assert c.post(f'/api/dc/buckets/{bid}/upload', params={'path': 'dogs'},
+    assert c.post(f'/api/bucket/buckets/{bid}/upload', params={'path': 'dogs'},
                   files=[('files', ('n.jpg', jpeg_bytes(), 'image/jpeg'))]).status_code == 400
 
     # the assistant's view of the open folder
@@ -231,11 +231,11 @@ def test_edit_inside_a_downloaded_folder_only(dc, s3_server, s3_bucket):
     st = service.folder_state(c.user, bid, 'dogs')
     assert not st['editable'] and st['local'] is None and st['location'] == f's3://{bucket}/dogs'
     from dataviz.llm.engine import roles
-    txt = roles.data_scope(c.user, {'bucket': bid, 'path': 'cats'})
+    txt = roles.bucket_scope(c.user, {'bucket': bid, 'path': 'cats'})
     assert "folder 'cats'" in txt and 'editable' in txt and 'Do NOT propose loading the whole bucket' in txt
-    txt = roles.data_scope(c.user, {'bucket': bid, 'path': 'dogs'})
+    txt = roles.bucket_scope(c.user, {'bucket': bid, 'path': 'dogs'})
     assert f's3://{bucket}/dogs' in txt and 'download_s3_folders for just this folder' in txt and "'cats'" in txt
-    from dataviz.llm.tools import datacenter as tdc
+    from dataviz.llm.tools import bucket as tdc
     change = type('T', (), {'s3_ok': False})()                       # a changing tool that is not S3-aware
     tdc._writable({'kind': 's3', 'writable': False, 'local_folders': 1}, change)      # the service decides per path
     with pytest.raises(Exception, match='download_s3_folders'):
@@ -252,11 +252,11 @@ def test_reload_lists_s3_again(dc, s3_server, s3_bucket):
 
 
 def _compare(c, bid, path='', verify=False, **kw):
-    r = c.post(f'/api/dc/buckets/{bid}/compare', json={'path': path, 'verify': verify})
+    r = c.post(f'/api/bucket/buckets/{bid}/compare', json={'path': path, 'verify': verify})
     assert r.status_code == 200, r.text
     j = wait_job(c, r.json()['job_id'])
     assert j['status'] == 'done', j
-    g = c.get(f'/api/dc/buckets/{bid}/compare', params={'path': path, 'limit': 1000, **kw})
+    g = c.get(f'/api/bucket/buckets/{bid}/compare', params={'path': path, 'limit': 1000, **kw})
     assert g.status_code == 200, g.text
     return g.json()
 
@@ -267,15 +267,15 @@ def test_compare_the_local_copy_with_the_cloud(dc, s3_server, s3_bucket):
     import os
     c = dc
     bid, client, bucket = _link(c, s3_server, s3_bucket)
-    assert c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats'}).json()['ready'] is False
-    r = c.post(f'/api/dc/buckets/{bid}/compare', json={'path': 'cats'})
+    assert c.get(f'/api/bucket/buckets/{bid}/compare', params={'path': 'cats'}).json()['ready'] is False
+    r = c.post(f'/api/bucket/buckets/{bid}/compare', json={'path': 'cats'})
     assert r.status_code == 400 and 'nothing of' in r.json()['detail']          # nothing downloaded yet
-    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
+    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])
     same = _compare(c, bid, 'cats')
     assert same['counts']['same'] == 3 and same['total'] == 3
 
     time.sleep(3.2)                                     # past the download's end (and the clock slack)
-    root = next(x for x in c.get('/api/dc/buckets').json() if x['id'] == bid)
+    root = next(x for x in c.get('/api/bucket/buckets').json() if x['id'] == bid)
     local = os.path.join(c.ctx.cfg['storage']['data_root'], '.s3')
     copy = next(os.path.join(local, d) for d in os.listdir(local))
     with open(os.path.join(copy, 'cats', 'im0.jpg'), 'ab') as f:         # edited here
@@ -292,16 +292,16 @@ def test_compare_the_local_copy_with_the_cloud(dc, s3_server, s3_bucket):
     assert got['counts']['same'] == 0 and got['total'] == 5 and got['complete'] and root['kind'] == 's3'
     # rows come by status (what the user did first), then path; filters and paging
     assert [x['status'] for x in got['rows']][:3] == ['added_local', 'deleted_local', 'edited_local']
-    f = c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'status': 'new_cloud,changed_cloud'}).json()
+    f = c.get(f'/api/bucket/buckets/{bid}/compare', params={'path': 'cats', 'status': 'new_cloud,changed_cloud'}).json()
     assert [x['path'] for x in f['rows']] == ['cats/new.jpg', 'cats/im2.jpg'] and f['matched'] == 2
-    p = c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'offset': 4, 'limit': 1}).json()
+    p = c.get(f'/api/bucket/buckets/{bid}/compare', params={'path': 'cats', 'offset': 4, 'limit': 1}).json()
     assert p['matched'] == 5 and len(p['rows']) == 1 and p['offset'] == 4
-    assert c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'q': 'mine'}).json()['matched'] == 1
-    assert c.get(f'/api/dc/buckets/{bid}/compare', params={'path': 'cats', 'status': 'nope'}).status_code == 400
+    assert c.get(f'/api/bucket/buckets/{bid}/compare', params={'path': 'cats', 'q': 'mine'}).json()['matched'] == 1
+    assert c.get(f'/api/bucket/buckets/{bid}/compare', params={'path': 'cats', 'status': 'nope'}).status_code == 400
 
     # an S3 deletion after the download; a file re-saved with the same bytes reads as same with verify
     client.delete_object(Bucket=bucket, Key='cats/new.jpg')
-    wait_job(c, c.post(f'/api/dc/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])   # update
+    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])   # update
     time.sleep(3.2)
     client.delete_object(Bucket=bucket, Key='cats/im2.jpg')
     os.utime(os.path.join(copy, 'cats', 'im1.jpg'))                       # touched, same bytes
@@ -322,6 +322,6 @@ def test_compare_the_local_copy_with_the_cloud(dc, s3_server, s3_bucket):
 def test_compare_needs_an_s3_link(dc, tmp_path):
     c = dc
     (tmp_path / 'm').mkdir()
-    b = c.post('/api/dc/buckets', json={'name': 'm', 'kind': 'managed'}).json()
-    r = c.post(f"/api/dc/buckets/{b['id']}/compare", json={'path': ''})
+    b = c.post('/api/bucket/buckets', json={'name': 'm', 'kind': 'managed'}).json()
+    r = c.post(f"/api/bucket/buckets/{b['id']}/compare", json={'path': ''})
     assert r.status_code == 400 and 'S3 link' in r.json()['detail']

@@ -22,15 +22,17 @@ static/
    `<link>`s (parallel downloads; `@import` would be serial), and later files win ties.
 4. `js/main.js` as `type="module"` (deferred by default).
 5. `plotly.min.js` (about 1.5 MB) **only on the visualizer screen** (`/s/<id>/`): `theme-boot.js` adds a
-   `<link rel="preload">` for it, and `main.js` runs it before the first plot. The Sessions home never
+   `<link rel="preload">` for it, and `main.js` runs it before the first plot. The Home and Image pages never
    downloads it. Both find it from their own script URL, never from the page URL.
 
-## Five screens, one page
+## The screens, one page
 
-`index.html` holds them all: the **sign-in page** (`#login`, path `/login`), the **Sessions home** (`#home`, `/`),
-the **labeling page** (`#label`, `/?label=<pid>`), the **Data Center** (`#datacenter`, `/?data[=<bucket>&path=…]`) and the **visualizer** (everything marked `.viz-only`,
-`/s/<session id>/`). `theme-boot.js` sets `html[data-screen=login|home|label|data|viz]` before the first paint, so the
-other screens never flash, and sends an old `?session=<id>` link to `s/<id>/`. The server renders the same
+`index.html` holds them all: the **sign-in page** (`#login`, path `/login`), **Home** (`#home`, `/`, the overview),
+**Bucket** (`#bucket`, `/?bucket[=<bucket>&path=…]`), **Image** (`#image`, `/?image[=viz|label]`: the sessions),
+the **labeling page** (`#label`, `/?label=<pid>`), **Data** (`#data`, `/?data[=<session>]`), the UI sheet (`?ui`) and the
+**visualizer** (everything marked `.viz-only`, `/s/<session id>/`). `theme-boot.js` sets
+`html[data-screen=login|home|bucket|image|label|data|ui|viz]` before the first paint, so the other screens never flash,
+sends an old `?session=<id>` link to `s/<id>/` and an old `?analysis` link to `?data`. The server renders the same
 `index.html` for `/login` and for `/s/<id>/` (there with `../../` in front of every asset URL); every link the
 page builds goes through `js/core/nav.js` (`homeUrl`, `vizUrl`, `labelUrl`, `dataUrl`, `loginUrl`), so a proxy prefix
 (`/user/x/proxy/5151/`) is kept. Every request goes through `js/core/api.js` `apiFetch` (header

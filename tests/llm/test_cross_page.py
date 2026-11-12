@@ -1,6 +1,6 @@
 """Work across pages in the one ◆ chat: the checklist (todo, with a page per step) is saved on the chat and shown
-to every later turn while a step is open; the Visualizer finds the Data Center folder of its dataset
-(data_location, service.locate: local folders, downloaded and streamed S3 links) and the Data Center finds the
+to every later turn while a step is open; the Visualizer finds the Bucket page folder of its dataset
+(data_location, service.locate: local folders, downloaded and streamed S3 links) and the Bucket page finds the
 sessions made from a folder (list_sessions bucket + path); sending a folder to labeling is always confirmed."""
 
 import json
@@ -27,26 +27,26 @@ def _lines(r):
 
 def test_plan_section():
     assert react.plan_section([]) == '' and react.plan_section([{'text': 'a', 'state': 'done'}]) == ''
-    s = react.plan_section([{'text': 'find the folder', 'state': 'done', 'page': 'data'},
+    s = react.plan_section([{'text': 'find the folder', 'state': 'done', 'page': 'bucket'},
                             {'text': 't-SNE map', 'state': 'active', 'page': 'viz'}, {'text': 'explain', 'state': 'pending'}])
-    assert s.startswith('## Plan of this chat') and '✓ find the folder (Data Center)' in s
+    assert s.startswith('## Plan of this chat') and '✓ find the folder (Bucket)' in s
     assert '▶ t-SNE map (Visualizer)' in s and '· explain' in s
 
 
 def test_the_plan_is_kept_with_the_chat(client, monkeypatch, svc):  # noqa: F811
-    _connect(client, ['data_center'])
-    items = [{'text': 'find the truck folder', 'state': 'done', 'page': 'data'},
+    _connect(client, ['bucket_data'])
+    items = [{'text': 'find the truck folder', 'state': 'done', 'page': 'bucket'},
              {'text': 'map it with t-SNE', 'state': 'active', 'page': 'viz'}]
     seen = script(monkeypatch, ('', [('todo', {'items': items})]), ('Going there.', []), ('On it.', []),
                   ('', [('todo', {'items': [{**i, 'state': 'done'} for i in items]})]), ('All done.', []),
                   ('Hello.', []))
-    evs = _lines(client.post('/api/llm/agent/data/chat', json={'text': 'visualize trucks with t-SNE'}))
+    evs = _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'visualize trucks with t-SNE'}))
     sid = next(e for e in evs if e['type'] == 'session')['session_id']
     assert sessions.context(client.user, sid)['plan'] == items
-    client.post('/api/llm/agent/data/chat', json={'text': 'go on', 'session_id': sid})
+    client.post('/api/llm/agent/bucket/chat', json={'text': 'go on', 'session_id': sid})
     assert '## Plan of this chat' in seen[2]['system'] and '▶ map it with t-SNE (Visualizer)' in seen[2]['system']
-    client.post('/api/llm/agent/data/chat', json={'text': 'finish', 'session_id': sid})
-    client.post('/api/llm/agent/data/chat', json={'text': 'hi', 'session_id': sid})
+    client.post('/api/llm/agent/bucket/chat', json={'text': 'finish', 'session_id': sid})
+    client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'session_id': sid})
     assert '## Plan of this chat' not in seen[5]['system'], 'every step done: no plan in the prompt'
     assert client.get(f'/api/llm/sessions/{sid}').json()['session']['plan'][1]['state'] == 'done'
 
@@ -54,13 +54,13 @@ def test_the_plan_is_kept_with_the_chat(client, monkeypatch, svc):  # noqa: F811
 def _s3_bucket(owner, name, s3_bucket, prefix):
     bid = os.urandom(8).hex()
     with db.begin() as c:
-        c.execute(text("""INSERT INTO app.dc_buckets(id, owner_id, name, kind, root, s3_bucket, prefix)
+        c.execute(text("""INSERT INTO app.buckets(id, owner_id, name, kind, root, s3_bucket, prefix)
                           VALUES (:id, :o, :n, 's3', :r, :b, :p)"""),
                   {'id': bid, 'o': owner['id'], 'n': name, 'r': f's3://{s3_bucket}/{prefix}', 'b': s3_bucket, 'p': prefix})
     return bid
 
 
-def test_locate_a_dataset_in_the_data_center(client, tmp_path):
+def test_locate_a_dataset_in_the_bucket(client, tmp_path):
     u = make_user('locator')
     deep = tmp_path / 'datasets' / 'traffic' / 'day' / 'val'
     deep.mkdir(parents=True)

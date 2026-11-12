@@ -52,7 +52,7 @@ CUSTOM_SPEC = {
     },
 }
 
-ADAPTER_TEMPLATE = '''"""Adapter for a Custom model in the Dataset Visualizer.
+ADAPTER_TEMPLATE = '''"""Adapter for a Custom model in the DataViz.
 
 Every function is optional except build_model for .pth / .safetensors state dicts.
 """

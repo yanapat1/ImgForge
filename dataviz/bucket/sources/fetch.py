@@ -29,7 +29,7 @@ import httpx
 
 from ..store import Cancelled, BucketError  # noqa: F401 - Cancelled is re-exported (fetch.Cancelled)
 
-UA = 'dataviz-datacenter/1 (+httpx)'
+UA = 'dataviz-bucket/1 (+httpx)'
 CHUNK = 1 << 20
 PARALLEL_MIN = 64 << 20             # files above this are split over PARTS ranged connections
 PARTS = 8
@@ -53,7 +53,7 @@ def resolve_host(host):
 
 
 def private_allowed():
-    """config sources.allow_private_urls (the server's config through the Data Center service)."""
+    """config sources.allow_private_urls (the server's config through the Bucket page service)."""
     try:
         from .. import service
         return bool(((service._cfg() or {}).get('sources') or {}).get('allow_private_urls'))

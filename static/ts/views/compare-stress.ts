@@ -1,5 +1,5 @@
 // Compare › Image conditions › Stress test: a model run on member A's images under graded light, blur, noise, colour,
-// JPEG and resolution changes (POST api/compare/stress, a job; data/stress.py). One small chart per axis: the score
+// JPEG and resolution changes (POST api/compare/stress, a job; image/stress.py). One small chart per axis: the score
 // (mAP50 with labels, else consistency with the clean predictions) against the level, the safe window (>= 95 % of the
 // clean score) shaded, A's own range shaded, and B's position from the Image conditions report with its expected
 // score; a table, advice, a strip of one image at every level of an axis, CSV. Loaded by compare-shift.ts when its

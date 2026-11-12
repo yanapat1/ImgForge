@@ -1,6 +1,6 @@
 """Label-all inference in its own process (models/proc.py): the worker reads and decodes the files itself, answers
 in the labeling predictions shape (normalised boxes), fails one unreadable image alone, keeps the model's class
-names, and goes away when idle; the Data Center's autolabel POST returns before the model is even looked at."""
+names, and goes away when idle; the Bucket page's autolabel POST returns before the model is even looked at."""
 
 import time
 
@@ -8,7 +8,7 @@ import pytest
 
 from conftest import make_jpeg
 
-from test_bucket_routes import dc, new_bucket, upload_zip  # noqa: F401 - the Data Center fixture
+from test_bucket_routes import dc, new_bucket, upload_zip  # noqa: F401 - the Bucket page fixture
 
 from dataviz.models import proc
 
@@ -89,7 +89,7 @@ def test_autolabel_post_does_not_wait_for_the_model(dc, monkeypatch):  # noqa: F
         raise service.BucketError('the model is broken')
     monkeypatch.setattr(service._hooks(), 'model_info', slow_info)
     t0 = time.time()
-    r = client.post('/api/dc/autolabel', json={'bucket': b['id'], 'model': {'registry_id': 'x', 'name': 'Slow'}})
+    r = client.post('/api/bucket/autolabel', json={'bucket': b['id'], 'model': {'registry_id': 'x', 'name': 'Slow'}})
     took = time.time() - t0
     assert r.status_code == 200, r.text
     assert took < 1.5, took

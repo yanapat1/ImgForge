@@ -1,7 +1,7 @@
 """
-The Data Center's one entry point (contract: datacenter/API.md). The routes (server/routes/datacenter.py), the
-LLM tools (llm/tools.py) and the CLI (`python -m dataviz dc`) call only these functions, so a rule is enforced
-in one place: who sees a bucket (its owner; admins see all), who may change it (tier permission data.manage),
+The Bucket page's one entry point (contract: bucket/API.md). The routes (server/routes/bucket.py), the
+LLM tools (llm/tools.py) and the CLI (`python -m dataviz bucket`) call only these functions, so a rule is enforced
+in one place: who sees a bucket (its owner; admins see all), who may change it (tier permission bucket.manage),
 which buckets are read-only (S3 links), and that every change is followed by a format re-check of the bucket
 root (tags.revalidate) whose outcome travels back as `retagged`.
 
@@ -40,8 +40,8 @@ __all__ = ['BucketError', 'configure', 'list_buckets', 'get_bucket', 'create_buc
 
 KINDS = ('managed', 'local', 's3')
 MODES = ('stream', 'local')         # an S3 link: read S3 on every request, or an editable local copy
-PERM = 'data.manage'
-LANE = 'dc'                         # job lane of the bulk work: fair per account, never in the way of opening a session
+PERM = 'bucket.manage'
+LANE = 'bucket'                        # job lane of the bulk work: fair per account, never in the way of opening a session
 S3_TTL = 3600                       # an S3 detection is fresh this long (no cheap fingerprint for a prefix)
 SEARCH_SCAN = 300_000               # entries walked by one search
 LS_WAIT = 0.8                       # s an S3 folder listing is waited for before ls answers with what it has
@@ -118,7 +118,7 @@ def _epoch(dt):
 
 
 # ---------------------------------------------------------------------------------------------- rows
-_BUCKET_SQL = """SELECT b.*, u.username, u.display_name FROM app.dc_buckets b
+_BUCKET_SQL = """SELECT b.*, u.username, u.display_name FROM app.buckets b
                  JOIN app.users u ON u.id = b.owner_id"""
 
 
@@ -170,7 +170,7 @@ def _writable(r):
 
 def _importing(bid):
     jobs = getattr(_conf['ctx'], 'jobs', None) if _conf['ctx'] is not None else None
-    return bool(jobs is not None and jobs.busy(f'dc-import:{bid}'))
+    return bool(jobs is not None and jobs.busy(f'bk-import:{bid}'))
 
 
 def _need_write(r):
@@ -221,7 +221,7 @@ def _write_view(r, sources=(), targets=()):
     rows = _local_rows(r.id) if r.local_root else {}
     if not rows:
         _need_write(r)                                  # the "streamed and read-only" message
-    if _busy(f'dc-fetch:{r.id}:'):
+    if _busy(f'bk-fetch:{r.id}:'):
         raise BucketError(f'a download into “{r.name}” is running: it can be changed once it finished', 409)
     _need_inside(r, rows, sources, targets)
     v = _LocalView(r)
@@ -298,14 +298,14 @@ def _cached(r, rel, force=False, want_tree=False, user=None, wait=True, refresh=
             raise BucketError(f'{rel or "/"} is not a folder')
         fp = formats.fingerprint(absp)
     with db.connect() as c:
-        hit = c.execute(text('SELECT fingerprint, result FROM app.dc_format_cache WHERE bucket_id = :b AND path = :p'),
+        hit = c.execute(text('SELECT fingerprint, result FROM app.bucket_format_cache WHERE bucket_id = :b AND path = :p'),
                         {'b': r.id, 'p': rel}).first()
     if hit is not None and not force and hit.fingerprint == fp and (hit.result.get('tree') or not (want_tree or not rel)):
         return hit.result
     if r.kind == 's3' and not wait:
         jobs = getattr(_conf['ctx'], 'jobs', None) if _conf['ctx'] is not None else None
         if (refresh and _quiet.get(('scan', r.id, rel), 0) <= time.monotonic()
-                and (jobs is None or not jobs.busy(f'dc-scan:{r.id}:'))):      # one scan per bucket at a time on the dc lane
+                and (jobs is None or not jobs.busy(f'bk-scan:{r.id}:'))):      # one scan per bucket at a time on the dc lane
             _scan_soon(user, r, rel)
         return hit.result if hit is not None else None
     res = _scan(r, rel, want_tree or not rel)
@@ -339,7 +339,7 @@ def _scan(r, rel, want_tree, progress=None, cancelled=None):
 
 def _store_cache(r, rel, fp, res):
     with db.begin() as c:
-        c.execute(text("""INSERT INTO app.dc_format_cache(bucket_id, path, fingerprint, result, updated_at)
+        c.execute(text("""INSERT INTO app.bucket_format_cache(bucket_id, path, fingerprint, result, updated_at)
                           VALUES (:b, :p, :fp, :result, now())
                           ON CONFLICT (bucket_id, path) DO UPDATE SET fingerprint = EXCLUDED.fingerprint,
                           result = EXCLUDED.result, updated_at = now()""").bindparams(_JSONB),
@@ -347,7 +347,7 @@ def _store_cache(r, rel, fp, res):
 
 
 def _scan_soon(user, r, rel=''):
-    """List + detect folder `rel` of S3 link `r` in a dc-lane job dc-scan:<bid>:<rel> (the running one when it is
+    """List + detect folder `rel` of S3 link `r` in a bucket-lane job bk-scan:<bid>:<rel> (the running one when it is
     already queued; inline from the CLI): progress shows the object count, Cancel stores nothing. -> job id."""
     rel = store.clean_rel(rel)
 
@@ -371,7 +371,7 @@ def _scan_soon(user, r, rel=''):
     if jobs is None:
         fn()
         return None
-    return jobs.submit(f'dc-scan:{r.id}:{rel}', f'scan {r.name}{"/" + rel if rel else ""} on S3', fn, lane=LANE,
+    return jobs.submit(f'bk-scan:{r.id}:{rel}', f'scan {r.name}{"/" + rel if rel else ""} on S3', fn, lane=LANE,
                        public_result=True, owner=(user or {}).get('id') or r.owner_id).id
 
 
@@ -380,7 +380,7 @@ def _revalidate(r):
     folders of a streamed link only asks for a new comparison with S3 (the copy is partial: the format is S3's)."""
     if getattr(r, 'local_view', False):
         with db.begin() as c:
-            c.execute(text('UPDATE app.dc_s3_local SET checked_at = NULL WHERE bucket_id = :b'), {'b': r.id})
+            c.execute(text('UPDATE app.bucket_s3_local SET checked_at = NULL WHERE bucket_id = :b'), {'b': r.id})
         return None
     try:
         res = _cached(r, '', force=True)
@@ -405,13 +405,13 @@ def _shape(rows, conn):
         return []
     ids = [r.id for r in rows]
     cache = {c.bucket_id: c.result for c in conn.execute(
-        text("SELECT bucket_id, result FROM app.dc_format_cache WHERE bucket_id = ANY(:b) AND path = ''"),
+        text("SELECT bucket_id, result FROM app.bucket_format_cache WHERE bucket_id = ANY(:b) AND path = ''"),
         {'b': ids}).all()}
     tg = vtags.for_buckets(ids, conn)
     ses = _sessions_for(rows, conn)
     loc = {x.bucket_id: x for x in conn.execute(text(
         """SELECT bucket_id, count(*) AS n, count(*) FILTER (WHERE state IN ('outdated', 'error')) AS old
-           FROM app.dc_s3_local WHERE bucket_id = ANY(:b) GROUP BY bucket_id"""), {'b': ids}).all()}
+           FROM app.bucket_s3_local WHERE bucket_id = ANY(:b) GROUP BY bucket_id"""), {'b': ids}).all()}
     out = []
     for r in rows:
         res = cache.get(r.id) or {}
@@ -539,13 +539,13 @@ def create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_
     bid = uuid.uuid4().hex
     try:
         with db.begin() as c:
-            c.execute(text("""INSERT INTO app.dc_buckets(id, owner_id, name, kind, root, connection_id, s3_bucket, prefix)
+            c.execute(text("""INSERT INTO app.buckets(id, owner_id, name, kind, root, connection_id, s3_bucket, prefix)
                               VALUES (:id, :o, :n, :k, :r, :cid, :b, :p)"""),
                       {'id': bid, 'o': user['id'], 'n': name, 'k': kind, 'r': root, 'cid': cid, 'b': s3b, 'p': pre})
             for t in utags:
                 if t.casefold().startswith(vtags.AUTO_PREFIX):
                     raise BucketError(f'“{t}”: format:* tags are set automatically')
-                c.execute(text("INSERT INTO app.dc_tags(bucket_id, path, tag, auto) VALUES (:b, '', :t, false)"),
+                c.execute(text("INSERT INTO app.bucket_tags(bucket_id, path, tag, auto) VALUES (:b, '', :t, false)"),
                           {'b': bid, 't': t})
     except IntegrityError:
         if made is not None:
@@ -584,7 +584,7 @@ def update_bucket(user, bid, name=None, mode=None):
         if r.link != 's3':
             raise BucketError('only an S3 link has a load mode: managed and local buckets are always local')
         with db.begin() as c:
-            c.execute(text('UPDATE app.dc_buckets SET mode = :m, updated_at = now() WHERE id = :b'),
+            c.execute(text('UPDATE app.buckets SET mode = :m, updated_at = now() WHERE id = :b'),
                       {'m': mode, 'b': r.id})
         if mode == 'local':
             job_id = sync(user, bid)['job_id']
@@ -592,7 +592,7 @@ def update_bucket(user, bid, name=None, mode=None):
         name = _clean_name(name)
         try:
             with db.begin() as c:
-                c.execute(text('UPDATE app.dc_buckets SET name = :n, updated_at = now() WHERE id = :b'),
+                c.execute(text('UPDATE app.buckets SET name = :n, updated_at = now() WHERE id = :b'),
                           {'n': name, 'b': r.id})
         except IntegrityError:
             raise BucketError(f'a bucket called “{name}” already exists: pick another name', 409) from None
@@ -609,7 +609,7 @@ def _local_root(r):
     base = store.data_root(_cfg()) / '.s3'
     root = base / f'{_slug(r.name)}-{r.id[:6]}'
     with db.begin() as c:
-        c.execute(text('UPDATE app.dc_buckets SET local_root = :p WHERE id = :b'), {'p': str(root), 'b': r.id})
+        c.execute(text('UPDATE app.buckets SET local_root = :p WHERE id = :b'), {'p': str(root), 'b': r.id})
     return str(root)
 
 
@@ -641,9 +641,9 @@ def sync(user, bid):
             view.close()
         if job is None or not job.cancelled.is_set():
             with db.begin() as c:
-                c.execute(text('UPDATE app.dc_buckets SET synced_at = now(), updated_at = now() WHERE id = :b'),
+                c.execute(text('UPDATE app.buckets SET synced_at = now(), updated_at = now() WHERE id = :b'),
                           {'b': r.id})
-                c.execute(text("DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path <> ''"), {'b': r.id})
+                c.execute(text("DELETE FROM app.bucket_s3_local WHERE bucket_id = :b AND path <> ''"), {'b': r.id})
             _set_local(r.id, '', state='fresh', objects=res['total'], bytes=res['size'], diff=None, fetched=True,
                        checked=True)                     # streamed again later: the whole copy reads as downloaded
             s3dir.invalidate(r.id)
@@ -656,7 +656,7 @@ def sync(user, bid):
     jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
     if jobs is None:
         return {'job_id': None, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-sync:{r.id}', f'load {r.name} from S3', fn, lane=LANE,
+    return {'job_id': jobs.submit(f'bk-sync:{r.id}', f'load {r.name} from S3', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'result': None}
 
 
@@ -698,7 +698,7 @@ def convert_vectors(user, bid, path='', to='parquet'):
     jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
     if jobs is None:
         return {'job_id': None, 'path': out, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-convert:{r.id}', f'convert {base} to {vector.LAYOUTS[to]["label"]}', fn,
+    return {'job_id': jobs.submit(f'bk-convert:{r.id}', f'convert {base} to {vector.LAYOUTS[to]["label"]}', fn,
                                   lane=LANE, public_result=True, owner=user['id']).id, 'path': out, 'result': None}
 
 
@@ -860,7 +860,7 @@ def extract_frames(user, bid, paths, opts=None, target='inplace', new_name=None,
     `new_name` ('copy'; the only way for a bucket streamed from S3: each video is downloaded first). The folder is
     written hidden and appears in one rename when complete; layout yolo / yolo-split also writes labels/ and
     data.yaml, every layout writes frames.csv. remember=True saves `opts` as the bucket's auto-extract settings.
-    One dc-lane job -> {job_id, bucket, path, estimate, result}."""
+    One bucket-lane job -> {job_id, bucket, path, estimate, result}."""
     r = _row(user, bid)
     _need(user)
     o = video.options(opts)
@@ -959,7 +959,7 @@ def _frames_job(user, r, rels, o, est, name, target='inplace', new_name=None):
             raise
         path = store.join(parent_rel, os.path.basename(final))
         with db.begin() as c:
-            c.execute(text('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': dest.id})
+            c.execute(text('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': dest.id})
         return {'bucket': dest.id, 'path': path, 'frames': done[0], 'bytes': nbytes, 'videos': per,
                 'layout': o['layout'], 'format': o['format'], 'describe': video.describe(o),
                 'capped': capped,
@@ -970,7 +970,7 @@ def _frames_job(user, r, rels, o, est, name, target='inplace', new_name=None):
     base = {'bucket': dest.id, 'path': out_rel, 'estimate': {k: est[k] for k in ('frames', 'approx', 'bytes')}}
     if jobs is None:
         return {'job_id': None, **base, 'result': fn()}
-    job = jobs.submit(f'dc-frames:{dest.id}:{out_rel}', label, fn, lane=LANE, public_result=True, owner=user['id'])
+    job = jobs.submit(f'bk-frames:{dest.id}:{out_rel}', label, fn, lane=LANE, public_result=True, owner=user['id'])
     return {'job_id': job.id, **base, 'result': None}
 
 
@@ -986,7 +986,7 @@ def set_video_auto(user, bid, opts=None):
         o = video.options(opts)
         o['split'] = list(o['split'])
     with db.begin() as c:
-        c.execute(text('UPDATE app.dc_buckets SET video_auto = :v, updated_at = now() WHERE id = :b')
+        c.execute(text('UPDATE app.buckets SET video_auto = :v, updated_at = now() WHERE id = :b')
                   .bindparams(bindparam('v', type_=JSONB)), {'v': o, 'b': r.id})
     return {'video_auto': o}
 
@@ -1065,7 +1065,7 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
     """Download a dataset from the web (Kaggle, Hugging Face, Roboflow, a link, Zenodo, OpenML) into a new managed
     bucket (named from the ref, or `name`), or into folder `path` of an existing writable `bucket`. Archives are
     unpacked (opts.extract, default on; opts.nested: archives inside too; opts.keep_archive keeps the download), files
-    of the same name are replaced, then the format is detected. A dc-lane job keyed dc-import:<bid> (inline from
+    of the same name are replaced, then the format is detected. A bucket-lane job keyed bk-import:<bid> (inline from
     the CLI); a new bucket whose import fails or is cancelled is removed again. -> {job_id, bucket, result}"""
     from . import sources
     _need(user)
@@ -1100,7 +1100,7 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
         target = r.root
     meta = {'connection_id': (conn or {}).get('id'), 'opts': {**o, **flags}, 'path': rel}
     with db.begin() as c:
-        c.execute(text("""UPDATE app.dc_buckets SET source_kind = :k, source_ref = :ref, source_meta = :m,
+        c.execute(text("""UPDATE app.buckets SET source_kind = :k, source_ref = :ref, source_meta = :m,
                           updated_at = now() WHERE id = :b""").bindparams(bindparam('m', type_=JSONB)),
                   {'k': src.key, 'ref': pref['ref'], 'm': meta, 'b': r.id})
 
@@ -1139,7 +1139,7 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
             prog(stage='detecting the format')
             done_meta = {**meta, **(got.get('meta') or {}), 'bytes': res['bytes']}
             with db.begin() as c:
-                c.execute(text("""UPDATE app.dc_buckets SET imported_at = now(), updated_at = now(), source_meta = :m
+                c.execute(text("""UPDATE app.buckets SET imported_at = now(), updated_at = now(), source_meta = :m
                                   WHERE id = :b""").bindparams(bindparam('m', type_=JSONB)), {'m': done_meta, 'b': r.id})
             res['retagged'] = _revalidate(_row(user, r.id))
             if auto:
@@ -1161,7 +1161,7 @@ def import_source(user, source, ref, name=None, connection_id=None, opts=None, b
     jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
     if jobs is None:
         return {'job_id': None, 'bucket': r.id, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-import:{r.id}', f'import {pref["ref"]} from {src.label}', fn, lane=LANE,
+    return {'job_id': jobs.submit(f'bk-import:{r.id}', f'import {pref["ref"]} from {src.label}', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'bucket': r.id, 'result': None}
 
 
@@ -1198,7 +1198,7 @@ def _export_check(user, bid, path):
 
 def _export_items(user, r, rel):
     """The files of folder (or file) `rel`, paths below the bucket root (store.Item), local or S3 alike: what the
-    zip and export_to both read. .env files only for data.manage; the S3 client closes when the walk ends."""
+    zip and export_to both read. .env files only for bucket.manage; the S3 client closes when the walk ends."""
     secrets = vtiers.has(user, PERM)
     if r.kind != 's3':
         yield from store.local_items(r.root, rel, _allowed(), secrets)
@@ -1238,7 +1238,7 @@ def export_to(user, bid, path='', target=None, create_bucket=False, overwrite=Fa
     (labeling/sinks). Layout: destination = target prefix (S3) or path (FTP / SFTP) + the path RELATIVE TO THE
     BUCKET ROOT, so exporting data/image or all of the bucket puts data/image/im1.png at the same key.
     create_bucket (S3): make the target bucket when missing. A non-empty destination needs overwrite.
-    A job on the dc lane dc-export:<bid> (inline from the CLI) -> {job_id, result: {files, bytes, uri, created}}."""
+    A job on the dc lane bk-export:<bid> (inline from the CLI) -> {job_id, result: {files, bytes, uri, created}}."""
     _need(user)
     r, rel, _ = _export_check(user, bid, path)
     t = dict(target or {})
@@ -1268,7 +1268,7 @@ def export_to(user, bid, path='', target=None, create_bucket=False, overwrite=Fa
         tgt['path'] = t.get('path') or t.get('prefix') or None
     ctx = _conf['ctx']
     jobs = getattr(ctx, 'jobs', None) if ctx is not None else None
-    if jobs is not None and jobs.busy(f'dc-export:{r.id}'):     # submit would hand back that job, not this target
+    if jobs is not None and jobs.busy(f'bk-export:{r.id}'):     # submit would hand back that job, not this target
         raise BucketError(f'bucket “{r.name}” is already being exported: wait for that job (or cancel it)', 409)
     from ..labeling import sinks
     sink = None
@@ -1317,7 +1317,7 @@ def export_to(user, bid, path='', target=None, create_bucket=False, overwrite=Fa
 
     if jobs is None:
         return {'job_id': None, 'result': fn()}
-    return {'job_id': jobs.submit(f'dc-export:{r.id}', f'export {r.name} to {sink.uri}', fn, lane=LANE,
+    return {'job_id': jobs.submit(f'bk-export:{r.id}', f'export {r.name} to {sink.uri}', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'result': None}
 
 
@@ -1329,8 +1329,8 @@ def delete_bucket(user, bid, delete_files=False):
     if delete_files and r.kind != 'managed' and not (r.link == 's3' and r.local_root):
         raise BucketError('only a managed bucket’s files can be deleted: a link is only forgotten')
     with db.begin() as c:
-        undo_ids = c.execute(text('SELECT id FROM app.dc_undo WHERE bucket_id = :b'), {'b': r.id}).scalars().all()
-        c.execute(text('DELETE FROM app.dc_buckets WHERE id = :b'), {'b': r.id})
+        undo_ids = c.execute(text('SELECT id FROM app.bucket_undo WHERE bucket_id = :b'), {'b': r.id}).scalars().all()
+        c.execute(text('DELETE FROM app.buckets WHERE id = :b'), {'b': r.id})
     trash = store.data_root(_cfg()) / store.TRASH
     for u in undo_ids:
         shutil.rmtree(trash / u, ignore_errors=True)
@@ -1426,9 +1426,9 @@ def _local_rows(bid):
     """{path: {path, state, objects, bytes, diff, fetched_at, checked_at}} of the downloaded folders of an S3 link
     ('' = all). A download that is no longer running (cancelled, a restart) reads as outdated."""
     with db.connect() as c:
-        rows = c.execute(text("""SELECT path, state, objects, bytes, diff, fetched_at, checked_at FROM app.dc_s3_local
+        rows = c.execute(text("""SELECT path, state, objects, bytes, diff, fetched_at, checked_at FROM app.bucket_s3_local
                                  WHERE bucket_id = :b"""), {'b': bid}).all()
-    fetching = _busy(f'dc-fetch:{bid}:') if rows else False
+    fetching = _busy(f'bk-fetch:{bid}:') if rows else False
     return {x.path: {'path': x.path, 'state': 'outdated' if x.state == 'fetching' and not fetching else x.state,
                      'objects': x.objects, 'bytes': x.bytes, 'diff': x.diff, 'fetched_at': _epoch(x.fetched_at),
                      'checked_at': _epoch(x.checked_at)} for x in rows}
@@ -1490,7 +1490,7 @@ def _local_entries(r, rel):
 def _s3_ls(user, r, rel, offset, limit, sort, q, retry):
     rows = _local_rows(r.id)
     cover = _cover(rows, rel)
-    if (cover is not None and cover['state'] != 'fetching' and r.local_root and not _busy(f'dc-fetch:{r.id}:')
+    if (cover is not None and cover['state'] != 'fetching' and r.local_root and not _busy(f'bk-fetch:{r.id}:')
             and os.path.isdir(os.path.join(r.local_root, rel) if rel else r.local_root)):
         out = store.list_local(r.local_root, rel, _allowed(), offset, limit, sort, q)   # edited in place
         st = 'error' if cover['state'] == 'error' else 'fresh'
@@ -1564,7 +1564,7 @@ def folder_state(user, bid, path=''):
     if _streamed(r) and r.local_root:
         rows = _local_rows(r.id)
         c = _cover(rows, rel)
-        busy = _busy(f'dc-fetch:{r.id}:')
+        busy = _busy(f'bk-fetch:{r.id}:')
         if c is not None:
             out.update(local='fetching' if busy else c['state'], downloaded_in=c['path'], editable=not busy)
             out['location'] = os.path.join(r.local_root, rel) if rel else r.local_root
@@ -1587,13 +1587,13 @@ def _local_file(r, rel):
 
 
 def _set_local(bid, path, **cols):
-    """Upsert the dc_s3_local row of (bid, path) with `cols` (state, objects, bytes, diff, fetched, checked)."""
+    """Upsert the bucket_s3_local row of (bid, path) with `cols` (state, objects, bytes, diff, fetched, checked)."""
     vals = {'b': bid, 'p': path, 'state': cols.get('state', 'fetching'), 'objects': cols.get('objects', 0),
             'bytes': cols.get('bytes', 0), 'diff': cols.get('diff')}
     stamp = ', '.join(f'{k}_at = now()' for k in ('fetched', 'checked') if cols.get(k))
     sets = ['state = EXCLUDED.state'] + [f'{k} = EXCLUDED.{k}' for k in ('objects', 'bytes', 'diff') if k in cols]
     with db.begin() as c:
-        c.execute(text(f"""INSERT INTO app.dc_s3_local(bucket_id, path, state, objects, bytes, diff
+        c.execute(text(f"""INSERT INTO app.bucket_s3_local(bucket_id, path, state, objects, bytes, diff
                            {''.join(f', {k}_at' for k in ('fetched', 'checked') if cols.get(k))})
                            VALUES (:b, :p, :state, :objects, :bytes, :diff
                            {''.join(', now()' for k in ('fetched', 'checked') if cols.get(k))})
@@ -1625,7 +1625,7 @@ def fetch_local(user, bid, paths, mirror=False):
     """Download folders (or files) `paths` of a streamed S3 link into its local copy (read-only; the bucket keeps
     streaming the rest). Downloading again updates: new and changed objects are fetched, unchanged ones skipped;
     mirror also removes local files S3 no longer has. A path inside an already downloaded folder refreshes only
-    that part; a folder above downloaded ones takes them over. A dc-lane job dc-fetch:<bid>:<hash> -> {job_id,
+    that part; a folder above downloaded ones takes them over. A bucket-lane job bk-fetch:<bid>:<hash> -> {job_id,
     paths, result}."""
     r = _need_stream(user, bid)
     rels = _top_paths(paths)
@@ -1667,7 +1667,7 @@ def fetch_local(user, bid, paths, mirror=False):
                     _set_local(r.id, p, state='outdated' if cancelled() or res['failed'] else 'fresh',
                                objects=res['total'], bytes=res['size'], diff=None, fetched=True, checked=True)
                     with db.begin() as c:                      # a folder above downloaded ones takes them over
-                        c.execute(text("""DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path <> :p
+                        c.execute(text("""DELETE FROM app.bucket_s3_local WHERE bucket_id = :b AND path <> :p
                                           AND (:p = '' OR path LIKE :pre)"""),
                                   {'b': r.id, 'p': p, 'pre': p.replace('%', r'\%').replace('_', r'\_') + '/%'})
         except BaseException as e:
@@ -1684,7 +1684,7 @@ def fetch_local(user, bid, paths, mirror=False):
     jobs = _jobs()
     if jobs is None:
         return {'job_id': None, 'paths': rels, 'result': fn()}
-    key = f'dc-fetch:{r.id}:{uuid.uuid4().hex[:8]}'
+    key = f'bk-fetch:{r.id}:{uuid.uuid4().hex[:8]}'
     return {'job_id': jobs.submit(key, f'download {", ".join(p or "all" for p in rels[:3])}'
                                        f'{"…" if len(rels) > 3 else ""} of {r.name}', fn, lane=LANE,
                                   public_result=True, owner=user['id']).id, 'paths': rels, 'result': None}
@@ -1746,8 +1746,8 @@ def _check_soon(user, r, rows):
     """Queue the comparison of the downloaded folders with S3 when the last one is older than CHECK_TTL (one
     check per bucket at a time)."""
     now = time.time()
-    if (not rows or _quiet.get(('check', r.id), 0) > time.monotonic() or _busy(f'dc-check:{r.id}')
-            or _busy(f'dc-fetch:{r.id}:')):
+    if (not rows or _quiet.get(('check', r.id), 0) > time.monotonic() or _busy(f'bk-check:{r.id}')
+            or _busy(f'bk-fetch:{r.id}:')):
         return None
     if all(x['checked_at'] and now - x['checked_at'] < CHECK_TTL for x in rows.values() if x['state'] != 'fetching'):
         return None
@@ -1787,20 +1787,20 @@ def _check_job(user, r):
     if jobs is None:
         fn()
         return None
-    return jobs.submit(f'dc-check:{r.id}', f'check {r.name} against S3', fn, lane=LANE, public_result=True,
+    return jobs.submit(f'bk-check:{r.id}', f'check {r.name} against S3', fn, lane=LANE, public_result=True,
                        owner=(user or {}).get('id') or r.owner_id).id
 
 
 def check_local(user, bid):
     """Compare every downloaded folder of a streamed S3 link with S3 now (new / changed / removed files; the
-    folder turns outdated when any). A dc-lane job dc-check:<bid> -> {job_id}."""
+    folder turns outdated when any). A bucket-lane job bk-check:<bid> -> {job_id}."""
     r = _need_stream(user, bid)
     if not _local_rows(r.id):
         raise BucketError(f'no folder of “{r.name}” is downloaded')
     return {'job_id': _check_job(user, r)}
 
 
-# ---------------------------------------------------------------- local copy vs. the cloud (datacenter/cloudiff.py)
+# ---------------------------------------------------------------- local copy vs. the cloud (bucket/cloudiff.py)
 def _compare_targets(r, rel):
     """(dest, [(folder, end of its download)]) to compare for `rel` of an S3 link with a local copy."""
     if r.local_copy:                                  # the whole bucket loaded into local (mode local)
@@ -1822,14 +1822,14 @@ def _compare_file(r, rel):
 def compare_cloud(user, bid, path='', verify=False):
     """Compare the local copy of folder `path` of an S3 link with S3: every file added, deleted or edited here,
     and new, changed or removed in S3 since the download. verify: also compare the bytes (MD5 against the ETag).
-    A dc-lane job dc-compare:<bid>:<hash> -> {job_id, path}; compare_result reads it."""
+    A bucket-lane job bk-compare:<bid>:<hash> -> {job_id, path}; compare_result reads it."""
     r = _row(user, bid)
     if r.link != 's3':
         raise BucketError('only an S3 link has a cloud copy to compare with')
     rel = store.clean_rel(path)
     dest, targets = _compare_targets(r, rel)
     out = _compare_file(r, rel)
-    key = f'dc-compare:{r.id}:{out.stem}'
+    key = f'bk-compare:{r.id}:{out.stem}'
     if _busy(key):
         raise BucketError('this folder is being compared already', 409)
 
@@ -1859,7 +1859,7 @@ def compare_result(user, bid, path='', status=None, q='', offset=0, limit=200):
         raise BucketError('only an S3 link has a cloud copy to compare with')
     rel = store.clean_rel(path)
     out = _compare_file(r, rel)
-    running = _busy(f'dc-compare:{r.id}:{out.stem}')
+    running = _busy(f'bk-compare:{r.id}:{out.stem}')
     if not out.exists():
         return {'ready': False, 'running': running, 'path': rel, 'labels': cloudiff.LABEL}
     sts = [s for s in (status.split(',') if isinstance(status, str) else status or ()) if s]
@@ -1874,7 +1874,7 @@ def drop_local(user, bid, paths):
     """Remove the local copy of downloaded folders `paths` (or of every downloaded folder below them); S3 is not
     touched and they stream again. -> {removed: [paths]}"""
     r = _need_stream(user, bid)
-    if _busy(f'dc-fetch:{r.id}:'):
+    if _busy(f'bk-fetch:{r.id}:'):
         raise BucketError(f'a download into “{r.name}” is running: wait for it (or cancel it)', 409)
     rows = _local_rows(r.id)
     gone = []
@@ -1895,7 +1895,7 @@ def drop_local(user, bid, paths):
                 else:
                     e.unlink(missing_ok=True)
             with db.begin() as c:
-                c.execute(text('DELETE FROM app.dc_s3_local WHERE bucket_id = :b AND path = :p'), {'b': r.id, 'p': x})
+                c.execute(text('DELETE FROM app.bucket_s3_local WHERE bucket_id = :b AND path = :p'), {'b': r.id, 'p': x})
             cloudiff.forget(store.data_root(_cfg()), r.id, x)
             gone.append(x)
     s3dir.invalidate(r.id)
@@ -1962,7 +1962,7 @@ _BOM = b'\xef\xbb\xbf'
 
 
 def _need_secret(user, rel):
-    """A .env file holds secrets: reading it needs data.manage, like changing data."""
+    """A .env file holds secrets: reading it needs bucket.manage, like changing data."""
     if store.is_secret(rel):
         _need(user)
 
@@ -2109,11 +2109,11 @@ def write_text(user, bid, path, text, expect_mtime_ns=None, create=False):
             pass
     st = os.stat(p)
     with db.begin() as c:
-        c.execute(sql("""INSERT INTO app.dc_undo(id, bucket_id, user_id, manifest)
+        c.execute(sql("""INSERT INTO app.bucket_undo(id, bucket_id, user_id, manifest)
                          VALUES (:id, :b, :u, :manifest)""").bindparams(_MANIFEST),
                   {'id': undo_id, 'b': r.id, 'u': user['id'],
                    'manifest': {'root': r.root, 'trash': str(trash), 'steps': [step]}})
-        c.execute(sql('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
+        c.execute(sql('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
     return {'path': rel, 'size': st.st_size, 'mtime_ns': str(st.st_mtime_ns), 'undo_id': undo_id,
             'created': old is None, 'retagged': _revalidate(r)}
 
@@ -2157,12 +2157,12 @@ def ops(user, bid, ops):
         steps.append(step)
     if steps:
         with db.begin() as c:
-            c.execute(text("""INSERT INTO app.dc_undo(id, bucket_id, user_id, manifest)
+            c.execute(text("""INSERT INTO app.bucket_undo(id, bucket_id, user_id, manifest)
                               VALUES (:id, :b, :u, :manifest)""").bindparams(_MANIFEST),
                       {'id': undo_id, 'b': r.id, 'u': user['id'],
                        'manifest': {'root': r.root, 'trash': str(trash), 'steps': steps}})
-            c.execute(text('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
-            keep = set(c.execute(text('SELECT id FROM app.dc_undo')).scalars().all())
+            c.execute(text('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
+            keep = set(c.execute(text('SELECT id FROM app.bucket_undo')).scalars().all())
         store.purge_trash(str(trash_root), keep)
     return {'applied': applied, 'errors': errors, 'undo_id': undo_id if steps else None,
             'retagged': _revalidate(r) if steps else None}
@@ -2173,7 +2173,7 @@ def undo(user, bid, undo_id):
     _need(user)
     r = _write_view(r)
     with db.connect() as c:
-        u = c.execute(text('SELECT * FROM app.dc_undo WHERE id = :id AND bucket_id = :b'),
+        u = c.execute(text('SELECT * FROM app.bucket_undo WHERE id = :id AND bucket_id = :b'),
                       {'id': str(undo_id or ''), 'b': r.id}).first()
     if u is None:
         raise BucketError('nothing to undo with that id (already undone, or expired)', 404)
@@ -2197,7 +2197,7 @@ def undo(user, bid, undo_id):
             elif step['undo'] == 'restore':
                 vtags.put_back(r.id, step.get('tags'), c)
     with db.begin() as c:
-        c.execute(text('DELETE FROM app.dc_undo WHERE id = :id'), {'id': u.id})
+        c.execute(text('DELETE FROM app.bucket_undo WHERE id = :id'), {'id': u.id})
     if not errors:
         shutil.rmtree(man.get('trash') or os.path.join(trash_root, u.id), ignore_errors=True)
     return {'restored': len(restored), 'paths': restored, 'errors': errors, 'retagged': _revalidate(r)}
@@ -2216,7 +2216,7 @@ def upload(user, bid, path, files, unzip=True):
 def _after_upload(user, r, path, out, before):
     """The bucket's touch, format re-check and auto-extract of the new videos after files landed in `path`."""
     with db.begin() as c:
-        c.execute(text('UPDATE app.dc_buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
+        c.execute(text('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
     out['retagged'] = _revalidate(r) if out['added'] else None
     if before is not None and out['added']:
         out['frames'] = _auto_frames(user, r, sorted(_videos_below(r, path) - before))
@@ -2388,7 +2388,7 @@ def _parents(rel):
 
 
 def locate(user, path=None, s3_bucket=None, prefix=None):
-    """The Data Center folder that holds a dataset (a visualize session's source) -> {bucket, bucket_name, path,
+    """The Bucket page folder that holds a dataset (a visualize session's source) -> {bucket, bucket_name, path,
     parents} or None when no bucket the user sees contains it. A local `path` matches a bucket whose folder (or
     the local copy of a downloaded S3 link) contains it; an S3 source (s3_bucket, prefix) an S3 link of that
     bucket whose prefix contains it. The deepest bucket wins (a bucket inside another bucket's folder)."""
@@ -2527,7 +2527,7 @@ def _label_source(r, rel):
 
 
 def source(user, bid, path=''):
-    """What a new labeling session needs to read folder `path` of a bucket (New label › Data Center):
+    """What a new labeling session needs to read folder `path` of a bucket (New label › Bucket):
     {source, format, classes, bucket, path} -- source is the POST /api/label/projects `source`."""
     r = _row(user, bid)
     rel = store.clean_rel(path)
@@ -2763,7 +2763,7 @@ def autolabel(user, bid, path='', model=None, target='inplace', new_name=None, c
     jobs = getattr(ctx, 'jobs', None)
     if jobs is None:
         return {'job_id': None, 'bucket': dest.id, 'result': fn()}
-    job = jobs.submit(f'dc-autolabel:{dest.id}:{rel}', f'label {dest.name} with {shown}',
+    job = jobs.submit(f'bk-autolabel:{dest.id}:{rel}', f'label {dest.name} with {shown}',
                       fn, lane='model', public_result=True, owner=user['id'])
     return {'job_id': job.id, 'bucket': dest.id, 'result': None}
 
@@ -2864,7 +2864,7 @@ def _write_labels(r, rel, st, task, formats=('yolo',)):
             val = next((f'images/{d}' for d in ('val', 'valid') if d in splits), train)
         else:
             train = val = 'images' if os.path.isdir(os.path.join(base, 'images')) else '.'
-        lines = [f'# written by the Data Center from a {task["task_type"].replace("_", " ")} model', 'path: .',
+        lines = [f'# written by the Bucket page from a {task["task_type"].replace("_", " ")} model', 'path: .',
                  f'train: {train}', f'val: {val}', f'nc: {len(names)}', 'names:']
         lines += [f'  {i}: {_yaml_str(nm)}' for i, nm in enumerate(names)]
         if task['task_type'] == 'keypoints':

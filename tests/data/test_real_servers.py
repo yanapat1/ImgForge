@@ -45,7 +45,7 @@ def make(pg, tmp_path, conn):
         c.execute(text("""INSERT INTO app.users (id, username, email, password_hash, display_name, is_admin)
                           VALUES (:i, 'an', 'an@example.com', 'x', 'An', true)"""), {'i': uid})
     user = {'id': uid, 'username': 'an', 'is_admin': True}
-    service.configure(SimpleNamespace(cfg={'data_analysis': {'max_rows': 5000, 'statement_timeout_s': 30}}, datasets=Reg(tmp_path, conn)))
+    service.configure(SimpleNamespace(cfg={'data': {'max_rows': 5000, 'statement_timeout_s': 30}}, datasets=Reg(tmp_path, conn)))
     return SimpleNamespace(s=service, user=user, sid=service.create_session(user, 'q')['id'], cid=conn['id'])
 
 

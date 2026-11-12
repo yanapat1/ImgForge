@@ -1,5 +1,5 @@
 """
-The Writer contract shared by the session export (export.py) and the Data Center's "Label with model" (it writes
+The Writer contract shared by the session export (export.py) and the Bucket page's "Label with model" (it writes
 into the bucket): one instance per (task, format), rows streamed in, files written through a Sink (sinks.py).
 
     w = REGISTRY[key]()

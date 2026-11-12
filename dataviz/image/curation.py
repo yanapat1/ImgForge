@@ -304,7 +304,7 @@ class Curation:
         self._flat = None
         self._fp = getattr(state, 'fingerprint', None)
         try:
-            state._curation = self          # the live feed (data/live.py) patches under self.lock, tracks patch_cls
+            state._curation = self          # the live feed (image/live.py) patches under self.lock, tracks patch_cls
         except AttributeError:
             pass
         self._migrate_backups()
@@ -1138,7 +1138,7 @@ class Curation:
                         self._invalidate()
                     diff = patching.boxes_patched(self.state, [r['image'] for r in records if r['image']])
                     if diff:
-                        patch['diff'] = diff                # the Compare tab's diffs, updated (data/compare.py)
+                        patch['diff'] = diff                # the Compare tab's diffs, updated (image/compare.py)
                 elif bdir.is_dir():
                     shutil.rmtree(bdir, ignore_errors=True)
             return {'applied': applied, 'files': len(records), 'conflicts': conflicts, 'errors': errors,
@@ -1414,7 +1414,7 @@ class Curation:
             return {'restored': restored, 'conflicts': conflicts, 'errors': errors, 'patch': patch, 'stale': not same}
 
     def forget_files(self, labels):
-        """Labels changed outside curation (the live feed, data/live.py, after its State patch): re-read and re-scan
+        """Labels changed outside curation (the live feed, image/live.py, after its State patch): re-read and re-scan
         the ones this scan knows, so sha1 / box ids / issues match the store again. Box ids come from the live
         samples' box_idx (what the live patch left). Returns the names re-scanned."""
         out = []

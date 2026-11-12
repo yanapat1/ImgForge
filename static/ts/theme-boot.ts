@@ -3,9 +3,10 @@
 // "palette" = default | cbsafe | contrast | fjord | ember | orchid; retired names map to their replacement, as in core/theme.ts)
 // so the page never flashes the wrong colours; these are this browser's mirror of the signed-in user's prefs
 // (core/auth.ts syncs them from /api/me/prefs once the app is loaded). Then it picks the screen (html[data-screen]):
-// 'login' (path ends in /login), 'viz' (path /s/<session id>/), 'label' (?label=<pid>), 'data' (the Data Center:
-// ?data or ?data=<bucket id>), else the Sessions 'home'.
-// An old link ?session=<id> is sent to its s/<id>/ URL. Only the visualizer needs Plotly (~1.5 MB), so only it
+// 'login' (path ends in /login), 'viz' (path /s/<session id>/), 'label' (?label=<pid>), 'bucket' (?bucket or
+// ?bucket=<bucket id>), 'image' (the sessions: ?image or ?image=viz|label), 'data' (?data or ?data=<session>),
+// 'ui' (?ui), else 'home' (the overview).
+// An old link ?session=<id> is sent to its s/<id>/ URL, and an old ?analysis[=<session>] to ?data[=<session>]. Only the visualizer needs Plotly (~1.5 MB), so only it
 // preloads it here, in parallel with the stylesheets. The UI font is preloaded on every screen but the labeling page
 // (it paints its canvas first and fetches the font through the stylesheet: a preload there went unused).
 // Plotly and the font are found from this script's own URL (static/js/theme-boot.js), never from the page URL:
@@ -29,13 +30,20 @@
     location.replace(path.replace(/[^/]*$/, '') + 's/' + old[1] + '/');
     return;
   }
+  if (/[?&]analysis(=|&|$)/.test(location.search)) {        // Data was called Analysis: keep old links working
+    location.replace(path + location.search.replace(/([?&])analysis(?=[=&]|$)/, '$1data') + location.hash);
+    return;
+  }
   var login = /\/login\/?$/.test(path);
   var viz = !login && /\/s\/[^/]+\/$/.test(path);
   var label = !login && !viz && /[?&]label=[^&]/.test(location.search);
-  var data = !login && !viz && !label && /[?&]data(=|&|$)/.test(location.search);
-  var analysis = !login && !viz && !label && !data && /[?&]analysis(=|&|$)/.test(location.search);
-  var ui = !login && !viz && !label && !data && !analysis && /[?&]ui(=|&|$)/.test(location.search);
-  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : data ? 'data' : analysis ? 'analysis' : ui ? 'ui' : 'home');
+  var q = login || viz || label ? '' : location.search;
+  var bucket = /[?&]bucket(=|&|$)/.test(q);
+  var image = !bucket && /[?&]image(=|&|$)/.test(q);
+  var data = !bucket && !image && /[?&]data(=|&|$)/.test(q);
+  var ui = !bucket && !image && !data && /[?&]ui(=|&|$)/.test(q);
+  html.setAttribute('data-screen', login ? 'login' : viz ? 'viz' : label ? 'label' : bucket ? 'bucket' : image ? 'image'
+    : data ? 'data' : ui ? 'ui' : 'home');
   var me = document.currentScript instanceof HTMLScriptElement ? document.currentScript.src : '';
   var base = me || document.baseURI;
   var url = function (rel: string): string { try { return new URL(rel, base).href; } catch (e) { return rel; } };

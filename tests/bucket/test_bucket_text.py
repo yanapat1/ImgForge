@@ -1,6 +1,6 @@
-"""Data Center text editing (GET / PUT /api/dc/buckets/{bid}/text): read metadata, save + undo, the 409 when the
+"""Bucket text editing (GET / PUT /api/bucket/buckets/{bid}/text): read metadata, save + undo, the 409 when the
 file changed since it was read, newline style / BOM / mode kept, new files (and the `create` op), the dot-file
-allowlist (.env shown but read only with data.manage, internal dot folders hidden), the new kinds, a read-only S3
+allowlist (.env shown but read only with bucket.manage, internal dot folders hidden), the new kinds, a read-only S3
 link refused, and a data.yaml edit that re-tags the bucket."""
 
 import os
@@ -25,11 +25,11 @@ def dc(client_as, tmp_path):
 
 
 def _put(c, bid, path, body, **kw):
-    return c.put(f'/api/dc/buckets/{bid}/text', json={'path': path, 'text': body, **kw})
+    return c.put(f'/api/bucket/buckets/{bid}/text', json={'path': path, 'text': body, **kw})
 
 
 def _get(c, bid, path, **kw):
-    return c.get(f'/api/dc/buckets/{bid}/text', params={'path': path, **kw})
+    return c.get(f'/api/bucket/buckets/{bid}/text', params={'path': path, **kw})
 
 
 def test_read_save_undo_conflict(dc):
@@ -57,7 +57,7 @@ def test_read_save_undo_conflict(dc):
     assert stale.status_code == 409 and 'changed' in stale.json()['detail']
     assert open(os.path.join(root, 'notes.txt')).read() == 'hello\nthere\n'
 
-    u = c.post(f'/api/dc/buckets/{b["id"]}/undo', json={'undo_id': out['undo_id']})
+    u = c.post(f'/api/bucket/buckets/{b["id"]}/undo', json={'undo_id': out['undo_id']})
     assert u.status_code == 200 and u.json()['restored'] == 1 and not u.json()['errors'], u.text
     assert open(os.path.join(root, 'notes.txt')).read() == 'hello\nworld\n'
 
@@ -96,18 +96,18 @@ def test_create_new_file_and_create_op(dc):
     s = _put(c, b['id'], 'new.json', '{"a": 1}\n', create=True)
     assert s.status_code == 200 and s.json()['created']
     assert _put(c, b['id'], 'new.json', '{}', create=True).status_code == 409
-    assert c.post(f'/api/dc/buckets/{b["id"]}/undo', json={'undo_id': s.json()['undo_id']}).status_code == 200
+    assert c.post(f'/api/bucket/buckets/{b["id"]}/undo', json={'undo_id': s.json()['undo_id']}).status_code == 200
     assert not os.path.exists(os.path.join(b['root'], 'new.json'))
     # a missing file is a 404 without create
     assert _put(c, b['id'], 'missing.txt', 'x').status_code == 404
 
-    r = c.post(f'/api/dc/buckets/{b["id"]}/ops', json={'ops': [{'op': 'create', 'path': 'empty.md'},
+    r = c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'create', 'path': 'empty.md'},
                                                                {'op': 'create', 'path': '.hidden'}]}).json()
     assert r['applied'] == [{'op': 'create', 'path': 'empty.md'}] and len(r['errors']) == 1
     assert os.path.getsize(os.path.join(b['root'], 'empty.md')) == 0
-    ls = c.get(f'/api/dc/buckets/{b["id"]}/ls').json()
+    ls = c.get(f'/api/bucket/buckets/{b["id"]}/ls').json()
     assert [(e['name'], e['kind']) for e in ls['entries']] == [('empty.md', 'text')]
-    c.post(f'/api/dc/buckets/{b["id"]}/undo', json={'undo_id': r['undo_id']})
+    c.post(f'/api/bucket/buckets/{b["id"]}/undo', json={'undo_id': r['undo_id']})
     assert not os.path.exists(os.path.join(b['root'], 'empty.md'))
 
 
@@ -123,40 +123,40 @@ def test_dotfiles_kinds_and_secret_reads(dc):
         os.makedirs(os.path.join(root, d, 'sub'))
         with open(os.path.join(root, d, 'sub', 'f.txt'), 'w') as f:
             f.write('x')
-    ls = c.get(f'/api/dc/buckets/{b["id"]}/ls').json()
+    ls = c.get(f'/api/bucket/buckets/{b["id"]}/ls').json()
     kinds = {e['name']: e['kind'] for e in ls['entries']}
     assert kinds == {'.env': 'code', '.env.local': 'code', '.gitignore': 'text', 'a.parquet': 'table',
                      'run.py': 'code', 'Dockerfile': 'code', 'clip.mp4': 'video', 'song.wav': 'audio',
                      'readme.md': 'text'}
     # the search walk sees .env but none of the internal dot folders
-    found = c.get('/api/dc/search', params={'q': 'f.txt', 'bucket': b['id']}).json()['files']
+    found = c.get('/api/bucket/search', params={'q': 'f.txt', 'bucket': b['id']}).json()['files']
     assert found == []
-    found = c.get('/api/dc/search', params={'q': '.env', 'bucket': b['id']}).json()['files']
+    found = c.get('/api/bucket/search', params={'q': '.env', 'bucket': b['id']}).json()['files']
     assert sorted(f['name'] for f in found) == ['.env', '.env.local']
 
     # rename may produce an allowlisted dot name, never a hidden one
-    r = c.post(f'/api/dc/buckets/{b["id"]}/ops', json={'ops': [{'op': 'rename', 'path': 'readme.md',
+    r = c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'rename', 'path': 'readme.md',
                                                                'name': '.secret'}]}).json()
     assert r['errors'] and not r['applied']
-    r = c.post(f'/api/dc/buckets/{b["id"]}/ops', json={'ops': [{'op': 'rename', 'path': 'readme.md',
+    r = c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'rename', 'path': 'readme.md',
                                                                'name': '.env.prod'}]}).json()
     assert r['applied'] and not r['errors']
 
     assert _get(c, b['id'], '.env').json()['text'] == 'SECRET=1\n'
 
-    # a tier without data.manage reads ordinary files of its own buckets, never .env
+    # a tier without bucket.manage reads ordinary files of its own buckets, never .env
     from dataviz import db
     v = make_user('viewer')
     with db.begin() as conn:
         conn.execute(text("UPDATE app.users SET tier_id = 'viewer' WHERE id = :u"), {'u': v['id']})
-        conn.execute(text('UPDATE app.dc_buckets SET owner_id = :u WHERE id = :b'), {'u': v['id'], 'b': b['id']})
+        conn.execute(text('UPDATE app.buckets SET owner_id = :u WHERE id = :b'), {'u': v['id'], 'b': b['id']})
     viewer = as_user({**v, 'tier_id': 'viewer'})
     assert _get(viewer, b['id'], 'run.py').status_code == 200
     ro = _get(viewer, b['id'], 'run.py').json()
     assert not ro['editable'] and 'tier' in ro['reason']
     assert _get(viewer, b['id'], '.env').status_code == 403
     assert _get(viewer, b['id'], '.env.local').status_code == 403
-    assert viewer.get(f'/api/dc/buckets/{b["id"]}/file', params={'path': '.env'}).status_code == 403
+    assert viewer.get(f'/api/bucket/buckets/{b["id"]}/file', params={'path': '.env'}).status_code == 403
     assert _put(viewer, b['id'], 'run.py', 'y\n').status_code == 403
 
 
@@ -167,13 +167,13 @@ def test_data_yaml_edit_retags_and_undo(dc):
     r = _get(c, b['id'], 'data.yaml').json()
     assert r['editable']
     s = _put(c, b['id'], 'data.yaml', 'names: [cat, dog, bird]\n', expect_mtime_ns=r['mtime_ns']).json()
-    b2 = c.get(f'/api/dc/buckets/{b["id"]}').json()
+    b2 = c.get(f'/api/bucket/buckets/{b["id"]}').json()
     assert b2['format']['classes'] == 3
     # a broken data.yaml: still saved, the format check runs again
     r = _get(c, b['id'], 'data.yaml').json()
     s = _put(c, b['id'], 'data.yaml', 'nonsense\n', expect_mtime_ns=r['mtime_ns']).json()
     assert 'retagged' in s
-    u = c.post(f'/api/dc/buckets/{b["id"]}/undo', json={'undo_id': s['undo_id']}).json()
+    u = c.post(f'/api/bucket/buckets/{b["id"]}/undo', json={'undo_id': s['undo_id']}).json()
     assert u['restored'] == 1
     assert open(os.path.join(b['root'], 'data.yaml')).read() == 'names: [cat, dog, bird]\n'
 
@@ -186,12 +186,12 @@ def test_s3_stream_text_read_only(dc, s3_server, s3_bucket):
     client.put_object(Bucket=bucket, Key='t/.env', Body=b'K=V\n')
     client.put_object(Bucket=bucket, Key='t/.git/config', Body=b'x\n')
     conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'})
-    b = c.post('/api/dc/buckets', json={'name': 'cloud', 'kind': 's3', 'connection_id': conn.json()['id'],
+    b = c.post('/api/bucket/buckets', json={'name': 'cloud', 'kind': 's3', 'connection_id': conn.json()['id'],
                                         's3_bucket': bucket, 'prefix': 't'}).json()
     r = _get(c, b['id'], 'data.yaml').json()
     assert r['text'] == 'names: [car]\n' and not r['editable'] and 'read-only' in r['reason']
     assert r['mtime_ns'] is None
     s = _put(c, b['id'], 'data.yaml', 'names: [bus]\n')
     assert s.status_code == 400 and 'read-only' in s.json()['detail']
-    names = [e['name'] for e in c.get(f'/api/dc/buckets/{b["id"]}/ls').json()['entries']]
+    names = [e['name'] for e in c.get(f'/api/bucket/buckets/{b["id"]}/ls').json()['entries']]
     assert '.env' in names and '.git' not in names

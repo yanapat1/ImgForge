@@ -194,7 +194,7 @@ globalThis.fetch = async (path, init) => {
   return new Response(body, { status: 200 });
 };
 const evs = [];
-await streamNDJSON('api/llm/agent/data/chat', { text: 'hi' }, (v) => evs.push(v.type));
+await streamNDJSON('api/llm/agent/bucket/chat', { text: 'hi' }, (v) => evs.push(v.type));
 assert.deepEqual(evs, ['meta', 'step', 'done']);
 const h = seen.init.headers;
 // JupyterHub's jupyter-server-proxy streams only when Accept is exactly text/event-stream (else it buffers it all)

@@ -14,7 +14,7 @@ body / query keeps the argument's JSON type, and is dropped when the optional ar
 is one of the plugin's secrets (headers, query and body only, never the URL itself). The scheme and host of the URL
 are fixed by the manifest (no placeholder before the path) and https only, http for admins.
 
-A call goes through datacenter/sources/fetch.py (`request`: redirects followed by hand, every hop SSRF-checked;
+A call goes through bucket/sources/fetch.py (`request`: redirects followed by hand, every hop SSRF-checked;
 private / loopback hosts are refused unless the plugin's owner is an admin), 15 s timeout, at most 1 MB read, and
 returns compact JSON or text of at most 6000 characters. change / danger tools go through the engine's confirm.
 """
@@ -32,7 +32,7 @@ MAX_BYTES = 1 << 20
 MAX_OUT = 6000
 METHODS = ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
 RISKS = ('read', 'change', 'danger')
-ROLES = ('data', 'visual')
+ROLES = ('bucket', 'visual')
 UA = 'dataviz-plugin/1 (+httpx)'
 _ARG = re.compile(r'\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}')
 _SECRET = re.compile(r'\$\{secret:([A-Za-z_][A-Za-z0-9_]*)\}')

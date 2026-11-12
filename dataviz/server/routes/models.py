@@ -68,7 +68,7 @@ def router(state, ctx):
 
     def public(m):
         out = reg.public(m)
-        st = ctx.state                          # None on the Sessions home: nothing predicted
+        st = ctx.state                          # None on the Image page: nothing predicted
         try:
             out['predicted'] = st is not None and svc.is_predicted(st, m)
         except Exception:  # noqa: BLE001 - a missing file must not break the list
@@ -203,7 +203,7 @@ def router(state, ctx):
     @r.post('/api/models/{mid}/test')
     async def test(mid: str):
         m = model_or_404(mid)
-        if ctx.state is None:                   # the Sessions home / label page: load it (or reach it) and list its classes
+        if ctx.state is None:                   # the Image page / label page: load it (or reach it) and list its classes
             from ...models import hub
             try:
                 info = await run_io(hub.info, reg, m, svc.workdir)

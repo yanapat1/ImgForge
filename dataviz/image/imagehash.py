@@ -1,6 +1,6 @@
 """
-Content hashes of a dataset's images: what links "the same image" across two datasets (data/diff.py) and what a
-labeling project dedups on (data/promote.py, lbl.media.checksum).
+Content hashes of a dataset's images: what links "the same image" across two datasets (image/diff.py) and what a
+labeling project dedups on (image/promote.py, lbl.media.checksum).
 
 Two hashes per image, both blake2b-128 (hashlib; 32 hex chars, fits lbl.media.checksum):
     h  full    of every byte. Computed for free while indexing: the indexer already holds the file's bytes.
@@ -8,7 +8,7 @@ Two hashes per image, both blake2b-128 (hashlib; 32 hex chars, fits lbl.media.ch
                big the file: what the backfill computes for images the indexer never reads (no boxes) and for
                workspaces indexed before hashes existed. Different bytes in the middle are missed - acceptable for
                photos (any re-encode changes the head), and `full` can be asked for where it matters (promote).
-Matching uses h when both sides have it, else q (data/diff.py).
+Matching uses h when both sides have it, else q (image/diff.py).
 
 <workspace>/images.json, written atomically:
     {"version": 1, "fingerprint": <dataset fp>, "complete": <every listed image present>,

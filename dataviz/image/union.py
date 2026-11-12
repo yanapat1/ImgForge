@@ -1,7 +1,7 @@
 """
 UnionSource: one visualize session over several others (a "combined dataset"), read in place - nothing is copied.
-What the Compare tab diffs (data/diff.py, data/compare.py) and what "Promote to labeling" materializes
-(data/promote.py).
+What the Compare tab diffs (image/diff.py, image/compare.py) and what "Promote to labeling" materializes
+(image/promote.py).
 
     names       every image / label of member `alias` is '<alias>/<its own name>' (aliases are unique per union)
     classes     the union of the members' class names, in member order, matched by name (case-folded); a member's
@@ -265,7 +265,7 @@ class UnionSource:
 
     @property
     def live(self):
-        """A labeling member: its edits reach the union through the live change feed (data/live.py)."""
+        """A labeling member: its edits reach the union through the live change feed (image/live.py)."""
         return any(getattr(m.src, 'kind', None) == 'labeling' for m in self.members)
 
     def _out(self, m, text):

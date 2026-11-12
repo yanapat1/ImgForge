@@ -1,11 +1,11 @@
 """
-Web dataset sources for the Data Center's "From the web" import: Kaggle, Hugging Face, Roboflow, a direct link,
+Web dataset sources for the Bucket page's "From the web" import: Kaggle, Hugging Face, Roboflow, a direct link,
 Zenodo and OpenML. Each is a Source (base.py); fetch.py holds the shared downloader (SSRF guard, resume, ranged
 parallel parts, progress, disk check). service.import_source runs one as an io-lane job and unpacks the result.
 
     SOURCES          {key: Source}
     get(key)         the Source (BucketError 400 on an unknown key)
-    describe()       [{key, label, needs, token, fields, examples, help}] for GET /api/dc/sources
+    describe()       [{key, label, needs, token, fields, examples, help}] for GET /api/bucket/sources
 """
 
 from ..store import BucketError

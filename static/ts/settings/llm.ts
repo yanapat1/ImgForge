@@ -63,10 +63,10 @@ const FEATS: Record<string, [title: string, desc: string, panel?: boolean]> = {
   prelabel: ['Pre-label this image', 'Label page: one click draws suggested boxes for you to accept or reject.'],
   label_assist: ['Label assistant', 'Label page: ask “how do I label the hands here?” and get an answer plus boxes.'],
   voice: ['Voice commands', 'Hold the mic to ask a question or drive the page by voice.'],
-  data_center: ['Data Center assistant', 'The ◆ of the Data Center: find, tag, move and organise datasets in your buckets, with every change confirmed.'],
+  bucket_data: ['Bucket & Data assistant', 'The ◆ of the Bucket and Data pages: find, tag, move and organise datasets in your buckets, query your databases, with every change confirmed.'],
 };
 const GROUPS: Array<[string, string[]]> = [['Visualizer', ['assistant', 'dataset_qa', 'explain_eval', 'ask_selection', 'label_check', 'report']],
-  ['Search & tags', ['nl_filter', 'auto_tag']], ['Labeling', ['prelabel', 'label_assist']], ['Data Center', ['data_center']], ['Voice', ['voice']]];
+  ['Search & tags', ['nl_filter', 'auto_tag']], ['Labeling', ['prelabel', 'label_assist']], ['Bucket', ['bucket_data']], ['Voice', ['voice']]];
 const NEEDS: Record<string, 'vision' | 'audio'> = { ask_selection: 'vision', label_check: 'vision', auto_tag: 'vision', prelabel: 'vision', label_assist: 'vision', voice: 'audio' };
 
 export async function loadLlmData(): Promise<void> {

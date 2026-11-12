@@ -1,4 +1,4 @@
-/* The shared ◆ chat (ts/core/chat.ts), used by the Data Center drawer (datacenter/ai.ts) and the visualizer's AI tab
+/* The shared ◆ chat (ts/core/chat.ts), used by the Bucket page drawer (bucket/ai.ts) and the visualizer's AI tab
    (views/assistant.ts): session header, transcript with the agent's trace (thinking, tool calls, web sources,
    confirmations, plans, page actions), the composer with its chips, the History panel and the two floating
    popovers (/model, slash commands). Everything is scoped under .chat (the popovers under .chat-pop) so it never
@@ -353,12 +353,12 @@
 .chat-hist-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--surface-3); border-radius: var(--r-md); font-size: var(--fs-xs); }
 .chat-hist-f { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex-wrap: wrap; margin-top: auto; padding: 8px 4px 0; border-top: 1px solid var(--border); }
 
-/* ---- hosts: the Data Center drawer (datacenter/ai.ts) and the visualizer's AI tab (views/assistant.ts) */
-.dr-main > .dc-chat { flex: 1; min-height: 0; }
-.dc-ai-hello { display: flex; gap: 10px; align-items: flex-start; font-size: var(--fs-sm); max-width: 680px; align-self: center; }
-.dc-ai-hello > div { min-width: 0; }
-.dc-ai-hello p { margin: 2px 0 8px; }
-.dc-ai-sugg { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* ---- hosts: the Bucket page drawer (bucket/ai.ts) and the visualizer's AI tab (views/assistant.ts) */
+.dr-main > .bk-chat { flex: 1; min-height: 0; }
+.bk-ai-hello { display: flex; gap: 10px; align-items: flex-start; font-size: var(--fs-sm); max-width: 680px; align-self: center; }
+.bk-ai-hello > div { min-width: 0; }
+.bk-ai-hello p { margin: 2px 0 8px; }
+.bk-ai-sugg { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .tchip.danger { border-color: var(--danger-line); color: var(--danger-text); }
 #ai-side > .chat { flex: 1; min-height: 0; }
 

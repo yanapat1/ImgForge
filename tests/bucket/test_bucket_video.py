@@ -1,4 +1,4 @@
-"""Video → frames (datacenter/video.py, service.extract_frames): every pick mode gives exactly the frames it promises
+"""Video → frames (bucket/video.py, service.extract_frames): every pick mode gives exactly the frames it promises
 (30 and 60 fps, ranges, bursts, keyframes, scene, smart, near-duplicate skip), the layouts and frames.csv, the
 poster thumbnail, and the HTTP flow end to end: estimate, the job, the hidden-then-renamed folder, the format
 detection, cancel, the read-only S3 refusal, path escapes, the frame limit and the bucket's auto-extract."""
@@ -164,7 +164,7 @@ def test_cancel_stops(clips, tmp_path):
 # ---------------------------------------------------------------------------------------------- HTTP + jobs
 def _upload(c, bid, clip, path='', name=None):
     with open(clip, 'rb') as f:
-        r = c.post(f'/api/dc/buckets/{bid}/upload', params={'path': path},
+        r = c.post(f'/api/bucket/buckets/{bid}/upload', params={'path': path},
                    files=[('files', (name or os.path.basename(clip), f.read(), 'video/mp4'))])
     assert r.status_code == 200, r.text
     return r.json()
@@ -182,15 +182,15 @@ def test_extract_frames_end_to_end(dc, clips):
     _, c = dc
     b = new_bucket(c, name='vids')
     _upload(c, b['id'], clips['a'], 'raw')
-    info = c.get(f'/api/dc/buckets/{b["id"]}/video', params={'path': 'raw/a.mp4'}).json()
+    info = c.get(f'/api/bucket/buckets/{b["id"]}/video', params={'path': 'raw/a.mp4'}).json()
     assert info['fps'] == 30.0 and info['frames'] == 90 and 'time_base' not in info
-    poster = c.get(f'/api/dc/buckets/{b["id"]}/file', params={'path': 'raw/a.mp4', 'w': 64, 't': 0.5})
+    poster = c.get(f'/api/bucket/buckets/{b["id"]}/file', params={'path': 'raw/a.mp4', 'w': 64, 't': 0.5})
     assert poster.status_code == 200 and poster.headers['content-type'] == 'image/jpeg'
 
     opts = {'mode': 'pattern', 'every_s': 2, 'window_s': 1, 'take': 15}
-    est = c.post('/api/dc/frames/estimate', json={'bucket': b['id'], 'paths': ['raw/a.mp4'], 'opts': opts}).json()
+    est = c.post('/api/bucket/frames/estimate', json={'bucket': b['id'], 'paths': ['raw/a.mp4'], 'opts': opts}).json()
     assert est['frames'] == 30 and len(est['times']) == 8 and est['describe'] == '15 from 1 s every 2 s'
-    r = c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['raw/a.mp4'], 'opts': opts})
+    r = c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['raw/a.mp4'], 'opts': opts})
     assert r.status_code == 200, r.text
     assert r.json()['path'] == 'raw/a-frames' and r.json()['estimate']['frames'] == 30
     res = _done(c, r.json())
@@ -199,19 +199,19 @@ def test_extract_frames_end_to_end(dc, clips):
     assert len(os.listdir(os.path.join(root, 'images'))) == 30 and os.path.isdir(os.path.join(root, 'labels'))
     assert {'frames.csv', 'data.yaml'} <= set(os.listdir(root))
     assert not [n for n in os.listdir(os.path.join(b['root'], 'raw')) if n.startswith('.frames-')]
-    ls = c.get(f'/api/dc/buckets/{b["id"]}/ls', params={'path': 'raw/a-frames'}).json()
+    ls = c.get(f'/api/bucket/buckets/{b["id"]}/ls', params={'path': 'raw/a-frames'}).json()
     assert ls['format']['format'] == 'yolo-detect', ls['format']                     # ready to label
 
     # a second run: a new folder, never into the first one
-    r2 = c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['raw'], 'opts': {'mode': 'count', 'n': 4}})
+    r2 = c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['raw'], 'opts': {'mode': 'count', 'n': 4}})
     res2 = _done(c, r2.json())
     assert res2['path'] == 'raw/a-frames (copy)' and res2['frames'] == 4
 
     # a copy into a new bucket, flat
-    r3 = c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['raw/a.mp4'], 'target': 'copy',
+    r3 = c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['raw/a.mp4'], 'target': 'copy',
                                         'new_name': 'a-cut', 'opts': {'fps': 1, 'layout': 'flat'}})
     res3 = _done(c, r3.json())
-    nb = c.get(f'/api/dc/buckets/{res3["bucket"]}').json()
+    nb = c.get(f'/api/bucket/buckets/{res3["bucket"]}').json()
     assert nb['name'] == 'a-cut' and sorted(os.listdir(os.path.join(nb['root'], 'a-frames'))) == \
         ['a_000000.jpg', 'a_000030.jpg', 'a_000060.jpg', 'frames.csv']
 
@@ -220,13 +220,13 @@ def test_extract_frames_refusals(dc, clips):
     _, c = dc
     b = new_bucket(c, name='vids2')
     _upload(c, b['id'], clips['a'])
-    post = lambda **kw: c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['a.mp4'], **kw})
+    post = lambda **kw: c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['a.mp4'], **kw})
     assert post(paths=['../x.mp4']).status_code == 400
     assert post(paths=['nope.mp4']).status_code == 404
     assert post(opts={'mode': 'bogus'}).status_code == 400
     assert post(out='.hidden').status_code == 400
-    c.post(f'/api/dc/buckets/{b["id"]}/ops', json={'ops': [{'op': 'mkdir', 'path': 'empty'}]})
-    r = c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['empty']})
+    c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'mkdir', 'path': 'empty'}]})
+    r = c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['empty']})
     assert r.status_code == 400 and 'holds no video' in r.text
 
 
@@ -234,7 +234,7 @@ def test_nothing_matched_leaves_nothing(dc, clips):
     _, c = dc
     b = new_bucket(c, name='vids3')
     _upload(c, b['id'], clips['a'])
-    r = c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['a.mp4'], 'opts': {'fps': 1, 'start': 50}})
+    r = c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['a.mp4'], 'opts': {'fps': 1, 'start': 50}})
     j = wait_job(c, r.json()['job_id']) if r.json()['job_id'] else None
     assert j is None or j['status'] == 'error'
     assert sorted(os.listdir(b['root'])) == ['a.mp4']                                  # no folder, no .frames-*
@@ -243,9 +243,9 @@ def test_nothing_matched_leaves_nothing(dc, clips):
 def test_auto_extract_on_upload(dc, clips):
     _, c = dc
     b = new_bucket(c, name='auto')
-    r = c.post(f'/api/dc/buckets/{b["id"]}/video-auto', json={'opts': {'mode': 'count', 'n': 3, 'layout': 'flat'}})
+    r = c.post(f'/api/bucket/buckets/{b["id"]}/video-auto', json={'opts': {'mode': 'count', 'n': 3, 'layout': 'flat'}})
     assert r.status_code == 200 and r.json()['video_auto']['n'] == 3
-    assert c.get(f'/api/dc/buckets/{b["id"]}').json()['video_auto']['mode'] == 'count'
+    assert c.get(f'/api/bucket/buckets/{b["id"]}').json()['video_auto']['mode'] == 'count'
     up = _upload(c, b['id'], clips['a'], 'in')
     jobs = up['frames']['jobs']
     assert [j['path'] for j in jobs] == ['in/a.mp4'] and not up['frames']['errors']
@@ -256,7 +256,7 @@ def test_auto_extract_on_upload(dc, clips):
         ['a_000015.jpg', 'a_000045.jpg', 'a_000075.jpg', 'frames.csv']
     # the same file again adds nothing, so nothing starts; turning it off stops it
     assert 'frames' not in _upload(c, b['id'], clips['a'], 'in')
-    assert c.post(f'/api/dc/buckets/{b["id"]}/video-auto', json={'opts': None}).json() == {'video_auto': None}
+    assert c.post(f'/api/bucket/buckets/{b["id"]}/video-auto', json={'opts': None}).json() == {'video_auto': None}
     assert 'frames' not in _upload(c, b['id'], clips['static'], 'y')
 
 
@@ -266,9 +266,9 @@ def test_frames_need_manage(dc, clips):
     b = new_bucket(c, name='mine')
     _upload(c, b['id'], clips['a'])
     other = as_user(make_user('bob'))
-    r = other.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['a.mp4']})
+    r = other.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['a.mp4']})
     assert r.status_code in (403, 404)
-    assert other.get(f'/api/dc/buckets/{b["id"]}/video', params={'path': 'a.mp4'}).status_code == 404
+    assert other.get(f'/api/bucket/buckets/{b["id"]}/video', params={'path': 'a.mp4'}).status_code == 404
 
 
 def test_s3_stream_needs_copy(dc, clips, monkeypatch):
@@ -286,10 +286,10 @@ def test_s3_stream_needs_copy(dc, clips, monkeypatch):
         def __getattr__(self, k):
             return getattr(self._r, k)
     monkeypatch.setattr(service, '_row', lambda user, bid, conn=None: S3Row(real(user, bid, conn)))
-    r = c.post('/api/dc/frames', json={'bucket': b['id'], 'paths': ['a.mp4']})
+    r = c.post('/api/bucket/frames', json={'bucket': b['id'], 'paths': ['a.mp4']})
     assert r.status_code == 400 and 'streamed from S3' in r.text
-    assert c.post(f'/api/dc/buckets/{b["id"]}/video-auto', json={'opts': {}}).status_code == 400
-    assert c.get(f'/api/dc/buckets/{b["id"]}/file', params={'path': 'a.mp4', 'w': 64}).status_code == 415
+    assert c.post(f'/api/bucket/buckets/{b["id"]}/video-auto', json={'opts': {}}).status_code == 400
+    assert c.get(f'/api/bucket/buckets/{b["id"]}/file', params={'path': 'a.mp4', 'w': 64}).status_code == 415
 
 
 def test_frames_csv_columns(clips, tmp_path):

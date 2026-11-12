@@ -2,9 +2,9 @@
 Page shell: the page itself (home at /, the visualizer at /s/<id>/), plotly.js, status (polled at startup) and
 background jobs. Core: every install has these. What one visualizer session serves is in session_data.py.
 
-    GET /                  the home page; /?session=<id> (old links) -> 302 s/<id>/
+    GET /                  the page (Home, or the screen its query names); /?session=<id> (old links) -> 302 s/<id>/
     GET /s/<id>/           the visualizer page (assets under ../../static/), marks the session opened by me
-    GET /api/status        works on the home page too (dataset: null); my_role + user
+    GET /api/status        works on the Image page too (dataset: null); my_role + user
     /api/jobs              only jobs of sessions I can open, or that I started
 """
 
@@ -66,7 +66,7 @@ def router(state, ctx):
 
     @r.get('/api/status', dependencies=signed_in)
     def status():
-        st, cfg = ctx.state, ctx.cfg            # st is None on the Sessions home (no session open)
+        st, cfg = ctx.state, ctx.cfg            # st is None on the Image page (no session open)
         b = context.bound()
         vis = visible()
         out = {

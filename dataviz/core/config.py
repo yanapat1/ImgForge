@@ -82,7 +82,7 @@ DEFAULTS = {
     'database': {'url': '${DATABASE_URL}', 'pool_size': 10},
     'auth': {'cookie_secure': '${DATAVIZ_COOKIE_SECURE:-auto}',   # auto = Secure cookie when the request came over https
              'session_idle_days': 7, 'session_max_days': 30},
-    'data_analysis': {                      # the Data Analysis zone
+    'data': {                      # the Data zone
         'max_rows': 1000000,                # rows kept of one result
         'max_spool_mb': 4096,               # result files kept per user
         'statement_timeout_s': 600,
@@ -93,11 +93,11 @@ DEFAULTS = {
         'ai_cell_chars': 80,                # one cell
         'ai_result_chars': 4000,            # one tool result, whatever is in it
         'ai_table_columns': 200,            # columns of one describe_table page
-        'sample_database': True,            # the first start makes the example database sample_shop (analysis/sample.py)
+        'sample_database': True,            # the first start makes the example database sample_shop (data/sample.py)
     },
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root
-    'storage': {'allowed_roots': ['.'], 'data_root': 'data'},   # data_root: Data Center managed buckets
+    'storage': {'allowed_roots': ['.'], 'data_root': 'data'},   # data_root: Bucket managed buckets
     'embeddings': {'allow_url_previews': False},
     'vectors': {'enabled': True, 'hnsw_min_rows': 50000},   # pgvector copy of every feature set; HNSW index above n rows
     's3': {'concurrency': 32, 'connect_timeout': 5, 'read_timeout': 60, 'retries': 5},
@@ -142,6 +142,10 @@ def load_config(path=None, log=None):
             raise ValueError(f'{path}: top level must be a mapping')
     elif path != DEFAULT_CONFIG:
         raise FileNotFoundError(path)
+    if 'data_analysis' in data and 'data' not in data:        # the old name of the Data zone's section
+        data['data'] = data.pop('data_analysis')
+        from . import logging as vlog
+        vlog.get_logger('config').warning('config: `data_analysis:` is now called `data:`; please rename it')
     unknown = []
     cfg = _merge(DEFAULTS, data, (), unknown)
     if unknown:

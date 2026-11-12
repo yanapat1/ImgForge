@@ -1,7 +1,7 @@
 """
 Every table the server keeps in PostgreSQL, in three database schemas:
 
-    app   accounts, login sessions, sessions (= the cards of the home page) + sharing, per-user connections /
+    app   accounts, login sessions, sessions (= the cards of the Image page) + sharing, per-user connections /
           LLM providers / models / preferences, audit log
     lbl   labeling annotations (one shared set of tables, every row carries project_id = the label session id)
     vec   feature vectors (pgvector): one registry row per (dataset fingerprint, feature) + one table per set
@@ -241,7 +241,7 @@ models = Table(
     Index('ux_models_owner_name', 'owner_id', func.lower(text('name')), unique=True),
     schema='app')
 
-# one row per card of the home page, both kinds; access is decided here for both (auth/access.py)
+# one row per card of the Image page, both kinds; access is decided here for both (auth/access.py)
 sessions = Table(
     'sessions', metadata,
     Column('id', String(36), primary_key=True),
@@ -273,7 +273,7 @@ viz_sessions = Table(
     CheckConstraint("source_kind IN ('local', 's3', 'labeling', 'embeddings', 'union')", name='source_kind'),  # 0004
     schema='app')
 
-# the members of a combined ('union') visualize session, in order; alias = the name prefix of its images (data/union.py)
+# the members of a combined ('union') visualize session, in order; alias = the name prefix of its images (image/union.py)
 union_members = Table(
     'union_members', metadata,
     Column('union_id', String(36), ForeignKey('app.sessions.id', ondelete='CASCADE'), nullable=False),
@@ -364,9 +364,9 @@ curation_undo = Table(
     Index('ix_curation_undo_session', 'session_id', 'at'),
     schema='app')
 
-# ---- the Data Center (datacenter/, migration 0006): buckets of data, their tags, detections, undo log
-dc_buckets = Table(
-    'dc_buckets', metadata,
+# ---- the Bucket page (bucket/, migration 0006): buckets of data, their tags, detections, undo log
+buckets = Table(
+    'buckets', metadata,
     Column('id', String(32), primary_key=True),
     _user_fk('owner_id'),                                # private to the owner; admins see every bucket
     Column('name', String(200), nullable=False),
@@ -386,26 +386,26 @@ dc_buckets = Table(
     _now('created_at'), _now('updated_at'),
     CheckConstraint("kind IN ('managed', 'local', 's3')", name='kind'),
     CheckConstraint("mode IN ('stream', 'local')", name='mode'),
-    Index('ux_dc_buckets_owner_name', 'owner_id', func.lower(text('name')), unique=True),
+    Index('ux_buckets_owner_name', 'owner_id', func.lower(text('name')), unique=True),
     schema='app')
 
 
 def _bucket_fk():
-    return Column('bucket_id', String(32), ForeignKey('app.dc_buckets.id', ondelete='CASCADE'), nullable=False)
+    return Column('bucket_id', String(32), ForeignKey('app.buckets.id', ondelete='CASCADE'), nullable=False)
 
 
-dc_tags = Table(                                         # path '' = the bucket; auto = format:<key> from detection
-    'dc_tags', metadata,
+bucket_tags = Table(                                         # path '' = the bucket; auto = format:<key> from detection
+    'bucket_tags', metadata,
     _bucket_fk(),
     Column('path', Text, nullable=False, server_default=text("''")),
     Column('tag', String(100), nullable=False),
     Column('auto', Boolean, nullable=False, server_default=text('false')),
-    Index('ux_dc_tags_bucket_path_tag', 'bucket_id', 'path', func.lower(text('tag')), unique=True),
-    Index('ix_dc_tags_tag', func.lower(text('tag'))),
+    Index('ux_bucket_tags_bucket_path_tag', 'bucket_id', 'path', func.lower(text('tag')), unique=True),
+    Index('ix_bucket_tags_tag', func.lower(text('tag'))),
     schema='app')
 
-dc_format_cache = Table(                                 # last detection of a folder, valid while its fingerprint is
-    'dc_format_cache', metadata,
+bucket_format_cache = Table(                                 # last detection of a folder, valid while its fingerprint is
+    'bucket_format_cache', metadata,
     _bucket_fk(),
     Column('path', Text, nullable=False),
     Column('fingerprint', String(64), nullable=False),
@@ -414,8 +414,8 @@ dc_format_cache = Table(                                 # last detection of a f
     PrimaryKeyConstraint('bucket_id', 'path'),
     schema='app')
 
-dc_s3_local = Table(                                     # a folder of a streamed S3 link downloaded into local_root
-    'dc_s3_local', metadata,
+bucket_s3_local = Table(                                     # a folder of a streamed S3 link downloaded into local_root
+    'bucket_s3_local', metadata,
     _bucket_fk(),
     Column('path', Text, nullable=False),                # '' = the whole bucket
     Column('state', String(16), nullable=False, server_default=text("'fetching'")),   # fresh|outdated|fetching|error
@@ -427,14 +427,14 @@ dc_s3_local = Table(                                     # a folder of a streame
     PrimaryKeyConstraint('bucket_id', 'path'),
     schema='app')
 
-dc_undo = Table(                                         # one ops batch: the steps that reverse it
-    'dc_undo', metadata,
+bucket_undo = Table(                                         # one ops batch: the steps that reverse it
+    'bucket_undo', metadata,
     Column('id', String(32), primary_key=True),
     _bucket_fk(),
     _user_fk(ondelete='SET NULL', nullable=True),
     _now('created_at'),
     Column('manifest', JSONB, nullable=False),
-    Index('ix_dc_undo_bucket', 'bucket_id', 'created_at'),
+    Index('ix_bucket_undo_bucket', 'bucket_id', 'created_at'),
     schema='app')
 
 jobs_log = Table(
@@ -539,7 +539,7 @@ lbl_annotations = Table(
     Column('created_at', Float), Column('updated_at', Float),
     Column('version', Integer, nullable=False, server_default=text('1')),
     Column('is_deleted', Boolean, nullable=False, server_default=text('false')),
-    Column('change_seq', BigInteger),        # 0004: set by a trigger from lbl.change_seq on every write (data/live.py)
+    Column('change_seq', BigInteger),        # 0004: set by a trigger from lbl.change_seq on every write (image/live.py)
     Index('ix_lbl_ann_task_media', 'task_id', 'media_id'),
     Index('ix_lbl_ann_media_live', 'media_id', postgresql_where=text('NOT is_deleted')),
     Index('ix_lbl_ann_class_live', 'class_id', postgresql_where=text('NOT is_deleted')),
@@ -608,21 +608,21 @@ feature_sets = Table(
     Index('ux_feature_sets_fp_key', 'fingerprint', 'feature_key', unique=True),
     schema='vec')
 
-# ==================================================== Data Analysis zone (analysis/): private to their owner, never shared
-an_sessions = Table(
-    'an_sessions', metadata,
+# ==================================================== Data zone (data/): private to their owner, never shared
+data_sessions = Table(
+    'data_sessions', metadata,
     Column('id', String(36), primary_key=True),
     _user_fk('owner_id'),
     Column('name', String(200), nullable=False),
     Column('state', JSONB, nullable=False, server_default=text("'{}'::jsonb")),     # open query tabs, layout
     _now('created_at'), _now('updated_at'),
-    Index('ix_an_sessions_owner', 'owner_id'),
+    Index('ix_data_sessions_owner', 'owner_id'),
     schema='app')
 
-an_history = Table(
-    'an_history', metadata,
+data_history = Table(
+    'data_history', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('session_id', String(36), ForeignKey('app.an_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('session_id', String(36), ForeignKey('app.data_sessions.id', ondelete='CASCADE'), nullable=False),
     Column('connection_id', String(36)),
     Column('database', String(200)),
     Column('name', String(200), nullable=False, server_default=''),
@@ -633,24 +633,24 @@ an_history = Table(
     Column('ms', Integer),
     Column('error', Text),
     _now('at'),
-    Index('ix_an_history_session_at', 'session_id', 'at'),
+    Index('ix_data_history_session_at', 'session_id', 'at'),
     schema='app')
 
-an_scripts = Table(
-    'an_scripts', metadata,
+data_scripts = Table(
+    'data_scripts', metadata,
     Column('id', String(36), primary_key=True),
-    Column('session_id', String(36), ForeignKey('app.an_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('session_id', String(36), ForeignKey('app.data_sessions.id', ondelete='CASCADE'), nullable=False),
     Column('name', String(200), nullable=False),
     Column('position', Integer, nullable=False, server_default=text('0')),
     Column('connection_id', String(36)),
     Column('database', String(200)),
     Column('body', Text, nullable=False, server_default=''),
     _now('updated_at'),
-    Index('ix_an_scripts_session', 'session_id', 'position'),
+    Index('ix_data_scripts_session', 'session_id', 'position'),
     schema='app')
 
-an_column_docs = Table(
-    'an_column_docs', metadata,
+data_column_docs = Table(
+    'data_column_docs', metadata,
     Column('connection_id', String(36), nullable=False),
     Column('database', String(200), nullable=False, server_default=''),
     Column('schema_name', String(200), nullable=False, server_default=''),
@@ -663,14 +663,14 @@ an_column_docs = Table(
     PrimaryKeyConstraint('connection_id', 'database', 'schema_name', 'table_name', 'column_name'),
     schema='app')
 
-an_dashboards = Table(
-    'an_dashboards', metadata,
+data_dashboards = Table(
+    'data_dashboards', metadata,
     Column('id', String(36), primary_key=True),
-    Column('session_id', String(36), ForeignKey('app.an_sessions.id', ondelete='CASCADE'), nullable=False),
+    Column('session_id', String(36), ForeignKey('app.data_sessions.id', ondelete='CASCADE'), nullable=False),
     Column('name', String(200), nullable=False),
     Column('layout', JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     _now('updated_at'),
-    Index('ix_an_dashboards_session', 'session_id'),
+    Index('ix_data_dashboards_session', 'session_id'),
     schema='app')
 
 SCHEMAS = ('app', 'lbl', 'vec')

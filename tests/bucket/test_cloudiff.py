@@ -1,4 +1,4 @@
-"""Local copy vs. S3, file by file (datacenter/cloudiff.py): with the download's manifest each status is exact; without
+"""Local copy vs. S3, file by file (bucket/cloudiff.py): with the download's manifest each status is exact; without
 one (a copy downloaded before manifests) the file times decide, tolerant of S3's second-cut LastModified."""
 
 from dataviz.bucket import cloudiff

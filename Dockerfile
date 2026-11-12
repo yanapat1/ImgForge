@@ -29,7 +29,7 @@ WORKDIR /workspace/scripts/image-tools
 COPY --from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 /uv /usr/local/bin/uv
 
 # ZONES: which parts of the product this image holds (dataviz/zones.py). Empty = every zone. An analyst image:
-#   docker compose build --build-arg ZONES=datacenter,analysis      (or ZONES=... in .env)
+#   docker compose build --build-arg ZONES=bucket,data      (or ZONES=... in .env)
 # installs only core + those zones' requirements (no torch / GPU libraries) and leaves the other zones' files out.
 ARG ZONES=
 COPY requirements.txt .

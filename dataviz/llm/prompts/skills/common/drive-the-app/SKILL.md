@@ -7,8 +7,9 @@ when: do / show something elsewhere, or run something
 
 | The user wants… | Page / view | How |
 |---|---|---|
-| sessions, open a dataset | Home | `navigate` home |
-| files, folders, buckets, tags, formats, upload, export | Data Center | `navigate` data (+ bucket, path) |
+| an overview of everything (counts, recent work) | Home | `navigate` home |
+| the list of sessions, open a dataset | Image | `navigate` image |
+| files, folders, buckets, tags, formats, upload, export | Bucket | `navigate` bucket (+ bucket, path) |
 | the map, clusters, outliers, a class's boxes | Visualizer › Explore | `open_tab` explore, `set_projection` |
 | class counts, sizes, balance | Visualizer › Class stats | `compute_stats`, `class_stats` |
 | duplicates, leaks, box problems | Visualizer › Curation | `run_scan` curation, `issue_summary` |
@@ -17,7 +18,7 @@ when: do / show something elsewhere, or run something
 | which model is best | Visualizer › Evaluation | `run_eval_all`, `eval_summary` |
 | A vs B datasets | Visualizer › Compare (combined datasets) | `open_tab` compare, `compare_tests` |
 | boxes of one image | Labeling | `navigate` label (its own Label assistant edits boxes) |
-| SQL / MongoDB queries, joins, statistics, forecasts, dashboards | Data Analysis | `navigate` analysis (its own assistant runs the queries) |
+| SQL / MongoDB queries, joins, statistics, forecasts, dashboards | Data | `navigate` data (its own assistant runs the queries) |
 
 Another page: find the session (`list_sessions`) or the bucket first, then call `navigate` **last**, with a
 `goal` that says what to do there ("run yolov8s on val and rank the classes"). Say in one line where you go.
@@ -29,11 +30,11 @@ with every task instead of calling the tools one by one; each task names exactly
 
 Across pages (one chat, a `todo` with a page on each step when it spans pages):
 - "open session a1 in the visualizer": `list_sessions` q=a1 → `navigate` viz, session_id, goal = the rest.
-- Data Center, "visualize this folder with t-SNE": `list_sessions` bucket + path. One found → `navigate` viz with
+- Bucket, "visualize this folder with t-SNE": `list_sessions` bucket + path. One found → `navigate` viz with
   goal "t-SNE projection". None → `send_to_session` target visualize (the user approves in ask), then `navigate`
   to the new id it returned. A labeling project (target label) is always confirmed.
-- Visualizer, "go to ../.. of this folder": `data_location` → `navigate` data, bucket, path = parents[1]
-  (".." = parents[0]); the Data Center tools are there.
+- Visualizer, "go to ../.. of this folder": `data_location` → `navigate` bucket, bucket, path = parents[1]
+  (".." = parents[0]); the Bucket page tools are there.
 - Only a question about another page ("mAP of yolov8s in a1?", "how many images in bucket cars?"): `consult`
   (viz needs the session_id) and answer here; the user stays. `navigate` when they want to see or change it.
 - The Plan of this chat shows the steps: after a page change continue the ▶ one.

@@ -166,7 +166,7 @@ def test_open_tab_applies_in_ask_mode(monkeypatch, session):  # noqa: F811 - the
 
 # ---------------------------------------------------------------- navigate
 def test_navigate_is_checked_and_ends_the_turn(monkeypatch, svc):  # noqa: F811
-    ctx = react.Ctx(user=ALICE, role='data', scope={}, skills={})
+    ctx = react.Ctx(user=ALICE, role='bucket', scope={}, skills={})
     with pytest.raises(tools.ToolError, match='goal is required'):
         tools.prepare(ctx, 'navigate', {'screen': 'home', 'goal': ' '}, tools.REGISTRY)
     with pytest.raises(tools.ToolError, match='session_id is required'):
@@ -177,12 +177,12 @@ def test_navigate_is_checked_and_ends_the_turn(monkeypatch, svc):  # noqa: F811
     with pytest.raises(tools.ToolError, match="no visualize session 'zz'"):
         tools.prepare(ctx, 'navigate', {'screen': 'viz', 'goal': 'x', 'session_id': 'zz'}, tools.REGISTRY)
     monkeypatch.setattr(nav, '_need_zone', lambda screen: None)
-    clean, label = tools.prepare(ctx, 'navigate', {'screen': 'analysis', 'goal': 'count orders'}, tools.REGISTRY)
-    assert clean == {'screen': 'analysis', 'goal': 'count orders'} and label == 'Open Data Analysis'
+    clean, label = tools.prepare(ctx, 'navigate', {'screen': 'data', 'goal': 'count orders'}, tools.REGISTRY)
+    assert clean == {'screen': 'data', 'goal': 'count orders'} and label == 'Open Data'
     # the engine: applied in ask mode, no second provider step (the page reloads)
     script(monkeypatch, ('Opening the visualizer.', [('navigate', {'screen': 'viz', 'goal': 'run yolov8s', 'session_id': 's1'})]))
     opts = react.options({'mode': 'ask'}, OPENAI)
-    r = react.prepare(ALICE, 'data', OPENAI, react.history([{'role': 'user', 'text': 'show it'}]), {}, opts)
+    r = react.prepare(ALICE, 'bucket', OPENAI, react.history([{'role': 'user', 'text': 'show it'}]), {}, opts)
     r.ctx.ui_ack = True
     evs = list(react.events(r))
     ui = next(e for e in evs if e['type'] == 'ui_action')
@@ -208,11 +208,11 @@ def test_uiwait_owner_and_unknown():
 
 
 def test_ui_result_route_and_stream(client, monkeypatch, svc):  # noqa: F811
-    _connect(client, ['data_center', 'assistant'])
+    _connect(client, ['bucket_data', 'assistant'])
     assert client.post('/api/llm/agent/ui-result', json={}).status_code == 400
     assert client.post('/api/llm/agent/ui-result', json={'run_id': 'x', 'action_id': 'y', 'ok': True}).status_code == 404
     script(monkeypatch, ('Hello.', []))
-    r = client.post('/api/llm/agent/data/chat', json={'text': 'hi', 'ui_ack': True})
+    r = client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'ui_ack': True})
     assert r.status_code == 200 and json.loads(r.text.splitlines()[-1])['type'] == 'done'
     assert r.headers.get('content-encoding') != 'gzip', 'a gzipped stream holds the events back'
 
@@ -224,8 +224,8 @@ def test_analysis_reads_the_editor_and_proposes_sql_for_apply(monkeypatch):
     monkeypatch.setattr(service, 'user_prefs', lambda user: {})
     fix = {'sql': 'SELECT TOP 3 a FROM t', 'mode': 'replace', 'note': 'LIMIT → TOP for SQL Server'}
     seen = script(monkeypatch, ('', [('read_editor', {})]), ('', [('set_editor_query', fix)]), ('Waiting for Apply.', []))
-    run = react.prepare(ALICE, 'analysis', OPENAI, react.history([{'role': 'user', 'text': 'fix my sql'}]),
-                        {'page': 'analysis', 'session': 's1', 'connection': 'c1', 'sql': 'SELECT a FROM t LIMIT 3'},
+    run = react.prepare(ALICE, 'data', OPENAI, react.history([{'role': 'user', 'text': 'fix my sql'}]),
+                        {'page': 'data', 'session': 's1', 'connection': 'c1', 'sql': 'SELECT a FROM t LIMIT 3'},
                         react.options({'mode': 'ask'}, OPENAI))
     run.ctx.ui_ack = True
     evs = drive(run)

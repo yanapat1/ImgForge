@@ -1,4 +1,4 @@
-"""The favorites the ◆ assistant sees (analysis/favorites.py): the prefs blob is validated like the page's loadFavs,
+"""The favorites the ◆ assistant sees (data/favorites.py): the prefs blob is validated like the page's loadFavs,
 the system-prompt line stays short, and a user's word resolves to a category, a favorite table, several, or none."""
 
 from dataviz.data import favorites as fav

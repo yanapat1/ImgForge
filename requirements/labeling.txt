@@ -1,4 +1,4 @@
-# Labeling (with core + datacenter): images, pre-label models
+# Image · Label (with core + bucket): images, pre-label models
 opencv-python==5.0.0.93
 torch==2.14.1
 ultralytics==8.4.174

@@ -1,7 +1,7 @@
 """
-The Data Center's filesystem layer: where buckets live, safe path joins, paged folder listings, file operations
+The Bucket page's filesystem layer: where buckets live, safe path joins, paged folder listings, file operations
 with an undo manifest, streamed uploads / safe unzip, thumbnails, and the read-only S3 view. No database and no
-users here: datacenter/service.py decides who may touch which bucket, this module only keeps every path inside
+users here: bucket/service.py decides who may touch which bucket, this module only keeps every path inside
 its bucket.
 
 Why the care with paths: a bucket path comes from the page or from an LLM tool call, so `..`, absolute paths,
@@ -64,7 +64,7 @@ class Cancelled(Exception):
 
 
 class BucketError(Exception):
-    """A Data Center failure with the HTTP status it maps to; the message is shown to the user / the model."""
+    """A Bucket failure with the HTTP status it maps to; the message is shown to the user / the model."""
 
     def __init__(self, message, status=400):
         super().__init__(message)
@@ -86,8 +86,8 @@ def data_root(cfg):
         _warned_roots.add(str(p))
         if not on_mount(p):
             from ..core import logging as vlog
-            vlog.get_logger('datacenter').warning(
-                f'Data Center root {p} is inside the container, not on a volume: buckets, S3 local copies and '
+            vlog.get_logger('bucket').warning(
+                f'Bucket root {p} is inside the container, not on a volume: buckets, S3 local copies and '
                 'imports are lost when the container is recreated (up --build). Mount it (see docker-compose.yml).')
     return p
 
@@ -112,10 +112,21 @@ def roots(cfg):
     return [*connections.allowed_roots(cfg), data_root(cfg)]
 
 
-def cache_dir(cfg, name='dc_thumbs'):
+_moved_caches = set()
+
+
+def cache_dir(cfg, name='bucket_thumbs'):
     from ..core.config import resolve
     ws = ((cfg or {}).get('dataset') or {}).get('workspace_root') or '.dataviz_cache'
     p = resolve(str(ws)) / name
+    if name == 'bucket_thumbs' and str(p) not in _moved_caches:     # once per process: the cache's old name
+        _moved_caches.add(str(p))
+        old = p.parent / 'dc_thumbs'
+        if old.is_dir() and not p.exists():
+            try:
+                old.rename(p)
+            except OSError:
+                pass
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -169,7 +180,7 @@ def visible(name, is_dir=False):
 
 
 def is_secret(name):
-    """A .env file: it holds secrets, so reading it needs data.manage."""
+    """A .env file: it holds secrets, so reading it needs bucket.manage."""
     low = os.path.basename(str(name or '')).lower()
     return low == '.env' or low.startswith('.env.') or low.endswith('.env')
 
@@ -1276,7 +1287,7 @@ class S3View:
         are kept, unless `mirror`: then, once the listing completed, they are removed (`removed`). Downloads start
         while the (parallel) listing runs; an object of BIG bytes or more is fetched in parallel ranges.
         listed(key, size, last_modified): called for every object listed (the download's manifest,
-        datacenter/cloudiff.Manifest).
+        bucket/cloudiff.Manifest).
         -> {downloaded, skipped, bytes (downloaded), size (of every object), failed, total, removed}."""
         progress = progress or (lambda *a, **k: None)
         stop = cancelled or (lambda: False)

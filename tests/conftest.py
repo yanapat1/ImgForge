@@ -18,7 +18,7 @@ from pathlib import Path
 # every index build spawns hardware.workers('proc') decode processes (16 on 128 cores): 32 workers x 16 = 560 pythons
 # and the 64 GiB container was OOM-killed. Each worker is pinned to its own slice of the cores instead (sched_setaffinity
 # is what hardware._cpu_count reads, and children -- decode pools, app.py -- inherit it), with BLAS threads to match.
-# The example database (analysis/sample.py) lives on the shared test server: an app started by a test (app.py in a
+# The example database (data/sample.py) lives on the shared test server: an app started by a test (app.py in a
 # subprocess inherits this) does not make it; tests/data/test_sample.py makes its own under a name of its own.
 os.environ.setdefault('DATAVIZ_SAMPLE_DB', '0')
 
@@ -43,7 +43,7 @@ if os.environ.get('PYTEST_XDIST_WORKER_COUNT'):
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))     # makes `dataviz` importable
-# Tests live in feature folders (auth/, compare/, datacenter/, ...) with no __init__.py; the shared helpers (authutil,
+# Tests live in feature folders (auth/, compare/, bucket/, ...) with no __init__.py; the shared helpers (authutil,
 # vizutil, conftest_io) sit here and tests reuse each other's fixtures across folders (from test_page_smoke import
 # server), so this folder and every feature folder go on sys.path. Test file names stay unique across folders.
 _TESTS = Path(__file__).resolve().parent
@@ -257,7 +257,7 @@ def wait_job(client, job_id, timeout=30):
 # ---------------------------------------------------------------- multi-user helpers (added for the per-user repositories)
 @pytest.fixture
 def tmp_roots(monkeypatch, tmp_path):
-    """The folders local paths may use (data/connections.py allowed_roots, read by the routes on every request)
+    """The folders local paths may use (image/connections.py allowed_roots, read by the routes on every request)
     also include tmp_path, where the test folders live. Use with pytestmark = pytest.mark.usefixtures('tmp_roots')."""
     from dataviz.image import connections
     orig = connections.allowed_roots

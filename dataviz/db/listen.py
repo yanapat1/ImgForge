@@ -1,7 +1,7 @@
 """
 ChangeListener: one thread per process holding a psycopg 3 autocommit connection that LISTENs on channel
 'lbl_change' (the triggers of migration 0004 NOTIFY it with the project id on every annotation / status write)
-and wakes the asyncio waiters of that project (data/live.py).
+and wakes the asyncio waiters of that project (image/live.py).
 
     listener()                     the process singleton (started on first use)
     listener().waiter(pid, loop)   a fresh asyncio.Event, set (on `loop`) by the next NOTIFY of project pid

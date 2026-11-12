@@ -1,5 +1,5 @@
 // Augment › Model: a detection model on each step of the recipe at full chance (and the whole recipe), scored against
-// the labels as the step moved them (routes/augment.py → data/augment_model.py). A step the model loses much on is
+// the labels as the step moved them (routes/augment.py → image/augment_model.py). A step the model loses much on is
 // worth training with; one it already handles adds little.
 
 import { errText, getJSON, postJSON } from '../core/api.js';

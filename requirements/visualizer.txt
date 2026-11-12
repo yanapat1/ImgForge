@@ -1,4 +1,4 @@
-# Dataset Visualizer (with core + datacenter): features, projections, curation, models. The GPU libraries are here.
+# Image · Visualize (with core + bucket): features, projections, curation, models. The GPU libraries are here.
 scipy==1.17.1
 scikit-learn==1.9.0
 cleanlab==2.9.0              # Find issues › Label issues: cleanlab on k-fold out-of-fold class probabilities

@@ -73,7 +73,7 @@ class Ctx:
         self.labeling = labeling            # labeling.projects.ProjectRegistry (labeling sessions, keyed by pid)
         self.llm = llm                      # llm.store.LLMStore (saved LLM providers + feature switches)
         self.curation = lambda st: None     # State -> its scanned data.curation.Curation or None (routes/curation.py)
-        self.label_auto = None              # routes/labeling.py: link / activate / label_all (Data Center autolabel)
+        self.label_auto = None              # routes/labeling.py: link / activate / label_all (Bucket autolabel)
         self.states = OrderedDict()         # session id -> State, least recently used first
         self.max_loaded = max(1, int((cfg.get('sessions') or {}).get('max_loaded', 4)))
         self.close_hooks = []               # fn(tag): per-State caches of the route modules, dropped on unload
@@ -83,7 +83,7 @@ class Ctx:
     # ------------------------------------------------------------ the request's session
     @property
     def state(self):
-        """The State of this request's /s/<id>/ session; None on the home page (and outside a request)."""
+        """The State of this request's /s/<id>/ session; None on the Image page (and outside a request)."""
         b = context.bound()
         return b.state if b is not None else self.fixed
 
@@ -175,7 +175,7 @@ class Ctx:
         return st
 
     def loaded(self, sid):
-        """True while session `sid` is loaded on the server (the home cards' "open now")."""
+        """True while session `sid` is loaded on the server (the Image page cards' "open now")."""
         return sid in self.states or layer_key(sid, 'images') in self.states
 
     def _register(self, sid, st):
@@ -292,7 +292,7 @@ def create_app(ctx, auth=True) -> FastAPI:
         ctx = Ctx(ctx)
     zones.configure(ctx.cfg)
     state = _StateProxy(ctx)
-    app = FastAPI(title='Dataset Visualizer', docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title='DataViz', docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(JsonGZip)
     log_http = bool(ctx.cfg.get('logging', {}).get('http', True))
     log_static = bool(ctx.cfg.get('logging', {}).get('static', False))   # also log /static/ files, thumbnails, polling

@@ -1,4 +1,4 @@
-"""data/imgstats.py: each metric moves the right way on a synthetic scene (darker, blurred, noisy, tinted,
+"""image/imgstats.py: each metric moves the right way on a synthetic scene (darker, blurred, noisy, tinted,
 recompressed), the JPEG quality estimate, EXIF camera facts, the per-member cache (a second run reads nothing, a
 changed sig re-measures, a sample is deterministic and nested) and a bad file is skipped."""
 

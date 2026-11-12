@@ -1,4 +1,4 @@
-"""Augmentation recipes (data/augment.py): every transform of the catalog runs, recipes are checked, boxes follow."""
+"""Augmentation recipes (image/augment.py): every transform of the catalog runs, recipes are checked, boxes follow."""
 
 import numpy as np
 import pytest

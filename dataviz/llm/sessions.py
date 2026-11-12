@@ -22,9 +22,9 @@ answers 404 like another user's. The rows stay until purge() (startup + every 24
 account removes them at once (FK CASCADE).
 
 One chat, every page: the assistant's chats are role 'app'. The page a message comes from picks the specialist
-that answers it (engine/roles.py), not the chat, so the same chat continues on the home page, in the Data Center
+that answers it (engine/roles.py), not the chat, so the same chat continues on the Image page, in the Bucket page
 and in any visualizer session. Each message keeps its page (llm_messages.page); list_(role 'app') lists every live
-chat of the user, the older per-assistant chats ('data', 'visual') too, so they can be continued anywhere.
+chat of the user, the older per-assistant chats ('bucket', 'visual', 'data') too, so they can be continued anywhere.
 
 Limits: MAX_SESSIONS (Admin › Settings llm_max_sessions) live chats per user (role 'app' counts every chat; the
 older roles count their own). Pinned chats are never removed automatically; when every chat is pinned, create() is
@@ -51,7 +51,7 @@ TITLE_LEN = 60
 RETENTION_DAYS = 730
 PURGE_BATCH = 1000
 PURGE_EVERY_S = 24 * 3600
-ROLES = ('app', 'data', 'visual', 'analysis')
+ROLES = ('app', 'bucket', 'visual', 'data')
 APP = 'app'                     # one chat across every page: lists and limits cover all roles
 MAX_PLAN = 30
 THINKING_MAX = 4000

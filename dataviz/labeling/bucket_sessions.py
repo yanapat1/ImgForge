@@ -1,4 +1,4 @@
-"""Labeling sessions whose source lies inside a Data Center bucket, for the bucket cards."""
+"""Labeling sessions whose source lies inside a bucket, for the bucket cards."""
 
 from sqlalchemy import text
 

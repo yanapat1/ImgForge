@@ -1,4 +1,4 @@
-"""Chunked uploads (POST /api/dc/buckets/{bid}/upload/part, service.upload_part): a big file sent in parts lands
+"""Chunked uploads (POST /api/bucket/buckets/{bid}/upload/part, service.upload_part): a big file sent in parts lands
 byte for byte under its folder path, archives are
 unpacked, dot names / files already there are skipped before any bytes, the part file stays hidden and goes away,
 chunks may come out of order, twice or in parallel, the status GET resumes after a reload, stale parts are swept,
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.usefixtures('tmp_roots')
 
 
 def part(c, bid, name, data, offset, total, uid, path=''):
-    return c.post(f'/api/dc/buckets/{bid}/upload/part', content=data,
+    return c.post(f'/api/bucket/buckets/{bid}/upload/part', content=data,
                   params={'path': path, 'name': name, 'id': uid, 'offset': offset, 'total': total},
                   headers={'Content-Type': 'application/octet-stream'})
 
@@ -49,7 +49,7 @@ def test_parts_land_byte_for_byte(dc):
 
 
 def status(c, bid, name, total, uid, path=''):
-    r = c.get(f'/api/dc/buckets/{bid}/upload/part', params={'path': path, 'name': name, 'id': uid, 'total': total})
+    r = c.get(f'/api/bucket/buckets/{bid}/upload/part', params={'path': path, 'name': name, 'id': uid, 'total': total})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -62,7 +62,7 @@ def test_out_of_order_duplicates_and_resume(dc):
     assert part(c, b['id'], 'a.bin', data[600:], 600, 1000, uid).json() == {'received': 400, 'ranges': [[600, 1000]]}
     assert part(c, b['id'], 'a.bin', data[600:], 600, 1000, uid).json()['received'] == 400       # a repeat: no harm
     assert part(c, b['id'], 'a.bin', data[:300], 0, 1000, uid).json()['ranges'] == [[0, 300], [600, 1000]]
-    ls = c.get(f'/api/dc/buckets/{b["id"]}/ls').json()
+    ls = c.get(f'/api/bucket/buckets/{b["id"]}/ls').json()
     assert 'upload' not in str(ls.get('entries', ls.get('items', [])))                           # parts stay hidden
     # a "reload": a new page asks what is held and sends only the gap
     assert status(c, b['id'], 'a.bin', 1000, uid)['ranges'] == [[0, 300], [600, 1000]]
@@ -146,7 +146,7 @@ def test_auto_extract_on_chunked_video(dc):
     from test_bucket_video import make_clip
     _, c = dc
     b = new_bucket(c, name='autoparts')
-    c.post(f'/api/dc/buckets/{b["id"]}/video-auto', json={'opts': {'mode': 'count', 'n': 3, 'layout': 'flat'}})
+    c.post(f'/api/bucket/buckets/{b["id"]}/video-auto', json={'opts': {'mode': 'count', 'n': 3, 'layout': 'flat'}})
     clip = make_clip(os.path.join(b['root'], '..', 'src.mp4'))
     with open(clip, 'rb') as f:
         data = f.read()

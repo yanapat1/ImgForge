@@ -143,7 +143,7 @@ def test_coverage_against_an_uploaded_target_set(pg, tmp_path):
     assert c.post(f'/s/{sid}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'upload', 'id': t['id']}}).status_code == 404
 
 
-def test_augmented_copy_lands_in_a_new_data_center_bucket(world, tmp_path):
+def test_augmented_copy_lands_in_a_new_bucket_bucket(world, tmp_path):
     from conftest import wait_job
     world['ctx'].cfg['storage']['data_root'] = str(tmp_path / 'dc')    # never the real data folder
     c, sid = world['c'], world['sid']

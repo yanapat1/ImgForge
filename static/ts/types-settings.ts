@@ -2,7 +2,7 @@
 // Pure types, no runtime code. Forms are `type` aliases (not interfaces) so the dialog's data-f="a.b.c" writer can
 // view them as plain records. Each form carries a `form` tag, so `SET.form` narrows like a discriminated union.
 
-import type { Bucket, Format } from './types-datacenter.js';
+import type { Bucket, Format } from './types-bucket.js';
 import type { TagState } from './core/tag-field.js';
 
 // ------------------------------------------------------------------ shared
@@ -36,7 +36,7 @@ export interface BrowseResult {
   /** image files directly in this folder (local browse with images=1, S3 browse); capped at 10,000 */
   images?: number | null;
 }
-/** GET api/fs/embeddings: what an embeddings session on that folder would hold (data/embedding_source.py check). */
+/** GET api/fs/embeddings: what an embeddings session on that folder would hold (image/embedding_source.py check). */
 export interface EmbeddingsSummary {
   path: string; n: number; label: boolean; classes: number;
   features: Array<{ key: string; name: string; dim: number }>;
@@ -84,7 +84,7 @@ export interface UnionPart { id: string; alias: string; name?: string; kind?: Da
 export interface DatasetItem {
   id: string; name: string;
   kind: 's3' | 'local' | 'labeling' | 'embeddings' | 'union';
-  /** union: its members, in order (data/connections.py _add_parts); not `members`, which lists whom it is shared with */
+  /** union: its members, in order (image/connections.py _add_parts); not `members`, which lists whom it is shared with */
   parts?: UnionPart[];
   uri?: string;
   modality?: string[];
@@ -92,7 +92,7 @@ export interface DatasetItem {
   connection_id?: string; connection?: string | null;
   bucket?: string; prefix?: string; path?: string;
   project_id?: string; task_id?: string; only_done?: boolean;
-  /** local / S3: what one point is (data/views.py) and whether sub-folder names are the classes */
+  /** local / S3: what one point is (image/views.py) and whether sub-folder names are the classes */
   unit?: MapUnit; class_from_folder?: boolean;
   error?: string;
   exists?: boolean;
@@ -129,7 +129,7 @@ export type LocalForm = TagFields & {
   browse?: BrowseResult | null | undefined;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
-/** New visualize › Data Center: a folder of one of the user's Data Center buckets (POST /api/dc/send, target visualize). */
+/** New visualize › Bucket: a folder of one of the user's buckets (POST /api/bucket/send, target visualize). */
 export type DcForm = TagFields & {
   form: 'dc';
   buckets: Bucket[] | null; bid: string; path: string; dirs: string[] | null; format: Format | null; name: string;
@@ -147,7 +147,7 @@ export type LabelingForm = TagFields & {
   projects: LabProject[] | null;
   status?: StatusLine | null | undefined; saveStatus?: StatusLine | null | undefined;
 };
-/** A combined dataset: 2–8 visualize sessions in priority order, each with an alias (data/union.py ALIAS_RE). */
+/** A combined dataset: 2–8 visualize sessions in priority order, each with an alias (image/union.py ALIAS_RE). */
 export type UnionForm = TagFields & {
   form: 'union';
   id?: string | undefined; name?: string | undefined;
@@ -330,7 +330,7 @@ export type LabSettings = {
 };
 
 // ------------------------------------------------------------------ prompts & skills (settings/prompts.ts)
-export type AssetRole = 'data' | 'visual' | 'all';
+export type AssetRole = 'bucket' | 'visual' | 'data' | 'all';
 /** One of the user's own instructions / skills (GET api/llm/prompts → items[]). */
 export interface LlmItem {
   id: string; kind: 'prompt' | 'skill'; role: AssetRole; name: string; description: string; when: string; body: string;

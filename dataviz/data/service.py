@@ -1,5 +1,5 @@
 """
-The Data Analysis zone's one entry point: routes, assistant tools and tests call these functions.
+The Data zone's one entry point: routes, assistant tools and tests call these functions.
 
 Every call names the signed-in user, and connections are looked up as that user's own: nobody can run SQL with someone
 else's credentials, so analysis sessions are private and never shared.
@@ -37,7 +37,7 @@ from . import stats as stats_mod
 KINDS = ('postgres', 'mssql', 'mongo')
 TOKEN_S = 300
 MAX_TEXT = 200000
-_log = vlog.get_logger('analysis')
+_log = vlog.get_logger('data')
 
 
 class DataError(Exception):
@@ -65,7 +65,7 @@ def configure(ctx):
 
 
 def _cfg():
-    return (_Conf.ctx.cfg or {}).get('data_analysis') or {}
+    return (_Conf.ctx.cfg or {}).get('data') or {}
 
 
 def _root():
@@ -73,7 +73,7 @@ def _root():
 
 
 def _use(user):
-    tiers.check(user, 'analysis.use')
+    tiers.check(user, 'data.use')
 
 
 def _conn(user, cid):
@@ -103,7 +103,7 @@ def _dialect(conn):
 # ---------------------------------------------------------------- sessions
 def _session(user, sid):
     with db.connect() as c:
-        r = c.execute(text('SELECT * FROM app.an_sessions WHERE id = :i AND owner_id = :o'),
+        r = c.execute(text('SELECT * FROM app.data_sessions WHERE id = :i AND owner_id = :o'),
                       {'i': sid, 'o': user['id']}).first()
     if r is None:
         raise DataError('no such session', 404)
@@ -117,7 +117,7 @@ def _shape(r):
 def list_sessions(user):
     _use(user)
     with db.connect() as c:
-        rows = c.execute(text('SELECT * FROM app.an_sessions WHERE owner_id = :o ORDER BY updated_at DESC'),
+        rows = c.execute(text('SELECT * FROM app.data_sessions WHERE owner_id = :o ORDER BY updated_at DESC'),
                          {'o': user['id']}).all()
     return [_shape(r) for r in rows]
 
@@ -127,7 +127,7 @@ def create_session(user, name):
     name = str(name or '').strip()[:200] or 'Untitled analysis'
     sid = uuid.uuid4().hex
     with db.begin() as c:
-        r = c.execute(text('INSERT INTO app.an_sessions (id, owner_id, name) VALUES (:i, :o, :n) RETURNING *'),
+        r = c.execute(text('INSERT INTO app.data_sessions (id, owner_id, name) VALUES (:i, :o, :n) RETURNING *'),
                       {'i': sid, 'o': user['id'], 'n': name}).first()
     return _shape(r)
 
@@ -142,7 +142,7 @@ def update_session(user, sid, name=None, state=None):
         sets.append('state = CAST(:s AS JSONB)')
         args['s'] = orjson.dumps(state).decode()
     with db.begin() as c:
-        r = c.execute(text(f'UPDATE app.an_sessions SET {", ".join(sets)} WHERE id = :i RETURNING *'), args).first()
+        r = c.execute(text(f'UPDATE app.data_sessions SET {", ".join(sets)} WHERE id = :i RETURNING *'), args).first()
     return _shape(r)
 
 
@@ -150,8 +150,8 @@ def delete_session(user, sid):
     _session(user, sid)
     close_session(user, sid)
     with db.begin() as c:
-        c.execute(text('DELETE FROM app.an_sessions WHERE id = :i'), {'i': sid})
-    shutil.rmtree(_root() / 'analysis' / str(user['id']) / sid, ignore_errors=True)
+        c.execute(text('DELETE FROM app.data_sessions WHERE id = :i'), {'i': sid})
+    shutil.rmtree(spool.results_dir(_root()) / str(user['id']) / sid, ignore_errors=True)
 
 
 def _state(sid):
@@ -212,7 +212,7 @@ def sources(user):
 
 
 def _sample_connection(user):
-    """The first visit gives the user the sample database's connection (analysis/sample.py), once."""
+    """The first visit gives the user the sample database's connection (data/sample.py), once."""
     prefs = user_prefs(user)
     if prefs.get(sample.PREF):
         return
@@ -284,7 +284,7 @@ def describe(user, cid, database, schema, table):
         if a is not None:
             a.close()
     with db.connect() as c:
-        rows = c.execute(text("""SELECT column_name, description, source FROM app.an_column_docs
+        rows = c.execute(text("""SELECT column_name, description, source FROM app.data_column_docs
                                  WHERE connection_id = :c AND database = :d AND schema_name = :s AND table_name = :t"""),
                          {'c': cid, 'd': database or '', 's': schema or '', 't': table}).all()
     docs = {r.column_name: r for r in rows}
@@ -304,11 +304,11 @@ def set_description(user, cid, database, schema, table, column, description, sou
     keys = {'c': cid, 'd': database or '', 's': schema or '', 't': table, 'col': column or ''}
     with db.begin() as c:
         if not str(description or '').strip():
-            c.execute(text("""DELETE FROM app.an_column_docs WHERE connection_id = :c AND database = :d
+            c.execute(text("""DELETE FROM app.data_column_docs WHERE connection_id = :c AND database = :d
                               AND schema_name = :s AND table_name = :t AND column_name = :col"""), keys)
             return {'ok': True}
         c.execute(text("""
-            INSERT INTO app.an_column_docs (connection_id, database, schema_name, table_name, column_name, description,
+            INSERT INTO app.data_column_docs (connection_id, database, schema_name, table_name, column_name, description,
                                             source, updated_by)
             VALUES (:c, :d, :s, :t, :col, :text, :src, :u)
             ON CONFLICT (connection_id, database, schema_name, table_name, column_name)
@@ -343,7 +343,7 @@ def check(user, sid, cid, database, sql):
     if not need:
         return {'statements': public, 'confirm': None}
     if any(s['kind'] == classify.WRITE for s in need):
-        tiers.check(user, 'analysis.write')
+        tiers.check(user, 'data.write')
     token = secrets.token_urlsafe(24)
     with _lock:
         for k in [k for k, v in _tokens.items() if v[3] < time.time()]:
@@ -391,7 +391,7 @@ def start(user, sid, cid, database, sql, token=None, name=''):
     need = classify.needs_confirm(st)
     if need:
         if any(s['kind'] == classify.WRITE for s in need):
-            tiers.check(user, 'analysis.write')
+            tiers.check(user, 'data.write')
         _spend(user, sid, sql, token)
     with _lock:
         mine = sum(1 for r in _runs.values() if r.user['id'] == user['id'] and r.status == 'running')
@@ -537,7 +537,7 @@ def _drop_result(rid):
 def _remember(run, kind, rows):
     try:
         with db.begin() as c:
-            c.execute(text("""INSERT INTO app.an_history (session_id, connection_id, database, name, sql, kind, status, rows, ms, error)
+            c.execute(text("""INSERT INTO app.data_history (session_id, connection_id, database, name, sql, kind, status, rows, ms, error)
                               VALUES (:s, :c, :d, :n, :q, :k, :st, :r, :m, :e)"""),
                       {'s': run.sid, 'c': run.cid, 'd': run.database, 'n': run.name, 'q': run.sql, 'k': kind,
                        'st': run.status, 'r': rows, 'm': run.ms, 'e': run.error})
@@ -780,7 +780,7 @@ def search_catalog(user, cid, database, query):
     words = [w for w in str(query).lower().split() if w]
     tables = tree(user, cid, database).get('tables') or []
     with db.connect() as c:
-        docs = c.execute(text("""SELECT schema_name, table_name, column_name, description FROM app.an_column_docs
+        docs = c.execute(text("""SELECT schema_name, table_name, column_name, description FROM app.data_column_docs
                                  WHERE connection_id = :c AND database = :d"""), {'c': cid, 'd': database or ''}).all()
     note = {}
     for d in docs:
@@ -824,7 +824,7 @@ def favorites_for_ai(user, name=None):
     if items:
         with db.connect() as c:
             for r in c.execute(text("""SELECT connection_id, database, schema_name, table_name, description
-                                         FROM app.an_column_docs WHERE column_name = '' AND connection_id = ANY(:c)"""),
+                                         FROM app.data_column_docs WHERE column_name = '' AND connection_id = ANY(:c)"""),
                                {'c': sorted({f['c'] for f in items})}).all():
                 docs[(r.connection_id, r.database, r.schema_name, r.table_name)] = r.description
     tables = []
@@ -1002,7 +1002,7 @@ def explain_for_ai(user, sid, cid, database, sql):
 def history(user, sid, limit=200):
     _session(user, sid)
     with db.connect() as c:
-        rows = c.execute(text('SELECT * FROM app.an_history WHERE session_id = :s ORDER BY at DESC LIMIT :l'),
+        rows = c.execute(text('SELECT * FROM app.data_history WHERE session_id = :s ORDER BY at DESC LIMIT :l'),
                          {'s': sid, 'l': max(1, min(int(limit), 1000))}).all()
     return [{'id': r.id, 'connection': r.connection_id, 'database': r.database, 'name': r.name, 'sql': r.sql, 'kind': r.kind,
              'status': r.status, 'rows': r.rows, 'ms': r.ms, 'error': r.error, 'at': r.at.isoformat()} for r in rows]
@@ -1011,7 +1011,7 @@ def history(user, sid, limit=200):
 def scripts(user, sid):
     _session(user, sid)
     with db.connect() as c:
-        rows = c.execute(text('SELECT * FROM app.an_scripts WHERE session_id = :s ORDER BY position, updated_at'), {'s': sid}).all()
+        rows = c.execute(text('SELECT * FROM app.data_scripts WHERE session_id = :s ORDER BY position, updated_at'), {'s': sid}).all()
     return [{'id': r.id, 'name': r.name, 'position': r.position, 'connection': r.connection_id, 'database': r.database,
              'body': r.body} for r in rows]
 
@@ -1024,10 +1024,10 @@ def save_script(user, sid, body):
             'b': str(body.get('body') or '')[:MAX_TEXT]}
     with db.begin() as c:
         got = c.execute(text("""
-            INSERT INTO app.an_scripts (id, session_id, name, position, connection_id, database, body)
+            INSERT INTO app.data_scripts (id, session_id, name, position, connection_id, database, body)
             VALUES (:i, :s, :n, :p, :c, :d, :b)
             ON CONFLICT (id) DO UPDATE SET name = :n, position = :p, connection_id = :c, database = :d, body = :b, updated_at = now()
-            WHERE app.an_scripts.session_id = :s RETURNING id"""), args).first()
+            WHERE app.data_scripts.session_id = :s RETURNING id"""), args).first()
     if got is None:
         raise DataError('no such script', 404)
     return {'id': pid}
@@ -1036,13 +1036,13 @@ def save_script(user, sid, body):
 def delete_script(user, sid, pid):
     _session(user, sid)
     with db.begin() as c:
-        c.execute(text('DELETE FROM app.an_scripts WHERE id = :i AND session_id = :s'), {'i': pid, 's': sid})
+        c.execute(text('DELETE FROM app.data_scripts WHERE id = :i AND session_id = :s'), {'i': pid, 's': sid})
 
 
 def dashboards(user, sid):
     _session(user, sid)
     with db.connect() as c:
-        rows = c.execute(text('SELECT * FROM app.an_dashboards WHERE session_id = :s ORDER BY updated_at DESC'), {'s': sid}).all()
+        rows = c.execute(text('SELECT * FROM app.data_dashboards WHERE session_id = :s ORDER BY updated_at DESC'), {'s': sid}).all()
     return [{'id': r.id, 'name': r.name, 'layout': r.layout} for r in rows]
 
 
@@ -1052,9 +1052,9 @@ def save_dashboard(user, sid, body):
     args = {'i': pid, 's': sid, 'n': str(body.get('name') or 'Dashboard').strip()[:200], 'l': orjson.dumps(body.get('layout') or []).decode()}
     with db.begin() as c:
         got = c.execute(text("""
-            INSERT INTO app.an_dashboards (id, session_id, name, layout) VALUES (:i, :s, :n, CAST(:l AS JSONB))
+            INSERT INTO app.data_dashboards (id, session_id, name, layout) VALUES (:i, :s, :n, CAST(:l AS JSONB))
             ON CONFLICT (id) DO UPDATE SET name = :n, layout = CAST(:l AS JSONB), updated_at = now()
-            WHERE app.an_dashboards.session_id = :s RETURNING id"""), args).first()
+            WHERE app.data_dashboards.session_id = :s RETURNING id"""), args).first()
     if got is None:
         raise DataError('no such dashboard', 404)
     return {'id': pid}
@@ -1063,4 +1063,4 @@ def save_dashboard(user, sid, body):
 def delete_dashboard(user, sid, pid):
     _session(user, sid)
     with db.begin() as c:
-        c.execute(text('DELETE FROM app.an_dashboards WHERE id = :i AND session_id = :s'), {'i': pid, 's': sid})
+        c.execute(text('DELETE FROM app.data_dashboards WHERE id = :i AND session_id = :s'), {'i': pid, 's': sid})

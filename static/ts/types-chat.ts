@@ -1,7 +1,7 @@
 // Shapes of the shared ◆ chat (core/chat.ts): the agent events (dataviz/llm/engine/events.py), the catalogue
 // (GET api/llm/agent/<role>/catalog), the chat sessions (api/llm/sessions*) and the transcript the reducer builds.
 
-export type ChatRole = 'data' | 'visual' | 'analysis';
+export type ChatRole = 'bucket' | 'visual' | 'data';
 export type ChatMode = 'ask' | 'auto' | 'plan';
 export type ChatEffort = 'low' | 'medium' | 'high';
 export type ThinkLevel = 'off' | 'low' | 'medium' | 'high';

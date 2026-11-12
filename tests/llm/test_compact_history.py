@@ -93,7 +93,7 @@ def test_summarize_gives_up_on_hard_error(monkeypatch):
 
 # ---------------------------------------------------------------- the saved chat
 def _chat(u, n):
-    sid = sessions.create(u, 'data', {}, 'long')['session']['id']
+    sid = sessions.create(u, 'bucket', {}, 'long')['session']['id']
     for r in _rows(n):
         sessions.append(u, sid, r['role'], r['text'], trace=[{'type': 'tool', 'name': f't{r["seq"]}', 'ok': True}]
                         if r['role'] == 'assistant' else None)
@@ -136,18 +136,18 @@ def test_save_summary_only_over_its_base(pg):
 
 # ---------------------------------------------------------------- the chat route
 def _long_chat(client, n):
-    sid = client.post('/api/llm/sessions', json={'role': 'data'}).json()['session']['id']
+    sid = client.post('/api/llm/sessions', json={'role': 'bucket'}).json()['session']['id']
     for r in _rows(n):
         sessions.append(client.user, sid, r['role'], r['text'])
     return sid
 
 
 def test_route_auto_compacts_past_history_turns(client, monkeypatch, svc):  # noqa: F811
-    _connect(client, ['data_center', 'assistant'])
+    _connect(client, ['bucket_data', 'assistant'])
     sid = _long_chat(client, sessions.HISTORY_TURNS + 2)
     calls = _fake_complete(monkeypatch, ['## Goal\n- keep the trucks'])
     seen = script(monkeypatch, ('Sure.', []))
-    evs = _events(client.post('/api/llm/agent/data/chat', json={'session_id': sid, 'text': 'next?'}))
+    evs = _events(client.post('/api/llm/agent/bucket/chat', json={'session_id': sid, 'text': 'next?'}))
     kinds = [e['type'] for e in evs]
     assert kinds[:2] == ['compact', 'compact'] and kinds[-1] == 'done' and len(calls) == 1
     done = evs[1]
@@ -161,47 +161,47 @@ def test_route_auto_compacts_past_history_turns(client, monkeypatch, svc):  # no
     assert any(t['type'] == 'compact' and t.get('state') == 'done' for t in g['messages'][-1]['trace'])
     # the next turn reads the stored summary without compacting again
     seen = script(monkeypatch, ('Again.', []))
-    evs = _events(client.post('/api/llm/agent/data/chat', json={'session_id': sid, 'text': 'and?'}))
+    evs = _events(client.post('/api/llm/agent/bucket/chat', json={'session_id': sid, 'text': 'and?'}))
     assert 'compact' not in [e['type'] for e in evs] and 'keep the trucks' in seen[0]['system'] and len(calls) == 1
 
 
 def test_route_auto_compacts_past_the_budget(client, monkeypatch, svc):  # noqa: F811
-    _connect(client, ['data_center', 'assistant'])
+    _connect(client, ['bucket_data', 'assistant'])
     client.ctx.llm.set_config({'budget': {'max_input_tokens': 30000}}, client.user)
-    sid = client.post('/api/llm/sessions', json={'role': 'data'}).json()['session']['id']
+    sid = client.post('/api/llm/sessions', json={'role': 'bucket'}).json()['session']['id']
     for r in _rows(8):
         sessions.append(client.user, sid, r['role'], r['text'] + ' ' + 'w' * 10000)
     _fake_complete(monkeypatch)
     script(monkeypatch, ('ok', []))
-    evs = _events(client.post('/api/llm/agent/data/chat', json={'session_id': sid, 'text': 'go'}))
+    evs = _events(client.post('/api/llm/agent/bucket/chat', json={'session_id': sid, 'text': 'go'}))
     assert evs[0] == {'type': 'compact', 'state': 'start', 'auto': True} and evs[1]['state'] == 'done'
 
 
 def test_route_goes_on_when_the_summary_fails(client, monkeypatch, svc):  # noqa: F811
-    _connect(client, ['data_center', 'assistant'])
+    _connect(client, ['bucket_data', 'assistant'])
     sid = _long_chat(client, sessions.HISTORY_TURNS + 2)
     _fake_complete(monkeypatch, [LLMError('bad key', 401)])
     script(monkeypatch, ('Answer anyway.', []))
-    evs = _events(client.post('/api/llm/agent/data/chat', json={'session_id': sid, 'text': 'next?'}))
+    evs = _events(client.post('/api/llm/agent/bucket/chat', json={'session_id': sid, 'text': 'next?'}))
     assert evs[1]['type'] == 'notice' and 'Could not compact' in evs[1]['text'] and evs[-1]['type'] == 'done'
     assert sessions.context(client.user, sid)['summary'] is None
 
 
 def test_compact_route(client, monkeypatch, svc):  # noqa: F811
-    _connect(client, ['data_center', 'assistant'])
-    assert client.post('/api/llm/agent/data/compact', json={}).status_code == 400
+    _connect(client, ['bucket_data', 'assistant'])
+    assert client.post('/api/llm/agent/bucket/compact', json={}).status_code == 400
     sid = _long_chat(client, 8)
     calls = _fake_complete(monkeypatch)
-    r = client.post('/api/llm/agent/data/compact', json={'session_id': sid, 'focus': 'the truck class'})
+    r = client.post('/api/llm/agent/bucket/compact', json={'session_id': sid, 'focus': 'the truck class'})
     assert r.status_code == 200 and r.json()['compacted'] and r.json()['covered'] == 6
     assert 'the truck class' in calls[0]['system']
-    assert client.post('/api/llm/agent/data/compact', json={'session_id': sid}).json() == {'compacted': False}
-    assert client.post('/api/llm/agent/data/compact', json={'session_id': 'nope'}).status_code == 404
+    assert client.post('/api/llm/agent/bucket/compact', json={'session_id': sid}).json() == {'compacted': False}
+    assert client.post('/api/llm/agent/bucket/compact', json={'session_id': 'nope'}).status_code == 404
     _fake_complete(monkeypatch, [LLMError('upstream', 503, transient=False)])
     for r_ in _rows(12)[8:]:
         sessions.append(client.user, sid, r_['role'], r_['text'])
-    assert client.post('/api/llm/agent/data/compact', json={'session_id': sid}).status_code == 502
-    names = [c['name'] for c in client.get('/api/llm/agent/data/catalog').json()['commands']]
+    assert client.post('/api/llm/agent/bucket/compact', json={'session_id': sid}).status_code == 502
+    names = [c['name'] for c in client.get('/api/llm/agent/bucket/catalog').json()['commands']]
     assert 'compact' in names
 
 

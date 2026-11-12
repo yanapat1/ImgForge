@@ -9,7 +9,7 @@ Engine order (the first that answers wins):
     3. DuckDuckGo HTML (html.duckduckgo.com/html: no key)
 'auto' (and duckduckgo / searxng without a URL) start at the matching step.
 
-fetch_url goes through datacenter/sources/fetch.py's SSRF guard (no private / loopback / link-local / metadata
+fetch_url goes through bucket/sources/fetch.py's SSRF guard (no private / loopback / link-local / metadata
 address, every redirect checked), http(s) only, at most 2 MB in 15 s, and returns readable text (≤ 8000 characters).
 
 Each search sent queues a 'search' event on ctx.events (the engine sends it after tool_end, the trace keeps it):

@@ -1,4 +1,4 @@
-"""Promote to labeling (data/promote.py, POST /s/<union>/api/promote): content dedup across members, checksum and
+"""Promote to labeling (image/promote.py, POST /s/<union>/api/promote): content dedup across members, checksum and
 origins on the media, labels preferred by member priority, an existing-project rerun skips known content, and the
 live visualize session opens from the union's workspace with no feature computation."""
 

@@ -27,8 +27,9 @@ def test_ui_sheet_shows_every_part_in_every_style(server):  # noqa: F811
             assert page.locator(f'#ui-{part}').count() == 1, part
         # the header is the shared one: brand, page links, settings and theme
         head = page.locator('#ui-header .app-header')
-        assert head.locator('.brand h1').inner_text() == 'Dataset Visualizer'
-        assert head.locator('.hdr-nav a.on').inner_text().strip() == 'Analysis'
+        assert head.locator('.brand h1').inner_text() == 'DataViz'
+        assert head.locator('.hdr-nav a.on').inner_text().strip() == 'Data'
+        assert [a.strip() for a in head.locator('.hdr-nav a').all_inner_texts()] == ['Bucket', 'Image', 'Data']
         assert head.locator('[data-act="settings"]').count() == 1 and head.locator('[data-act="theme"]').count() == 1
         # the parts are styled by the shared sheets, not by the browser defaults
         assert page.evaluate("getComputedStyle(document.querySelector('#ui-buttons button.primary')).backgroundColor") != 'rgba(0, 0, 0, 0)'

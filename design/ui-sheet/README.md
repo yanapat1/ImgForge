@@ -7,10 +7,10 @@ rules in `base.css`, `layout.css`, `components.css` and `settings.css`.
 
 ## Rules
 
-1. A screen is built from the parts on the sheet. Its own stylesheet (e.g. `analysis.css`, `datacenter.css`) lays the
+1. A screen is built from the parts on the sheet. Its own stylesheet (e.g. `data.css`, `bucket.css`) lays the
    page out (grid, panes, sizes of its areas); it does not restyle buttons, inputs, tabs, pills or tables.
 2. A part a screen needs that is not on the sheet is added to `kit.css` and to the sheet first, then used.
-3. Every page header is `appHeader()` (`static/ts/core/header.ts`): the Dataset Visualizer brand, the page links,
+3. Every page header is `appHeader()` (`static/ts/core/header.ts`): the DataViz brand, the page links,
    settings and theme. The home's copy in `index.html` has the same markup.
 4. Colours, sizes, spacing, radii and shadows are tokens (`tokens.css`); nothing is written by hand.
 5. Behaviour hooks (`data-act`, ids) stay separate from look (classes), so a restyle never breaks a test or a handler.

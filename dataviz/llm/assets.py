@@ -27,7 +27,7 @@ from .. import db
 from ..core import logging as vlog
 
 KINDS = ('prompt', 'skill')
-ROLES = ('data', 'visual', 'analysis', 'all')
+ROLES = ('bucket', 'visual', 'data', 'all')
 MAX_ITEMS = 100
 MAX_BODY = 20000
 MAX_NAME = 120
@@ -261,7 +261,7 @@ def parse_manifest(m, admin=False):
         elif isinstance(roles, str):
             roles = [roles]
         if not isinstance(roles, list) or any(r not in TOOL_ROLES for r in roles):
-            raise AssetError(f'{where}: roles must be data and / or visual')
+            raise AssetError(f'{where}: roles must be bucket and / or visual')
         desc = _str(t.get('description'), MAX_DESC, f'{where}.description', need=True)
         try:
             params = clean_params(t.get('parameters'), where)
@@ -457,7 +457,7 @@ def plugin_secrets(user, pid):
 
 # ---------------------------------------------------------------- what one run gets
 def for_run(user, role):
-    """The enabled prompts, skills and plugin tools of `user` for one assistant ('data' | 'visual'):
+    """The enabled prompts, skills and plugin tools of `user` for one assistant ('bucket' | 'visual' | 'data'):
     {'prompts': [{name, body, role}], 'skills': [{name, description, when, body, source}], 'tools': [Tool]}.
     Never raises (no database, a broken row): the run goes on without them, and the log says why."""
     out = {'prompts': [], 'skills': [], 'tools': []}

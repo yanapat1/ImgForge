@@ -40,7 +40,7 @@ from . import begin, crypto
 from . import schema as S
 from ..core.names import clean_tags, unique_name
 
-SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')     # = data/connections.py
+SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')     # = image/connections.py
 PERSIST_KEYS = ('curation_ignored', 'filter', 'filter_presets')           # = state.py: per dataset, not per version
 DS_KINDS = ('local', 's3', 'labeling')
 BATCH = 1000

@@ -1,6 +1,6 @@
 """
 Saved connections and visualize sessions, per user, in PostgreSQL. Each saved dataset is a **session**: a card
-on the page's first screen (Sessions home) that opens the visualizer on it. There is no built-in dataset: a
+on the page's first screen (the Image page) that opens the visualizer on it. There is no built-in dataset: a
 fresh database has no sessions.
 
     app.connections   one row per connection, owned by one user: config = the public fields (CONN_KIND_FIELDS
@@ -10,12 +10,12 @@ fresh database has no sessions.
     app.sessions (kind 'viz') + app.viz_sessions
                       a dataset: {id, name, kind: local|s3|labeling, path | connection_id, bucket, prefix,
                       mode: stream|cache | project_id, task_id, only_done, created, updated, tags, owner_id,
-                      visibility}. Who may see / open / change it is data/sessions.py + auth/access.py.
+                      visibility}. Who may see / open / change it is image/sessions.py + auth/access.py.
 
 The formats are the ones db/legacy.py writes when it imports the old connections.json.
 
 Connection kinds: s3, ftp, sftp (labeling image sources / export targets), postgres, mssql (labeling database
-export, Data Analysis), mongo (Data Analysis), model (a self-hosted model server the labeling page sends images to: url, optional api_key sent as
+export, Data), mongo (Data), model (a self-hosted model server the labeling page sends images to: url, optional api_key sent as
 a Bearer token, timeout_s). A connection used by a visualize session or a labeling session (app.label_projects,
 including a task's model link) cannot be deleted.
 
@@ -42,9 +42,9 @@ CONN_KIND_FIELDS = {
     'sftp': ('name', 'host', 'port', 'username', 'secret_key', 'private_key', 'base_path'),
     'postgres': _DB_FIELDS,
     'mssql': _DB_FIELDS,
-    'mongo': ('name', 'host', 'port', 'database', 'username', 'secret_key', 'encrypt'),      # Data Analysis
+    'mongo': ('name', 'host', 'port', 'database', 'username', 'secret_key', 'encrypt'),      # Data
     'model': ('name', 'url', 'api_key', 'timeout_s'),
-    # web dataset sources (Data Center › From the web): the token, encrypted like every secret
+    # web dataset sources (Bucket › From the web): the token, encrypted like every secret
     'kaggle': ('name', 'username', 'api_key'),
     'huggingface': ('name', 'api_key'),
     'roboflow': ('name', 'api_key'),
@@ -56,11 +56,11 @@ DEFAULT_PORTS = {'ftp': 21, 'sftp': 22, 'postgres': 5432, 'mssql': 1433, 'mongo'
 SECRET_FIELDS = ('secret_key', 'access_key', 'private_key', 'api_key')      # blank in an update = keep the stored one
 _BOOL_FIELDS = ('verify_ssl', 'tls', 'passive', 'encrypt')
 DS_FIELDS = ('name', 'kind', 'path', 'connection_id', 'bucket', 'prefix', 'mode', 'project_id', 'task_id', 'only_done')
-# app.viz_sessions.options of a local / S3 session: what one point is (data/views.py UNITS) and folder classes
+# app.viz_sessions.options of a local / S3 session: what one point is (image/views.py UNITS) and folder classes
 DS_OPTIONS = ('unit', 'class_from_folder')
 # labeling: one task of a labeling session, read live (labeling_source); embeddings: a folder of .npy vectors + a
 # metadata table (embedding_source)
-# union: a combined dataset over other visualize sessions (data/union.py), its members in app.union_members
+# union: a combined dataset over other visualize sessions (image/union.py), its members in app.union_members
 DS_KINDS = ('local', 's3', 'labeling', 'embeddings', 'union')
 _DS_KIND_FIELDS = {'local': ('path',), 's3': ('connection_id', 'bucket', 'prefix', 'mode'),
                    'labeling': ('project_id', 'task_id', 'only_done'), 'embeddings': ('path',), 'union': ()}
@@ -356,7 +356,7 @@ class Registry:
 
     # ------------------------------------------------------------ datasets
     def datasets(self, user=None, scope='all'):
-        """The visualize sessions `user` sees in `scope` (data/sessions.py listing: newest opened first), each
+        """The visualize sessions `user` sees in `scope` (image/sessions.py listing: newest opened first), each
         dataset dict with the card header {owner, members, visibility, my_role, opened_at}. user None = an
         internal caller: every session."""
         from . import sessions

@@ -1,8 +1,8 @@
-"""The Data Center agent (llm/tools.py, llm/agent.py) with no network and no real datacenter.service: provider
+"""The Bucket page agent (llm/tools.py, llm/agent.py) with no network and no real bucket.service: provider
 request bodies with tools and a tool history (OpenAI / Anthropic / Gemini JSON shapes), tool calls parsed from
 canned answers, the agent loop on a scripted model over a fake service (read-only tools run, changes become a plan
 and are not run until confirm, ask / cannot end the turn, the step limit), confirm (only the checked actions, its
-user only, expiry), and the /api/llm/dc/* routes gated like every AI feature (403)."""
+user only, expiry), and the /api/llm/bucket/* routes gated like every AI feature (403)."""
 
 import json
 
@@ -163,7 +163,7 @@ def test_complete_tools_error_status(monkeypatch):
 
 # ---------------------------------------------------------------- fake service + scripted model
 class FakeService:
-    """The datacenter.service functions the tools call, recording every call."""
+    """The bucket.service functions the tools call, recording every call."""
 
     def __init__(self):
         self.calls = []
@@ -448,7 +448,7 @@ def test_catalog_lists_every_tool():
         assert f'| `{name}` | {t.kind} |' in cat
     assert '| `move` | change | bucket, paths, to |' in cat
     from pathlib import Path
-    skill = Path(__file__).resolve().parents[2] / '.claude' / 'skills' / 'datacenter' / 'SKILL.md'
+    skill = Path(__file__).resolve().parents[2] / '.claude' / 'skills' / 'bucket' / 'SKILL.md'
     if skill.exists():                                  # the skill shows the same table: regenerate it on a change
         assert cat in skill.read_text(encoding='utf-8')
 
@@ -465,8 +465,8 @@ def test_cli_list_and_usage(capsys):
 # ---------------------------------------------------------------- routes
 def test_bucket_routes_gated(client):
     msg = {'messages': [{'role': 'user', 'text': 'hi'}], 'scope': {}}
-    assert client.post('/api/llm/dc/chat', json=msg).status_code == 403            # feature off
-    assert client.post('/api/llm/dc/confirm', json={'plan_id': 'x', 'action_ids': ['a1']}).status_code == 403
+    assert client.post('/api/llm/bucket/chat', json=msg).status_code == 403            # feature off
+    assert client.post('/api/llm/bucket/confirm', json={'plan_id': 'x', 'action_ids': ['a1']}).status_code == 403
 
 
 # ---------------------------------------------------------------- web import and text files

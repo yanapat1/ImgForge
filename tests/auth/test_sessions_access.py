@@ -1,4 +1,4 @@
-"""app.sessions + sharing + the access rule (auth/access.py, data/sessions.py)."""
+"""app.sessions + sharing + the access rule (auth/access.py, image/sessions.py)."""
 
 import pytest
 from starlette.exceptions import HTTPException

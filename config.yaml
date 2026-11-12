@@ -25,7 +25,7 @@ sessions:
 storage:
   allowed_roots: ['.']           # folders users may read datasets / models from (and browse in the page);
                                  #  relative = to the project root
-  data_root: ${DATAVIZ_DATA_ROOT:-data}   # Data Center managed buckets (imports land here, always allowed; its .trash/ holds
+  data_root: ${DATAVIZ_DATA_ROOT:-data}   # managed buckets of the Bucket page (imports land here, always allowed; its .trash/ holds
                                  #  deleted files until undone or a week old); relative = to the project root
 
 embeddings:                      # embeddings sessions (a folder of .npy vectors + meta.csv)

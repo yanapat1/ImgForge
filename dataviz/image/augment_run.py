@@ -1,6 +1,6 @@
 """
 Augment › Coverage, the work behind the job: turn the three image sets into embeddings, each part cached on its own,
-then data/augment_cover.run.
+then image/augment_cover.run.
 
     <cache>/augment/emb/<part>/imgs/00000.jpg   224 px thumbnails (what the features read, and what the page shows)
     <cache>/augment/emb/<part>/meta.json         {names, stats, steps (aug only)}
@@ -8,7 +8,7 @@ then data/augment_cover.run.
 
     part train_<h>: images of this session (fingerprint, how many, seed)
     part aug_<h>:   those images through the recipe, k variants each (train part + recipe + k)
-    part tgt_<h>:   the target images (an upload, or a Data Center folder with its files' sizes and times)
+    part tgt_<h>:   the target images (an upload, or a Bucket folder with its files' sizes and times)
 
 A recipe change re-makes only the aug part; another target only the tgt part. Features: 'quick' = colour histogram +
 HOG (CPU, seconds), else a deep feature key of the registry (DINOv2 / CLIP ...). Pure functions of their inputs, so
@@ -286,7 +286,7 @@ GHOST_IMAGES, GHOST_K, NEIGHBOURS = 200, 3, 10
 
 def ghost_crops(root, key, names, load, recipe, k=1, seed=0, cancelled=None, pad=0.1):
     """Crops of the boxes of `names` after the recipe (k variants each), cut like the session's own crops (a padded
-    square, data/indexer.square_crop_box) -> (part dir, meta {n, cls, image, applied})."""
+    square, image/indexer.square_crop_box) -> (part dir, meta {n, cls, image, applied})."""
     from PIL import Image
     from .indexer import square_crop_box
     d = root / f'ghost_{key}'

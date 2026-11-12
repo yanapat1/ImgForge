@@ -1,5 +1,5 @@
 """
-"Promote to labeling": materialize a combined dataset (data/union.py) as a labeling session, with an optional live
+"Promote to labeling": materialize a combined dataset (image/union.py) as a labeling session, with an optional live
 visualize session over it that opens with nothing to decode or embed.
 
     run(state, ctx, user, opts, job)       state: the union's State (indexed); a job on the io lane
@@ -15,7 +15,7 @@ opts:
     priority          member aliases in preference order (default: member order); also picks the file kept
     include_background  images with no box are promoted too (default True)
     create_viz        a kind=labeling visualize session '<name> · live' (default True), its workspace seeded from
-                      the union's through donor reuse (data/reuse.py): same crops, same feature rows
+                      the union's through donor reuse (image/reuse.py): same crops, same feature rows
 
 Steps: full hashes per member (in the member's own workspace: its sessions reuse them), group by content, pick
 representatives, create / check the project, skip media whose checksum the project already has, hard-link (else

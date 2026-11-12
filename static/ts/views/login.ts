@@ -34,7 +34,7 @@ const pwField = (id: string, label: string, ac: string, extra = ''): string => `
 function markup(): string {
   return `<div class="login-wrap"><main class="login-card panel" aria-labelledby="login-title">
     <div class="login-brand"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg>
-      <h1 id="login-title">Dataset Visualizer</h1></div>
+      <h1 id="login-title">DataViz</h1></div>
     <div class="segmented login-tabs single" role="tablist" aria-label="Sign in or create an account">
       <button type="button" role="tab" id="lg-tab-in" aria-controls="lg-in" aria-selected="true" data-tab="in">Sign in</button>
       <button type="button" role="tab" id="lg-tab-up" aria-controls="lg-up" aria-selected="false" tabindex="-1" data-tab="up" class="hidden">Create account</button>
@@ -70,7 +70,7 @@ function setTab(t: Tab, focus: boolean): void {
     $req(`lg-${k}`).classList.toggle('hidden', !on);
   }
   if (focus) $req(`lg-tab-${t}`).focus();
-  document.title = `${t === 'in' ? 'Sign in' : 'Create account'} · Dataset Visualizer`;
+  document.title = `${t === 'in' ? 'Sign in' : 'Create account'} · DataViz`;
 }
 
 function showErr(id: string, text: string): void {
@@ -188,7 +188,7 @@ function bind(): void {
 }
 
 export async function renderLogin(): Promise<void> {
-  document.title = 'Sign in · Dataset Visualizer';
+  document.title = 'Sign in · DataViz';
   const root = $req('login');
   root.innerHTML = markup();
   bind();

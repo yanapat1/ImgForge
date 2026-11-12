@@ -1,4 +1,4 @@
-"""Data Center: the parallel S3 listing (datacenter/s3list.py) yields every object below the prefix exactly once
+"""Bucket: the parallel S3 listing (bucket/s3list.py) yields every object below the prefix exactly once
 (nested folders with objects at every level, a flat folder too big to split, many folders listed in runs, folder
 marker objects), stops on cancel / close without leaving threads, and raises a listing error; against moto too."""
 

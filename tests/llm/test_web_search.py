@@ -198,7 +198,7 @@ def test_three_blocked_turns_web_off(monkeypatch, svc):
     seen = script(monkeypatch, ('', [('web_search', q)]), ('', [('web_search', {'query': 'night cam 01 help'})]),
                   ('', [('web_search', {'query': 'about night-cam-01'})]), ('', [('web_search', {'query': 'yolo'})]),
                   ('Sorry.', []))
-    run = start('look it up', role='data', web=1)
+    run = start('look it up', role='bucket', web=1)
     run.ctx.web_cfg = {'level': 1, 'ask_before': False, 'engine': 'auto', 'url': '', 'words': []}
     evs = list(react.events(run))
     blocked = [e for e in evs if e['type'] == 'search']

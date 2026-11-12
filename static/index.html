@@ -4,21 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>Dataset Visualizer</title>
+<title>DataViz</title>
 <!-- before the first paint: the theme (localStorage "theme" = system | light | dark) and the screen
-     (data-screen = login on /login, viz on /s/<id>/, label with ?label=, data with ?data, else home; on viz it also starts the Plotly download) -->
-<script src="static/js/theme-boot.js?v=17"></script>
+     (data-screen = login on /login, viz on /s/<id>/, label with ?label=, bucket with ?bucket, image with ?image, data with ?data,
+     ui with ?ui, else home; on viz it also starts the Plotly download) -->
+<script src="static/js/theme-boot.js?v=18"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='9' fill='%23458'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12.5' cy='13.5' r='2.4'/%3E%3Ccircle cx='18.5' cy='11.8' r='2.4'/%3E%3Ccircle cx='17' cy='17.6' r='2.4'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="stylesheet" href="static/css/tokens.css?v=24">
 <link rel="stylesheet" href="static/css/base.css?v=18">
 <link rel="stylesheet" href="static/css/layout.css?v=15">
 <link rel="stylesheet" href="static/css/components.css?v=21">
-<link rel="stylesheet" href="static/css/kit.css?v=1">
+<link rel="stylesheet" href="static/css/kit.css?v=2">
 <link rel="stylesheet" href="static/css/plot.css?v=16">
 <link rel="stylesheet" href="static/css/settings.css?v=24">
-<link rel="stylesheet" href="static/css/home.css?v=21">
-<link rel="stylesheet" href="static/css/datacenter.css?v=13">
-<link rel="stylesheet" href="static/css/analysis.css?v=6">
+<link rel="stylesheet" href="static/css/home.css?v=1">
+<link rel="stylesheet" href="static/css/image.css?v=22">
+<link rel="stylesheet" href="static/css/bucket.css?v=14">
+<link rel="stylesheet" href="static/css/data.css?v=7">
 <link rel="stylesheet" href="static/css/ui-sheet.css?v=1">
 <link rel="stylesheet" href="static/css/label.css?v=18">
 <link rel="stylesheet" href="static/css/curation.css?v=17">
@@ -39,56 +41,59 @@
 <!-- ?v= on the entry files: bump it after a big change. Every static file is served with Cache-Control: no-cache
      (cheap 304 revalidation), so the ES modules imported by main.js are never stale either. -->
 <!-- painted before the stylesheets arrive: no white flash, icons never render huge -->
-<style>html[data-screen=login] .viz-only,html[data-screen=login] #home,html:not([data-screen=login]) .login-only,html[data-screen=home] .viz-only,html[data-screen=viz] #home,html[data-screen=label] .viz-only,html[data-screen=label] #home,html:not([data-screen=label]) .label-only,html[data-screen=data] .viz-only,html[data-screen=data] #home,html:not([data-screen=data]) #datacenter{display:none!important}html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}html[data-look=editorial][data-theme=light],html[data-look=editorial][data-theme=light] body{background:#f4f1ea;color:#1c1a17}html[data-look=editorial][data-theme=dark],html[data-look=editorial][data-theme=dark] body{background:#171615;color:#ece6da}html[data-look=blueprint][data-theme=dark],html[data-look=blueprint][data-theme=dark] body{background:#0b1828;color:#dbe9f6}html[data-look=blueprint][data-theme=light],html[data-look=blueprint][data-theme=light] body{background:#e9f0f5;color:#0f2236}html[data-look=brutalist][data-theme=light],html[data-look=brutalist][data-theme=light] body{background:#efede6;color:#0d0d0d}html[data-look=brutalist][data-theme=dark],html[data-look=brutalist][data-theme=dark] body{background:#0f0f0e;color:#f4f2ec}html[data-look=terminal][data-theme=dark],html[data-look=terminal][data-theme=dark] body{background:#090c0a;color:#c6ecd1}html[data-look=terminal][data-theme=light],html[data-look=terminal][data-theme=light] body{background:#f3f2ea;color:#16211a}html[data-look=soft][data-theme=light],html[data-look=soft][data-theme=light] body{background:#eceaf3;color:#25223a}html[data-look=soft][data-theme=dark],html[data-look=soft][data-theme=dark] body{background:#1c1b24;color:#ebe9f5}html[data-palette=cbsafe][data-theme=dark],html[data-palette=cbsafe][data-theme=dark] body{background:#181c22;color:#eaeef4}html[data-palette=cbsafe][data-theme=light],html[data-palette=cbsafe][data-theme=light] body{background:#eceff3;color:#1b222c}html[data-palette=contrast][data-theme=dark],html[data-palette=contrast][data-theme=dark] body{background:#000000;color:#ffffff}html[data-palette=contrast][data-theme=light],html[data-palette=contrast][data-theme=light] body{background:#ffffff;color:#000000}html[data-palette=fjord][data-theme=dark],html[data-palette=fjord][data-theme=dark] body{background:#20262f;color:#e6ebf2}html[data-palette=fjord][data-theme=light],html[data-palette=fjord][data-theme=light] body{background:#e4e9ef;color:#1f2733}html[data-palette=ember][data-theme=dark],html[data-palette=ember][data-theme=dark] body{background:#1d1814;color:#efe3d0}html[data-palette=ember][data-theme=light],html[data-palette=ember][data-theme=light] body{background:#efe5d3;color:#2e2418}html[data-palette=orchid][data-theme=dark],html[data-palette=orchid][data-theme=dark] body{background:#1e1820;color:#f0e6f0}html[data-palette=orchid][data-theme=light],html[data-palette=orchid][data-theme=light] body{background:#f1eaf0;color:#2a1f2a}svg.ico{width:16px;height:16px;fill:none;stroke:currentColor}.brand-mark{width:32px;height:32px}</style>
-<style>html[data-screen=analysis] #home,html[data-screen=analysis] .viz-only,html[data-screen=ui] #home,html[data-screen=ui] .viz-only{display:none}</style>
+<style>html:not([data-screen=viz]) .viz-only,html:not([data-screen=home]) #home,html:not([data-screen=image]) #image,html:not([data-screen=login]) .login-only,html:not([data-screen=label]) .label-only,html:not([data-screen=bucket]) #bucket{display:none!important}html,body{background:#1b2028;color:#e3e8ef}html[data-theme=light],html[data-theme=light] body{background:#eceff4;color:#1b222c}html[data-look=editorial][data-theme=light],html[data-look=editorial][data-theme=light] body{background:#f4f1ea;color:#1c1a17}html[data-look=editorial][data-theme=dark],html[data-look=editorial][data-theme=dark] body{background:#171615;color:#ece6da}html[data-look=blueprint][data-theme=dark],html[data-look=blueprint][data-theme=dark] body{background:#0b1828;color:#dbe9f6}html[data-look=blueprint][data-theme=light],html[data-look=blueprint][data-theme=light] body{background:#e9f0f5;color:#0f2236}html[data-look=brutalist][data-theme=light],html[data-look=brutalist][data-theme=light] body{background:#efede6;color:#0d0d0d}html[data-look=brutalist][data-theme=dark],html[data-look=brutalist][data-theme=dark] body{background:#0f0f0e;color:#f4f2ec}html[data-look=terminal][data-theme=dark],html[data-look=terminal][data-theme=dark] body{background:#090c0a;color:#c6ecd1}html[data-look=terminal][data-theme=light],html[data-look=terminal][data-theme=light] body{background:#f3f2ea;color:#16211a}html[data-look=soft][data-theme=light],html[data-look=soft][data-theme=light] body{background:#eceaf3;color:#25223a}html[data-look=soft][data-theme=dark],html[data-look=soft][data-theme=dark] body{background:#1c1b24;color:#ebe9f5}html[data-palette=cbsafe][data-theme=dark],html[data-palette=cbsafe][data-theme=dark] body{background:#181c22;color:#eaeef4}html[data-palette=cbsafe][data-theme=light],html[data-palette=cbsafe][data-theme=light] body{background:#eceff3;color:#1b222c}html[data-palette=contrast][data-theme=dark],html[data-palette=contrast][data-theme=dark] body{background:#000000;color:#ffffff}html[data-palette=contrast][data-theme=light],html[data-palette=contrast][data-theme=light] body{background:#ffffff;color:#000000}html[data-palette=fjord][data-theme=dark],html[data-palette=fjord][data-theme=dark] body{background:#20262f;color:#e6ebf2}html[data-palette=fjord][data-theme=light],html[data-palette=fjord][data-theme=light] body{background:#e4e9ef;color:#1f2733}html[data-palette=ember][data-theme=dark],html[data-palette=ember][data-theme=dark] body{background:#1d1814;color:#efe3d0}html[data-palette=ember][data-theme=light],html[data-palette=ember][data-theme=light] body{background:#efe5d3;color:#2e2418}html[data-palette=orchid][data-theme=dark],html[data-palette=orchid][data-theme=dark] body{background:#1e1820;color:#f0e6f0}html[data-palette=orchid][data-theme=light],html[data-palette=orchid][data-theme=light] body{background:#f1eaf0;color:#2a1f2a}svg.ico{width:16px;height:16px;fill:none;stroke:currentColor}.brand-mark{width:32px;height:32px}</style>
 <!-- plotly (~1.5 MB) is loaded only on the visualizer screen: theme-boot.js preloads it, main.js runs it -->
 </head>
 <body>
 <a class="skip-link" href="#" data-skip>Skip to the main content</a>
-<!-- SESSIONS HOME (first page, no ?session=): one card per session, each one dataset -->
-<div id="home" class="home">
+<!-- HOME (/): the overview, one card each for Bucket, Image and Data; markup owned by js/views/home.js -->
+<div id="home" class="landing"></div>
+
+<!-- IMAGE (?image[=viz|label]): one card per session, each one dataset; Visualize and Label tabs (js/views/image.js) -->
+<div id="image" class="image-page">
   <header class="app-header">
-    <div class="brand">
+    <a id="image-brand" class="brand" href="./" aria-label="DataViz: Home">
       <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="static/assets/icons.svg#i-brand"/></svg>
-      <h1>Dataset Visualizer</h1>
-    </div>
-    <!-- Sessions | Data (hrefs set by main.js through core/nav.js, so a proxy prefix is kept) -->
+      <h1>DataViz</h1>
+    </a>
+    <!-- Bucket · Image · Data, the order of core/header.ts PAGES (hrefs set by main.js through core/nav.js, so a proxy
+         prefix is kept; a link whose zone is not installed is removed) -->
     <nav class="hdr-nav" aria-label="Pages">
-      <a id="home-nav-sessions" class="on" href="./" aria-current="page"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Sessions</a>
-      <a id="home-nav-data" href="./?data"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-db"/></svg>Data</a>
-      <a id="home-nav-analysis" href="./?analysis"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Analysis</a>
+      <a id="image-nav-bucket" href="./?bucket"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-db"/></svg>Bucket</a>
+      <a id="image-nav-image" class="on" href="./?image" aria-current="page"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-layers"/></svg>Image</a>
+      <a id="image-nav-data" href="./?data"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg>Data</a>
     </nav>
     <span class="grow"></span>
     <div class="header-actions">
-      <button id="home-settings" class="icon-btn ghost" aria-label="Settings: connections, labeling, appearance" title="Settings: connections, labeling hotkeys, theme"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg></button>
-      <button id="home-theme" class="icon-btn ghost" aria-label="Switch light / dark theme" title="Switch light / dark theme">
+      <button id="image-settings" class="icon-btn ghost" aria-label="Settings: connections, labeling, appearance" title="Settings: connections, labeling hotkeys, theme"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-gear"/></svg></button>
+      <button id="image-theme" class="icon-btn ghost" aria-label="Switch light / dark theme" title="Switch light / dark theme">
         <svg class="ico only-dark" aria-hidden="true"><use href="static/assets/icons.svg#i-sun"/></svg><svg class="ico only-light" aria-hidden="true"><use href="static/assets/icons.svg#i-moon"/></svg></button>
     </div>
   </header>
-  <div class="home-scroll" role="main" tabindex="-1">
-    <div class="home-wrap">
-      <div id="home-head" class="home-head hidden">
-        <div class="home-title">
-          <h2>Sessions</h2>
+  <div class="image-scroll" role="main" tabindex="-1">
+    <div class="image-wrap">
+      <div id="image-head" class="image-head hidden">
+        <div class="image-title">
+          <h2>Image</h2>
           <p class="muted">Visualize a YOLO dataset or your own embeddings (audio, video, text, tables), with features and views cached per session, or label a folder of images for one or more tasks.</p>
         </div>
-        <button id="home-new" class="primary" data-act="new"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-plus"/></svg><span id="home-new-text">New session</span></button>
+        <button id="image-new" class="primary" data-act="new"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-plus"/></svg><span id="image-new-text">New session</span></button>
       </div>
-      <div id="home-status" class="home-status" role="status" aria-live="polite"></div>
-      <!-- two kinds of sessions, one tab each (views/home.js); every click inside goes through one delegated listener -->
-      <div id="home-body" class="home-body">
-        <div id="home-tabs" class="home-tabs tabbar hidden" role="tablist" aria-label="Kind of session">
-          <button id="home-tab-viz" role="tab" data-tab="viz" aria-controls="home-panel-viz" aria-selected="true" tabindex="0"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg>Visualize<span id="home-n-viz" class="count-badge num"></span></button>
-          <button id="home-tab-label" role="tab" data-tab="label" aria-controls="home-panel-label" aria-selected="false" tabindex="-1"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Label<span id="home-n-label" class="count-badge num"></span></button>
+      <div id="image-status" class="image-status" role="status" aria-live="polite"></div>
+      <!-- two kinds of sessions, one tab each (views/image.js); every click inside goes through one delegated listener -->
+      <div id="image-body" class="image-body">
+        <div id="image-tabs" class="image-tabs tabbar hidden" role="tablist" aria-label="Kind of session">
+          <button id="image-tab-viz" role="tab" data-tab="viz" aria-controls="image-panel-viz" aria-selected="true" tabindex="0"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-scatter"/></svg>Visualize<span id="image-n-viz" class="count-badge num"></span></button>
+          <button id="image-tab-label" role="tab" data-tab="label" aria-controls="image-panel-label" aria-selected="false" tabindex="-1"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-tag"/></svg>Label<span id="image-n-label" class="count-badge num"></span></button>
         </div>
-        <!-- find sessions: whose (scope, sent to the server), name search + tag filter (AND), over the current tab (views/home.js) -->
-        <div id="home-filter" class="home-filter hidden">
-          <div id="home-scope" class="segmented home-scope" role="radiogroup" aria-label="Whose sessions"></div>
-          <div class="hf-search"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg><input type="search" id="home-search" placeholder="Search sessions by name" aria-label="Search sessions by name" autocomplete="off" spellcheck="false"></div>
-          <div id="home-tagbar" class="home-tagbar" role="group" aria-label="Filter by tag"></div>
+        <!-- find sessions: whose (scope, sent to the server), name search + tag filter (AND), over the current tab (views/image.js) -->
+        <div id="image-filter" class="image-filter hidden">
+          <div id="image-scope" class="segmented image-scope" role="radiogroup" aria-label="Whose sessions"></div>
+          <div class="hf-search"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-search"/></svg><input type="search" id="image-search" placeholder="Search sessions by name" aria-label="Search sessions by name" autocomplete="off" spellcheck="false"></div>
+          <div id="image-tagbar" class="image-tagbar" role="group" aria-label="Filter by tag"></div>
         </div>
-        <div id="home-panel-viz" class="session-grid" role="tabpanel" aria-labelledby="home-tab-viz"></div>
-        <div id="home-panel-label" class="session-grid hidden" role="tabpanel" aria-labelledby="home-tab-label"></div>
+        <div id="image-panel-viz" class="session-grid" role="tabpanel" aria-labelledby="image-tab-viz"></div>
+        <div id="image-panel-label" class="session-grid hidden" role="tabpanel" aria-labelledby="image-tab-label"></div>
       </div>
     </div>
   </div>
@@ -109,11 +114,11 @@
 <!-- LABELING PAGE (?label=<project id>): markup owned by js/label/ (see js/label/README.md) -->
 <div id="label" class="label-only"></div>
 
-<!-- DATA CENTER (?data[=<bucket>&path=…]): markup owned by js/datacenter/ (see js/datacenter/README.md) -->
-<div id="datacenter" class="dc"></div>
+<!-- BUCKET (?bucket[=<bucket>&path=…]): markup owned by js/bucket/ (see js/bucket/README.md) -->
+<div id="bucket" class="bk"></div>
 
-<!-- DATA ANALYSIS (?analysis[=<session>]): markup owned by js/analysis/ -->
-<div id="analysis"></div>
+<!-- DATA (?data[=<session>]): markup owned by js/data/ -->
+<div id="data"></div>
 
 <!-- UI SHEET (?ui): every shared part of the page, drawn live (js/ui/sheet.js, design/ui-sheet/README.md) -->
 <div id="ui-sheet"></div>
@@ -126,7 +131,7 @@
   <a id="brand-home" class="brand" href="./" title="All sessions" aria-label="Back to all sessions">
     <svg class="ico brand-back" aria-hidden="true"><use href="static/assets/icons.svg#i-chev-l"/></svg>
     <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="static/assets/icons.svg#i-brand"/></svg>
-    <h1>Dataset Visualizer</h1>
+    <h1>DataViz</h1>
   </a>
   <div id="ds-info" class="ds-info"></div>
   <div class="header-actions">
@@ -1018,6 +1023,6 @@
     </div>
   </div>
 </div>
-<script type="module" src="static/js/main.js?v=17"></script>
+<script type="module" src="static/js/main.js?v=18"></script>
 </body>
 </html>

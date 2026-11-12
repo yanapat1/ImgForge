@@ -1,5 +1,5 @@
 // The page's side of the vendored editor module (static/vendor-src/editor.ts, built to static/js/vendor/editor.js and
-// loaded at runtime by datacenter/editor.ts). Kept in step with that file by hand: it is loaded by URL, not imported.
+// loaded at runtime by bucket/editor.ts). Kept in step with that file by hand: it is loaded by URL, not imported.
 
 export type Lang = 'json' | 'yaml' | 'env' | 'ini' | 'toml' | 'xml' | 'html' | 'css' | 'js' | 'ts' | 'python' | 'markdown' | 'sql'
   | 'shell' | 'dockerfile' | 'csv' | 'text';

@@ -2,12 +2,13 @@
 
 ```
 js/
-├── theme-boot.js      classic script, runs before the first paint (saved theme, login / home / label / data / viz screen, Plotly preload)
+├── theme-boot.js      classic script, runs before the first paint (saved theme, login / home / bucket / image / label / data / ui / viz screen, Plotly preload)
 ├── main.js            entry: boot → init → bindEvents; nothing imports it
 ├── core/              no UI: DOM helpers, API, state, theme, jobs   → core/README.md
 ├── plot/              the embedding plot and its mouse interactions → plot/README.md
-├── views/             the Sessions home, the other panels and controls → views/README.md
-├── datacenter/        the Data Center page (?data), loaded on demand → datacenter/README.md
+├── views/             Home, the Image page, the other panels and controls → views/README.md
+├── bucket/            the Bucket page (?bucket), loaded on demand  → bucket/README.md
+├── data/              the Data page (?data), loaded on demand
 └── settings/          the Settings dialog                          → settings/README.md
 ```
 
@@ -49,6 +50,6 @@ Details are in each folder's README.
 - `core/auth.ts` loads the signed-in user once (`loadMe`, `ME`, `isAdmin`) with their prefs (`pref`, `setPrefs`,
   `rememberPref`: theme / look / palette, `label_settings`, `homeTab`, `homeScope`, PUT `api/me/prefs` debounced).
   `userKey(k)` suffixes every browser-storage key that holds a user's data with the user id.
-- `main.ts` boots in this order: wait for the server → on `/login` only `views/login.ts` → `loadMe()` → the screen. Each zone's screen is a dynamic import (`label/app.ts`, `datacenter/app.ts`, `analysis/app.ts`, `viz/boot.ts` for `/s/<id>/`), so an install without that zone needs none of its files; shared code reaches the visualizer through `core/hooks.ts`, never a static import (`tests/zones/test_install.py`).
+- `main.ts` boots in this order: wait for the server → on `/login` only `views/login.ts` → `loadMe()` → the screen. Each zone's screen is a dynamic import (`label/app.ts`, `bucket/app.ts`, `data/app.ts`, `viz/boot.ts` for `/s/<id>/`), so an install without that zone needs none of its files; shared code reaches the visualizer through `core/hooks.ts`, never a static import (`tests/zones/test_install.py`).
 - Roles (`my_role`: viewer < labeler < owner) only hide what the server would refuse anyway: the home cards' actions,
   the label page (`L.readOnly`: no tools, no saves, a "View only" banner), the visualizer (`html[data-role=viewer]`).

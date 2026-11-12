@@ -1,4 +1,4 @@
-"""Combined datasets (data/union.py): members assembled from their own workspaces (ids offset, names prefixed,
+"""Combined datasets (image/union.py): members assembled from their own workspaces (ids offset, names prefixed,
 classes unified by name, crops hard-linked, features concatenated), writes routed back to the owning member with
 its own class ids, access needs every member, a member in use cannot be deleted, and the index lock."""
 

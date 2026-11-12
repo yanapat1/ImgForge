@@ -1,8 +1,8 @@
 """
-`python -m dataviz dc <tool> --args '{json}' --user <username>`: run one Data Center tool (llm/tools.py, the same
+`python -m dataviz bucket <tool> --args '{json}' --user <username>`: run one Bucket tool (llm/tools.py, the same
 registry the in-app agent uses) as a user and print its JSON result. Changes (move, delete, tag, send ...) need
 --yes; without it the CLI prints what it would do and exits 3, like a plan the user has not confirmed yet.
-`python -m dataviz dc list` prints the tool catalogue. Exit codes: 0 ok, 1 tool / service error, 2 usage, 3 not
+`python -m dataviz bucket list` prints the tool catalogue. Exit codes: 0 ok, 1 tool / service error, 2 usage, 3 not
 confirmed. It connects to the app's database (config.yaml / DATABASE_URL) without migrating it.
 """
 
@@ -32,7 +32,7 @@ def _user(username):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog='python -m dataviz dc', description=__doc__,
+    ap = argparse.ArgumentParser(prog='python -m dataviz bucket', description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('tool', help='a tool name, or "list" for the catalogue')
     ap.add_argument('--args', default='{}', help='the tool arguments as a JSON object')
@@ -69,8 +69,8 @@ def main(argv=None):
         if t.mutating:
             clean, summary = tools.prepare(user, a.tool, args)
             from .auth import tiers
-            if a.yes and 'data.manage' in tiers.PERMS and not tiers.has(user, 'data.manage'):
-                print(json.dumps({'ok': False, 'error': f'{a.user} has no data.manage permission', 'status': 403}))
+            if a.yes and 'bucket.manage' in tiers.PERMS and not tiers.has(user, 'bucket.manage'):
+                print(json.dumps({'ok': False, 'error': f'{a.user} has no bucket.manage permission', 'status': 403}))
                 return 1
             if not a.yes:
                 print(json.dumps({'ok': False, 'confirm': summary, 'args': clean,

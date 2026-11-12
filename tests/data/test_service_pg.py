@@ -35,7 +35,7 @@ def an(pg, tmp_path):
     cid = reg.upsert_connection({'kind': 'postgres', 'name': 'target', 'host': url.hostname, 'port': url.port,
                                  'database': url.path.lstrip('/'), 'username': url.username, 'secret_key': url.password,
                                  'schema': 'public', 'table_prefix': 'lbl_'}, uid)['id']
-    service.configure(SimpleNamespace(cfg={'data_analysis': {'max_rows': 1000, 'statement_timeout_s': 30}}, datasets=reg))
+    service.configure(SimpleNamespace(cfg={'data': {'max_rows': 1000, 'statement_timeout_s': 30}}, datasets=reg))
     with psycopg.connect(pg.replace('+psycopg', ''), autocommit=True) as c:
         c.execute('CREATE TABLE public.orders (id int PRIMARY KEY, total numeric(10,2), note text)')
         c.execute("COMMENT ON COLUMN public.orders.total IS 'Order value'")

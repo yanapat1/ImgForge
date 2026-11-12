@@ -1,6 +1,6 @@
 """
-In-place patches of a loaded State (no re-index): what a curation fix / undo (data/curation.py) and the live change
-feed of a labeling task (data/live.py) both do to the index in memory.
+In-place patches of a loaded State (no re-index): what a curation fix / undo (image/curation.py) and the live change
+feed of a labeling task (image/live.py) both do to the index in memory.
 
     patch = {'cls': {sid: new class}, 'deleted': [sid], 'restored': [sid], 'moved': [{'id': sid, 'bbox': [x1,y1,x2,y2]}],
              'box_idx': {sid: line}}          (box_idx: internal, the label line a box is on now; not sent)

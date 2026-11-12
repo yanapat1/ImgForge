@@ -17,7 +17,7 @@ projections, and serving the page + JSON API. The `app.py` launcher one folder u
 | Sub-package | |
 |---|---|
 | [`core/`](core/README.md) | config, logging, job queue, worker processes — no dataset knowledge |
-| [`data/`](data/README.md) | where datasets live (local / S3), saved datasets & connections, the indexer |
+| [`data/`](image/README.md) | where datasets live (local / S3), saved datasets & connections, the indexer |
 | [`ml/`](ml/README.md) | feature extractors, projections, k-NN scores, density groups — pure numpy/torch |
 | [`models/`](models/README.md) | saved detectors (files or HTTP APIs), running them over a dataset, scoring them against its labels |
 | [`server/`](server/README.md) | FastAPI app, middleware, route modules |

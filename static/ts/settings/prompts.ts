@@ -25,8 +25,8 @@ const PR: PromptsState = { tab: 'instr', items: null, plugins: null, web: null, 
 const MAX_BODY = 20000;
 const TABS: Array<[Tab, string, string]> = [['instr', 'My instructions', 'text'], ['skills', 'My skills', 'sparkle'],
   ['plugins', 'Plugins', 'plug'], ['web', 'Web search', 'globe']];
-const ROLES: Array<[AssetRole, string]> = [['all', 'Both'], ['data', 'Data'], ['visual', 'Visual']];
-const ROLE_LABEL: Record<AssetRole, string> = { all: 'Data + Visual', data: 'Data', visual: 'Visual' };
+const ROLES: Array<[AssetRole, string]> = [['all', 'All'], ['bucket', 'Bucket'], ['visual', 'Visual'], ['data', 'Data']];
+const ROLE_LABEL: Record<AssetRole, string> = { all: 'All assistants', bucket: 'Bucket', visual: 'Visual', data: 'Data' };
 const LEVELS: Array<[string, string]> = [
   ['Off', 'No web search at all.'],
   ['Public only', 'General words only. Every internal name (buckets, folders, files, classes, hosts, people) and all special words are blocked.'],
@@ -125,7 +125,7 @@ const host = (u: string): string => { try { return new URL(u).host; } catch { re
 function pluginHTML(p: LlmPlugin): string {
   const tools = p.tools.length ? '<ul class="pr-tools">' + p.tools.map((t) =>
     `<li><code>${esc(t.name)}</code>${tagc(t.risk, t.risk === 'danger' ? 'bad' : t.risk === 'change' ? 'warn' : '')}` +
-    `<span class="muted">${esc(t.method)} ${esc(host(t.url))} · ${esc(t.roles.map((r) => r === 'data' ? 'Data' : 'Visual').join(' + '))}</span>` +
+    `<span class="muted">${esc(t.method)} ${esc(host(t.url))} · ${esc(t.roles.map((r) => ROLE_LABEL[r as AssetRole] ?? r).join(' + '))}</span>` +
     `<span class="pr-tdesc">${esc(t.description)}</span></li>`).join('') + '</ul>' : '';
   const chips = [...p.skills.map((s) => `<span class="chip" title="${esc(s.description)}">${icon('sparkle')}${esc(s.name)}</span>`),
     ...p.prompts.map((s) => `<span class="chip">${icon('text')}${esc(s.name)}</span>`)].join('');
@@ -229,7 +229,7 @@ const fieldOf = (root: Element, k: string): HTMLInputElement | HTMLSelectElement
 const valOf = (root: Element, k: string): string => fieldOf(root, k)?.value ?? '';
 const itemOf = (b: HTMLElement): LlmItem | undefined => (PR.items ?? []).find((i) => i.id === rowAttr(b, '[data-pr-id]', 'prId'));
 const plugOf = (b: HTMLElement): LlmPlugin | undefined => (PR.plugins ?? []).find((p) => p.id === rowAttr(b, '[data-plug]', 'plug'));
-const isRole = (x: string): x is AssetRole => x === 'all' || x === 'data' || x === 'visual';
+const isRole = (x: string): x is AssetRole => x === 'all' || x === 'bucket' || x === 'visual' || x === 'data';
 
 async function saveWeb(patch: Record<string, unknown>, okText = 'Saved'): Promise<void> {
   PR.webStatus = { kind: 'busy', text: 'saving…' };

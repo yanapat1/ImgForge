@@ -10,7 +10,7 @@ web
 Primary: a solo ML / computer-vision researcher curating their own YOLO datasets before and between training runs. They explore embeddings, look for bad labels, train/val leaks, outliers and near-duplicates, compare models, and fix boxes. The multi-user features (accounts, private/global sessions, Viewer/Labeler roles) are for occasional collaborators, not a team workflow.
 
 ## Product Purpose
-Dataset Visualizer is a self-hosted, FiftyOne-style explorer for YOLO datasets, and for any other embeddings (audio, video, text, tables) brought as `.npy` vectors plus a metadata table. Every bounding box (or row) becomes a dot in a 2D projection (15 linear, non-linear and other methods) of a chosen feature space (OpenCLIP, SigLIP 2, DINOv2, own YOLO weights, colour histogram, HOG, box geometry). The researcher lassos dots or describes them in words to see their crops, runs curation checks, and corrects labels. Success: dataset problems are found and fixed in the same sitting, and the next training run starts from cleaner data.
+DataViz is a self-hosted, FiftyOne-style explorer for YOLO datasets, and for any other embeddings (audio, video, text, tables) brought as `.npy` vectors plus a metadata table. Every bounding box (or row) becomes a dot in a 2D projection (15 linear, non-linear and other methods) of a chosen feature space (OpenCLIP, SigLIP 2, DINOv2, own YOLO weights, colour histogram, HOG, box geometry). The researcher lassos dots or describes them in words to see their crops, runs curation checks, and corrects labels. Success: dataset problems are found and fixed in the same sitting, and the next training run starts from cleaner data.
 
 ## Positioning
 Find and fix in one place. The loop goes embed → spot the problem on the plot (suspicious labels, leaks, outliers, duplicates, model disagreement) → fix the box right there with undo and conflict checks, on local disk or S3 / RustFS. There is no export/import round-trip to a separate labeling tool.
@@ -22,13 +22,13 @@ Find and fix in one place. The loop goes embed → spot the problem on the plot 
 - Runs on the user's own GPU box via Docker (PostgreSQL + pgvector). It may be served behind a proxy prefix.
 
 ## Capabilities and Constraints
-- Screens: sign-in, Sessions home, visualizer (`/s/<id>/`), labeling page. All share one `index.html`.
+- Screens: sign-in, Home (`/`, the overview), Bucket (`?bucket`), Image (`?image`: Visualize and Label sessions), the visualizer (`/s/<id>/`), the labeling page (`?label=`), Data (`?data`). The header always lists Bucket · Image · Data in that order. All share one `index.html`.
 - Front end: strict TypeScript in `static/ts` built with esbuild. Plain CSS in cascade-ordered files. Plotly is the only UI library. Colours exist only as CSS tokens, and the plot reads them from the CSS.
 - Existing fact, not a confirmed commitment: light/dark themes, six selectable styles (Instrument, Editorial, Blueprint, Brutalist, Terminal, Soft) and six colour palettes (Default, Colour-blind safe, High contrast, Fjord, Ember, Orchid).
-- Terminology: session, visualize vs label session, owner / Viewer / Labeler, connection, curation scan, fix / undo, job.
+- Terminology: Bucket, Image, Data (the pages; formerly Data Center, Sessions, Analysis), session, visualize vs label session, owner / Viewer / Labeler, connection, curation scan, fix / undo, job.
 
 ## Brand Commitments
-- Name: "Dataset Visualizer". The README says "FiftyOne-style", which compares the product but does not borrow FiftyOne's identity.
+- Name: "DataViz". The README says "FiftyOne-style", which compares the product but does not borrow FiftyOne's identity.
 - Engineering voice from the README conventions: comments say why, performance claims are measured, nothing slow hangs a request.
 
 ## Evidence on Hand

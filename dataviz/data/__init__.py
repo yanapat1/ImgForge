@@ -1,1 +1,1 @@
-"""Data Analysis zone: see README.md in this folder."""
+"""Data zone: see README.md in this folder."""

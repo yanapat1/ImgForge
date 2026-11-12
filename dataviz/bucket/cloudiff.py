@@ -2,7 +2,7 @@
 Local copy vs. the cloud: what the user changed in the downloaded copy of an S3 link, and what S3 changed since.
 
 A download sets each file's mtime to its object's LastModified (store.S3View.pull / service._fetch_file) and stamps
-the folder with the end of the download (dc_s3_local.fetched_at; a whole bucket loaded into local: synced_at) = T.
+the folder with the end of the download (bucket_s3_local.fetched_at; a whole bucket loaded into local: synced_at) = T.
 So, per file, with SLACK seconds of clock tolerance:
 
     same            size equal and mtime == LastModified                      (as downloaded)
@@ -273,7 +273,7 @@ def _verify(con, dest, cancelled, progress):
         return p, (got == want) if got else None
 
     done = 0
-    with ThreadPoolExecutor(max_workers=VERIFY_WORKERS, thread_name_prefix='dc-verify') as ex:
+    with ThreadPoolExecutor(max_workers=VERIFY_WORKERS, thread_name_prefix='bk-verify') as ex:
         for p, match in ex.map(one, todo):
             done += 1
             if match is None:

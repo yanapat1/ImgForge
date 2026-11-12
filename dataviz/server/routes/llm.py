@@ -9,9 +9,9 @@ generator, and a provider error mid-stream becomes a {"t": "error"} line. Auto-t
 
 Everything runs on the CALLER's providers and switches (llm/store.py is per user). The dataset features need
 the visualizer session the request is bound to (/s/<id>/: viewer; auto-tag writes box tags: labeler); the
-label page features need the labeling session (assist: viewer; prelabel / accept: labeler). The Data Center
-agent (/api/llm/dc/*) needs no session: its tools act through datacenter/service.py as the caller, and its
-changes only run on /api/llm/dc/confirm.
+label page features need the labeling session (assist: viewer; prelabel / accept: labeler). The Bucket page
+agent (/api/llm/bucket/*) needs no session: its tools act through bucket/service.py as the caller, and its
+changes only run on /api/llm/bucket/confirm.
 """
 
 import base64
@@ -248,10 +248,10 @@ def router(state, ctx):
         return StreamingResponse(gen(), media_type='application/x-ndjson',
                                  headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
-    # ------------------------------------------------------------ Data Center agent (NDJSON stream)
-    @r.post('/api/llm/dc/chat')
+    # ------------------------------------------------------------ Bucket agent (NDJSON stream)
+    @r.post('/api/llm/bucket/chat')
     def dc_chat(body: dict):
-        p = need('data_center')
+        p = need('bucket_data')
         msgs_in = body.get('messages') or []
         if not msgs_in or not isinstance(msgs_in, list) or not isinstance(msgs_in[-1], dict) \
                 or msgs_in[-1].get('role') != 'user':
@@ -273,15 +273,15 @@ def router(state, ctx):
         return StreamingResponse(gen(), media_type='application/x-ndjson',
                                  headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
-    @r.post('/api/llm/dc/confirm')
+    @r.post('/api/llm/bucket/confirm')
     def dc_confirm(body: dict):
-        need('data_center')
+        need('bucket_data')
         ids = body.get('action_ids')
         if not isinstance(ids, list):
             raise HTTPException(400, 'action_ids must be a list')
         user = auth_context.user()
-        if 'data.manage' in tiers.PERMS:            # changing data needs the same permission as /api/dc/*/ops
-            tiers.check(user, 'data.manage')
+        if 'bucket.manage' in tiers.PERMS:            # changing data needs the same permission as /api/bucket/*/ops
+            tiers.check(user, 'bucket.manage')
         try:
             return agent.confirm(user, body.get('plan_id'), ids)
         except agent.AgentError as e:

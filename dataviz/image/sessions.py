@@ -1,6 +1,6 @@
 """
-The sessions table (app.sessions): one row per card of the home page, for both kinds — 'viz' (a dataset
-opened in the visualizer; its source in app.viz_sessions, data/connections.py) and 'label' (a labeling
+The sessions table (app.sessions): one row per card of the Image page, for both kinds — 'viz' (a dataset
+opened in the visualizer; its source in app.viz_sessions, image/connections.py) and 'label' (a labeling
 project; app.label_projects, labeling/projects.py). Ownership, visibility, tags, members and "last opened by
 me" live here, so both kinds share one access model (auth/access.py) and one card header.
 

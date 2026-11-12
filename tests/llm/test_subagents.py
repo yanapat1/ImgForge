@@ -45,14 +45,14 @@ def fake(monkeypatch, tasks=None):
     return seen, live
 
 
-def start(agents_on=True, provider=OPENAI, role='data'):
+def start(agents_on=True, provider=OPENAI, role='bucket'):
     opts = react.options({'agents': agents_on}, provider)
     return react.prepare(ALICE, role, provider, react.history([{'role': 'user', 'text': 'check two buckets'}]), {}, opts)
 
 
 def test_off_by_default_and_never_for_a_small_model():
     assert 'delegate' not in start(agents_on=False).tools
-    assert 'delegate' not in react.prepare(ALICE, 'data', OPENAI, react.history([{'role': 'user', 'text': 'x'}]), {},
+    assert 'delegate' not in react.prepare(ALICE, 'bucket', OPENAI, react.history([{'role': 'user', 'text': 'x'}]), {},
                                            react.options({}, OPENAI)).tools
     small = {**OPENAI, 'model': 'qwen2.5-7b-instruct'}
     assert react.profile_of(small) == 'small' and 'delegate' not in start(provider=small).tools
@@ -107,4 +107,4 @@ def test_the_switch_is_saved_per_user(client):
     client.put('/api/llm/config', json={'budget': {'agents': {'on': True}}})
     client.put('/api/llm/config', json={'budget': {'agents': {'model': ' gpt-mini '}}})
     assert s.load(u)['budget']['agents'] == {'on': True, 'model': 'gpt-mini'}
-    assert any(c['name'] == 'agents' for c in client.get('/api/llm/agent/data/catalog').json()['commands'])
+    assert any(c['name'] == 'agents' for c in client.get('/api/llm/agent/bucket/catalog').json()['commands'])

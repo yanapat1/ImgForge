@@ -1,4 +1,4 @@
-"""Data Center: the progressive S3 folder listing (datacenter/s3dir.py): a request sees the entries listed so far
+"""Bucket: the progressive S3 folder listing (bucket/s3dir.py): a request sees the entries listed so far
 while the fill runs, one listing is shared and reused (no second listing), an error is kept for the reader, and
 the cache drops the oldest finished listings, never a running one; invalidate forgets a bucket's folders."""
 

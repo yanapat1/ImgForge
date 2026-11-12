@@ -47,6 +47,9 @@ a.btn { display: inline-flex; align-items: center; gap: 7px; height: var(--contr
   background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r); color: var(--text); text-decoration: none;
   transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease); }
 a.btn:hover { background: var(--surface-3); border-color: var(--border-hover); }
+a.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+a.btn.primary .ico { color: var(--on-accent); }
+a.btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 :is(button, a.btn).sm { height: 26px; padding: 0 var(--s2); gap: 5px; font-size: var(--fs-xs); }
 :is(button, a.btn).sm .ico { width: 14px; height: 14px; }
 input.txt.sm { height: 26px; padding: 0 var(--s2); font-size: var(--fs-xs); }

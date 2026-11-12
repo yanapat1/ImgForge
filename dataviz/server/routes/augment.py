@@ -24,7 +24,7 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     POST /api/augment/curve            {recipe, target, quality, m, seed} -> a job: coverage + unreal variants at strengths
                                         0.25 … 2 -> {points, best} (GET .../coverage/result?key=)
     POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path} | {kind: session, id}, quality,
-                                        m, k, seed} -> {ready, result} | {ready: false, job_id, key}  (data/augment_run.py)
+                                        m, k, seed} -> {ready, result} | {ready: false, job_id, key}  (image/augment_run.py)
     GET  /api/augment/coverage/result  ?key= | latest=1 -> the coverage report
     GET  /api/augment/thumb            ?part=&i= -> one 224 px thumbnail of a coverage part (the page's galleries)
 
@@ -312,7 +312,7 @@ def router(state, ctx):
 
     @r.post('/api/augment/copy')
     def make_copy(body: dict = Body(...), user=Depends(deps.current_user)):
-        """A new managed Data Center bucket holding k augmented variants of every image (+ the originals), YOLO labels."""
+        """A new managed bucket holding k augmented variants of every image (+ the originals), YOLO labels."""
         g.need_index()
         g.boxes_only()
         _albu()
@@ -423,7 +423,7 @@ def router(state, ctx):
             m = target_meta(st, str(tgt.get('id') or ''))
             files = sorted((targets_dir(st) / m['id'] / 'images').iterdir())
             return ar.h16('upload', m['id'], len(files)), files, m['name'], None
-        if kind == 'dc':
+        if kind == 'bucket':
             from ...bucket import service as dc
             from ...bucket.store import BucketError
             try:
@@ -439,7 +439,7 @@ def router(state, ctx):
                     sig.append(f'{f}:{stt.st_size}:{int(stt.st_mtime)}')
                 except OSError:
                     continue
-            return ar.h16('dc', *sig), files, f'{tgt.get("path") or "/"} ({len(files)} images)', None
+            return ar.h16('bucket', *sig), files, f'{tgt.get("path") or "/"} ({len(files)} images)', None
         if kind == 'session':
             other = str(tgt.get('id') or '')
             seen = {d['id']: d for d in ctx.datasets.datasets(user)}

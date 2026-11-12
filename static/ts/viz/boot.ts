@@ -230,7 +230,7 @@ function bindPointsLayer(caps: Caps): void {
 }
 
 // an embeddings session: the controls that read box geometry / images go, its metadata columns come in
-// one point per image (data/views.py ImageView): every "box" is the whole image, so box size and shape say nothing
+// one point per image (image/views.py ImageView): every "box" is the whole image, so box size and shape say nothing
 function adaptToImages(): void {
   const colorBy = $req<HTMLSelectElement>('color-by');
   for (const v of ['area', 'aspect']) colorBy.querySelector(`option[value="${v}"]`)?.remove();

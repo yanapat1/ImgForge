@@ -1344,7 +1344,7 @@ class ProjectStore:
 
     def change_cursor(self, tid):
         """The newest lbl.change_seq of task `tid` (its shapes + statuses; 0 = none): where a live feed starts
-        (data/live.py). Read BEFORE a snapshot so a write committed during it is replayed, never lost."""
+        (image/live.py). Read BEFORE a snapshot so a write committed during it is replayed, never lost."""
         a = {'p': self.pid, 't': tid}
         with self._read() as c:
             return int(c.execute(_q(

@@ -1,11 +1,11 @@
 # Every zone (the full install). Versions this was built and tested with (Python 3.12). One file per zone in
-# requirements/: an install of fewer zones needs only core + its zones, e.g. Data Center + Data Analysis:
-#   uv pip install -r requirements/core.txt -r requirements/datacenter.txt -r requirements/analysis.txt
+# requirements/: an install of fewer zones needs only core + its zones, e.g. Bucket + Data:
+#   uv pip install -r requirements/core.txt -r requirements/bucket.txt -r requirements/data.txt
 # Install into an existing venv WITHOUT -U, so numpy/scipy/torch already there are not upgraded:
 #   uv pip install --python .venv/bin/python -r requirements.txt
 -r requirements/core.txt
--r requirements/datacenter.txt
--r requirements/analysis.txt
+-r requirements/bucket.txt
+-r requirements/data.txt
 -r requirements/visualizer.txt
 -r requirements/labeling.txt
 # test only (tests/): not needed to run the server

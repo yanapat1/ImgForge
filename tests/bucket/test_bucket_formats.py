@@ -1,4 +1,4 @@
-"""Data Center format detection (dataviz/bucket/formats.py): pure, on temp folders, no database."""
+"""Bucket format detection (dataviz/bucket/formats.py): pure, on temp folders, no database."""
 
 import json
 

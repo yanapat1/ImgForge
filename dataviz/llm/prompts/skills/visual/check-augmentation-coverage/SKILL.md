@@ -4,7 +4,7 @@ when: the user asks whether augmentation will make the dataset fit another place
 description: Build an augmentation recipe for the new images and check how much of them it covers
 ---
 1. `augment_coverage`. With no check yet, tell the user to open Augment › Coverage, pick the new images (Upload images…
-   or a Data Center folder) and press Check coverage; meanwhile propose a starting recipe.
+   or a Bucket folder) and press Check coverage; meanwhile propose a starting recipe.
 2. To propose one: `augment_catalog`, pick the steps for the change the user describes (a new camera: colour
    temperature, tone curve, sharpness, lens distortion, JPEG, noise; night: darker, gamma, ISO noise; weather: rain,
    fog), moderate chances (0.2–0.5), and `set_augment_recipe` with a one-line note.
