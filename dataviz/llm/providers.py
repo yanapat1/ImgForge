@@ -809,6 +809,8 @@ def _openai_events(p, r, st):
         if ev.get('usage'):
             st['usage'] = _usage_openai(ev['usage'])
         for ch in ev.get('choices') or []:
+            if ch.get('finish_reason'):
+                st['stop'] = ch['finish_reason']        # 'length': the output limit cut the answer
             d = ch.get('delta') or ch.get('message') or {}
             th = d.get('reasoning_content') or d.get('reasoning')
             if isinstance(th, str) and th:
@@ -956,6 +958,8 @@ def _gemini_events(p, r, st):
                 raise LLMError(f'Gemini returned no answer (blocked: {why})', 502)
             continue
         c = cands[0]
+        if c.get('finishReason'):
+            st['stop'] = c['finishReason']
         for x in (c.get('content') or {}).get('parts') or []:
             sig = x.get('thoughtSignature')
             fc = x.get('functionCall')
@@ -987,12 +991,21 @@ def _gemini_events(p, r, st):
                          'results': [{'title': t, 'url': u} for u, t in results.items()]}
 
 
+CUT_OFF = ('length', 'max_tokens', 'MAX_TOKENS')                  # stop reasons: the output limit ended the answer
+
+
+def out_limit(p):
+    """The provider's output limit for one answer (its setting, else the default)."""
+    return _max_tokens(p, None)
+
+
 def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_tokens=None):
     """One tool-calling step streamed for the agent engine. Yields
         ('thinking', {text, sig?, kind?, redacted?})   reasoning chunks; a signed one goes back in the history
         ('text', str)                                  answer chunks
         ('tool_call', {id, name, args, sig?})          once per complete call (args None: not a JSON object)
         ('search', {query, engine, results: [{title, url}], unavailable?})   provider-native web search
+        ('stop', str)                                  why the answer ended, when the provider said (before usage)
         ('usage', {in, out})                           last
     think: None | 'off' | 'low' | 'medium' | 'high'. native_web: ask for the provider's own web search where
     native_web_ok(p); when the provider refuses it, the step is sent again without it, that is remembered and one
@@ -1011,6 +1024,7 @@ def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_token
     _stream_extras(p, body, h, level, bool(native_web) and native_web_ok(p), tools)
     _drop_refused(p, body)
     total, told, guessed = {'in': 0, 'out': 0}, False, set()
+    stop = None
     for _pause in range(_MAX_PAUSES + 1):
         st = {'usage': {'in': 0, 'out': 0}, 'stop': None, 'content': []}
         for _ in range(len(_PARAMS) + 2):
@@ -1035,6 +1049,7 @@ def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_token
         if guessed:
             _remember(p, guessed)
             guessed = set()
+        stop = st['stop'] or stop
         total = {'in': total['in'] + int(st['usage'].get('in') or 0),
                  'out': total['out'] + int(st['usage'].get('out') or 0)}
         if kind != 'anthropic' or st['stop'] != 'pause_turn' or not st['content']:
@@ -1045,6 +1060,8 @@ def stream_tools(p, system, msgs, tools, think=None, native_web=False, max_token
             body['messages'] = ms[:-1] + [{'role': 'assistant', 'content': ms[-1]['content'] + st['content']}]
         else:
             body['messages'] = ms + [{'role': 'assistant', 'content': st['content']}]
+    if stop:
+        yield 'stop', str(stop)
     yield 'usage', total
 
 

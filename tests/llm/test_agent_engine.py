@@ -140,6 +140,31 @@ def test_retry_then_success_and_no_retry_for_setup_errors(monkeypatch, svc):
         drain(start('hi'))
 
 
+def test_an_answer_cut_off_while_thinking_is_tried_once_with_twice_the_room(monkeypatch, svc):
+    """A small output limit ran out in the thinking (no text, no call, stop 'length'): once more with twice the
+    limit and a nudge to act; cut off again: an error that says what to change, not "empty answer"."""
+    limits, outs = [], iter([[], [('text', 'Done.')]])
+
+    def stream_tools(p, system, msgs, specs, think=None, native_web=False, max_tokens=None):
+        limits.append(max_tokens)
+        evs = next(outs)
+        yield 'thinking', {'text': 'long plan…'}
+        yield from evs
+        yield 'stop', 'stop' if evs else 'length'
+        yield 'usage', {'in': 10, 'out': 2048}
+
+    monkeypatch.setattr(providers, 'stream_tools', stream_tools)
+    evs = drain(start('organise the board', provider={**OPENAI, 'max_output_tokens': 2048}))
+    assert limits == [None, 4096]
+    assert any(e['type'] == 'notice' and '2048 tokens' in e['text'] for e in evs)
+    assert not any(e['type'] == 'error' for e in evs)
+    outs = iter([[], []])
+    limits.clear()
+    evs = drain(start('organise the board', provider={**OPENAI, 'max_output_tokens': 2048}))
+    err = next(e for e in evs if e['type'] == 'error')
+    assert limits == [None, 4096] and 'output limit (4096 tokens)' in err['detail'] and 'Max output tokens' in err['detail']
+
+
 def test_loop_guard_nudges_then_stops(monkeypatch, svc):
     seen = script(monkeypatch, *[('', [('list_folder', {'bucket': 'cars'})]) for _ in range(6)])
     evs = drain(start('again'))

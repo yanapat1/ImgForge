@@ -12,12 +12,12 @@ import { $, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { openDialog, promptDialog } from '../views/dialog.js';
 import { chip, saveTabs } from './app.js';
-import { addMenu, bindBoard, clearNoteSel, layerHTML, marqueeNotes, noteDown, noteKey, noteMenu, noteMove, noteUp, placeNoteBar, renderNotes } from './board.js';
+import { addMenu, bindBoard, clearNoteSel, layerHTML, marqueeNotes, noteDown, noteKey, noteMenu, noteMove, noteUp, pinnedTo, placeNoteBar, renderNotes } from './board.js';
 import { cardOf, cardTitle, ENDS_LABEL, ENDS_NEXT, endsMode, markerDefs, setEndsMode, sideMarks, statKey } from './cardinality.js';
 import { countJoin } from './joins.js';
 import { MENU_SEP, menuHead, menuItem, openMenu } from './menu.js';
 import { A, api, sourceOf, tab, tableKey } from './state.js';
-import type { Calc, Card, Join, Model, MTable, Tab } from './state.js';
+import type { Calc, Card, Join, Model, MTable, Note, Tab } from './state.js';
 
 const WINDOW_FNS = ['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'NTILE', 'PERCENT_RANK', 'CUME_DIST', 'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE', 'NTH_VALUE', 'SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'STDEV', 'VAR'];
 const NO_ARG = new Set(['ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK', 'CUME_DIST']);
@@ -581,7 +581,7 @@ async function cardAct(id: string, k: string): Promise<void> {
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; ox: number; oy: number; moved: boolean; join: string | null; card: string | null; note: string | null }
   | { kind: 'marq'; sx: number; sy: number; el: HTMLElement; r: DOMRect; add: boolean; moved: boolean }
-  | { kind: 'move'; id: string; sx: number; sy: number; moved: boolean; group: { m: MTable; ox: number; oy: number }[] }
+  | { kind: 'move'; id: string; sx: number; sy: number; moved: boolean; group: { m: MTable; ox: number; oy: number }[]; pins: { n: Note; ox: number; oy: number }[] }
   | { kind: 'col'; t: string; c: string; sx: number; sy: number; moved: boolean };
 let P: Drag | null = null;
 let panEnd = 0;
@@ -605,7 +605,8 @@ export function builderDown(e: PointerEvent): boolean {
   if (head) {
     const id = head.dataset['mv'] ?? '', ids = S.sel.includes(id) ? S.sel : [id];
     const group = ids.flatMap((x) => { const m = modelOf(t).tables.find((y) => y.id === x); return m ? [{ m, ox: m.x, oy: m.y }] : []; });
-    P = { kind: 'move', id, sx: e.clientX, sy: e.clientY, moved: false, group };
+    const pins = pinnedTo(new Set(group.map((g) => g.m.id))).map((n) => ({ n, ox: n.x, oy: n.y }));   // their descriptions
+    P = { kind: 'move', id, sx: e.clientX, sy: e.clientY, moved: false, group, pins };
     e.preventDefault();
     return true;
   }
@@ -643,6 +644,12 @@ export function builderMove(e: PointerEvent): void {
         g.m.y = g.oy + dy;
         const el = document.querySelector<HTMLElement>(`.an-tb[data-t="${CSS.escape(g.m.id)}"]`);
         if (el) { el.style.left = `${g.m.x}px`; el.style.top = `${g.m.y}px`; }
+      }
+      for (const g of P.pins) {
+        g.n.x = Math.round(g.ox + dx);
+        g.n.y = Math.round(g.oy + dy);
+        const el = document.querySelector<HTMLElement>(`.an-note[data-n="${CSS.escape(g.n.id)}"]`);
+        if (el) { el.style.left = `${g.n.x}px`; el.style.top = `${g.n.y}px`; }
       }
       drawLines();
     }
@@ -789,4 +796,5 @@ export async function syncFromSql(t: Tab): Promise<void> {
   }
 }
 
-bindBoard({ modelOf, record, drawLines, clearCards: () => { if (S.sel.length) { S.sel = []; syncSel(); } }, cards: () => modelOf(tab()).tables });
+bindBoard({ modelOf, record, drawLines, clearCards: () => { if (S.sel.length) { S.sel = []; syncSel(); } }, cards: () => modelOf(tab()).tables,
+  info: (m) => { const t = tab(); return t.conn ? A.info.get(tableKey(t.conn, m.database || t.db || '', m.schema, m.name)) : undefined; }, redraw: renderBuilder });

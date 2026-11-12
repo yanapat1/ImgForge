@@ -53,6 +53,7 @@ export interface Note {
   locked?: boolean;        // does not move or resize
   carry?: boolean;         // dragging this zone moves the cards inside it
   auto?: boolean;          // made by Auto zones (the next Auto zones replaces it)
+  pin?: string;            // a table card's id: this note describes that table and moves with its card
 }
 /** The whole query at once (POST /joins/overview): its rows, and the join keys of each table that reach it. */
 export interface JoinOverview { rows: number; used: Record<string, number>; key: Record<string, string> }

@@ -11,7 +11,7 @@ import { openDialog } from '../views/dialog.js';
 import { saveTabs } from './app.js';
 import { MENU_SEP, menuHead, menuItem, openMenu } from './menu.js';
 import { tab } from './state.js';
-import type { MTable, Model, Note, NoteShape, Tab } from './state.js';
+import type { MTable, Model, Note, NoteShape, Tab, TableInfo } from './state.js';
 
 export const BOARD_W = 2400, BOARD_H = 1600, MAX_NOTES = 300, MAX_TEXT = 2000;
 /** Notes go anywhere on the board, like the table cards (left of and above its first corner too), within this. */
@@ -28,7 +28,10 @@ const SVG_PATH: Partial<Record<NoteShape, string>> = {
 const STRIP = 28, SNAP = 8, MIN_W = 40, MIN_H = 24;
 
 /** The hooks the builder gives: its model, undo snapshot, a redraw of the join lines, and the card selection. */
-interface Host { modelOf: (t: Tab) => Model; record: (t: Tab) => void; drawLines: () => void; clearCards: () => void; cards: () => MTable[] }
+interface Host {
+  modelOf: (t: Tab) => Model; record: (t: Tab) => void; drawLines: () => void; clearCards: () => void; cards: () => MTable[];
+  info: (m: MTable) => TableInfo | undefined; redraw: () => void;
+}
 let H: Host | null = null;
 export function bindBoard(h: Host): void { H = h; }
 
@@ -63,6 +66,7 @@ export function cleanNote(x: Partial<Note>, id?: string): Note {
   if (x.locked) n.locked = true;
   if (x.carry) n.carry = true;
   if (x.auto) n.auto = true;
+  if (typeof x.pin === 'string' && x.pin) n.pin = x.pin.slice(0, 64);
   return n;
 }
 
@@ -468,27 +472,132 @@ export function boardScope(): Record<string, unknown> | null {
   const out = {
     tables: m.tables.slice(0, 40).map((x) => {
       const el = document.querySelector<HTMLElement>(`.an-tb[data-t="${CSS.escape(x.id)}"]`);
-      return { id: x.id, name: x.schema ? `${x.schema}.${x.name}` : x.name, x: Math.round(x.x), y: Math.round(x.y), w: el?.offsetWidth ?? 200, h: el?.offsetHeight ?? 160 };
+      const d = H?.info(x)?.description?.trim();
+      return { id: x.id, name: x.schema ? `${x.schema}.${x.name}` : x.name, x: Math.round(x.x), y: Math.round(x.y), w: el?.offsetWidth ?? 200, h: el?.offsetHeight ?? 160, ...(d ? { description: d.slice(0, 160) } : {}) };
     }),
     joins: m.joins.slice(0, 60).map((j) => ({ a: j.a.join('.'), b: j.b.join('.'), ...(j.card ? { card: j.card } : {}) })),
-    notes: (m.notes ?? []).slice(0, 80).map((n) => ({ id: n.id, shape: n.shape, layer: n.layer, x: n.x, y: n.y, w: n.w, h: n.h, fill: n.fill, text: n.text.slice(0, 80), ...(n.locked ? { locked: true } : {}) })),
+    notes: (m.notes ?? []).slice(0, 80).map((n) => ({ id: n.id, shape: n.shape, layer: n.layer, x: n.x, y: n.y, w: n.w, h: n.h, fill: n.fill, text: n.text.slice(0, 80), ...(n.pin ? { describes: n.pin } : {}), ...(n.locked ? { locked: true } : {}) })),
   };
   let s = JSON.stringify(out);
   while (s.length > 4000 && out.notes.length) { out.notes.pop(); s = JSON.stringify(out); }
   return out;
 }
 
-export interface BoardOp { op: 'add' | 'update' | 'remove'; id?: string; note?: Partial<Note> }
+export type BoardOp =
+  | { op: 'add' | 'update' | 'remove'; id?: string; note?: Partial<Note> }
+  | { op: 'zone'; id?: string; label: string; tables: string[]; fill?: string }
+  | { op: 'describe'; table: string; text: string };
+export interface BoardResult { added: number; changed: number; removed: number; moved: number; refused: string[]; overlap: string[] }
 
-/** The assistant's edit_board: apply the ops in one undo step; locked notes are left as they are. -> what was done. */
-export function applyBoardOps(ops: BoardOp[]): { added: number; changed: number; removed: number; refused: string[] } {
-  const t = tab(), list = notesOf(t), out = { added: 0, changed: 0, removed: 0, refused: [] as string[] };
+/** The notes that describe these table cards (they move with them). */
+export function pinnedTo(ids: Set<string>): Note[] {
+  return notesOf(tab()).filter((n) => n.pin && ids.has(n.pin) && !n.locked);
+}
+
+const PAD = 24, GAP = 36, DESC_GAP = 6, COL_MAX = 1100;
+const cardBox = (m: MTable): { w: number; h: number } => {
+  const el = document.querySelector<HTMLElement>(`.an-tb[data-t="${CSS.escape(m.id)}"]`);
+  return { w: el?.offsetWidth ?? 220, h: el?.offsetHeight ?? 160 };
+};
+/** The height a note needs for its text at this width (measured with the notes' own text style). */
+function textHeight(text: string, w: number, size: number): number {
+  const host = document.getElementById('an-nfront');
+  if (!host) return Math.max(MIN_H, Math.ceil(text.length * size * 0.55 / Math.max(40, w - 20)) * size * 1.3 + 14);
+  const el = document.createElement('div');
+  el.className = 'an-ntext';
+  Object.assign(el.style, { position: 'absolute', visibility: 'hidden', width: `${w}px`, height: 'auto', fontSize: `${size}px` });
+  el.textContent = text;
+  host.append(el);
+  const h = el.offsetHeight;
+  el.remove();
+  return Math.max(MIN_H, Math.ceil(h) + 4);
+}
+const inside = (a: Note, b: Note): boolean => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;   // a nested zone is meant
+const hit = (a: Note, b: Note): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** The assistant's edit_board in one undo step: notes added / changed / removed by id; `zone` draws a zone around
+ * tables (the page measures them); `describe` pins a sticky note with a table's description above its card;
+ * `arrange` first lays the tables out zone by zone, side by side, so no two zones overlap. Locked notes stay. */
+export function applyBoardOps(ops: BoardOp[], arrange = false): BoardResult {
+  const t = tab(), list = notesOf(t), out: BoardResult = { added: 0, changed: 0, removed: 0, moved: 0, refused: [], overlap: [] };
+  const tables = H?.cards() ?? [], byTable = new Map(tables.map((m) => [m.id, m]));
+  const find = (k: string): MTable | undefined => byTable.get(k) ?? tables.find((m) => m.alias === k || m.name === k || `${m.schema}.${m.name}` === k);
   H?.record(t);
+  const room = (): boolean => { if (list.length < MAX_NOTES) return true; out.refused.push(`the board holds ${MAX_NOTES} notes`); return false; };
+  // 1. descriptions: one pinned note per table (written again when the table has one)
+  const desc = new Map<string, Note>();
   for (const o of ops) {
+    if (o.op !== 'describe') continue;
+    const m = find(o.table);
+    if (!m) { out.refused.push(`describe: no table ${o.table} on the board`); continue; }
+    const w = cardBox(m).w, text = String(o.text ?? '').slice(0, MAX_TEXT);
+    const cur = list.find((n) => n.pin === m.id);
+    if (cur?.locked) { out.refused.push(`describe: the note of ${m.name} is locked`); continue; }
+    const h = textHeight(text, w, 12);
+    if (cur) { Object.assign(cur, { text, w, h }); out.changed++; desc.set(m.id, cur); continue; }
+    if (!room()) continue;
+    const n = cleanNote({ ...PRESETS['sticky'], text, size: 12, w, h, x: m.x, y: m.y - h - DESC_GAP, pin: m.id });
+    list.push(n);
+    desc.set(m.id, n);
+    out.added++;
+  }
+  for (const n of list) if (n.pin && !desc.has(n.pin) && byTable.has(n.pin)) desc.set(n.pin, n);
+  // 2. the zones' tables (a table goes to the first zone that names it)
+  const zones = ops.filter((o): o is Extract<BoardOp, { op: 'zone' }> => o.op === 'zone');
+  const seen = new Set<string>();
+  const groups = zones.map((z) => {
+    const ms: MTable[] = [];
+    for (const k of z.tables ?? []) {
+      const m = find(k);
+      if (!m) out.refused.push(`zone ${z.label}: no table ${k} on the board`);
+      else if (!seen.has(m.id)) { seen.add(m.id); ms.push(m); }
+    }
+    return ms;
+  });
+  // 3. arrange: each zone's tables in a column (a second column past COL_MAX px), zones side by side, the rest after
+  if (arrange && tables.length) {
+    const rest = tables.filter((m) => !seen.has(m.id));
+    let x = Math.min(...tables.map((m) => m.x)), top = Math.min(...tables.map((m) => m.y - (desc.get(m.id)?.h ?? 0)));
+    top += STRIP;
+    for (const g of [...groups, rest]) {
+      if (!g.length) continue;
+      x += PAD;
+      let y = top + PAD, colW = 0, right = x;
+      for (const m of g) {
+        const b = cardBox(m), d = desc.get(m.id), dh = d ? d.h + DESC_GAP : 0;
+        if (y > top + PAD && y + dh + b.h > top + COL_MAX) { x += colW + GAP; y = top + PAD; colW = 0; }
+        if (d && !d.locked) { d.x = x; d.y = y; d.w = b.w; }
+        m.x = x; m.y = y + dh;
+        y += dh + b.h + GAP;
+        colW = Math.max(colW, b.w);
+        right = Math.max(right, x + colW);
+        out.moved++;
+      }
+      x = right + PAD + GAP * 2;
+    }
+  }
+  // 4. a zone around each group's cards and their descriptions
+  zones.forEach((z, i) => {
+    const g = groups[i] ?? [];
+    if (!g.length) { out.refused.push(`zone ${z.label}: none of its tables are on the board`); return; }
+    const box = g.flatMap((m) => { const b = cardBox(m), d = desc.get(m.id); return [{ x: m.x, y: m.y, w: b.w, h: b.h }, ...(d ? [d] : [])]; });
+    const x0 = Math.min(...box.map((b) => b.x)) - PAD, y0 = Math.min(...box.map((b) => b.y)) - PAD - STRIP;
+    const x1 = Math.max(...box.map((b) => b.x + b.w)) + PAD, y1 = Math.max(...box.map((b) => b.y + b.h)) + PAD;
+    const rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, label = String(z.label ?? '').slice(0, 120);
+    const cur = (z.id ? list.find((n) => n.id === z.id) : undefined) ?? list.find((n) => n.layer === 'back' && n.text.trim().toLowerCase() === label.trim().toLowerCase());
+    if (cur?.locked) { out.refused.push(`zone ${label}: ${cur.id} is locked (only the user unlocks it)`); return; }
+    if (cur) { Object.assign(cur, cleanNote({ ...cur, ...rect, text: label, ...(z.fill ? { fill: z.fill } : {}), auto: false }, cur.id)); out.changed++; return; }
+    if (!room()) return;
+    list.push(cleanNote({ ...PRESETS['zone'], ...rect, text: label, fill: z.fill || (PALETTE[i % PALETTE.length] ?? 'blue') }, z.id));
+    out.added++;
+  });
+  // 5. notes by id
+  for (const o of ops) {
+    if (o.op !== 'add' && o.op !== 'update' && o.op !== 'remove') continue;
     const cur = o.id ? list.find((n) => n.id === o.id) : undefined;
     if (o.op === 'add') {
-      if (list.length >= MAX_NOTES) { out.refused.push(`add: the board holds ${MAX_NOTES} notes`); continue; }
       if (cur) { out.refused.push(`add: ${o.id} exists`); continue; }
+      if (!room()) continue;
       list.push(cleanNote({ ...(o.note ?? {}), auto: false }, o.id));
       out.added++;
     } else if (!cur) out.refused.push(`${o.op}: no note ${o.id ?? ''}`);
@@ -496,13 +605,15 @@ export function applyBoardOps(ops: BoardOp[]): { added: number; changed: number;
     else if (o.op === 'remove') { list.splice(list.indexOf(cur), 1); out.removed++; }
     else {
       const next = cleanNote({ ...cur, ...(o.note ?? {}), locked: false, auto: false }, cur.id);
-      for (const k of ['bold', 'locked', 'carry', 'auto'] as const) delete cur[k];
+      for (const k of ['bold', 'locked', 'carry', 'auto', 'pin'] as const) delete cur[k];
       Object.assign(cur, next);
       out.changed++;
     }
   }
+  const back = list.filter((n) => n.layer === 'back');
+  back.forEach((a, i) => back.slice(i + 1).forEach((b) => { if (hit(a, b) && !inside(a, b) && !inside(b, a)) out.overlap.push(`${a.text.split('\n')[0] || a.id} / ${b.text.split('\n')[0] || b.id}`); }));
   NS.sel = [];
   saveTabs();
-  renderNotes();
+  if (out.moved) H?.redraw(); else renderNotes();
   return out;
 }

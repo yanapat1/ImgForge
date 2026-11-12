@@ -104,9 +104,11 @@ function pageAction(a: UiAction): UiResult {
   if (a.action === 'edit_board') {
     if (A.ws !== 'query') { A.ws = 'query'; render(); }
     if (!A.layout.viz) { A.layout.viz = true; render(); }
-    const r = applyBoardOps((a.args['ops'] ?? []) as BoardOp[]);
-    const parts = [r.added && `added ${r.added}`, r.changed && `changed ${r.changed}`, r.removed && `removed ${r.removed}`].filter(Boolean);
-    return { ok: r.added + r.changed + r.removed > 0 || !r.refused.length, result: { done: parts.join(', ') || 'nothing', refused: r.refused.slice(0, 20), undo: 'Ctrl+Z on the board' } };
+    const r = applyBoardOps((a.args['ops'] ?? []) as BoardOp[], a.args['arrange'] === true);
+    const parts = [r.added && `added ${r.added}`, r.changed && `changed ${r.changed}`, r.removed && `removed ${r.removed}`, r.moved && `moved ${r.moved} tables`].filter(Boolean);
+    return { ok: r.added + r.changed + r.removed + r.moved > 0 || !r.refused.length,
+      result: { done: parts.join(', ') || 'nothing', refused: r.refused.slice(0, 20), undo: 'Ctrl+Z on the board',
+        ...(r.overlap.length ? { zones_overlap: r.overlap.slice(0, 10), hint: 'call edit_board again with the same zone ops and arrange: true to move the tables apart' } : {}) } };
   }
   if (a.action === 'build_dashboard') {
     addCharts((a.args['charts'] ?? []) as { kind: string; title: string; x?: string; y?: string; agg?: string }[]);

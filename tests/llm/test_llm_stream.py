@@ -128,6 +128,16 @@ def test_compat_reasoning_content_and_think_tags(fake):
     assert f.bodies[1]['chat_template_kwargs'] == {'enable_thinking': False}
 
 
+def test_compat_cut_off_by_the_output_limit_says_so_and_takes_a_bigger_limit(fake):
+    """finish_reason length (all the tokens went to thinking) is passed on as ('stop', 'length'), before usage;
+    the engine's second try sends its bigger max_tokens."""
+    f = fake((200, sse(oa({'reasoning_content': 'a long plan'}),
+                       {'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'length'}]}, done=True)))
+    evs = run({**COMPAT, 'max_output_tokens': 2048}, max_tokens=4096)
+    assert evs[-2:] == [('stop', 'length'), ('usage', {'in': 0, 'out': 0})] and not of(evs, 'text')
+    assert f.bodies[0]['max_tokens'] == 4096
+
+
 def test_compat_calls_without_index(fake):
     fake((200, sse(oa({'tool_calls': [{'id': 'x1', 'function': {'name': 'list_buckets', 'arguments': '{}'}}]}),
                    oa({'tool_calls': [{'id': 'x2', 'function': {'name': 'list_folder', 'arguments': {'bucket': 'b'}}}]}),

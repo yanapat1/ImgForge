@@ -32,6 +32,9 @@ _log = vlog.get_logger('llm')
 
 MAX_STEPS = 50
 MAX_RETRIES = 50
+OUT_RETRY_MAX = 16384                   # an answer cut off by the output limit is tried once more with up to this
+CUT_NUDGE = ('(system) Your last answer ran out of output tokens while you were still thinking, so nothing reached the '
+             'user. Think briefly: call the next tool now, or answer in a few lines. Let tools do the arithmetic.')
 MAX_TURNS = 40
 MAX_RESULT = 6000               # characters of one tool result fed back to the model
 CONFIRM_TIMEOUT = 600
@@ -392,11 +395,11 @@ def _step(run, state, step_no):
     """Streams one provider call -> yields events; the step's result lands in state['ans']."""
     specs = [t.spec() for t in run.tools.values()]
     while True:
-        text, thinking, calls, usage, think_t0 = [], [], [], {}, None
+        text, thinking, calls, usage, think_t0, stop = [], [], [], {}, None, None
         streamed = False
         try:
             for kind, val in providers.stream_tools(run.provider, run.system, run.msgs, specs, think=run.think,
-                                                    native_web=run.native_web):
+                                                    native_web=run.native_web, max_tokens=state.get('max_out')):
                 if run.cancel.is_set():
                     break
                 if kind == 'thinking':
@@ -417,11 +420,13 @@ def _step(run, state, step_no):
                     calls.append(val)
                 elif kind == 'search':
                     yield {'type': 'search', **val}
+                elif kind == 'stop':
+                    stop = val
                 elif kind == 'usage':
                     usage = val or {}
             if think_t0 is not None:
                 yield {'type': 'thinking_end', 'ms': round((time.perf_counter() - think_t0) * 1000)}
-            state['ans'] = {'text': ''.join(text), 'thinking': thinking, 'calls': calls, 'usage': usage}
+            state['ans'] = {'text': ''.join(text), 'thinking': thinking, 'calls': calls, 'usage': usage, 'stop': stop}
             return
         except LLMError as e:
             if not getattr(e, 'transient', False):
@@ -507,6 +512,20 @@ def events(run):
             yield done(step)
             return
         if not calls:
+            if not text and ans.get('stop') in providers.CUT_OFF:
+                # the output limit ran out while the model was still thinking (a small limit, a long plan): once
+                # more with twice the room, the model told to act sooner; then say what to change
+                lim = st.get('max_out') or providers.out_limit(p)
+                if not st.get('max_out') and lim < OUT_RETRY_MAX:
+                    st['max_out'] = min(lim * 2, OUT_RETRY_MAX)
+                    yield {'type': 'notice', 'level': 'info',
+                           'text': f'The model used its whole output limit ({lim} tokens) thinking: trying once more with {st["max_out"]}.'}
+                    run.msgs.append({'role': 'user', 'parts': [{'text': CUT_NUDGE}]})
+                    continue
+                yield {'type': 'error', 'detail': f'the model used its whole output limit ({lim} tokens) before it '
+                       'answered: raise "Max output tokens" of this provider in Settings › AI, choose a lower '
+                       'thinking effort, or ask for a smaller step'}
+                return
             if not text:
                 yield {'type': 'error', 'detail': 'the model returned an empty answer: try again or rephrase'}
                 return

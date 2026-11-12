@@ -316,7 +316,7 @@ html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
 .an-cmd { justify-content: flex-start; height: 32px; padding: 0 var(--s2); border: 0; background: none; border-radius: var(--r); font-weight: normal; }
 .an-cmd.on { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .an-cmd:hover:not(:disabled) { background: var(--surface-2); border: 0; }
-.an-note { margin: var(--s2) var(--s1); font-size: var(--fs-xs); }
+.an-scrnote { margin: var(--s2) var(--s1); font-size: var(--fs-xs); }
 .an-sbody { width: 100%; height: 100%; padding: var(--s3); resize: none; border: 0; background: var(--surface); color: var(--text); font: var(--fs-sm)/1.55 var(--mono); }
 
 /* ---------------------------------------------------------------- dashboards: a 12-column board + its side panel */

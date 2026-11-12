@@ -186,6 +186,23 @@ def test_edit_board_checks_its_ops_before_the_page_sees_them():
             an._board_check(None, bad)
 
 
+def test_edit_board_zone_and_describe_ops_need_no_coordinates():
+    import pytest
+    from dataviz.llm.tools import ToolError
+    from dataviz.llm.tools import analysis as an
+    ok, _ = an._board_check(None, {'arrange': 1, 'ops': [
+        {'op': 'describe', 'table': 'o', 'text': '  One row per order.  '},
+        {'op': 'zone', 'label': 'Sales', 'tables': ['o', 'c'], 'fill': 'Green'}]})
+    assert ok['arrange'] is True
+    assert ok['ops'] == [{'op': 'describe', 'table': 'o', 'text': 'One row per order.'},
+                         {'op': 'zone', 'label': 'Sales', 'tables': ['o', 'c'], 'fill': 'green'}]
+    for bad in ({'ops': [{'op': 'zone', 'label': 'S', 'tables': []}]}, {'ops': [{'op': 'zone', 'tables': ['o']}]},
+                {'ops': [{'op': 'zone', 'label': 'S', 'tables': ['o'], 'fill': 'pink'}]},
+                {'ops': [{'op': 'describe', 'table': 'o'}]}):
+        with pytest.raises(ToolError):
+            an._board_check(None, bad)
+
+
 def test_the_board_is_named_in_the_scope_only_when_it_has_something():
     from dataviz.llm.tools import analysis as an
     ctx = type('C', (), {'scope': {'board': {'tables': [{'id': 'o'}], 'notes': []}}})()

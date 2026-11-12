@@ -311,7 +311,9 @@ def _note_fields(i, note):
 
 
 def _board_check(ctx, a):
-    """Before the page applies edit_board: every op well-formed, sizes inside the board (the page checks locks)."""
+    """Before the page applies edit_board: every op well-formed, sizes inside the board (the page checks locks and
+    measures the tables for zone / describe)."""
+    import re
     ops = a.get('ops')
     if not isinstance(ops, list) or not ops:
         raise ToolError('ops: give 1 to 60 operations')
@@ -319,17 +321,36 @@ def _board_check(ctx, a):
         raise ToolError(f'at most {BOARD_OPS} operations in one edit_board')
     out = []
     for i, o in enumerate(ops):
-        if not isinstance(o, dict) or o.get('op') not in ('add', 'update', 'remove'):
-            raise ToolError(f'ops[{i}].op must be add, update or remove')
-        if o['op'] != 'add' and not o.get('id'):
-            raise ToolError(f'ops[{i}]: {o["op"]} needs the note id (read_board lists them)')
-        x = {'op': o['op']}
+        kind = o.get('op') if isinstance(o, dict) else None
+        if kind not in ('zone', 'describe', 'add', 'update', 'remove'):
+            raise ToolError(f'ops[{i}].op must be zone, describe, add, update or remove')
+        x = {'op': kind}
         if o.get('id'):
             x['id'] = str(o['id'])[:64]
-        if o['op'] != 'remove':
-            x['note'] = _note_fields(i, o.get('note') or {})
+        if kind == 'zone':
+            label, tables = str(o.get('label') or '').strip(), o.get('tables')
+            if not label:
+                raise ToolError(f'ops[{i}]: a zone needs its label')
+            if not isinstance(tables, list) or not tables or not all(isinstance(t, str) and t for t in tables):
+                raise ToolError(f'ops[{i}]: a zone needs tables, the table ids from read_board (e.g. ["o", "c"])')
+            x.update(label=label[:120], tables=[t[:200] for t in tables[:40]])
+            fill = str(o.get('fill') or '').strip().lower()
+            if fill and fill not in NOTE_COLORS and not re.fullmatch(r'#[0-9a-f]{6}', fill):
+                raise ToolError(f'ops[{i}].fill: one of {", ".join(NOTE_COLORS)} or #rrggbb')
+            if fill:
+                x['fill'] = fill
+        elif kind == 'describe':
+            table, text = str(o.get('table') or '').strip(), str(o.get('text') or '').strip()
+            if not table or not text:
+                raise ToolError(f'ops[{i}]: describe needs table (its id from read_board) and text')
+            x.update(table=table[:200], text=text[:600])
+        else:
+            if kind != 'add' and not o.get('id'):
+                raise ToolError(f'ops[{i}]: {kind} needs the note id (read_board lists them)')
+            if kind != 'remove':
+                x['note'] = _note_fields(i, o.get('note') or {})
         out.append(x)
-    return {**a, 'ops': out}, None
+    return {**a, 'ops': out, 'arrange': bool(a.get('arrange'))}, None
 
 
 def _read_board(ctx, a):
@@ -351,19 +372,30 @@ _NOTE_PROPS = {
     'ha': E('text across', ['left', 'center', 'right']), 'va': E('text up and down', ['top', 'middle', 'bottom']),
     'carry': {'type': 'boolean', 'description': 'zones: dragging the zone moves the tables inside it'},
 }
-register(Tool('read_board', 'The visual builder\'s board: each table card (id, name, x, y, w, h), the joins (with 1:N / N:M '
-                            'when known) and the notes (zones, text, sticky notes) with their ids. Read it before edit_board.',
+register(Tool('read_board', 'The visual builder\'s board: each table card (id, name, x, y, w, h, its description when the '
+                            'catalog has one), the joins (with 1:N / N:M when known) and the notes (zones, text, sticky '
+                            'notes; describes = the table a description note belongs to) with their ids. Read it before edit_board.',
               _obj({}), False, _read_board, **_R))
-register(Tool('edit_board', 'Page action: add, change or remove zones, text and sticky notes on the visual builder board, to '
-                            'group and explain tables. A zone is layer back with a light fill around its tables (leave 28 px '
-                            'above them for its title); text is shape none; a sticky note is round, yellow, alpha 1, front. '
-                            'Never moves or deletes a locked note; never removes the user\'s notes unless they asked. It does '
-                            'not change the SQL. One undo step (Ctrl+Z).',
-              _obj({'ops': {'type': 'array', 'description': 'the edits, in order (at most 60)', 'items': {
-                  'type': 'object', 'properties': {'op': E('what to do', ['add', 'update', 'remove']),
-                                                   'id': S('the note id (update, remove; optional on add)'),
-                                                   'note': {'type': 'object', 'description': 'the fields to set', 'properties': _NOTE_PROPS,
+register(Tool('edit_board', 'Page action: group and explain the tables on the visual builder board. Easiest: '
+                            'op zone {label, tables: [table ids]} draws a zone around those tables and op describe '
+                            '{table, text} pins a short description note above a table (it moves with the card): the '
+                            'page measures and places them, so never work out coordinates for these. arrange: true first '
+                            'lays the tables out zone by zone so no zones overlap (moves the cards, not the SQL). add / '
+                            'update / remove change one note by id (text, sticky notes, shapes; x, y in board px). Never '
+                            'moves or deletes a locked note; never removes the user\'s notes unless they asked. One undo '
+                            'step (Ctrl+Z).',
+              _obj({'ops': {'type': 'array', 'description': 'the edits (at most 60); describe ops before the zones that hold those tables', 'items': {
+                  'type': 'object', 'properties': {'op': E('zone = a zone around tables, describe = a table\'s description note, add / update / remove = one note by id',
+                                                           ['zone', 'describe', 'add', 'update', 'remove']),
+                                                   'label': S('zone: its title, a few words'),
+                                                   'tables': {'type': 'array', 'items': {'type': 'string'}, 'description': 'zone: the table ids from read_board'},
+                                                   'fill': S(f'zone: one of {", ".join(NOTE_COLORS)} (optional: a new colour per zone)'),
+                                                   'table': S('describe: the table id from read_board'),
+                                                   'text': S('describe: one or two short sentences (what one row is, what it is for)'),
+                                                   'id': S('the note id (update, remove; optional on add / zone: a zone with this id or label is redrawn)'),
+                                                   'note': {'type': 'object', 'description': 'add / update: the fields to set', 'properties': _NOTE_PROPS,
                                                             'additionalProperties': False}},
                   'required': ['op'], 'additionalProperties': False}},
+                    'arrange': {'type': 'boolean', 'description': 'move the tables so each zone\'s tables sit together and zones do not overlap (use when tables of different zones are mixed on the board)'},
                     'note': S('one line: what this edit does to the board')}, ['ops']), False, _ui_run,
-              lambda b, a: a.get('note') or f'Edit the board ({len(a.get("ops") or [])} changes)', check=_board_check, **_U))
+              lambda b, a: a.get('note') or f'Edit the board ({len(a.get("ops") or [])} changes{", tables arranged" if a.get("arrange") else ""})', check=_board_check, **_U))

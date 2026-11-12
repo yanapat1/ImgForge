@@ -1205,3 +1205,74 @@ def test_the_assistant_reads_the_editor_and_shows_its_sql_before_apply(server, t
             browser.close()
     finally:
         fake.should_exit = True
+
+
+def test_the_assistant_groups_and_describes_the_board_without_coordinates(server, target):  # noqa: F811
+    """edit_board with describe + zone ops and arrange: the page measures the cards, pins each description above its
+    table, lays the tables out zone by zone (no overlap) and draws each zone around its tables; dragging a table
+    takes its description along. The SQL does not change."""
+    from test_page_smoke import _post, _put
+    from test_llm import fake_app
+    from test_models import _serve
+    with psycopg.connect(target['url'], autocommit=True) as c:
+        c.execute('CREATE TABLE public.customers (id int PRIMARY KEY, name text)')
+        c.execute('CREATE TABLE public.products (id int PRIMARY KEY, title text)')
+    fake, url = _serve(fake_app())
+    ops = [{'op': 'describe', 'table': 'o', 'text': 'One row per order: who bought, when and the total.'},
+           {'op': 'describe', 'table': 'p', 'text': 'The catalogue.'},
+           {'op': 'zone', 'label': 'Sales', 'tables': ['o', 'c']},
+           {'op': 'zone', 'label': 'Products', 'tables': ['p']}]
+    events = [{'type': 'meta', 'run_id': 'r1', 'model': 'm', 'provider': 'p', 'mode': 'ask'},
+              {'type': 'ui_action', 'id': 'u1', 'action': 'edit_board', 'label': 'Group and describe',
+               'args': {'ops': ops, 'arrange': True, 'note': 'Group and describe'}, 'applied': False},
+              {'type': 'done', 'usage': {'in': 1, 'out': 1}}]
+    errors = []
+    try:
+        p = _post(f'{server}/api/llm/providers', {'name': 'fake', 'kind': 'openai_compat', 'base_url': f'{url}/v1', 'model': 'gpt-x'})['provider']
+        assert _post(f'{server}/api/llm/test', {'id': p['id']})['ok']
+        _put(f'{server}/api/llm/config', {'features': {'data_center': True}})
+        with sync_api.sync_playwright() as pw:
+            browser = _browser(pw)
+            page = browser.new_page(viewport={'width': 1500, 'height': 950})
+            page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+            page.route('**/api/llm/agent/analysis/chat', lambda r: r.fulfill(
+                status=200, content_type='application/x-ndjson', body=''.join(json.dumps(e) + '\n' for e in events)))
+            page.goto(f'{server}/?analysis')
+            page.wait_for_selector('.an-main', timeout=20000)
+            page.select_option('#an-conn', target['conn'])
+            page.click('.an-tn:has-text("sales")')
+            page.click(f'.an-tn:has-text("{target["db"]}")')
+            page.wait_for_selector('.an-tn:has-text("public.orders")', timeout=10000)
+            sql_before = page.locator('#an-sql .cm-content').text_content()
+            page.click('.an-pbtn[data-k="sql"]')                                # the builder alone: room for the tables
+            page.click('.an-pbtn[data-k="res"]')
+            for name, x in (('public.orders', 60), ('public.products', 250), ('public.customers', 440)):   # mixed up
+                page.drag_and_drop(f'.an-tn:has-text("{name}")', '#an-canvas', target_position={'x': x, 'y': 160})
+                page.wait_for_selector(f'.an-tb:has-text("{name.split(".")[1]}") .an-col', timeout=10000)
+            sql_before = page.locator('#an-sql .cm-content').text_content()
+            page.wait_for_function("document.documentElement.dataset.dock === 'open'", timeout=10000)
+            page.fill('#ai-analysis-q', 'put the description of each table and group them in zones')
+            page.keyboard.press('Enter')
+            page.locator('#ai-dock [data-ca="ui-apply"]').first.click(timeout=10000)
+            page.wait_for_selector('.an-note.l-back:has-text("Products")', timeout=10000)
+            rect = lambda sel: page.locator(sel).bounding_box()                           # noqa: E731
+            inside = lambda a, z: z['x'] <= a['x'] and z['y'] <= a['y'] and a['x'] + a['width'] <= z['x'] + z['width'] and a['y'] + a['height'] <= z['y'] + z['height']   # noqa: E731
+            sales, prods = rect('.an-note.l-back:has-text("Sales")'), rect('.an-note.l-back:has-text("Products")')
+            o, c, pr = rect('.an-tb[data-t="o"]'), rect('.an-tb[data-t="c"]'), rect('.an-tb[data-t="p"]')
+            desc = rect('.an-note.l-front:has-text("One row per order")')
+            assert inside(o, sales) and inside(c, sales) and inside(desc, sales) and inside(pr, prods)
+            assert sales['x'] + sales['width'] <= prods['x'] or prods['x'] + prods['width'] <= sales['x']    # side by side
+            assert desc['y'] + desc['height'] <= o['y'] and abs(desc['x'] - o['x']) < 1                      # above its card
+            # the description goes along when its table is dragged
+            h = page.locator('.an-tb[data-t="o"] .an-th').bounding_box()
+            page.mouse.move(h['x'] + 20, h['y'] + h['height'] / 2)
+            page.mouse.down()
+            page.mouse.move(h['x'] + 20, h['y'] + h['height'] / 2 + 90, steps=6)
+            page.mouse.up()
+            d2 = rect('.an-note.l-front:has-text("One row per order")')
+            assert abs(d2['y'] - desc['y'] - 90) < 12, (desc, d2)
+            assert page.locator('#an-sql .cm-content').text_content() == sql_before
+            browser.close()
+    finally:
+        fake.should_exit = True
+    assert not errors, errors
