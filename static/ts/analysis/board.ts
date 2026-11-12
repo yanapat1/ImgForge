@@ -1,8 +1,9 @@
 // Notes on the visual builder's board: zones, text, sticky notes and shapes, one kind of element (Note) for all of them.
 // A zone is a shape behind the table cards (layer back), a text label a shape with no fill or border, a sticky note a
 // filled shape in front. Notes never change the SQL: they are saved with the tab (its model, so undo covers them) and the
-// server never reads them. A back zone moves only by its title strip or its edge, so the tables on it stay easy to
-// select; with "move cards with zone" it carries the cards inside it. A locked note does not move or resize.
+// server never reads them. A note (a zone too) drags from anywhere on it; the table cards sit above zones, so they stay
+// easy to pick. With "move cards with zone" a zone carries the cards inside it. A locked note does not move or resize
+// (a press only selects it, so the format bar can unlock it).
 
 import { esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
@@ -24,7 +25,7 @@ const SVG_PATH: Partial<Record<NoteShape, string>> = {
   hexagon: 'M25 1H75L99 50L75 99H25L1 50Z',
   callout: 'M4 1H96Q99 1 99 4V72Q99 75 96 75H40L22 99L27 75H4Q1 75 1 72V4Q1 1 4 1Z',
 };
-const STRIP = 28, EDGE = 8, SNAP = 8, MIN_W = 40, MIN_H = 24;
+const STRIP = 28, SNAP = 8, MIN_W = 40, MIN_H = 24;
 
 /** The hooks the builder gives: its model, undo snapshot, a redraw of the join lines, and the card selection. */
 interface Host { modelOf: (t: Tab) => Model; record: (t: Tab) => void; drawLines: () => void; clearCards: () => void; cards: () => MTable[] }
@@ -164,6 +165,7 @@ function placeBar(): void {
   if (!sel.length) { bar?.remove(); return; }
   if (!bar) { bar = document.createElement('div'); bar.id = 'an-nbar'; bar.className = 'an-nbar'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Note format'); cv.append(bar); }
   bar.innerHTML = barHTML(sel);
+  bar.classList.remove('hide');                                           // hidden while a drag ran
   const v = t.view, x0 = Math.min(...sel.map((n) => n.x)), y0 = Math.min(...sel.map((n) => n.y)), y1 = Math.max(...sel.map((n) => n.y + n.h));
   const bw = bar.offsetWidth, bh = bar.offsetHeight;
   let top = v.y + y0 * v.z - bh - 8;
@@ -250,7 +252,7 @@ async function removeSelected(): Promise<void> {
   renderNotes();
 }
 
-// ---------------------------------------------------------------- pointer: select, move (zones by their strip), resize
+// ---------------------------------------------------------------- pointer: select, move, resize
 type NDrag =
   | { kind: 'move'; sx: number; sy: number; moved: boolean; lead: Note; notes: { n: Note; ox: number; oy: number }[]; cards: { m: MTable; ox: number; oy: number }[] }
   | { kind: 'size'; sx: number; sy: number; moved: boolean; n: Note; h: string; o: { x: number; y: number; w: number; h: number } };
@@ -258,32 +260,28 @@ let D: NDrag | null = null;
 /** A pointer press that only selected (no drag): the click after it must not clear the selection. */
 export const noteBusy = (): boolean => D !== null;
 
-function inStrip(n: Note, el: HTMLElement, e: PointerEvent, z: number): boolean {
-  const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / z, y = (e.clientY - r.top) / z;
-  return y <= STRIP || x <= EDGE || y >= n.h - EDGE || x >= n.w - EDGE;
-}
-
-/** Left press on the board: on a note (or its handle) -> handled. A back zone's inside, or a locked zone, is background. */
+/** Left press on the board: on a note (or its handle), anywhere on it -> handled (select, then move or resize). */
 export function noteDown(e: PointerEvent, target: Element): boolean {
   if (target.closest('[contenteditable]')) return true;               // typing in a note: the caret goes where clicked
   const el = target.closest<HTMLElement>('.an-note');
   if (!el) return false;
   const t = tab(), n = byId(t, el.dataset['n'] ?? '');
   if (!n) return false;
-  const z = t.view.z, h = target.closest<HTMLElement>('.an-nh')?.dataset['h'];
+  const h = target.closest<HTMLElement>('.an-nh')?.dataset['h'];
   if (h && !n.locked) {
     D = { kind: 'size', sx: e.clientX, sy: e.clientY, moved: false, n, h, o: { x: n.x, y: n.y, w: n.w, h: n.h } };
     e.preventDefault();
     return true;
   }
-  if (n.layer === 'back' && !inStrip(n, el, e, z)) return false;       // a zone's inside: the board (select, pan)
+  const was = NS.sel.join('\n');               // redraw only when the selection changes: a redraw between the two
+  const paint = (): void => { if (NS.sel.join('\n') !== was) renderNotes(); };   // clicks of a double click loses it
   if (e.shiftKey || e.ctrlKey || e.metaKey) NS.sel = NS.sel.includes(n.id) ? NS.sel.filter((x) => x !== n.id) : [...NS.sel, n.id];
   else if (!NS.sel.includes(n.id)) NS.sel = [n.id];
   H?.clearCards();
   e.preventDefault();
   const a = document.activeElement;                    // the board's keys (Delete, arrows) must not go to the SQL editor
   if (a instanceof HTMLElement && !a.closest('#an-canvas')) a.blur();
-  if (n.locked || !NS.sel.includes(n.id)) { renderNotes(); return true; }
+  if (n.locked || !NS.sel.includes(n.id)) { paint(); return true; }
   const moving = selected(t).filter((x) => !x.locked);
   const cards: { m: MTable; ox: number; oy: number }[] = [];
   const carried = new Set(moving.map((x) => x.id));
@@ -298,7 +296,7 @@ export function noteDown(e: PointerEvent, target: Element): boolean {
     }
   }
   D = { kind: 'move', sx: e.clientX, sy: e.clientY, moved: false, lead: n, notes: moving.map((x) => ({ n: x, ox: x.x, oy: x.y })), cards };
-  renderNotes();
+  paint();
   return true;
 }
 
@@ -345,8 +343,7 @@ export function noteUp(): boolean {
   const d = D;
   D = null;
   if (!d) return false;
-  if (d.moved) saveTabs();
-  renderNotes();
+  if (d.moved) { saveTabs(); renderNotes(); }         // a plain click changed nothing: no redraw
   return true;
 }
 

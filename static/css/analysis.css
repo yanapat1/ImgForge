@@ -184,11 +184,9 @@ html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
 .an-note.s-ellipse .an-ntext, .an-note.s-diamond .an-ntext, .an-note.s-hexagon .an-ntext { padding: 14% 18%; }
 .an-note.s-callout .an-ntext { padding-bottom: 28%; }
 .an-note.s-round[style*="--na:1"] .an-ntext, .an-note.s-rect[style*="--na:1"] .an-ntext { color: var(--note-ink); }
-.an-note.l-front { cursor: move; }
-.an-note.l-back { cursor: default; }
+.an-note { cursor: move; }
 .an-note.l-back .an-ntext { pointer-events: none; }
-.an-note.l-back::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 28px; cursor: move; }   /* the title strip */
-.an-note.locked, .an-note.locked.l-back::after { cursor: default; }
+.an-note.locked { cursor: default; }
 .an-note.s-none:hover, .an-note.s-none.sel { outline: 1px dashed var(--border-strong); }
 .an-note.sel { outline: 2px solid var(--accent); outline-offset: 2px; }
 .an-note.editing { cursor: text; }

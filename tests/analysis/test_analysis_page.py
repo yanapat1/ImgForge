@@ -562,7 +562,12 @@ def test_board_notes_zones_text_lock_and_auto_zones(server, target):  # noqa: F8
         page.keyboard.type('Sales area')
         page.keyboard.press('Control+Enter')
         page.wait_for_selector('.an-note.l-back:has-text("Sales area")')
-        page.mouse.click(zb['x'] + 40, zb['y'] + 8)                          # the title strip selects it
+        page.mouse.move(zb['x'] + zb['width'] / 2, zb['y'] + zb['height'] / 2)   # a zone drags from its middle too
+        page.mouse.down()
+        page.mouse.move(zb['x'] + zb['width'] / 2 + 80, zb['y'] + zb['height'] / 2 + 40, steps=6)
+        page.mouse.up()
+        assert zone.bounding_box()['x'] > zb['x'] + 40
+        zb = zone.bounding_box()
         page.click('#an-nbar .an-al[data-ha="right"][data-va="bottom"]')
         st = page.eval_on_selector('.an-note.l-back .an-ntext', 'e => [getComputedStyle(e).justifyContent, getComputedStyle(e).textAlign]')
         assert st == ['flex-end', 'right'], st
