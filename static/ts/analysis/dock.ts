@@ -11,6 +11,7 @@ import { render, saveTabs } from './app.js';
 import { currentResult } from './analyze.js';
 import { applyBoardOps, boardScope } from './board.js';
 import type { BoardOp } from './board.js';
+import type { Widget } from './state.js';
 import { addCharts } from './dash.js';
 import { editorText } from './query.js';
 import { A, newTab, tab } from './state.js';
@@ -111,7 +112,7 @@ function pageAction(a: UiAction): UiResult {
         ...(r.overlap.length ? { zones_overlap: r.overlap.slice(0, 10), hint: 'call edit_board again with the same zone ops and arrange: true to move the tables apart' } : {}) } };
   }
   if (a.action === 'build_dashboard') {
-    addCharts((a.args['charts'] ?? []) as { kind: string; title: string; x?: string; y?: string; agg?: string }[]);
+    addCharts((a.args['charts'] ?? []) as Partial<Widget>[]);
     A.ws = 'dash';
     render();
     return { ok: true };

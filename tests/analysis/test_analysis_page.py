@@ -360,12 +360,28 @@ def test_workspaces(server, target):  # noqa: F811
         page.click('[data-act="d-auto"]')
         page.wait_for_selector('.an-w svg', timeout=20000)
         n = page.locator('.an-w').count()
+        page.wait_for_selector('.an-w .an-kpi', timeout=20000)                # Build from this result: KPIs, a donut, a ranking
+        page.wait_for_selector('.an-w .an-donut', timeout=20000)
+        page.wait_for_selector('.an-w .an-rank li', timeout=20000)
         page.click('[data-act="d-add"][data-k="text"]')
         page.wait_for_function(f"document.querySelectorAll('.an-w').length === {n + 1}", timeout=10000)
+        # a bar chart turns into a ranking from the side panel, takes a colour and a height; duplicate makes a copy
+        page.click('[data-act="d-add"][data-k="bar"]')
+        page.locator('.an-fld:has-text("kind")').drag_to(page.locator('.an-w.on .an-wb'))
+        page.wait_for_selector('.an-w.on svg', timeout=20000)
+        page.select_option('#an-d-kind', 'hbar')
+        page.wait_for_selector('.an-w.on .an-rank li', timeout=20000)
+        page.click('#an-dash [data-act="d-color"][data-k="violet"]')
+        page.select_option('#an-d-size', 'l')
+        assert 'span 6' in page.eval_on_selector('.an-w.on', 'e => e.style.gridRow')
+        page.click('.an-w.on [data-act="d-dup"]')
+        page.wait_for_function(f"document.querySelectorAll('.an-w').length === {n + 3}", timeout=10000)
+        assert page.locator('.an-w.on .lbl').text_content().endswith('(copy)')
         page.wait_for_timeout(900)
         page.click('.an-rail [data-k="history"]')
         page.click('.an-rail [data-k="dash"]')
-        page.wait_for_function(f"document.querySelectorAll('.an-w').length === {n + 1}", timeout=10000)
+        page.wait_for_function(f"document.querySelectorAll('.an-w').length === {n + 3}", timeout=10000)
+        assert page.locator('.an-w.k-hbar').count() == 3              # the draft's ranking, the turned bar, its copy
 
         # Catalog: a description is saved and stays
         page.click('.an-tn:has-text("sales")')
@@ -605,6 +621,37 @@ def test_board_notes_zones_text_lock_and_auto_zones(server, target):  # noqa: F8
         page.mouse.move(sb['x'] + 130, sb['y'] + 70, steps=6)
         page.mouse.up()
         assert sticky.bounding_box()['x'] > sb['x'] + 50
+        # rotate: Shift+drag the round handle above it to its right (15° steps: 90°), the degrees box, ] (15°), and a
+        # double-click on the handle straightens it; a rotated note still resizes along its own sides
+        rot = lambda: page.eval_on_selector('.an-note.l-front', 'e => e.style.transform')
+        nb, hb = sticky.bounding_box(), page.locator('.an-note.l-front .h-rot').bounding_box()
+        cx, cy = nb['x'] + nb['width'] / 2, nb['y'] + nb['height'] / 2
+        page.mouse.move(hb['x'] + hb['width'] / 2, hb['y'] + hb['height'] / 2)
+        page.mouse.down()
+        page.keyboard.down('Shift')
+        page.mouse.move(cx + 120, cy + 40, steps=4)
+        page.mouse.move(cx + 200, cy, steps=6)
+        page.keyboard.up('Shift')
+        page.mouse.up()
+        assert rot() == 'rotate(90deg)', rot()
+        page.fill('#an-nbar [data-nf="rot"]', '30')
+        page.locator('#an-nbar [data-nf="rot"]').dispatch_event('change')
+        assert rot() == 'rotate(30deg)', rot()
+        w0 = page.eval_on_selector('.an-note.l-front', 'e => e.offsetWidth')
+        eb = page.locator('.an-note.l-front .h-e').bounding_box()
+        page.mouse.move(eb['x'] + 4, eb['y'] + 4)
+        page.mouse.down()
+        page.mouse.move(eb['x'] + 4 + 52, eb['y'] + 4 + 30, steps=5)        # along the turned side: about 60 px wider
+        page.mouse.up()
+        w1 = page.eval_on_selector('.an-note.l-front', 'e => e.offsetWidth')
+        assert 45 < w1 - w0 < 75, (w0, w1)
+        assert rot() == 'rotate(30deg)'
+        page.click('.an-note.l-front')                                       # its middle: a turned note's corner is off it
+        page.keyboard.press(']')
+        assert rot() == 'rotate(45deg)', rot()
+        hb = page.locator('.an-note.l-front .h-rot').bounding_box()
+        page.mouse.dblclick(hb['x'] + hb['width'] / 2, hb['y'] + hb['height'] / 2)
+        assert rot() == '', rot()
         # left and up as far as wanted: past the board's first corner too (like the table cards). Shift+arrows bring
         # each note near the corner, then a mouse drag takes it across
         def to_corner(sel):

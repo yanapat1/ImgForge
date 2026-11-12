@@ -155,8 +155,12 @@ def router(state, ctx):
         return _call(service.pivot, user, rid, row, col, value, agg)
 
     @r.get('/results/{rid}/chart')
-    def chart(rid: str, x: str, y: str = '', agg: str = 'sum', limit: int = 30, user=me):
-        return _call(service.chart, user, rid, x, y, agg, limit)
+    def chart(rid: str, x: str, y: str = '', agg: str = 'sum', limit: int = 30, order: str = 'key', user=me):
+        return _call(service.chart, user, rid, x, y, agg, limit, order)
+
+    @r.get('/results/{rid}/total')
+    def total(rid: str, y: str = '', agg: str = 'sum', user=me):
+        return _call(service.total, user, rid, y, agg)
 
     @r.post('/results/{rid}/forecast')
     def forecast(rid: str, body: dict = Body(...), user=me):

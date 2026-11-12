@@ -112,6 +112,15 @@ def test_chart_and_pivot(data):
     c = stats.chart(data, 'seg', 'id', 'count')
     assert dict(zip(c['labels'], c['values'])) == {'Consumer': 400, 'Enterprise': 200}
     assert stats.chart(data, 'seg')['values'] == [400, 200]
+    # top groups by value: the biggest first (desc), the smallest first (asc), with the limit applied after the sort
+    assert stats.chart(data, 'seg', order='asc')['labels'] == ['Enterprise', 'Consumer']
+    assert stats.chart(data, 'seg', order='desc', limit=1) == {'labels': ['Consumer'], 'values': [400]}
+    with pytest.raises(ValueError, match='order must be'):
+        stats.chart(data, 'seg', order='drop; --')
+    # a KPI over the whole result, whatever the number of groups
+    assert stats.total(data) == {'value': 600}
+    assert stats.total(data, 'id', 'count') == {'value': 600}
+    assert stats.total(data, 'id', 'min')['value'] <= stats.total(data, 'id', 'max')['value']
     p = stats.pivot(data, 'seg', 'status', None, 'count')
     assert sorted(p['columns']) == ['closed', 'open'] and len(p['rows']) == 2
 

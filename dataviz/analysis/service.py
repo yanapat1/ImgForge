@@ -731,8 +731,12 @@ def pivot(user, rid, row, col, value, agg):
     return stats_mod.pivot(_result(user, rid)['path'], row, col, value or None, agg or 'sum')
 
 
-def chart(user, rid, x, y, agg, limit):
-    return stats_mod.chart(_result(user, rid)['path'], x, y or None, agg or 'sum', limit)
+def chart(user, rid, x, y, agg, limit, order='key'):
+    return stats_mod.chart(_result(user, rid)['path'], x, y or None, agg or 'sum', limit, order or 'key')
+
+
+def total(user, rid, y, agg):
+    return stats_mod.total(_result(user, rid)['path'], y or None, agg or 'sum')
 
 
 def forecast(user, rid, date, value=None, agg='sum', grain='auto', horizon=None, group=None):

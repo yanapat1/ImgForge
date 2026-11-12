@@ -267,18 +267,34 @@ def pivot(path, row, col, value, agg='sum', limit=40):
     return {'columns': cols, 'rows': [{'name': r, 'cells': [table[r].get(k) for k in cols]} for r in sorted(order, key=str)[:200]]}
 
 
-def chart(path, x, y=None, agg='sum', limit=30):
-    """{labels, values}: y summed (or counted) per x, in x's natural order when x is a date or number."""
+CHART_ORDER = {'key': 'k', 'desc': 'v DESC NULLS LAST, k', 'asc': 'v ASC NULLS LAST, k'}
+
+
+def chart(path, x, y=None, agg='sum', limit=30, order='key'):
+    """{labels, values}: y summed (or counted) per x, in x's natural order when x is a date or number (order key), or
+    the largest (desc) / smallest (asc) values first: the top `limit` groups by value, not the first ones by name."""
     fn = _agg(agg)
+    if order not in CHART_ORDER:
+        raise ValueError(f'order must be one of {", ".join(CHART_ORDER)}')
     with _conn() as c:
         names = _names(c, path)
         _check(names, x)
         if y:
             _check(names, y)
         v = f'{fn}({_q(y)})' if y else 'COUNT(*)'
-        rows = c.execute(f'SELECT {_q(x)} AS k, {v} AS v FROM read_parquet(?) WHERE {_q(x)} IS NOT NULL GROUP BY k ORDER BY k LIMIT {max(1, min(int(limit), 500))}',
+        rows = c.execute(f'SELECT {_q(x)} AS k, {v} AS v FROM read_parquet(?) WHERE {_q(x)} IS NOT NULL GROUP BY k ORDER BY {CHART_ORDER[order]} LIMIT {max(1, min(int(limit), 500))}',
                          [str(path)]).fetchall()
     return {'labels': [str(spool._json(r[0])) for r in rows], 'values': [float(r[1] or 0) for r in rows]}
+
+
+def total(path, y=None, agg='sum'):
+    """{value}: one number over the whole result, y aggregated (no y: the row count). A dashboard KPI."""
+    fn = _agg(agg)
+    with _conn() as c:
+        if y:
+            _check(_names(c, path), y)
+        v = c.execute(f'SELECT {f"{fn}({_q(y)})" if y else "COUNT(*)"} FROM read_parquet(?)', [str(path)]).fetchone()[0]
+    return {'value': float(v) if v is not None else None}
 
 
 def quality(path):

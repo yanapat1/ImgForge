@@ -50,6 +50,7 @@ export interface Note {
   text: string; size: number; bold?: boolean;
   ha: 'left' | 'center' | 'right'; va: 'top' | 'middle' | 'bottom';
   layer: 'back' | 'front'; // back: under the table cards (a zone); front: above them
+  rot?: number;            // degrees clockwise about its centre, -180..180 (absent = 0)
   locked?: boolean;        // does not move or resize
   carry?: boolean;         // dragging this zone moves the cards inside it
   auto?: boolean;          // made by Auto zones (the next Auto zones replaces it)
@@ -72,7 +73,11 @@ export interface Forecast {
   groups: { name: string; model: string | null; next: number | null; ahead: number | null; recent: number | null; change_pct: number | null; note: string }[] | null;
 }
 export interface ForecastAsk { date: string; value?: string; agg?: string; grain?: string; horizon?: number | null; group?: string }
-export interface Widget { id: string; kind: 'bar' | 'line' | 'table' | 'kpi' | 'text' | 'forecast'; title: string; x: string; y: string; agg: string; span: number; text?: string }
+export type WidgetKind = 'bar' | 'hbar' | 'line' | 'area' | 'donut' | 'table' | 'kpi' | 'text' | 'forecast';
+/** A dashboard widget (dash.ts). color: a palette key (board.ts PALETTE), '' = the accent; size: its height;
+ * sort: key = x's own order, desc / asc = by value; top: how many groups (5..100, default 30). */
+export interface Widget { id: string; kind: WidgetKind; title: string; x: string; y: string; agg: string; span: number; text?: string;
+  color?: string; size?: 's' | 'm' | 'l'; sort?: 'key' | 'desc' | 'asc'; top?: number }
 export interface Dashboard { id: string; name: string; layout: Widget[] }
 
 export interface Tab {
@@ -155,9 +160,11 @@ export const api = {
   quality: (rid: string) => getJSON<{ rows: number; checks: { rule: string; ok: boolean; rows: number }[] }>(`${P}/results/${rid}/quality`),
   pivot: (rid: string, row: string, col: string, value: string, agg: string) => getJSON<{ columns: string[]; rows: { name: string; cells: (number | string | null)[] }[] }>(`${P}/results/${rid}/pivot?${qs({ row, col, value, agg })}`),
   forecast: (rid: string, ask: ForecastAsk) => postJSON<Forecast>(`${P}/results/${rid}/forecast`, ask),
-  chart: (rid: string, x: string, y: string | null, agg: string, limit = 30) => getJSON<{ labels: string[]; values: number[] }>(`${P}/results/${rid}/chart?${qs({ x, y, agg, limit })}`),
+  chart: (rid: string, x: string, y: string | null, agg: string, limit = 30, order = 'key') => getJSON<{ labels: string[]; values: number[] }>(`${P}/results/${rid}/chart?${qs({ x, y, agg, limit, order })}`),
+  total: (rid: string, y: string | null, agg: string) => getJSON<{ value: number | null }>(`${P}/results/${rid}/total?${qs({ y, agg })}`),
   dashboards: () => getJSON<{ dashboards: Dashboard[] }>(`${P}/sessions/${A.sid}/dashboards`),
   saveDashboard: (d: Dashboard) => sendJSON('PUT', `${P}/sessions/${A.sid}/dashboards`, d),
+  deleteDashboard: (id: string) => sendJSON('DELETE', `${P}/sessions/${A.sid}/dashboards/${encodeURIComponent(id)}`),
   history: () => getJSON<{ history: HistoryRow[] }>(`${P}/sessions/${A.sid}/history`),
   scripts: () => getJSON<{ scripts: Script[] }>(`${P}/sessions/${A.sid}/scripts`),
   saveScript: (s: Partial<Script>) => sendJSON<{ id: string }>('PUT', `${P}/sessions/${A.sid}/scripts`, s),

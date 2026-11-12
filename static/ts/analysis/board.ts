@@ -3,7 +3,8 @@
 // filled shape in front. Notes never change the SQL: they are saved with the tab (its model, so undo covers them) and the
 // server never reads them. A note (a zone too) drags from anywhere on it; the table cards sit above zones, so they stay
 // easy to pick. With "move cards with zone" a zone carries the cards inside it. A locked note does not move or resize
-// (a press only selects it, so the format bar can unlock it).
+// (a press only selects it, so the format bar can unlock it). Any note rotates about its centre (the round handle above it,
+// the degrees box on the format bar, [ and ]); x, y, w, h stay the unrotated box.
 
 import { esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
@@ -41,6 +42,21 @@ const notesOf = (t: Tab): Note[] => (H ? (H.modelOf(t).notes ??= []) : []);
 const byId = (t: Tab, id: string): Note | undefined => notesOf(t).find((n) => n.id === id);
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const snap = (v: number, on: boolean): number => (on ? Math.round(v / SNAP) * SNAP : Math.round(v));
+/** An angle in degrees as -180..180, one decimal; 0 for anything not a number. */
+export const normRot = (r: number): number => { if (!Number.isFinite(r)) return 0; const v = Math.round((((r + 180) % 360 + 360) % 360 - 180) * 10) / 10; return v === -180 ? 180 : v; };
+const RAD = Math.PI / 180;
+/** The box a note covers on the board, rotation included (the format bar, carried cards). */
+function bounds(n: Note): { x: number; y: number; w: number; h: number } {
+  if (!n.rot) return { x: n.x, y: n.y, w: n.w, h: n.h };
+  const c = Math.abs(Math.cos(n.rot * RAD)), s = Math.abs(Math.sin(n.rot * RAD)), w = n.w * c + n.h * s, h = n.w * s + n.h * c;
+  return { x: n.x + n.w / 2 - w / 2, y: n.y + n.h / 2 - h / 2, w, h };
+}
+/** Is board point (px, py) inside the note (its rotated shape's box)? */
+function contains(n: Note, px: number, py: number): boolean {
+  let dx = px - (n.x + n.w / 2), dy = py - (n.y + n.h / 2);
+  if (n.rot) { const c = Math.cos(n.rot * RAD), s = Math.sin(n.rot * RAD); [dx, dy] = [dx * c + dy * s, -dx * s + dy * c]; }
+  return Math.abs(dx) <= n.w / 2 && Math.abs(dy) <= n.h / 2;
+}
 const newId = (): string => (globalThis.crypto && 'randomUUID' in globalThis.crypto ? crypto.randomUUID() : `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
 
 export function colorOf(f: string): string {
@@ -62,6 +78,8 @@ export function cleanNote(x: Partial<Note>, id?: string): Note {
     ha: x.ha === 'center' || x.ha === 'right' ? x.ha : 'left', va: x.va === 'middle' || x.va === 'bottom' ? x.va : 'top',
     layer: x.layer === 'front' ? 'front' : 'back',
   };
+  const rot = normRot(Number(x.rot) || 0);
+  if (rot) n.rot = rot;
   if (x.bold) n.bold = true;
   if (x.locked) n.locked = true;
   if (x.carry) n.carry = true;
@@ -114,10 +132,11 @@ function noteHTML(n: Note, sel: boolean): string {
   const path = SVG_PATH[n.shape];
   const jc = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[n.va], ai = { left: 'flex-start', center: 'center', right: 'flex-end' }[n.ha];
   const cls = `an-note s-${n.shape} l-${n.layer} b-${n.border}${n.locked ? ' locked' : ''}${sel ? ' sel' : ''}${path ? ' svg' : ''}`;
-  const style = `left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px;--nf:${colorOf(n.fill)};--na:${n.fill ? n.alpha : 0}`;
+  const style = `left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px;--nf:${colorOf(n.fill)};--na:${n.fill ? n.alpha : 0}${n.rot ? `;transform:rotate(${n.rot}deg)` : ''}`;
   const shape = path ? `<svg class="an-nshape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}" vector-effect="non-scaling-stroke"/></svg>` : '';
   const text = `<div class="an-ntext" style="justify-content:${jc};align-items:${ai};text-align:${n.ha};font-size:${n.size}px;font-weight:${n.bold ? 650 : 400}">${n.text ? `<span>${esc(n.text)}</span>` : ''}</div>`;
-  const handles = sel && !n.locked ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((h) => `<span class="an-nh h-${h}" data-h="${h}"></span>`).join('') : '';
+  const handles = sel && !n.locked ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((h) => `<span class="an-nh h-${h}" data-h="${h}"></span>`).join('') +
+    `<span class="an-nh h-rot" data-h="rot" title="Drag to rotate (Shift: 15° steps). Double-click: straight" data-deg="${n.rot ?? 0}°"></span>` : '';
   const lock = n.locked ? `<span class="an-nlock" title="Locked: it does not move. Select it and click the lock to unlock.">${icon('lock')}</span>` : '';
   return `<div class="${cls}" data-n="${esc(n.id)}" style="${style}" role="note" aria-label="${esc(n.text.slice(0, 60) || `${n.shape} shape`)}">${shape}${text}${lock}${handles}</div>`;
 }
@@ -156,6 +175,7 @@ function barHTML(sel: Note[]): string {
     `<span class="an-algrid" role="group" aria-label="Text position">${align}</span>` +
     `<button type="button" class="sm" data-act="n-layer" data-k="${one.layer === 'back' ? 'front' : 'back'}" title="${one.layer === 'back' ? 'In front of the tables' : 'Behind the tables, as a zone'}">${one.layer === 'back' ? 'Bring to front' : 'Send to back'}</button>` +
     (zone ? `<label class="check sm" title="Dragging the zone by its title moves the tables inside it too (Alt+drag: the zone alone)"><input type="checkbox" data-nf="carry" ${all((n) => !!n.carry) ? 'checked' : ''}> Move cards with zone</label>` : '') +
+    `<span class="an-nrot" role="group" aria-label="Rotation"><button type="button" class="icon-btn ghost xs" data-act="n-rot" data-k="-15" aria-label="Rotate left 15°" title="Rotate left 15° ([)">↺</button><input type="number" class="sm num" data-nf="rot" min="-180" max="180" step="1" value="${one.rot ?? 0}" aria-label="Rotation in degrees" title="Rotation, degrees clockwise"><span class="faint">°</span><button type="button" class="icon-btn ghost xs" data-act="n-rot" data-k="15" aria-label="Rotate right 15°" title="Rotate right 15° (])">↻</button></span>` +
     `<button type="button" class="icon-btn ghost xs${locked ? ' on' : ''}" data-act="n-lock" aria-pressed="${locked}" aria-label="${locked ? 'Unlock' : 'Lock'}" title="${locked ? 'Unlock (Ctrl+L)' : 'Lock: it cannot move or resize (Ctrl+L)'}">${icon('lock')}</button>` +
     `<button type="button" class="icon-btn ghost xs" data-act="n-dup" aria-label="Duplicate" title="Duplicate (Ctrl+D)">${icon('copy')}</button>` +
     `<button type="button" class="icon-btn ghost xs" data-act="n-del" aria-label="Delete" title="Delete">${icon('trash')}</button>`;
@@ -170,7 +190,7 @@ function placeBar(): void {
   if (!bar) { bar = document.createElement('div'); bar.id = 'an-nbar'; bar.className = 'an-nbar'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Note format'); cv.append(bar); }
   bar.innerHTML = barHTML(sel);
   bar.classList.remove('hide');                                           // hidden while a drag ran
-  const v = t.view, x0 = Math.min(...sel.map((n) => n.x)), y0 = Math.min(...sel.map((n) => n.y)), y1 = Math.max(...sel.map((n) => n.y + n.h));
+  const bx = sel.map(bounds), v = t.view, x0 = Math.min(...bx.map((b) => b.x)), y0 = Math.min(...bx.map((b) => b.y)) - (sel.some((n) => !n.locked) ? 30 : 0), y1 = Math.max(...bx.map((b) => b.y + b.h));
   const bw = bar.offsetWidth, bh = bar.offsetHeight;
   let top = v.y + y0 * v.z - bh - 8;
   if (top < 44) top = v.y + y1 * v.z + 8;                                 // no room above: below the selection
@@ -196,6 +216,7 @@ export const N_ACTIONS: Record<string, (el: HTMLElement) => void> = {
   'n-bold': () => { const on = !selected(tab()).every((n) => n.bold); change((n) => { if (on) n.bold = true; else delete n.bold; }); },
   'n-align': (el) => change((n) => { n.ha = el.dataset['ha'] as Note['ha']; n.va = el.dataset['va'] as Note['va']; }),
   'n-layer': (el) => change((n) => { n.layer = el.dataset['k'] === 'front' ? 'front' : 'back'; }),
+  'n-rot': (el) => rotateBy(Number(el.dataset['k']) || 0),
   'n-lock': () => toggleLock(),
   'n-dup': () => duplicate(),
   'n-del': () => { void removeSelected(); },
@@ -220,8 +241,14 @@ export function noteInput(t: HTMLInputElement | HTMLSelectElement, done: boolean
   if (k === 'shape') change((n) => { n.shape = v as NoteShape; });
   else if (k === 'border') change((n) => { n.border = v as Note['border']; });
   else if (k === 'fillc') change((n) => { n.fill = v.toLowerCase(); if (n.alpha === 0) n.alpha = 0.3; });
+  else if (k === 'rot') change((n) => { if (n.locked) return; const r = normRot(Number(v) || 0); if (r) n.rot = r; else delete n.rot; });
   else if (k === 'carry') change((n) => { if ((t as HTMLInputElement).checked) n.carry = true; else delete n.carry; });
   return true;
+}
+
+/** Turn every selected, unlocked note by d degrees (0 = straighten). */
+function rotateBy(d: number): void {
+  change((n) => { if (n.locked) return; const r = d ? normRot((n.rot ?? 0) + d) : 0; if (r) n.rot = r; else delete n.rot; });
 }
 
 function toggleLock(): void {
@@ -259,8 +286,10 @@ async function removeSelected(): Promise<void> {
 // ---------------------------------------------------------------- pointer: select, move, resize
 type NDrag =
   | { kind: 'move'; sx: number; sy: number; moved: boolean; lead: Note; notes: { n: Note; ox: number; oy: number }[]; cards: { m: MTable; ox: number; oy: number }[] }
-  | { kind: 'size'; sx: number; sy: number; moved: boolean; n: Note; h: string; o: { x: number; y: number; w: number; h: number } };
+  | { kind: 'size'; sx: number; sy: number; moved: boolean; n: Note; h: string; o: { x: number; y: number; w: number; h: number } }
+  | { kind: 'rot'; sx: number; sy: number; moved: boolean; n: Note; cx: number; cy: number; a0: number; r0: number };
 let D: NDrag | null = null;
+const angleAt = (x: number, y: number, cx: number, cy: number): number => Math.atan2(y - cy, x - cx) / RAD;
 /** A pointer press that only selected (no drag): the click after it must not clear the selection. */
 export const noteBusy = (): boolean => D !== null;
 
@@ -272,6 +301,12 @@ export function noteDown(e: PointerEvent, target: Element): boolean {
   const t = tab(), n = byId(t, el.dataset['n'] ?? '');
   if (!n) return false;
   const h = target.closest<HTMLElement>('.an-nh')?.dataset['h'];
+  if (h === 'rot' && !n.locked) {
+    const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;   // the centre, on screen
+    D = { kind: 'rot', sx: e.clientX, sy: e.clientY, moved: false, n, cx, cy, a0: angleAt(e.clientX, e.clientY, cx, cy), r0: n.rot ?? 0 };
+    e.preventDefault();
+    return true;
+  }
   if (h && !n.locked) {
     D = { kind: 'size', sx: e.clientX, sy: e.clientY, moved: false, n, h, o: { x: n.x, y: n.y, w: n.w, h: n.h } };
     e.preventDefault();
@@ -291,7 +326,7 @@ export function noteDown(e: PointerEvent, target: Element): boolean {
   const carried = new Set(moving.map((x) => x.id));
   if (!e.altKey) {
     for (const zn of moving.filter((x) => x.layer === 'back' && x.carry)) {
-      const inside = (cx: number, cy: number): boolean => cx >= zn.x && cx <= zn.x + zn.w && cy >= zn.y && cy <= zn.y + zn.h;
+      const inside = (cx: number, cy: number): boolean => contains(zn, cx, cy);
       for (const m of H?.cards() ?? []) {
         const c = document.querySelector<HTMLElement>(`.an-tb[data-t="${CSS.escape(m.id)}"]`);
         if (c && inside(m.x + c.offsetWidth / 2, m.y + c.offsetHeight / 2) && !cards.some((k) => k.m === m)) cards.push({ m, ox: m.x, oy: m.y });
@@ -327,6 +362,26 @@ export function noteMove(e: PointerEvent): boolean {
       if (el) { el.style.left = `${g.m.x}px`; el.style.top = `${g.m.y}px`; }
     }
     if (D.cards.length) H?.drawLines();
+  } else if (D.kind === 'rot') {
+    const { n } = D;
+    let r = D.r0 + angleAt(e.clientX, e.clientY, D.cx, D.cy) - D.a0;
+    if (e.shiftKey) r = Math.round(r / 15) * 15;                          // Shift: 15° steps
+    else { r = Math.round(r); const q = Math.round(r / 90) * 90; if (Math.abs(r - q) <= 3) r = q; }   // free, held at 0 / 90 / 180
+    r = normRot(r);
+    if (r) n.rot = r; else delete n.rot;
+    const el = document.querySelector<HTMLElement>(`.an-note[data-n="${CSS.escape(n.id)}"]`);
+    if (el) { el.style.transform = r ? `rotate(${r}deg)` : ''; el.querySelector<HTMLElement>('.h-rot')?.setAttribute('data-deg', `${r}°`); el.classList.add('turning'); }
+  } else if (D.n.rot) {
+    // a rotated note: the pointer's move in the note's own axes; the side (or corner) across from the handle stays put
+    const { o, h, n } = D, a = (n.rot ?? 0) * RAD, c = Math.cos(a), s = Math.sin(a);
+    const lx = dx * c + dy * s, ly = -dx * s + dy * c;
+    const sxd = h.includes('e') ? 1 : h.includes('w') ? -1 : 0, syd = h.includes('s') ? 1 : h.includes('n') ? -1 : 0;
+    const w = clamp(Math.round(o.w + sxd * lx), MIN_W, BOARD_W), hh = clamp(Math.round(o.h + syd * ly), MIN_H, BOARD_H);
+    const mx = sxd * (w - o.w) / 2, my = syd * (hh - o.h) / 2;              // how far the centre moves, in the note's axes
+    const cx = o.x + o.w / 2 + mx * c - my * s, cy = o.y + o.h / 2 + mx * s + my * c;
+    Object.assign(n, { x: clamp(Math.round(cx - w / 2), -SPAN, SPAN), y: clamp(Math.round(cy - hh / 2), -SPAN, SPAN), w, h: hh });
+    const el = document.querySelector<HTMLElement>(`.an-note[data-n="${CSS.escape(n.id)}"]`);
+    if (el) Object.assign(el.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px` });
   } else {
     const { o, h, n } = D;
     let x = o.x, y = o.y, w = o.w, hh = o.h;
@@ -366,6 +421,7 @@ export function clearNoteSel(): void { if (NS.sel.length) { NS.sel = []; renderN
 // ---------------------------------------------------------------- text: double-click to write
 export function noteEdit(target: Element): boolean {
   const el = target.closest<HTMLElement>('.an-note');
+  if (el && target.closest('.h-rot')) { NS.sel = [el.dataset['n'] ?? '']; rotateBy(0); return true; }   // double-click the turn handle: straight
   if (!el || target.closest('.an-nh')) return false;
   const t = tab(), n = byId(t, el.dataset['n'] ?? '');
   const box = el.querySelector<HTMLElement>('.an-ntext');
@@ -405,6 +461,11 @@ export function noteKey(e: KeyboardEvent): boolean {
   if (mod && k === 'd') { e.preventDefault(); duplicate(); return true; }
   if (mod && k === 'l') { e.preventDefault(); toggleLock(); return true; }
   if (e.key === 'Escape') { clearNoteSel(); return true; }
+  if (!mod && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {   // [ ]: turn 15° (Shift: 1°)
+    e.preventDefault();
+    rotateBy((e.code === 'BracketLeft' ? -1 : 1) * (e.shiftKey ? 1 : 15));
+    return true;
+  }
   const d = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, [number, number]>)[e.key];
   if (d && !mod) {
     e.preventDefault();
@@ -422,10 +483,13 @@ export function noteMenu(id: string, at: { x: number; y: number }): boolean {
   if (!NS.sel.includes(id)) NS.sel = [id];
   renderNotes();
   const html = menuItem('edit', 'Edit text', 'edit') + menuItem('lock', n.locked ? 'Unlock' : 'Lock', 'lock') + menuItem('dup', 'Duplicate', 'copy') +
-    menuItem('layer', n.layer === 'back' ? 'Bring to front' : 'Send to back', 'layers') + MENU_SEP + menuItem('del', 'Delete', 'trash', '', 'danger');
+    menuItem('layer', n.layer === 'back' ? 'Bring to front' : 'Send to back', 'layers') +
+    (n.locked ? '' : menuItem('rot90', 'Rotate 90°', 'refresh') + (n.rot ? menuItem('rot0', 'Straighten', 'undo') : '')) + MENU_SEP + menuItem('del', 'Delete', 'trash', '', 'danger');
   openMenu(html, document.body, (k) => {
     if (k === 'edit') { const el = document.querySelector(`.an-note[data-n="${CSS.escape(id)}"] .an-ntext`); if (el) noteEdit(el); } else if (k === 'lock') toggleLock();
     else if (k === 'dup') duplicate();
+    else if (k === 'rot90') rotateBy(90);
+    else if (k === 'rot0') rotateBy(0);
     else if (k === 'layer') change((x) => { x.layer = x.layer === 'back' ? 'front' : 'back'; });
     else if (k === 'del') void removeSelected();
   }, at);
@@ -476,7 +540,7 @@ export function boardScope(): Record<string, unknown> | null {
       return { id: x.id, name: x.schema ? `${x.schema}.${x.name}` : x.name, x: Math.round(x.x), y: Math.round(x.y), w: el?.offsetWidth ?? 200, h: el?.offsetHeight ?? 160, ...(d ? { description: d.slice(0, 160) } : {}) };
     }),
     joins: m.joins.slice(0, 60).map((j) => ({ a: j.a.join('.'), b: j.b.join('.'), ...(j.card ? { card: j.card } : {}) })),
-    notes: (m.notes ?? []).slice(0, 80).map((n) => ({ id: n.id, shape: n.shape, layer: n.layer, x: n.x, y: n.y, w: n.w, h: n.h, fill: n.fill, text: n.text.slice(0, 80), ...(n.pin ? { describes: n.pin } : {}), ...(n.locked ? { locked: true } : {}) })),
+    notes: (m.notes ?? []).slice(0, 80).map((n) => ({ id: n.id, shape: n.shape, layer: n.layer, x: n.x, y: n.y, w: n.w, h: n.h, fill: n.fill, text: n.text.slice(0, 80), ...(n.rot ? { rot: n.rot } : {}), ...(n.pin ? { describes: n.pin } : {}), ...(n.locked ? { locked: true } : {}) })),
   };
   let s = JSON.stringify(out);
   while (s.length > 4000 && out.notes.length) { out.notes.pop(); s = JSON.stringify(out); }
@@ -586,7 +650,7 @@ export function applyBoardOps(ops: BoardOp[], arrange = false): BoardResult {
     const rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, label = String(z.label ?? '').slice(0, 120);
     const cur = (z.id ? list.find((n) => n.id === z.id) : undefined) ?? list.find((n) => n.layer === 'back' && n.text.trim().toLowerCase() === label.trim().toLowerCase());
     if (cur?.locked) { out.refused.push(`zone ${label}: ${cur.id} is locked (only the user unlocks it)`); return; }
-    if (cur) { Object.assign(cur, cleanNote({ ...cur, ...rect, text: label, ...(z.fill ? { fill: z.fill } : {}), auto: false }, cur.id)); out.changed++; return; }
+    if (cur) { delete cur.rot; Object.assign(cur, cleanNote({ ...cur, ...rect, rot: 0, text: label, ...(z.fill ? { fill: z.fill } : {}), auto: false }, cur.id)); out.changed++; return; }
     if (!room()) return;
     list.push(cleanNote({ ...PRESETS['zone'], ...rect, text: label, fill: z.fill || (PALETTE[i % PALETTE.length] ?? 'blue') }, z.id));
     out.added++;
@@ -605,7 +669,7 @@ export function applyBoardOps(ops: BoardOp[], arrange = false): BoardResult {
     else if (o.op === 'remove') { list.splice(list.indexOf(cur), 1); out.removed++; }
     else {
       const next = cleanNote({ ...cur, ...(o.note ?? {}), locked: false, auto: false }, cur.id);
-      for (const k of ['bold', 'locked', 'carry', 'auto', 'pin'] as const) delete cur[k];
+      for (const k of ['bold', 'locked', 'carry', 'auto', 'pin', 'rot'] as const) delete cur[k];
       Object.assign(cur, next);
       out.changed++;
     }

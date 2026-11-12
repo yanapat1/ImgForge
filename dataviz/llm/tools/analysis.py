@@ -261,22 +261,32 @@ register(Tool('set_editor_query', 'Page action: put a query in the SQL editor. T
                     'note': S('one line: what you wrote or fixed')}, ['sql']), False, _ui_run,
               lambda b, a: a.get('note') or ('Open this query in a new tab' if a.get('mode') == 'new_tab' else 'Put this query in the editor'),
               check=_ui_ok, **_U))
+NOTE_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow']
+DASH_KINDS = ['kpi', 'bar', 'hbar', 'line', 'area', 'donut', 'forecast', 'table', 'text']
 register(Tool('build_dashboard', 'Page action: add charts from the last result to the dashboard.',
               _obj({'charts': {'type': 'array', 'description': 'the charts to add', 'items': {'type': 'object', 'properties': {
-                  'kind': E('chart; forecast = a line with its forecast band, x the date', ['bar', 'line', 'table', 'kpi', 'forecast']),
-                  'title': S('title'), 'x': S('column'), 'y': S('column'),
-                  'agg': E('how', ['sum', 'avg', 'count', 'min', 'max'])}, 'required': ['kind', 'title']}}}, ['charts']),
+                  'kind': E('kpi = one number over the whole result (y, agg; x = optional trend sparkline by that column), bar = '
+                            'groups side by side, hbar = a ranking (largest first), line / area = a trend over x, donut = each '
+                            'group\'s share, forecast = a line with its forecast band (x the date), table = groups as rows, '
+                            'text = a heading or note (its text in text)', DASH_KINDS),
+                  'title': S('title: what it shows'), 'x': S('column: the groups, or the date'), 'y': S('column: the number (empty = row count)'),
+                  'agg': E('how', ['sum', 'avg', 'count', 'min', 'max']), 'text': S('text widget: its words'),
+                  'span': {'type': 'integer', 'description': 'width in 12ths: 3, 4, 6 (default), 8 or 12'},
+                  'size': E('height: s short, m medium (default), l tall', ['s', 'm', 'l']),
+                  'color': E('its colour (default the accent)', NOTE_COLORS),
+                  'sort': E('key = x\'s own order (dates, numbers), desc / asc = by value (default desc for hbar and donut)', ['key', 'desc', 'asc']),
+                  'top': {'type': 'integer', 'description': 'how many groups, 3..100 (default 30; hbar 10, donut 6)'}},
+                  'required': ['kind', 'title']}}}, ['charts']),
               False, _ui_run, lambda b, a: f'Add {len(a.get("charts") or [])} charts', check=_ui_ok, **_U))
 
 
 # ---------------------------------------------------------------- the visual builder's board: zones, text, sticky notes
 BOARD_W, BOARD_H, BOARD_OPS = 2400, 1600, 60
 NOTE_SHAPES = ['rect', 'round', 'pill', 'ellipse', 'diamond', 'hexagon', 'callout', 'none']
-NOTE_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow']
 _NOTE_ENUMS = {'shape': NOTE_SHAPES, 'layer': ['back', 'front'], 'border': ['solid', 'dashed', 'none'],
                'ha': ['left', 'center', 'right'], 'va': ['top', 'middle', 'bottom']}
 BOARD_SPAN = 20000                              # notes go anywhere on the board, like the table cards
-_NOTE_NUM = {'x': (-BOARD_SPAN, BOARD_SPAN), 'y': (-BOARD_SPAN, BOARD_SPAN), 'w': (40, BOARD_W), 'h': (24, BOARD_H), 'alpha': (0, 1), 'size': (11, 48)}
+_NOTE_NUM = {'x': (-BOARD_SPAN, BOARD_SPAN), 'y': (-BOARD_SPAN, BOARD_SPAN), 'w': (40, BOARD_W), 'h': (24, BOARD_H), 'alpha': (0, 1), 'size': (11, 48), 'rot': (-180, 180)}
 
 
 def _note_fields(i, note):
@@ -371,6 +381,7 @@ _NOTE_PROPS = {
     'size': {'type': 'number', 'description': 'font px 11..48'}, 'bold': {'type': 'boolean', 'description': 'bold text'},
     'ha': E('text across', ['left', 'center', 'right']), 'va': E('text up and down', ['top', 'middle', 'bottom']),
     'carry': {'type': 'boolean', 'description': 'zones: dragging the zone moves the tables inside it'},
+    'rot': {'type': 'number', 'description': 'rotation, degrees clockwise about its centre, -180..180 (0 = straight); x, y, w, h stay the unrotated box'},
 }
 register(Tool('read_board', 'The visual builder\'s board: each table card (id, name, x, y, w, h, its description when the '
                             'catalog has one), the joins (with 1:N / N:M when known) and the notes (zones, text, sticky '
@@ -381,7 +392,7 @@ register(Tool('edit_board', 'Page action: group and explain the tables on the vi
                             '{table, text} pins a short description note above a table (it moves with the card): the '
                             'page measures and places them, so never work out coordinates for these. arrange: true first '
                             'lays the tables out zone by zone so no zones overlap (moves the cards, not the SQL). add / '
-                            'update / remove change one note by id (text, sticky notes, shapes; x, y in board px). Never '
+                            'update / remove change one note by id (text, sticky notes, shapes; x, y in board px; rot turns it). Never '
                             'moves or deletes a locked note; never removes the user\'s notes unless they asked. One undo '
                             'step (Ctrl+Z).',
               _obj({'ops': {'type': 'array', 'description': 'the edits (at most 60); describe ops before the zones that hold those tables', 'items': {
