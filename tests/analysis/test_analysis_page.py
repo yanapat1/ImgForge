@@ -204,7 +204,8 @@ def test_visual_builder(server, target):  # noqa: F811
 
         # the line's ends: many orders to one customer, from the keys (customers.id is the primary key; the order's
         # customer_id may be NULL, so the customer end is "zero or one")
-        assert page.locator('.an-jl').inner_text() == 'LEFT · N:1'
+        assert page.locator('.an-jl .an-jc').inner_text() == 'N:1' and 'LEFT' in page.locator('.an-jl').inner_text()
+        assert page.locator('.an-jl svg.an-venn').count() == 1     # the join type's Venn icon
         line = page.locator('#an-lines path.an-jline')
         assert line.get_attribute('marker-start') == 'url(#an-mN)' and line.get_attribute('marker-end') == 'url(#an-m01)'
         page.click('.an-jl')
@@ -216,8 +217,24 @@ def test_visual_builder(server, target):  # noqa: F811
         page.click('[data-act="b-ends"]')                          # text only: no crow's feet
         assert page.locator('#an-lines path.an-jline').get_attribute('marker-start') is None
         page.click('[data-act="b-ends"]')                          # off: the label is the join type again
-        assert page.locator('.an-jl').inner_text() == 'LEFT'
+        assert page.locator('.an-jl').inner_text().strip() == 'LEFT' and page.locator('.an-jl .an-jc').count() == 0
         page.click('[data-act="b-ends"]')
+
+        # cards stacked one above the other: the line is a bracket outside both, the label off the cards
+        oh = page.locator('.an-tb[data-t="o"] .an-th').bounding_box()
+        ch = page.locator('.an-tb[data-t="c"] .an-th').bounding_box()
+        ob = page.locator('.an-tb[data-t="o"]').bounding_box()
+        page.mouse.move(ch['x'] + 40, ch['y'] + ch['height'] / 2)
+        page.mouse.down()
+        page.mouse.move(oh['x'] + 40, ob['y'] + ob['height'] + 60 + ch['height'] / 2, steps=8)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        ob, cb = (page.locator(f'.an-tb[data-t="{t}"]').bounding_box() for t in 'oc')
+        lb = page.locator('#an-lines path.an-jline').bounding_box()
+        jb = page.locator('.an-jl').bounding_box()
+        assert abs(ob['x'] - cb['x']) < 30, (ob, cb)
+        outside = lambda b: b['x'] + b['width'] / 2 > max(ob['x'] + ob['width'], cb['x'] + cb['width']) or b['x'] + b['width'] / 2 < min(ob['x'], cb['x'])  # noqa: E731
+        assert outside(lb) and outside(jb), (ob, cb, lb, jb)
 
         # after an edit the results stay, with a notice
         page.click('.an-col[data-t="c"][data-c="segment"] .lbl')

@@ -38,6 +38,14 @@ const alias = (m: MTable): string => m.alias || m.id;
 /** joins between the same two tables are one ON … AND …: they share one type */
 const samePair = (x: Join, y: Join): boolean => (x.a[0] === y.a[0] && x.b[0] === y.b[0]) || (x.a[0] === y.b[0] && x.b[0] === y.a[0]);
 const CARD_LABEL: Record<string, string> = { sub: 'SUB', cte: 'CTE', remote: 'REMOTE' };
+// the join type as a Venn icon on the line's label: the kept part filled (INNER: the overlap only)
+const VENN: Record<string, string> = (() => {
+  const L = '<circle cx="6" cy="5" r="4.5"/>', R = '<circle cx="11" cy="5" r="4.5"/>';
+  const fill = (x: string): string => x.replace('/>', ' fill="currentColor" fill-opacity=".45" stroke="none"/>');
+  const svg = (inner: string): string => `<svg class="an-venn" viewBox="0 0 17 10" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2">${inner}${L}${R}</g></svg>`;
+  const lens = '<path d="M8.5 1.26A4.5 4.5 0 0 1 8.5 8.74A4.5 4.5 0 0 1 8.5 1.26Z" fill="currentColor" fill-opacity=".45" stroke="none"/>';
+  return { INNER: svg(lens), LEFT: svg(fill(L)), RIGHT: svg(fill(R)), FULL: svg(fill(L) + fill(R)) };
+})();
 const readOnly = (t: Tab): boolean => t.dirty && t.typed || !!modelOf(t).locked.length || t.notDrawn;
 
 function columnsOf(t: Tab, m: MTable): { name: string; type: string; key: string }[] {
@@ -182,26 +190,39 @@ function drawLines(): void {
   const lines = $('an-lines'), labels = $('an-jl');
   if (!b || !lines || !labels) return;
   const br = b.getBoundingClientRect(), z = t.view.z;
-  const pt = (id: string, c: string): { l: number; r: number; y: number } | null => {
+  // a column's row: its left / right edge, its middle, and its card's left / right edge (board units)
+  const pt = (id: string, c: string): { l: number; r: number; y: number; cl: number; cr: number } | null => {
     const e = b.querySelector(`.an-col[data-t="${CSS.escape(id)}"][data-c="${CSS.escape(c)}"]`);
     if (!e) return null;
-    const r = e.getBoundingClientRect();
-    return { l: (r.left - br.left) / z, r: (r.right - br.left) / z, y: (r.top - br.top + r.height / 2) / z };
+    const r = e.getBoundingClientRect(), k = (e.closest('.an-tb') ?? e).getBoundingClientRect();
+    return { l: (r.left - br.left) / z, r: (r.right - br.left) / z, y: (r.top - br.top + r.height / 2) / z, cl: (k.left - br.left) / z, cr: (k.right - br.left) / z };
   };
   let p = markerDefs(), lb = '';
   const m = modelOf(t), ends = endsMode();
   m.joins.forEach((j, i) => {
     const A1 = pt(j.a[0], j.a[1]), B1 = pt(j.b[0], j.b[1]);
     if (!A1 || !B1) return;
-    const ltr = A1.l < B1.l, x1 = ltr ? A1.r : A1.l, x2 = ltr ? B1.l : B1.r, dx = Math.max(34, Math.abs(x2 - x1) / 2) * (ltr ? 1 : -1);
-    const d = `M${x1} ${A1.y}C${x1 + dx} ${A1.y} ${x2 - dx} ${B1.y} ${x2} ${B1.y}`;
+    let x1: number, x2: number, c1: number, c2: number, side = '';
+    if (A1.cr + 24 < B1.cl || B1.cr + 24 < A1.cl) {         // cards side by side: an S from the facing sides
+      const ltr = A1.cl < B1.cl, dx = (ltr ? 1 : -1);
+      x1 = ltr ? A1.r : A1.l; x2 = ltr ? B1.l : B1.r;
+      const k = Math.max(34, Math.abs(x2 - x1) / 2) * dx;
+      c1 = x1 + k; c2 = x2 - k;
+    } else {                                                // stacked / overlapping: a bracket round the side that lines up better
+      const right = Math.abs(A1.r - B1.r) <= Math.abs(A1.l - B1.l);
+      side = right ? ' out-r' : ' out-l';                   // the label hangs off the bracket's outer side
+      x1 = right ? A1.r : A1.l; x2 = right ? B1.r : B1.l;
+      c1 = c2 = right ? Math.max(x1, x2) + 48 : Math.min(x1, x2) - 48;
+    }
+    const d = `M${x1} ${A1.y}C${c1} ${A1.y} ${c2} ${B1.y} ${x2} ${B1.y}`;
+    const mx = (x1 + 3 * c1 + 3 * c2 + x2) / 8, my = (A1.y + B1.y) / 2;   // the curve's middle (t = .5)
     const c = ends === 'off' ? null : cardOf(t, m.tables, j), many = c?.card === 'N:M', w = many ? 'w' : '';
     const [ma, mb] = c ? sideMarks(c) : ['', ''];
     const mk = c && ends === 'crow' ? ` marker-start="url(#an-m${ma}${w})" marker-end="url(#an-m${mb}${w})"` : '';
     const na = m.tables.find((x) => x.id === j.a[0]), nb = m.tables.find((x) => x.id === j.b[0]);
     const tip = c ? cardTitle(c, na?.label || na?.name || 'left', nb?.label || nb?.name || 'right') : '';
     p += `<path class="an-jline${many ? ' many' : ''}" data-card="${c?.card ?? ''}" d="${d}" fill="none" stroke="var(${many ? '--warn' : '--accent'})" stroke-width="2"${mk}/><path class="an-jhit" data-j="${i}" d="${d}" fill="none" stroke="transparent" stroke-width="14"><title>${esc(tip ? `${tip}\n` : '')}Right-click to remove this join</title></path>`;
-    lb += `<button type="button" class="an-jl${many ? ' many' : ''}" style="left:${(x1 + x2) / 2}px;top:${(A1.y + B1.y) / 2}px" data-act="b-join" data-i="${i}" data-j="${i}" title="${esc(tip ? `${tip}. ` : '')}Change this join. Right-click removes it.">${esc(j.type)}${c ? ` · ${c.card}` : ''}</button>`;
+    lb += `<button type="button" class="an-jl${many ? ' many' : ''}${side}" style="left:${mx}px;top:${my}px" data-act="b-join" data-i="${i}" data-j="${i}" aria-label="${esc(j.type)} join${c ? `, ${c.card}` : ''}" title="${esc(tip ? `${tip}. ` : '')}Change this join. Right-click removes it.">${VENN[j.type] ?? ''}${esc(j.type)}${c ? `<span class="an-jc">${c.card}</span>` : ''}</button>`;
   });
   lines.innerHTML = p;
   labels.innerHTML = lb;

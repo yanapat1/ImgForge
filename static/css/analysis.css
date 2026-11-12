@@ -251,10 +251,17 @@ html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
   border-bottom: 1px dotted var(--text-faint); border-radius: 0; background: none; color: var(--text-faint); font: var(--fs-2xs) var(--mono); }
 .an-ty:hover:not(:disabled) { background: none; border-color: var(--accent); color: var(--text); }
 .an-ty.cast { color: var(--highlight); border-bottom-color: var(--highlight); font-weight: 600; }
-.an-jl { position: absolute; transform: translate(-50%, -50%); z-index: 3; height: 20px; padding: 0 var(--s2); border: 0; border-radius: 999px;
-  background: var(--accent); color: var(--on-accent); font: 650 var(--fs-2xs) var(--mono); }
-.an-jl:hover:not(:disabled) { background: var(--accent-hover); }
-.an-jl.many { background: var(--warn); color: var(--note-ink); }
+/* a join's label: an outlined chip on the line's middle: the type's Venn icon, the type, then the relation (1:1 … N:M) */
+.an-jl { position: absolute; transform: translate(-50%, -50%); z-index: 3; display: inline-flex; align-items: center; gap: 4px; height: 20px;
+  padding: 0 7px 0 5px; border: 1.5px solid var(--accent); border-radius: 999px; background: var(--surface); color: var(--accent-text);
+  font: 650 var(--fs-2xs) var(--mono); white-space: nowrap; box-shadow: var(--shadow-1); }
+.an-jl.out-r { transform: translate(-12px, -50%); }
+.an-jl.out-l { transform: translate(calc(12px - 100%), -50%); }
+.an-jl:hover:not(:disabled) { background: var(--accent-soft-hover); border-color: var(--accent); color: var(--accent-text); }
+.an-jl .an-venn { width: 17px; height: 10px; flex: none; color: var(--accent); }
+.an-jc { padding-left: 5px; border-left: 1px solid var(--border-strong); color: var(--text-muted); font-weight: 600; }
+.an-jl.many, .an-jl.many:hover:not(:disabled) { border-color: var(--warn); }
+.an-jl.many .an-venn, .an-jl.many .an-jc { color: var(--warn); }
 .an-jcheck { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 /* floating bars on the board: actions top left, zoom bottom right, computed items bottom left */
 .an-cvt { position: absolute; z-index: 6; display: flex; gap: var(--s1); align-items: center; padding: var(--s1); background: var(--surface);
