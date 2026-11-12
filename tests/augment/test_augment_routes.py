@@ -130,6 +130,12 @@ def test_coverage_against_an_uploaded_target_set(pg, tmp_path):
     th = c.get(f'/s/{sid}/api/augment/thumb', params={'part': out['dark']['parts']['target'], 'i': 0})
     assert th.status_code == 200 and th.headers['content-type'] == 'image/jpeg'
     assert c.get(f'/s/{sid}/api/augment/thumb', params={'part': '../x', 'i': 0}).status_code == 404
+    # the search, from an empty recipe: it adds a step that darkens, and the coverage rises
+    r = c.post(f'/s/{sid}/api/augment/autotune', json={'recipe': {'steps': []}, 'target': {'kind': 'upload', 'id': t['id']}, 'm': 14}).json()
+    assert wait_job(c, r['job_id'], timeout=300)['status'] == 'done'
+    tune = c.get(f'/s/{sid}/api/augment/coverage/result', params={'key': r['key']}).json()['result']
+    assert tune['history'] and tune['after'] > tune['start']
+    assert tune['recipe']['steps'] and tune['history'][0]['step'] in {s['t'] for s in tune['recipe']['steps']}
     assert c.delete(f'/s/{sid}/api/augment/targets/{t["id"]}').json() == {'ok': True}
     assert c.post(f'/s/{sid}/api/augment/coverage', json={'recipe': flip, 'target': {'kind': 'upload', 'id': t['id']}}).status_code == 404
 

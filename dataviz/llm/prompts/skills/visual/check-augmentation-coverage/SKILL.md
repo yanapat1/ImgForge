@@ -10,5 +10,7 @@ description: Build an augmentation recipe for the new images and check how much 
    fog), moderate chances (0.2–0.5), and `set_augment_recipe` with a one-line note.
 3. With a report: say coverage before → after in plain words, then the gaps it lists; add their steps to the recipe
    (`set_augment_recipe` with the whole new recipe). Warn when unreal variants are 20 % or more: lower the strength.
-4. Ask the user to check the Boxes view (labels lost by crops or shifts) and to run Coverage again.
-5. Say that coverage is about appearance only: real labelled images from the new place are the real test.
+4. When the user wants the app to choose: point to **Find a recipe for these images** in the Coverage view; it tries the
+   steps for them and shows the coverage after each one.
+5. Ask the user to check the Boxes view (labels lost by crops or shifts) and to run Coverage again.
+6. Say that coverage is about appearance only: real labelled images from the new place are the real test.

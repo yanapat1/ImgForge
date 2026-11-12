@@ -187,3 +187,71 @@ def make_copy(names, load, recipe, k, originals, out_root, classes, progress=Non
         if progress is not None:
             progress(i + 1, len(names), 'writing the augmented copy')
     return done
+
+
+# ---------------------------------------------------------------- the search: a recipe for these target images
+CANDIDATES = ['RandomBrightnessContrast', 'RandomGamma', 'HueSaturationValue', 'PlanckianJitter', 'RandomToneCurve',
+              'GaussNoise', 'ISONoise', 'GaussianBlur', 'MotionBlur', 'Defocus', 'Downscale', 'ImageCompression',
+              'RandomFog', 'RandomShadow', 'ToGray', 'Sharpen', 'CLAHE']
+SEARCH_IMAGES, ROUNDS, MIN_GAIN = 200, 4, 0.02
+
+
+def score(rep):
+    """Coverage after, less a penalty for augmented images like neither set (too strong to be real)."""
+    off = rep.get('off_domain') or 0.0
+    return rep['coverage']['after'] - 0.5 * max(0.0, off - 0.2)
+
+
+def autotune(root, trk, names, load, base, train_v, tgt_v, feature, registry, seed=0, progress=None, cancelled=None,
+             train_stats=None, tgt_stats=None):
+    """Greedy: start from `base` (a recipe), add the candidate step that raises the score most, tune its chance, repeat
+    while a round gains at least MIN_GAIN (at most ROUNDS). Each trial augments SEARCH_IMAGES images once and embeds
+    them (cached per recipe). -> {recipe, history: [{step, label, p, coverage}], before, after}."""
+    sub = list(names[:SEARCH_IMAGES])
+    sk = h16(trk, 'search', len(sub))
+
+    def trial(recipe):
+        r = ag.validate(recipe)
+        d, m = ensure_aug(root, h16(sk, ag.recipe_hash(r), 1), sub, load, r, 1, seed, cancelled)
+        v = embed(d, m['n'], feature, registry, lambda *a: None)
+        return cov.run(train_v, v, tgt_v, m.get('steps') or [], with_map=False)
+    cur = ag.validate(base)
+    cur_rep = trial(cur) if cur['steps'] else cov.run(train_v, np.zeros((0, train_v.shape[1])), tgt_v, with_map=False)
+    start = cur_rep['coverage']
+    best_score, history = score(cur_rep), []
+    gap_steps = {g['step']['t']: g['step'] for g in (cov.gap(train_stats, tgt_stats) if train_stats and tgt_stats else [])}
+    pool = list(dict.fromkeys([*gap_steps, *CANDIDATES]))                      # what the images differ in, first
+    total = ROUNDS * (len(pool) + 3)
+    done = 0
+    for _ in range(ROUNDS):
+        have = {s['t'] for s in cur['steps']}
+        best = None
+        for t in pool:
+            if t in have:
+                continue
+            if cancelled is not None and cancelled():
+                raise RuntimeError('cancelled')
+            gap_step = gap_steps.get(t)
+            step = {**ag._step(t), **({'args': gap_step['args']} if gap_step else {}), 'p': 0.5}
+            cand = {**cur, 'steps': [*cur['steps'], step]}
+            rep = trial(cand)
+            done += 1
+            if progress is not None:
+                progress(done, total, f'trying {ag.BY_NAME[t]["label"]}')
+            if best is None or score(rep) > best[0]:
+                best = (score(rep), cand, rep)
+        if best is None or best[0] - best_score < MIN_GAIN:
+            break
+        # its chance: a little more or less may do better
+        top = best
+        for p in (0.25, 0.8):
+            c2 = {**best[1], 'steps': [*best[1]['steps'][:-1], {**best[1]['steps'][-1], 'p': p}]}
+            rep = trial(c2)
+            done += 1
+            if score(rep) > top[0]:
+                top = (score(rep), c2, rep)
+        best_score, cur = top[0], ag.validate(top[1])
+        last = cur['steps'][-1]
+        history.append({'step': last['t'], 'label': ag.BY_NAME[last['t']]['label'], 'p': last['p'], 'coverage': top[2]['coverage']['after']})
+    after = history[-1]['coverage'] if history else start['after']
+    return {'recipe': cur, 'history': history, 'before': start['before'], 'start': start['after'], 'after': after}

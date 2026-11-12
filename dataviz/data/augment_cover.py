@@ -141,7 +141,7 @@ def _suggest(k, a, b):
 
 
 # ---------------------------------------------------------------- the report
-def run(train, aug, target, aug_steps=(), train_stats=None, target_stats=None, cap=200, seed=0):
+def run(train, aug, target, aug_steps=(), train_stats=None, target_stats=None, cap=200, seed=0, with_map=True):
     """train / aug / target: (n, d) embeddings; aug_steps[i]: the step names that ran on aug row i.
     -> the coverage report (plain JSON)."""
     if len(train) < 3 or len(target) < 1:
@@ -185,6 +185,8 @@ def run(train, aug, target, aug_steps=(), train_stats=None, target_stats=None, c
     if train_stats is not None and target_stats is not None:
         report['gap'] = gap(train_stats, [target_stats[i] for i in still] if len(still) else [])
     report['verdict'] = verdict(report)
+    if not with_map:                                   # a search scores many recipes: no picture
+        return report
     # the picture: a sample of each set, laid out together
     rng = np.random.default_rng(seed)
     take = lambda n, k: np.sort(rng.choice(n, k, replace=False)) if n > k else np.arange(n)

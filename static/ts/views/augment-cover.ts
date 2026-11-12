@@ -10,7 +10,7 @@ import { waitJob } from '../core/jobs.js';
 import { THEME } from '../core/theme.js';
 import { toast } from '../core/toast.js';
 import type { Job } from '../types.js';
-import { AG, AUG_HOOKS, augName, renderRecipe } from './augment.js';
+import { AG, AUG_HOOKS, augName, renderRecipe, setAugRecipe } from './augment.js';
 import type { AugRecipe, AugStep } from './augment.js';
 import { base, cfg } from './chart-util.js';
 import { openDialog } from './dialog.js';
@@ -29,11 +29,12 @@ interface Report {
   map: { train: { i: number[]; xy: number[][] }; aug: { i: number[]; xy: number[][] }; target: { i: number[]; xy: number[][]; covered: boolean[] } };
   recipe: AugRecipe;
 }
+interface Tune { recipe: AugRecipe; history: { step: string; label: string; p: number; coverage: number }[]; before: number; start: number; after: number }
 type TargetSpec = { kind: 'upload'; id: string; label: string } | { kind: 'dc'; bucket: string; path: string; label: string };
 
 const C = {
   targets: [] as Target[], target: null as TargetSpec | null, quality: 'quick' as 'quick' | 'deep', m: 300, k: 2,
-  res: null as Report | null, ab: null as Report | null, abName: '', busy: false, err: '', progress: '', loaded: false,
+  res: null as Report | null, ab: null as Report | null, tune: null as Tune | null, abName: '', busy: false, err: '', progress: '', loaded: false,
 };
 const pct = (v: number | null | undefined): string => (v === null || v === undefined ? '–' : `${Math.round(v * 100)}%`);
 const fmt = (v: number | null | undefined, d = 3): string => (v === null || v === undefined ? '–' : v.toFixed(d));
@@ -55,6 +56,7 @@ function targetRow(): string {
     `<label class="m-lbl" for="agv-m">images</label><select id="agv-m" data-agv="m">${[100, 300, 600, 1000].map((n) => `<option ${n === C.m ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
     `<label class="m-lbl" for="agv-k">× variants</label><select id="agv-k" data-agv="k">${[1, 2, 4].map((n) => `<option ${n === C.k ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
     `<button type="button" class="primary" data-agv-act="run" ${C.busy || !C.target ? 'disabled' : ''}>${C.res ? 'Run again' : 'Check coverage'}</button>` +
+    `<button type="button" data-agv-act="tune" ${C.busy || !C.target ? 'disabled' : ''} title="Tries the steps one by one (what the new images differ in first) and keeps those that raise the coverage most, starting from your recipe">Find a recipe for these images</button>` +
     `<span class="faint" id="agv-st">${esc(C.busy ? C.progress || 'Working…' : '')}</span></div>` +
     `<div class="ag-drop" id="agv-drop">Or drop images of the new place / camera here</div>`;
 }
@@ -110,7 +112,7 @@ export function paintCoverage(): void {
   const host = $('ag-main');
   if (!host || AG.view !== 'coverage') return;
   if (!C.loaded) { void loadTargets().then(paintCoverage); host.innerHTML = '<div class="empty">Loading…</div>'; return; }
-  host.innerHTML = targetRow() + (C.err ? `<div class="empty">${esc(C.err)}</div>` : C.res ? resultHTML(C.res)
+  host.innerHTML = targetRow() + (C.tune ? tuneHTML(C.tune) : '') + (C.err ? `<div class="empty">${esc(C.err)}</div>` : C.res ? resultHTML(C.res)
     : '<p class="faint">Pick images from the new place or camera (upload them, or a Data Center folder). The check embeds this dataset, its augmented copies and the new images, and says how much of the new images the recipe covers, and what is still missing.</p>');
   if (C.res && !C.err) drawMap(C.res);
   bindDrop();
@@ -137,6 +139,31 @@ async function runMain(): Promise<void> {
   C.ab = null;
   paintCoverage();
   try { C.res = await run(); } catch (e) { C.err = errText(e); } finally { C.busy = false; }
+  paintCoverage();
+}
+
+function tuneHTML(t: Tune): string {
+  if (!t.history.length) return `<div class="ag-verdict">No step raised the coverage of these images by 2 points or more (it stays at ${pct(t.start)}). They differ in ways augmentation does not make: real images from there are needed.</div>`;
+  return `<div class="ag-verdict"><b>Found: ${pct(t.start)} → ${pct(t.after)}</b> of the new images covered (dataset alone: ${pct(t.before)}).` +
+    `<ol>${t.history.map((h) => `<li>+ ${esc(h.label)} (chance ${Math.round(h.p * 100)}%) → ${pct(h.coverage)}</li>`).join('')}</ol>` +
+    '<button type="button" class="primary sm" data-agv-act="tune-use">Use this recipe</button> <span class="faint">Then check its boxes and run the coverage again with more images.</span></div>';
+}
+
+async function runTune(): Promise<void> {
+  if (!C.target) return;
+  const t = C.target, target = t.kind === 'upload' ? { kind: t.kind, id: t.id } : { kind: t.kind, bucket: t.bucket, path: t.path };
+  C.busy = true;
+  C.err = '';
+  C.tune = null;
+  paintCoverage();
+  try {
+    const r = await postJSON<{ ready: boolean; key: string; result?: Tune; job_id?: number }>('api/augment/autotune', { recipe: AG.recipe, target, quality: C.quality, m: C.m, seed: AG.seed });
+    if (r.ready) C.tune = r.result ?? null;
+    else if (r.job_id !== undefined) {
+      await waitJob<Job>(r.job_id, (j) => { C.progress = `${j.stage ?? 'Searching'}${j.total ? ` (${j.done}/${j.total})` : ''}`; const s = $('agv-st'); if (s) s.textContent = C.progress; });
+      C.tune = (await getJSON<{ result: Tune }>(`api/augment/coverage/result?key=${encodeURIComponent(r.key)}`)).result;
+    }
+  } catch (e) { C.err = errText(e); } finally { C.busy = false; }
   paintCoverage();
 }
 
@@ -240,6 +267,8 @@ export function initAugCover(): void {
     if (!b) return;
     const k = b.dataset['agvAct'];
     if (k === 'run') void runMain();
+    else if (k === 'tune') void runTune();
+    else if (k === 'tune-use' && C.tune) { setAugRecipe(structuredClone(C.tune.recipe)); C.tune = null; toast('The recipe is in place. Run the coverage again to see the full report.'); paintCoverage(); }
     else if (k === 'upload') pickFiles();
     else if (k === 'dc') void pickDc();
     else if (k === 'near') void nearest(Number(b.dataset['j']));

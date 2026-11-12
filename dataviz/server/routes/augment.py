@@ -14,6 +14,8 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     GET  /api/augment/targets          the image sets uploaded to compare against (this session)
     POST /api/augment/targets          multipart files (+ name): a new target set -> {id, name, n}
     DELETE /api/augment/targets/{id}
+    POST /api/augment/autotune         {recipe (start), target, quality, m, seed} -> a job: steps added while they raise the
+                                        target's coverage -> {recipe, history, before, after} (GET .../coverage/result?key=)
     POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path}, quality: quick | deep,
                                         m, k, seed} -> {ready, result} | {ready: false, job_id, key}  (data/augment_run.py)
     GET  /api/augment/coverage/result  ?key= | latest=1 -> the coverage report
@@ -481,6 +483,46 @@ def router(state, ctx):
             (aug_root(st) / 'checks' / 'latest_coverage.json').write_text(json.dumps({'key': key}))
             remember(key, rep)
         job = st.submit(f'augcov:{key}', 'Augment · coverage', run, lane='main')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.post('/api/augment/autotune')
+    def autotune(body: dict = Body(...), user=Depends(deps.current_user)):
+        """Find a recipe for the target images: steps added one by one while they raise its coverage (a job)."""
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        from ...data import augment_run as ar
+        st = ctx.current()
+        base = _recipe(body)
+        m = _clamp(body.get('m'), 20, 1000, 300)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        feature = feature_of(st, body.get('quality') or 'quick')
+        tkey, files, label = target_files(st, body.get('target'), user)
+        trk = ar.h16(str(st.fingerprint or ''), m, seed)
+        key = f'tune:{ar.h16(trk, ag.recipe_hash(base), tkey, feature, seed)}'
+        hit = cached(st, key)
+        if hit is not None:
+            return {'ready': True, 'key': key, 'result': hit}
+        names = pick_images(st, 'random', m, seed)
+        root = aug_root(st) / 'emb'
+
+        def run(job):
+            def load(nm):
+                rgb, boxes, _, _ = load_small(st, nm, 448)
+                return rgb, boxes
+            job.progress(0, 1, 'this dataset\'s and the target images')
+            trd, trm = ar.ensure_train(root, trk, names, load)
+            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES])
+            if tgm['n'] < 1:
+                raise ValueError('none of the target images could be read')
+            trv = ar.embed(trd, trm['n'], feature, st.registry, lambda *a: None)
+            tgv = ar.embed(tgd, tgm['n'], feature, st.registry, lambda *a: None)
+            res = ar.autotune(root, trk, names, load, base, trv, tgv, feature, st.registry, seed, job.progress,
+                              job.cancelled.is_set, trm.get('stats'), tgm.get('stats'))
+            res.update(key=key, target_label=label, feature=feature)
+            check_file(st, key).write_text(json.dumps(res))
+            remember(key, res)
+        job = st.submit(f'augtune:{key}', 'Augment · find a recipe', run, lane='main')
         return {'ready': False, 'job_id': job.id, 'key': key}
 
     @r.get('/api/augment/coverage/result')
