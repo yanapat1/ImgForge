@@ -40,3 +40,16 @@ def test_gap_names_the_darker_images():
     g = cov.gap(lit, dark)
     assert g[0]['key'] == 'brightness' and g[0]['step']['t'] == 'RandomBrightnessContrast'
     assert g[0]['step']['args']['brightness_limit'][0] < -0.3 and 'darker' in g[0]['text']
+
+
+def test_strength_curve_picks_where_more_stops_helping():
+    from dataviz.data import augment_run as ar
+    seen = []
+
+    def trial(recipe):                     # coverage rises with strength, but past 1x the variants stop looking real
+        s = recipe['strength']
+        seen.append(s)
+        return {'coverage': {'before': 0.3, 'after': min(0.9, 0.3 + 0.4 * s)}, 'off_domain': max(0.0, (s - 1) * 0.8)}
+    c = ar.strength_curve(trial, {'steps': [{'t': 'RandomGamma', 'p': 0.5}]})
+    assert seen == list(ar.STRENGTHS) and c['before'] == 0.3
+    assert c['best'] == 1.25 and [p['strength'] for p in c['points']] == list(ar.STRENGTHS)

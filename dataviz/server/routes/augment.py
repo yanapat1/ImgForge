@@ -16,6 +16,8 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     DELETE /api/augment/targets/{id}
     POST /api/augment/autotune         {recipe (start), target, quality, m, seed} -> a job: steps added while they raise the
                                         target's coverage -> {recipe, history, before, after} (GET .../coverage/result?key=)
+    POST /api/augment/curve            {recipe, target, quality, m, seed} -> a job: coverage + unreal variants at strengths
+                                        0.25 … 2 -> {points, best} (GET .../coverage/result?key=)
     POST /api/augment/coverage         {recipe, target: {kind: upload, id} | {kind: dc, bucket, path}, quality: quick | deep,
                                         m, k, seed} -> {ready, result} | {ready: false, job_id, key}  (data/augment_run.py)
     GET  /api/augment/coverage/result  ?key= | latest=1 -> the coverage report
@@ -483,6 +485,45 @@ def router(state, ctx):
             (aug_root(st) / 'checks' / 'latest_coverage.json').write_text(json.dumps({'key': key}))
             remember(key, rep)
         job = st.submit(f'augcov:{key}', 'Augment · coverage', run, lane='main')
+        return {'ready': False, 'job_id': job.id, 'key': key}
+
+    @r.post('/api/augment/curve')
+    def curve(body: dict = Body(...), user=Depends(deps.current_user)):
+        """The recipe at strengths 0.25 … 2: the target's coverage and the unreal variants at each (a job)."""
+        g.need_index()
+        g.boxes_only()
+        _albu()
+        from ...data import augment_run as ar
+        st = ctx.current()
+        recipe = _recipe(body)
+        if not any(x['on'] for x in recipe['steps']):
+            raise HTTPException(400, 'the recipe has no step to apply')
+        m = _clamp(body.get('m'), 20, 1000, 300)
+        seed = _clamp(body.get('seed'), 0, 2**31 - 1, 0)
+        feature = feature_of(st, body.get('quality') or 'quick')
+        tkey, files, _ = target_files(st, body.get('target'), user)
+        trk = ar.h16(str(st.fingerprint or ''), m, seed)
+        key = f'curve:{ar.h16(trk, ag.recipe_hash({**recipe, "strength": 1}), tkey, feature, seed)}'
+        hit = cached(st, key)
+        if hit is not None:
+            return {'ready': True, 'key': key, 'result': hit}
+        names = pick_images(st, 'random', m, seed)
+        root = aug_root(st) / 'emb'
+
+        def run(job):
+            def load(nm):
+                rgb, boxes, _, _ = load_small(st, nm, 448)
+                return rgb, boxes
+            trd, trm = ar.ensure_train(root, trk, names, load)
+            tgd, tgm = ar.ensure_target(root, tkey, files[:MAX_DC_FILES])
+            trv = ar.embed(trd, trm['n'], feature, st.registry, lambda *a: None)
+            tgv = ar.embed(tgd, tgm['n'], feature, st.registry, lambda *a: None)
+            trial = ar.trial_fn(root, trk, names, load, trv, tgv, feature, st.registry, seed, job.cancelled.is_set)
+            res = ar.strength_curve(trial, recipe, job.progress)
+            res['key'] = key
+            check_file(st, key).write_text(json.dumps(res))
+            remember(key, res)
+        job = st.submit(f'augcurve:{key}', 'Augment · strength curve', run, lane='main')
         return {'ready': False, 'job_id': job.id, 'key': key}
 
     @r.post('/api/augment/autotune')

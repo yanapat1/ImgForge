@@ -202,11 +202,8 @@ def score(rep):
     return rep['coverage']['after'] - 0.5 * max(0.0, off - 0.2)
 
 
-def autotune(root, trk, names, load, base, train_v, tgt_v, feature, registry, seed=0, progress=None, cancelled=None,
-             train_stats=None, tgt_stats=None):
-    """Greedy: start from `base` (a recipe), add the candidate step that raises the score most, tune its chance, repeat
-    while a round gains at least MIN_GAIN (at most ROUNDS). Each trial augments SEARCH_IMAGES images once and embeds
-    them (cached per recipe). -> {recipe, history: [{step, label, p, coverage}], before, after}."""
+def trial_fn(root, trk, names, load, train_v, tgt_v, feature, registry, seed=0, cancelled=None):
+    """-> trial(recipe): its coverage report on SEARCH_IMAGES images, one variant each (cached per recipe, no map)."""
     sub = list(names[:SEARCH_IMAGES])
     sk = h16(trk, 'search', len(sub))
 
@@ -215,6 +212,30 @@ def autotune(root, trk, names, load, base, train_v, tgt_v, feature, registry, se
         d, m = ensure_aug(root, h16(sk, ag.recipe_hash(r), 1), sub, load, r, 1, seed, cancelled)
         v = embed(d, m['n'], feature, registry, lambda *a: None)
         return cov.run(train_v, v, tgt_v, m.get('steps') or [], with_map=False)
+    return trial
+
+
+STRENGTHS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+
+
+def strength_curve(trial, recipe, progress=None):
+    """Coverage and unreal variants of `recipe` at each strength -> {points, best}: best = the highest score."""
+    pts = []
+    for i, st in enumerate(STRENGTHS):
+        rep = trial({**ag.validate(recipe), 'strength': st})
+        pts.append({'strength': st, 'coverage': rep['coverage']['after'], 'off_domain': rep.get('off_domain') or 0.0, 'score': round(score(rep), 4)})
+        if progress is not None:
+            progress(i + 1, len(STRENGTHS), f'strength {st}')
+    best = max(pts, key=lambda p: p['score'])
+    return {'points': pts, 'best': best['strength'], 'before': rep['coverage']['before']}
+
+
+def autotune(root, trk, names, load, base, train_v, tgt_v, feature, registry, seed=0, progress=None, cancelled=None,
+             train_stats=None, tgt_stats=None):
+    """Greedy: start from `base` (a recipe), add the candidate step that raises the score most, tune its chance, repeat
+    while a round gains at least MIN_GAIN (at most ROUNDS). Each trial augments SEARCH_IMAGES images once and embeds
+    them (cached per recipe). -> {recipe, history: [{step, label, p, coverage}], before, after}."""
+    trial = trial_fn(root, trk, names, load, train_v, tgt_v, feature, registry, seed, cancelled)
     cur = ag.validate(base)
     cur_rep = trial(cur) if cur['steps'] else cov.run(train_v, np.zeros((0, train_v.shape[1])), tgt_v, with_map=False)
     start = cur_rep['coverage']

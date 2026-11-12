@@ -30,11 +30,12 @@ interface Report {
   recipe: AugRecipe;
 }
 interface Tune { recipe: AugRecipe; history: { step: string; label: string; p: number; coverage: number }[]; before: number; start: number; after: number }
+interface Curve { points: { strength: number; coverage: number; off_domain: number; score: number }[]; best: number; before: number }
 type TargetSpec = { kind: 'upload'; id: string; label: string } | { kind: 'dc'; bucket: string; path: string; label: string };
 
 const C = {
   targets: [] as Target[], target: null as TargetSpec | null, quality: 'quick' as 'quick' | 'deep', m: 300, k: 2,
-  res: null as Report | null, ab: null as Report | null, tune: null as Tune | null, abName: '', busy: false, err: '', progress: '', loaded: false,
+  res: null as Report | null, ab: null as Report | null, tune: null as Tune | null, curve: null as Curve | null, abName: '', busy: false, err: '', progress: '', loaded: false,
 };
 const pct = (v: number | null | undefined): string => (v === null || v === undefined ? '–' : `${Math.round(v * 100)}%`);
 const fmt = (v: number | null | undefined, d = 3): string => (v === null || v === undefined ? '–' : v.toFixed(d));
@@ -57,6 +58,7 @@ function targetRow(): string {
     `<label class="m-lbl" for="agv-k">× variants</label><select id="agv-k" data-agv="k">${[1, 2, 4].map((n) => `<option ${n === C.k ? 'selected' : ''}>${n}</option>`).join('')}</select>` +
     `<button type="button" class="primary" data-agv-act="run" ${C.busy || !C.target ? 'disabled' : ''}>${C.res ? 'Run again' : 'Check coverage'}</button>` +
     `<button type="button" data-agv-act="tune" ${C.busy || !C.target ? 'disabled' : ''} title="Tries the steps one by one (what the new images differ in first) and keeps those that raise the coverage most, starting from your recipe">Find a recipe for these images</button>` +
+    `<button type="button" data-agv-act="curve" ${C.busy || !C.target ? 'disabled' : ''} title="Runs this recipe at strengths 0.25 to 2: where more strength stops helping, and where the images stop looking real">Strength curve</button>` +
     `<span class="faint" id="agv-st">${esc(C.busy ? C.progress || 'Working…' : '')}</span></div>` +
     `<div class="ag-drop" id="agv-drop">Or drop images of the new place / camera here</div>`;
 }
@@ -112,9 +114,10 @@ export function paintCoverage(): void {
   const host = $('ag-main');
   if (!host || AG.view !== 'coverage') return;
   if (!C.loaded) { void loadTargets().then(paintCoverage); host.innerHTML = '<div class="empty">Loading…</div>'; return; }
-  host.innerHTML = targetRow() + (C.tune ? tuneHTML(C.tune) : '') + (C.err ? `<div class="empty">${esc(C.err)}</div>` : C.res ? resultHTML(C.res)
+  host.innerHTML = targetRow() + (C.tune ? tuneHTML(C.tune) : '') + (C.curve ? curveHTML(C.curve) : '') + (C.err ? `<div class="empty">${esc(C.err)}</div>` : C.res ? resultHTML(C.res)
     : '<p class="faint">Pick images from the new place or camera (upload them, or a Data Center folder). The check embeds this dataset, its augmented copies and the new images, and says how much of the new images the recipe covers, and what is still missing.</p>');
   if (C.res && !C.err) drawMap(C.res);
+  if (C.curve) drawCurve(C.curve);
   bindDrop();
 }
 
@@ -147,6 +150,40 @@ function tuneHTML(t: Tune): string {
   return `<div class="ag-verdict"><b>Found: ${pct(t.start)} → ${pct(t.after)}</b> of the new images covered (dataset alone: ${pct(t.before)}).` +
     `<ol>${t.history.map((h) => `<li>+ ${esc(h.label)} (chance ${Math.round(h.p * 100)}%) → ${pct(h.coverage)}</li>`).join('')}</ol>` +
     '<button type="button" class="primary sm" data-agv-act="tune-use">Use this recipe</button> <span class="faint">Then check its boxes and run the coverage again with more images.</span></div>';
+}
+
+function curveHTML(c: Curve): string {
+  const b = c.points.find((p) => p.strength === c.best);
+  return `<div class="ag-verdict"><b>Best strength: ${c.best}×</b> · ${pct(b?.coverage)} covered, ${pct(b?.off_domain)} unreal variants (dataset alone: ${pct(c.before)}). ` +
+    `<button type="button" class="primary sm" data-agv-act="curve-use">Use strength ${c.best}×</button><div id="ag-curve-plot" style="height:220px" role="img" aria-label="Coverage and unreal variants by strength"></div></div>`;
+}
+
+function drawCurve(c: Curve): void {
+  const el = $('ag-curve-plot');
+  if (!el) return;
+  const x = c.points.map((p) => p.strength);
+  void Plotly.react(el, [
+    { type: 'scatter', mode: 'lines+markers', name: 'covered', x, y: c.points.map((p) => p.coverage * 100), line: { color: THEME.accent } },
+    { type: 'scatter', mode: 'lines+markers', name: 'unreal variants', x, y: c.points.map((p) => p.off_domain * 100), line: { color: THEME.danger, dash: 'dot' } },
+  ] as Plotly.Data[], { ...base(), margin: { l: 40, r: 10, t: 10, b: 30 }, xaxis: { title: { text: 'strength ×' } }, yaxis: { title: { text: '%' }, range: [0, 100] }, legend: { orientation: 'h', font: { color: THEME.text } } }, cfg);
+}
+
+async function runCurve(): Promise<void> {
+  if (!C.target) return;
+  if (!AG.recipe.steps.some((x) => x.on)) { toast('The recipe has no step to apply', 'err'); return; }
+  const t = C.target, target = t.kind === 'upload' ? { kind: t.kind, id: t.id } : { kind: t.kind, bucket: t.bucket, path: t.path };
+  C.busy = true;
+  C.curve = null;
+  paintCoverage();
+  try {
+    const r = await postJSON<{ ready: boolean; key: string; result?: Curve; job_id?: number }>('api/augment/curve', { recipe: AG.recipe, target, quality: C.quality, m: C.m, seed: AG.seed });
+    if (r.ready) C.curve = r.result ?? null;
+    else if (r.job_id !== undefined) {
+      await waitJob<Job>(r.job_id, (j) => { C.progress = `${j.stage ?? 'Measuring'}${j.total ? ` (${j.done}/${j.total})` : ''}`; const s = $('agv-st'); if (s) s.textContent = C.progress; });
+      C.curve = (await getJSON<{ result: Curve }>(`api/augment/coverage/result?key=${encodeURIComponent(r.key)}`)).result;
+    }
+  } catch (e) { C.err = errText(e); } finally { C.busy = false; }
+  paintCoverage();
 }
 
 async function runTune(): Promise<void> {
@@ -268,6 +305,8 @@ export function initAugCover(): void {
     const k = b.dataset['agvAct'];
     if (k === 'run') void runMain();
     else if (k === 'tune') void runTune();
+    else if (k === 'curve') void runCurve();
+    else if (k === 'curve-use' && C.curve) { AG.recipe.strength = C.curve.best; renderRecipe(); AUG_HOOKS.forEach((f) => f()); toast(`Strength set to ${C.curve.best}×`); }
     else if (k === 'tune-use' && C.tune) { setAugRecipe(structuredClone(C.tune.recipe)); C.tune = null; toast('The recipe is in place. Run the coverage again to see the full report.'); paintCoverage(); }
     else if (k === 'upload') pickFiles();
     else if (k === 'dc') void pickDc();
