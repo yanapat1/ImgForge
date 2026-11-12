@@ -36,5 +36,9 @@ def test_the_model_handles_a_flip_but_not_the_dark():
     assert not by['RandomBrightnessContrast']['handled'] and by['RandomBrightnessContrast']['drop'] > 0.5
     assert r['steps'][0]['key'] == 'RandomBrightnessContrast'                    # the worst first
     assert r['recipe'] is not None and 'Brightness' in r['verdict']
+    assert r['all']['label'] == 'Every step together' and r['all']['map50'] is not None    # the steps mixed, each at full chance
+    assert r['recipe']['map50'] is not None and {'all', 'recipe'}.isdisjoint(by)
+    one = am.run(lambda nm: _image(int(nm[1:])), names, {'steps': [{'t': 'HorizontalFlip', 'p': 0.5}]}, _detector, [], ['part'], conf=0.25)
+    assert one['all'] is None and one['recipe'] is not None                       # one step: nothing to mix, the recipe row stays
     with pytest.raises(ValueError):
         am.run(lambda nm: _image(0), names, {'steps': []}, _detector, [], ['part'])

@@ -79,6 +79,7 @@
 #ag-cov-plot { width: 100%; height: 380px; }
 .ag-tbl td, .ag-tbl th { padding: 3px 8px; font-size: var(--fs-xs); text-align: right; }
 .ag-tbl td:first-child, .ag-tbl th:first-child { text-align: left; }
+.ag-tbl .ag-mix th { padding-top: var(--s2); color: var(--text-muted); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .04em; }
 
 /* the chip on the Explore map while augmented boxes are drawn (views/augment-ghost.ts); #tab-embed holds it */
 #tab-embed { position: relative; }

@@ -17,7 +17,7 @@ The visualizer's Augment tab (/api/augment/*): what an augmentation recipe does 
     POST /api/augment/autotune         {recipe (start), target, quality, m, seed} -> a job: steps added while they raise the
                                         target's coverage -> {recipe, history, before, after} (GET .../coverage/result?key=)
     POST /api/augment/model            {recipe, model, n, conf, seed} -> a job: the model's mAP50 / mAP / P / R with each step at
-                                        full chance and with the whole recipe, against the labels the steps moved
+                                        full chance, every step together and the whole recipe (rows 'all', 'recipe'), against the labels the steps moved
     POST /api/augment/ghost            {recipe, feature, n, k, seed} -> a job: augmented box crops with their 10 nearest session
                                         boxes + weights in that feature (the page places them on the current map)
     POST /api/augment/curve            {recipe, target, quality, m, seed} -> a job: coverage + unreal variants at strengths
@@ -535,7 +535,7 @@ def router(state, ctx):
         except (TypeError, ValueError):
             raise HTTPException(400, 'conf: a number') from None
         fp = ms.fingerprint(m)
-        key = f'model:{ar.h16(str(st.fingerprint or ""), m["id"], fp, ag.recipe_hash(recipe), n, seed, round(conf, 3))}'
+        key = f'model:{ar.h16('v2', str(st.fingerprint or ""), m["id"], fp, ag.recipe_hash(recipe), n, seed, round(conf, 3))}'
         hit = cached(st, key)
         if hit is not None:
             return {'ready': True, 'key': key, 'result': hit}
@@ -556,7 +556,7 @@ def router(state, ctx):
                 return out
             res = am.run(lambda nm: load_small(st, nm, target)[:2], names, recipe, pred, model_names, list(st.classes), conf,
                          predict.pick_batch_size(runner, m, None), job.progress, job.cancelled.is_set, seed)
-            res.update(key=key, model={'id': m['id'], 'name': m['name']}, recipe=recipe)
+            res.update(key=key, model={'id': m['id'], 'name': m['name']}, recipe_used=recipe)   # not 'recipe': that is a row
             check_file(st, key).write_text(json.dumps(res))
             remember(key, res)
         job = st.submit(f'augmodel:{key}', f'Augment · {m["name"]} under the recipe', run, lane='io' if m.get('format') == 'api' else 'main')

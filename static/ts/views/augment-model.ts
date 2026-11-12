@@ -10,7 +10,7 @@ import type { ModelsPayload } from '../types-views.js';
 import { AG, AUG_HOOKS } from './augment.js';
 
 interface Row { key: string; label: string; map50?: number; map?: number; p?: number; r?: number; drop?: number; kept?: number | null; handled?: boolean }
-interface Result { n: number; conf: number; clean: Row; steps: Row[]; recipe: Row | null; verdict: string; model: { id: string; name: string }; recipe_used?: unknown }
+interface Result { n: number; conf: number; clean: Row; steps: Row[]; all?: Row | null; recipe: Row | null; verdict: string; model: { id: string; name: string }; recipe_used?: unknown }
 
 const M = { models: [] as { id: string; name: string }[], model: '', n: 100, res: null as Result | null, busy: false, err: '', progress: '', loaded: false };
 const pc = (v: number | undefined): string => (v === undefined ? '–' : `${(v * 100).toFixed(1)}`);
@@ -34,7 +34,7 @@ function html(): string {
   const row = (x: Row): string => `<tr><td>${esc(x.label)}</td><td class="num">${pc(x.map50)}</td><td class="num">${pc(x.p)}</td><td class="num">${pc(x.r)}</td>` +
     `<td class="num${x.handled === false ? ' down' : ''}">${x.drop === undefined ? '' : `−${pc(x.drop)}`}</td><td>${x.handled === undefined ? '' : x.handled ? 'handles it' : 'struggles'}</td></tr>`;
   return head + `<div class="ag-verdict">${esc(r.verdict)}</div>` +
-    `<table class="list-table ag-tbl"><thead><tr><th>Images</th><th>mAP50</th><th>P</th><th>R</th><th>Drop (points)</th><th></th></tr></thead><tbody>${row(r.clean)}${r.steps.map(row).join('')}${r.recipe ? row(r.recipe) : ''}</tbody></table>` +
+    `<table class="list-table ag-tbl"><thead><tr><th>Images</th><th>mAP50</th><th>P</th><th>R</th><th>Drop (points)</th><th></th></tr></thead><tbody>${row(r.clean)}${r.steps.map(row).join('')}${r.all || r.recipe ? `<tr class="ag-mix"><th colspan="6">Mixed</th></tr>${r.all ? row(r.all) : ''}${r.recipe ? row(r.recipe) : ''}` : ''}</tbody></table>` +
     `<p class="faint">${esc(r.model.name)} · ${r.n} images · P and R at confidence ${r.conf}. "Handles it" = keeps 95 % of its mAP50 without augmentation.</p>`;
 }
 
