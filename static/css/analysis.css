@@ -127,6 +127,12 @@ main.an-work { grid-template-columns: none; }
 .an-gridbox { flex: 1; min-height: 0; overflow: auto; }
 .an-gridbox:focus-visible { outline: none; }
 .an-grid th { cursor: pointer; }
+/* cells: text selects inside one cell; a drag across cells selects a block (grid.ts), shown with .sel */
+.an-grid td { user-select: text; cursor: cell; }
+.an-grid td.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.data-grid.an-grid tbody tr:hover td.sel { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+html.an-gsel .an-grid, html.an-gsel .an-grid td { user-select: none; }
+.an-cell span { user-select: text; max-height: 8em; overflow: auto; }
 .an-crs { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; }
 .an-crs:hover { background: var(--accent); }
 .an-msg { padding: var(--s3) var(--s4); font-size: var(--fs-sm); display: grid; gap: var(--s1); }

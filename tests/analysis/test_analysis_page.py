@@ -404,6 +404,53 @@ def test_catalog_tab_and_enter_move_to_the_next_description(server, target):  # 
     assert not errors, errors
 
 
+def test_results_grid_drag_selects_a_block_and_copies_it(server, target):  # noqa: F811
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        # what the page puts on the clipboard, without a real clipboard
+        page.add_init_script("window.__copied = []; navigator.clipboard.writeText = async (t) => { window.__copied.push(t); };")
+        page.goto(f'{server}/?analysis')
+        page.wait_for_selector('.an-main', timeout=20000)
+        page.select_option('#an-conn', target['conn'])
+        type_sql(page, "SELECT id, note, total FROM public.orders WHERE id <= 30 ORDER BY id")
+        page.keyboard.press('Control+Enter')
+        page.wait_for_selector('#an-rc .an-grid td[data-r="2"][data-c="1"]', timeout=20000)
+        a = page.locator('#an-rc td[data-r="0"][data-c="0"]').bounding_box()
+        b = page.locator('#an-rc td[data-r="2"][data-c="1"]').bounding_box()
+        page.mouse.move(a['x'] + 10, a['y'] + 10)
+        page.mouse.down()
+        page.mouse.move(a['x'] + 30, a['y'] + 12, steps=3)              # inside the first cell: still a text selection
+        page.mouse.move(b['x'] + 10, b['y'] + 10, steps=6)
+        page.mouse.up()
+        assert page.locator('#an-rc td.sel').count() == 6
+        page.keyboard.press('Control+c')
+        page.wait_for_function('window.__copied.length === 1', timeout=5000)
+        assert page.evaluate('window.__copied[0]') == '1\t\n2\teven\n3\t'
+        # the block survives a scroll back and forth, Shift+arrow grows it, Ctrl+Shift+C adds the header row
+        page.keyboard.press('Shift+ArrowRight')
+        assert page.locator('#an-rc td.sel').count() == 9
+        page.keyboard.press('Control+Shift+c')
+        page.wait_for_function('window.__copied.length === 2', timeout=5000)
+        assert page.evaluate('window.__copied[1]').split('\n')[0] == 'id\tnote\ttotal'
+        # a click is one cell again; a drag inside one cell selects its text, and Ctrl+C then copies that text (the browser's)
+        page.click('#an-rc td[data-r="1"][data-c="1"]')
+        assert page.locator('#an-rc td.sel').count() == 0
+        c = page.locator('#an-rc td[data-r="1"][data-c="1"]').bounding_box()
+        page.mouse.move(c['x'] + 2, c['y'] + 14)
+        page.mouse.down()
+        page.mouse.move(c['x'] + 60, c['y'] + 14, steps=5)
+        page.mouse.up()
+        assert page.evaluate('getSelection().toString()') == 'even'
+        page.keyboard.press('Control+c')
+        page.wait_for_timeout(300)
+        assert page.evaluate('window.__copied.length') == 2
+        browser.close()
+    assert not errors, errors
+
+
 def test_plain_http_without_random_uuid(server, target):  # noqa: F811
     """A server opened over plain http at its address is not a secure context: the browser has no crypto.randomUUID.
     The page must still start and make new query tabs, scripts and dashboards (core/uuid.ts)."""
