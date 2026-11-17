@@ -46,6 +46,9 @@ ALWAYS_APPLY = ('open_tab', 'fit_view', 'navigate')     # harmless and undone in
 REPEAT_NUDGE, REPEAT_STOP = 3, 5
 SMALL_STEPS = 20
 SMALL_TOOLS = 8
+MEDIUM_STEPS = 25               # a 15-40B model (or a context window of 40k or less): tool groups, a short prompt
+MEDIUM_PARAMS = 40              # billions of parameters up to which a model is 'medium'
+MEDIUM_CONTEXT = 40000          # ... or a Model context on its card up to this many tokens
 MODES = ('ask', 'auto', 'plan')
 PLAN_ONLY_OUT = ('change', 'danger', 'ui', 'run')        # the risks plan mode does not offer (tools.for_role)
 PLAN_SWITCH = ('Plan mode is on for the rest of this turn: the change and page tools are gone. {how}\n'
@@ -137,17 +140,27 @@ class Run:
     raw_est: int = 0                # the estimate before budget.fit cut anything (auto-compaction looks at it)
     cancel: threading.Event = field(default_factory=threading.Event)
     temperature: float = None
+    pool: dict = None               # every tool the run may load: run.tools is a part of it for a medium model
 
 
 # ---------------------------------------------------------------- options
 def profile_of(provider):
-    """'small' for a model of <= 14B parameters (from the provider's Agent profile, or guessed from the model
-    name like qwen2.5-7b-instruct / llama3.1:8b), else 'large'."""
+    """'small' for a model of <= 14B parameters, 'medium' up to 40B (from the provider's Agent profile, or guessed
+    from the model name like qwen2.5-7b-instruct / llama3.1:8b / qwen3-32b) or when the card's Model context is
+    40k tokens or less, else 'large'. small: <= 8 matching tools, 20 steps; medium: tool groups, 25 steps, the
+    knowledge as an index; both a low temperature."""
     p = str((provider or {}).get('agent_profile') or 'auto')
-    if p in ('small', 'large'):
+    if p in ('small', 'medium', 'large'):
         return p
     m = re.search(r'(?<![\d.])(\d+(?:\.\d+)?)\s*b(?![a-z])', str((provider or {}).get('model') or '').lower())
-    return 'small' if m and float(m.group(1)) <= 14 else 'large'
+    size = float(m.group(1)) if m else None
+    if size is not None and size <= 14:
+        return 'small'
+    try:
+        ctx = int((provider or {}).get('context_window') or 0)
+    except (TypeError, ValueError):
+        ctx = 0
+    return 'medium' if (size is not None and size <= MEDIUM_PARAMS) or 0 < ctx <= MEDIUM_CONTEXT else 'large'
 
 
 def options(body, provider):
@@ -161,7 +174,7 @@ def options(body, provider):
     except (TypeError, ValueError):
         web = 0
     profile = profile_of(provider)
-    steps = min(MAX_STEPS, e['steps'], SMALL_STEPS if profile == 'small' else MAX_STEPS)
+    steps = min(MAX_STEPS, e['steps'], {'small': SMALL_STEPS, 'medium': MEDIUM_STEPS}.get(profile, MAX_STEPS))
     # sub-agents (tools/agents.py delegate): only when the user switched them on, never for a small model
     agents = body.get('agents') is True and profile != 'small'
     return {'mode': mode, 'effort': effort, 'think': think, 'web': web, 'profile': profile, 'max_steps': steps,
@@ -245,9 +258,19 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     tset = tools.for_role(domains, opts['mode'], extra=plugin)
     if not opts.get('agents'):
         tset.pop('delegate', None)
+    pool = dict(tset)                           # what this run may load (a medium model starts with a part of it)
+    extra_static = [prompting.template('agents')] if 'delegate' in tset else []
     if opts['profile'] == 'small':
         q = ' '.join(x.get('text', '') for x in msgs[-1]['parts'] if 'text' in x)
         tset = pick_tools(tset, q, keep=role.always)
+    elif opts['profile'] == 'medium':           # whole groups, named by the last user messages
+        said = ' '.join(x.get('text', '') for m in [m for m in msgs if m['role'] == 'user'][-3:]
+                        for x in m['parts'] if 'text' in x)
+        tset = tools.pick_groups(tset, said)
+        extra_static.append(tools.groups_card(pool, tset))
+    if opts['profile'] != 'medium' or len(tset) == len(pool):
+        tset.pop('more_tools', None)
+        pool.pop('more_tools', None)
     sk = prompting.skills(role.name, user_skills)
     scope_text = roles.SCOPES[role.name](user, scope)
     system = prompting.build(role.name, tools_catalog=tools.risk_card(tset), scope_text=scope_text, mode=opts['mode'],
@@ -255,7 +278,7 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
                              user_prompts=[p for p in user_prompts if p.get('role') in (None, 'all', role.name)],
                              user_name=(user or {}).get('display_name') or (user or {}).get('username') or '',
                              forced_skills=forced_skills, pages_text=roles.other_pages(role.name),
-                             extra_static=[prompting.template('agents')] if 'delegate' in tset else [])
+                             extra_static=extra_static)
     plan_text = plan_section(plan)
     if plan_text:
         system += '\n\n' + plan_text
@@ -270,12 +293,13 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     ctx = Ctx(user=user, role=role.name, scope=scope if isinstance(scope, dict) else {}, skills=sk, state=state,
               app=app, web_level=opts['web'], run_id=run_id, provider=provider, limit=lim, mode=opts['mode'])
     p = dict(provider)
-    if opts['profile'] == 'small':
-        p['temperature'] = min(float(p.get('temperature') or 0.1), 0.1)
+    if opts['profile'] in ('small', 'medium'):
+        top = 0.1 if opts['profile'] == 'small' else 0.2
+        p['temperature'] = min(float(p.get('temperature') or top), top)
     run = Run(run_id=run_id, user=user, role=role, provider=p, system=system, msgs=list(fitted), tools=tset, ctx=ctx,
                mode=opts['mode'], effort=opts['effort'], think=opts['think'], web=opts['web'],
                native_web=_native_ok(p, opts['web']), profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est,
-               raw_est=raw_est)
+               raw_est=raw_est, pool=pool)
     ctx.cancel = run.cancel
     return run
 
@@ -320,6 +344,10 @@ PAGE_OF_DOMAIN = {r.name: (r.title, r.screen) for r in roles.ROLES.values()}
 
 def _missing_tool(run, name):
     """Why a call names a tool this run does not have: another page's (navigate there), not in this mode, unknown."""
+    g = tools.group_of(name)
+    if name in (run.pool or {}) and g:          # a tool of a group that is not loaded: load it, the model calls again
+        _load_group(run, g)
+        return f'{name} is in the tool group {g!r}, loaded now: call {name} again'
     t = tools.REGISTRY.get(name)
     here = (run.ctx.scope or {}).get('page') or run.role.screen
     if t is not None and t.domain in PAGE_OF_DOMAIN and t.domain not in run.role.domains:
@@ -332,6 +360,16 @@ def _missing_tool(run, name):
     if t is not None and t.domain in run.role.domains:
         return f'{name} is not available in mode {run.mode}; your tools are: {", ".join(run.tools)}'
     return f'unknown tool {name!r}; your tools are: {", ".join(run.tools)}'
+
+
+def _load_group(run, group):
+    """Add a tool group to the run (in the pool's order) -> the names added."""
+    pool = run.pool or {}
+    new = [k for k in pool if tools.group_of(k) == group and k not in run.tools]
+    if new:
+        run.tools = {**{k: t for k, t in pool.items() if k in run.tools or k in new},
+                     **{k: t for k, t in run.tools.items() if k not in pool}}
+    return new
 
 
 def _sig(c):
@@ -477,7 +515,7 @@ def events(run):
     # count once it answered (usage below is the turn's billed sum over every step, which is not a context size)
     ctx_now = run.est
     yield {'type': 'context', 'used': ctx_now, 'limit': cap, 'exact': False}
-    spec_tokens = None                          # the tool specs' share: run.system has no specs (counted once)
+    spec_tokens, spec_n = None, 0               # the tool specs' share: run.system has no specs (counted per tool set)
     st = {'retries': 0, 'ans': None}
     usage = {'in': 0, 'out': 0}
     t0 = time.perf_counter()
@@ -498,8 +536,8 @@ def events(run):
             yield done(step - 1)
             return
         if step > 1:
-            if spec_tokens is None:
-                spec_tokens = budget.text_tokens(json.dumps([t.spec() for t in run.tools.values()]))
+            if spec_tokens is None or spec_n != len(run.tools):       # a tool group was loaded
+                spec_tokens, spec_n = budget.text_tokens(json.dumps([t.spec() for t in run.tools.values()])), len(run.tools)
             ok, est = compact.fit(kind, run.system, run.msgs, cap - spec_tokens)
             if not ok:
                 yield {'type': 'error', 'detail': 'the tool results grew over the token budget: ask for less at once'}
@@ -560,7 +598,7 @@ def events(run):
         # control tools that end the turn (the first valid one wins)
         for c in calls:
             t = run.tools.get(c.get('name'))
-            if t is None or not t.control or t.name in ('todo', 'enter_plan_mode'):
+            if t is None or not t.control or t.name in ('todo', 'enter_plan_mode', 'more_tools'):
                 continue
             args, err = tools.validate(t, c.get('args'))
             if err:
@@ -607,6 +645,18 @@ def events(run):
                 yield _enter_plan(run, clean.get('reason') or '')
                 planned = True
                 results.append({**res, 'content': PLAN_SWITCH.format(how=prompting.template('mode_plan') or '')})
+                continue
+            if t.name == 'more_tools':
+                clean, err = tools.validate(t, args)
+                g = str((clean or {}).get('group') or '').strip().lower()
+                have = sorted({tools.group_of(k) for k in (run.pool or {}) if tools.group_of(k)})
+                if err or g not in have:
+                    results.append({**res, 'content': err or f'no tool group {g!r}; the groups are: {", ".join(have)}',
+                                    'is_error': True})
+                else:
+                    new = _load_group(run, g)
+                    results.append({**res, 'content': (f'loaded: {", ".join(new)}. Call the one you need.' if new
+                                                       else f'the {g} tools are loaded already: call the one you need')})
                 continue
             if t.name == 'todo':
                 clean, err = tools.validate(t, args)
@@ -769,9 +819,10 @@ def _enter_plan(run, reason):
     The system prompt stays as it is (the provider's cache); the tool result tells the model the rules."""
     run.mode = 'plan'
     run.ctx.mode = 'plan'
-    run.tools = {k: t for k, t in run.tools.items() if t.risk not in PLAN_ONLY_OUT and k != 'enter_plan_mode'}
+    keep = lambda d: {k: t for k, t in (d or {}).items() if t.risk not in PLAN_ONLY_OUT and k != 'enter_plan_mode'}  # noqa: E731
+    run.tools, run.pool = keep(run.tools), keep(run.pool)      # a tool group loaded later has no change tool either
     if 'submit_plan' in tools.REGISTRY:
-        run.tools['submit_plan'] = tools.REGISTRY['submit_plan']
+        run.tools['submit_plan'] = run.pool['submit_plan'] = tools.REGISTRY['submit_plan']
     return {'type': 'mode', 'mode': 'plan', 'reason': str(reason)[:300]}
 
 

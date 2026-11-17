@@ -5,6 +5,7 @@ Control tools (domain 'control'): answered by the user or by the engine itself, 
     todo                   the agent's visible checklist for a multi-step request (a 'todo' card, kept up to date);
                            saved on the chat (sessions.set_plan), so it goes on over page changes and compaction
     submit_plan            mode plan only: the researched plan, shown with Approve (llm/engine/planner.py)
+    more_tools             a mid-size model (profile medium) only: load another tool group for this turn
     enter_plan_mode        mode auto only: the request needs a plan first; the rest of the turn is plan mode
                            (read-only tools, ask_user, submit_plan) and the page shows the switch
 """
@@ -34,6 +35,9 @@ register(Tool('enter_plan_mode', 'Auto mode: switch to plan mode BEFORE acting w
                                  'approve. Not for small, clear requests.',
               _obj({'reason': S('why it needs a plan, one short sentence the user sees')}, ['reason']),
               False, control=True, domain='control'))
+register(Tool('more_tools', 'Load another group of tools (the system prompt lists the groups that are not loaded). '
+                            'Then call the tool you need. Does not end your turn.',
+              _obj({'group': S('the group name')}, ['group']), False, control=True, domain='control'))
 register(Tool('submit_plan', 'Plan mode: after looking things up, submit the plan for the user to approve. Ends your '
                              'turn; nothing is changed until they approve it.',
               _obj({'summary': S('one or two sentences: what the plan does'),

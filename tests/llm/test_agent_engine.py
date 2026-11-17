@@ -3,11 +3,12 @@ plan with confirm-and-continue, role separation (the visual agent has no Bucket 
 and the prompt built from llm/prompts/. The model is scripted through providers.stream_tools."""
 
 import copy
+import json
 import threading
 
 import pytest
 
-from dataviz.llm import prompting, providers, tools
+from dataviz.llm import budget, prompting, providers, tools
 from dataviz.llm.engine import confirm, react, roles
 from dataviz.llm.providers import LLMError
 from test_llm_tools import ALICE, OPENAI, FakeService
@@ -253,7 +254,7 @@ def test_visual_agent_has_no_bucket_tools(monkeypatch, svc):
 
 def test_small_model_profile(monkeypatch, svc):
     small = {**OPENAI, 'model': 'qwen2.5-7b-instruct'}
-    assert react.profile_of(small) == 'small' and react.profile_of({'model': 'qwen2.5-32b'}) == 'large'
+    assert react.profile_of(small) == 'small' and react.profile_of({'model': 'qwen2.5-72b'}) == 'large'
     assert react.profile_of({'model': 'x', 'agent_profile': 'small'}) == 'small'
     seen = script(monkeypatch, ('ok', []))
     evs = drain(start('delete the old folder in cars', provider=small, effort='high'))
@@ -425,3 +426,48 @@ def test_auto_switches_itself_to_plan_mode(monkeypatch, svc):
     assert 'Plan mode is on' in res[0]['content'] and 'not available in mode plan' in res[1]['content']
     # not offered in ask / plan
     assert 'enter_plan_mode' not in start('x', mode='ask').tools and 'enter_plan_mode' not in start('x', mode='plan').tools
+
+
+# ---------------------------------------------------------------- a mid-size model: tool groups
+def test_medium_model_profile_and_tool_groups(monkeypatch, svc):
+    """15-40B (or a context window of 40k or less): the look-ups plus the tool groups the message names, the other
+    groups one more_tools call away; a call to a tool of an unloaded group loads it."""
+    mid = {**OPENAI, 'model': 'qwen3-32b'}
+    assert react.profile_of(mid) == 'medium' and react.profile_of({'model': 'gemma-27b-it'}) == 'medium'
+    assert react.profile_of({'model': 'gpt-x', 'context_window': 32768}) == 'medium'
+    assert react.profile_of({'model': 'gpt-x', 'context_window': 200000}) == 'large'
+    assert react.profile_of({'model': 'qwen3-32b', 'agent_profile': 'large'}) == 'large'
+    run = start('what is in the bucket cars?', provider=mid, effort='high')
+    assert run.profile == 'medium' and run.max_steps == react.MEDIUM_STEPS and run.provider['temperature'] <= 0.2
+    assert {'list_buckets', 'list_folder', 'search', 'more_tools', 'ask_user', 'navigate'} <= set(run.tools)
+    assert not {'move', 'delete', 'extract_frames', 'import_dataset', 'set_s3_mode'} & set(run.tools)
+    assert len(run.tools) < len(run.pool) and '`video`: cut videos into image frames' in run.system
+    assert '## What you know' not in run.system, 'knowledge is an index for a mid-size model'
+    specs = json.dumps([t.spec() for t in run.tools.values()])
+    assert budget.text_tokens(run.system) + budget.text_tokens(specs) < 6500
+    # the message names a group: it is loaded from the start, in the pool's order
+    named = start('move the night images into val/night', provider=mid)
+    assert {'move', 'copy', 'delete'} <= set(named.tools) and 'extract_frames' not in named.tools
+    assert list(named.tools) == [k for k in named.pool if k in named.tools]
+    # a large model has everything and no more_tools; a small one keeps its own picking
+    assert 'more_tools' not in start('hi').tools and 'more_tools' not in start('hi', provider={**OPENAI, 'model': 'q-7b'}).tools
+    # more_tools loads a group; an unloaded tool called directly loads its group and is called again
+    seen = script(monkeypatch, ('', [('more_tools', {'group': 'video'})]), ('', [('more_tools', {'group': 'nope'})]),
+                  ('', [('add_tags', {'bucket': 'cars', 'tags': ['night']})]), ('done', []))
+    evs = drain(start('what is in the bucket cars?', provider=mid, mode='auto'))
+    assert evs[-1]['type'] == 'done'
+    r1 = seen[1]['msgs'][-1]['parts'][0]['tool_result']
+    assert 'extract_frames' in r1['content'] and not r1.get('is_error')
+    assert 'extract_frames' in {s['name'] for s in seen[1]['specs']} and 'extract_frames' not in {s['name'] for s in seen[0]['specs']}
+    r2 = seen[2]['msgs'][-1]['parts'][0]['tool_result']
+    assert r2['is_error'] and 'the groups are:' in r2['content'] and 'files' in r2['content']
+    r3 = seen[3]['msgs'][-1]['parts'][0]['tool_result']
+    assert r3['is_error'] and "tool group 'tags', loaded now: call add_tags again" in r3['content']
+    assert 'add_tags' in {s['name'] for s in seen[3]['specs']}
+
+
+def test_every_tool_group_names_real_tools():
+    names = {n for _, ns, _ in tools.GROUPS.values() for n in ns.split()}
+    assert names <= set(tools.REGISTRY), names - set(tools.REGISTRY)
+    assert not [n for n in names if tools.REGISTRY[n].domain in ('control', 'common', 'web')]
+    assert tools.group_of('move') == 'files' and tools.group_of('list_folder') is None

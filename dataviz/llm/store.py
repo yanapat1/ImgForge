@@ -42,7 +42,8 @@ ABS_MAX = 2_000_000             # no model takes more; a saved number is clamped
 MAX_BUDGET = DEFAULT_BUDGET     # the old name (some importers still use it)
 _FIELDS = ('name', 'kind', 'base_url', 'model', 'vision', 'audio', 'box_format', 'timeout_s', 'max_output_tokens',
            'temperature', 'agent_profile', 'context_window')
-PROFILES = ('auto', 'small', 'large')       # agent profile: small (<= 14B) gets a shorter prompt and fewer tools
+PROFILES = ('auto', 'small', 'medium', 'large')     # agent profile (engine/react.py profile_of): small (<= 14B) a short
+                                                    # prompt and few tools, medium (<= 40B / 40k context) tool groups
 ROLES = ('bucket', 'visual', 'data')      # the ◆ agents (llm/engine/roles.py)
 CHAT_APP = 'app'                          # config.chat key of the one chat's settings (every page reads it)
 CHAT_KEYS = {'mode': ('ask', 'auto', 'plan'), 'effort': ('low', 'medium', 'high'),

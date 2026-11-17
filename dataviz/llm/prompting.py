@@ -137,7 +137,7 @@ def build(role, *, tools_catalog, scope_text, mode='ask', effort='medium', profi
     out = [Template(_file('base.md')).safe_substitute(app=app_intro()), _file(role, 'system.md')]
 
     inline = []
-    if profile != 'small' and effort in ('medium', 'high'):
+    if profile == 'large' and effort in ('medium', 'high'):       # small / medium models read a topic on demand
         inline = [k for k in know.values() if k['core'] or (effort == 'high' and k['high'])]
     if inline:
         out.append('## What you know\n' + '\n\n'.join(f'### {k["title"]}\n{k["body"]}' for k in inline))

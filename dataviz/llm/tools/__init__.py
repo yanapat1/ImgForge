@@ -156,7 +156,7 @@ def register(t):
     return t
 
 
-CONTROL_ONLY_ENGINE = {'todo', 'submit_plan'}     # the engine's planner tools: not part of the old DC agent / CLI
+CONTROL_ONLY_ENGINE = {'todo', 'submit_plan', 'more_tools'}     # the engine's planner tools: not part of the old DC agent / CLI
 
 
 def for_role(domains, mode='ask', extra=()):
@@ -174,6 +174,85 @@ def for_role(domains, mode='ask', extra=()):
             continue
         out[t.name] = t
     return out
+
+
+# ---------------------------------------------------------------- tool groups (a mid-size model's tool set)
+# A model of 15-40B (engine/react.py profile 'medium') chooses badly among 30-40 tools and pays ~7k tokens for their
+# definitions. It gets the tools outside every group (the look-ups, the page's main actions, control, navigation)
+# plus the groups whose words appear in the last messages; `more_tools {group}` loads another one, and a call to a
+# tool of a group that is not loaded loads it. Whole groups in registry order: the same request keeps the same
+# set, so a local server's prompt cache holds between turns (per-tool picking changed it on every message).
+GROUPS = {
+    # Bucket page
+    'files': ('create, move, copy, rename, delete, write or undo files and folders',
+              'create_folder move copy rename delete write_text_file undo',
+              'move copy rename delete remove trash folder mkdir create write edit undo organise organize split restore '
+              'duplicate duplicates clean tidy yaml'),
+    'tags': ('add or remove tags', 'add_tags remove_tags', 'tag tags tagged untag label labels'),
+    's3': ('S3 links: stream / local mode, download folders, compare with S3',
+           'set_s3_mode sync_from_s3 download_s3_folders check_s3_local compare_s3_local remove_local_copy',
+           's3 stream streamed download downloaded local sync resync cloud mirror rustfs minio'),
+    'transfer': ('import a dataset from the web, export to S3 / FTP / SFTP',
+                 'inspect_dataset_source import_dataset export_to',
+                 'import export kaggle hugging huggingface roboflow zenodo openml url ftp sftp upload fetch'),
+    'video': ('cut videos into image frames', 'extract_frames set_video_auto', 'video videos frame frames mp4 mov fps clip'),
+    'sessions': ('open a folder as a visualize or labeling session', 'send_to_session',
+                 'visualize visualizer visualise labeling labelling session sessions send open map umap tsne project'),
+    'buckets': ('create, rename or delete a bucket', 'create_bucket update_bucket delete_bucket',
+                'unlink'),
+    # Data page
+    'stats': ('row samples, profiles, statistic tests, forecasts, a query\'s cost',
+              'sample_rows profile_result stat_test forecast explain_query',
+              'sample rows profile test significant significance correlation correlate forecast predict trend slow '
+              'explain statistic statistics distribution outlier average mean median'),
+    'write': ('check or convert SQL, describe columns, change data',
+              'check_sql set_column_description run_change',
+              'update insert delete change alter drop truncate temp describe description meaning fix syntax error '
+              'convert translate merge'),
+    'board': ('zones and notes on the visual builder board', 'read_board edit_board',
+              'board zone zones note notes sticky builder diagram arrange group'),
+    'dashboard': ('add charts to the dashboard', 'build_dashboard', 'dashboard chart charts kpi graph plot bar line donut'),
+    # Visualizer
+    'issues': ('find issues, the selection, text search, curation scans',
+               'issue_summary show_issue run_scan selection_view search_boxes_by_text fit_view',
+               'issue issues error errors wrong mislabeled mislabelled duplicate duplicates outlier outliers suspicious '
+               'cleanlab scan curation select selected selection similar search find zoom fit'),
+    'models': ('models: list, run, evaluate, class statistics',
+               'list_models run_model run_eval_all eval_summary compute_stats',
+               'model models eval evaluate evaluation map precision recall predict prediction yolo confusion stats '
+               'leaderboard ap'),
+    'compare': ('compare sessions: shift, tests, stress, map quality',
+                'compare_shift compare_tests compare_stress projection_quality',
+                'compare comparison shift camera cameras stress drift quality trust trustworthiness'),
+    'augment': ('augmentation recipes and coverage', 'augment_catalog set_augment_recipe augment_coverage',
+                'augment augmentation augmentations albumentations recipe coverage flip blur noise'),
+}
+_GROUP_OF = {n: g for g, (_, names, _) in GROUPS.items() for n in names.split()}
+_GROUP_WORDS = {g: frozenset(words.split()) for g, (_, _, words) in GROUPS.items()}
+
+
+def group_of(name):
+    """The group a tool loads with (None: always offered)."""
+    return _GROUP_OF.get(name)
+
+
+def pick_groups(all_tools, text, extra=()):
+    """{name: Tool} for a mid-size model: every tool outside the groups, plus the groups `text` (the last user
+    messages) names or `extra` lists, in the order of `all_tools`."""
+    import re
+    words = set(re.findall(r'[a-z0-9]+', str(text or '').lower()))
+    on = {g for g, kw in _GROUP_WORDS.items() if words & kw} | set(extra)
+    return {k: t for k, t in all_tools.items() if _GROUP_OF.get(k) is None or _GROUP_OF[k] in on}
+
+
+def groups_card(all_tools, loaded):
+    """The prompt's line on the tool groups that are not loaded (only those this role has)."""
+    have = {_GROUP_OF[k] for k in all_tools if k in _GROUP_OF}
+    rest = [g for g in GROUPS if g in have and not any(_GROUP_OF.get(k) == g for k in loaded)]
+    if not rest:
+        return ''
+    return ('More tools, not loaded yet (call `more_tools` with the group when the request needs one): '
+            + '; '.join(f'`{g}`: {GROUPS[g][0]}' for g in rest) + '.')
 
 
 def specs(tools=None):
@@ -203,8 +282,8 @@ def risk_card(tools):
     system prompt does not repeat them (tools.catalog is still the table the CLI and SKILL.md show)."""
     by = {}
     for t in tools.values():
-        if t.name == 'enter_plan_mode':     # auto only: kept out, so the card (cached) is the same in every mode
-            continue
+        if t.name in ('enter_plan_mode', 'more_tools'):     # auto only / named by the groups line: kept out, so the
+            continue                                        # card (cached) is the same in every mode
         k = 'query' if t.confirm_if and t.confirm_risk == 'query' else t.risk
         by.setdefault(k, []).append(f'`{t.name}`')
     return '\n'.join(f'- {label}: {", ".join(by[k])}' for k, label in RISK_LINE if by.get(k))
