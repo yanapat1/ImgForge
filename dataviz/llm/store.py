@@ -44,6 +44,7 @@ _FIELDS = ('name', 'kind', 'base_url', 'model', 'vision', 'audio', 'box_format',
            'temperature', 'agent_profile', 'context_window')
 PROFILES = ('auto', 'small', 'large')       # agent profile: small (<= 14B) gets a shorter prompt and fewer tools
 ROLES = ('bucket', 'visual', 'data')      # the ◆ agents (llm/engine/roles.py)
+CHAT_APP = 'app'                          # config.chat key of the one chat's settings (every page reads it)
 CHAT_KEYS = {'mode': ('ask', 'auto', 'plan'), 'effort': ('low', 'medium', 'high'),
              'think': ('off', 'low', 'medium', 'high')}
 WEB_ENGINES = ('auto', 'searxng', 'duckduckgo', 'brave', 'tavily', 'serper', 'google_cse')
@@ -291,7 +292,7 @@ class LLMStore:
             data['active'] = body['active']
         if isinstance(body.get('chat'), dict):
             for role, v in body['chat'].items():
-                if role in ROLES and isinstance(v, dict):
+                if role in (*ROLES, CHAT_APP) and isinstance(v, dict):
                     data['chat'][role] = self._chat({**(data['chat'].get(role) or {}), **v}, data)
         if isinstance(body.get('web'), dict):
             data['web'] = self.clean_web({**data['web'], **body['web']})
@@ -321,6 +322,13 @@ class LLMStore:
             c.execute(text('UPDATE app.llm_user_config SET web_secrets = :s WHERE user_id = :u'),
                       {'s': crypto.encrypt_json({'api_key': key}) if key else None, 'u': user['id']})
         return {'has_key': bool(key)}
+
+    @staticmethod
+    def chat_prefs(data, role):
+        """The chat settings a request starts from: the one chat's own (model, mode, effort, think, web: it follows
+        the user over every page), else what this page's assistant remembered before chats were shared."""
+        chat = (data or {}).get('chat') or {}
+        return chat.get(CHAT_APP) or chat.get(role) or {}
 
     def _chat(self, v, data):
         """One assistant's remembered chat settings: the model picked with /model, mode, effort, think, web level."""

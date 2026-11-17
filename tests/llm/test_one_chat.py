@@ -184,3 +184,20 @@ def test_a_bucket_chat_is_saved_with_its_bucket(client, monkeypatch, svc):  # no
     evs = _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'scope': {'page': 'home'}}))
     home = next(e for e in evs if e['type'] == 'session')['session_id']
     assert client.get(f'/api/llm/sessions/{home}').json()['session']['scope'] == {}
+
+
+def test_the_chat_keeps_its_model_and_mode_on_every_page(client, monkeypatch, svc):  # noqa: F811
+    """The chips (model, mode, effort, web) are saved once for the one chat, not per page."""
+    _connect(client, ['bucket_data'])
+    # what a page remembered before chats were shared still counts for that page
+    client.put('/api/llm/config', json={'chat': {'data': {'mode': 'plan'}}})
+    assert client.get('/api/llm/agent/data/catalog').json()['chat'] == {'mode': 'plan'}
+    assert client.get('/api/llm/agent/bucket/catalog').json()['chat'] == {}
+    # the chat's own settings: every page reads them
+    client.put('/api/llm/config', json={'chat': {'app': {'mode': 'auto', 'effort': 'high', 'nope': 1}}})
+    for role in ('bucket', 'data'):
+        assert client.get(f'/api/llm/agent/{role}/catalog').json()['chat'] == {'mode': 'auto', 'effort': 'high'}
+    script(monkeypatch, ('Hello.', []))
+    evs = _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'scope': {'page': 'home'}}))
+    meta = next(e for e in evs if e['type'] == 'meta')
+    assert meta['mode'] == 'auto' and meta['effort'] == 'high'

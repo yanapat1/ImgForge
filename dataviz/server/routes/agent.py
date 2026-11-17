@@ -186,7 +186,7 @@ def router(state, ctx):
         user = auth_context.user()              # captured now: the stream runs in another thread
         st = session_state() if role.needs_session else None
         cfg = store().load()
-        saved = (cfg.get('chat') or {}).get(role.name) or {}
+        saved = store().chat_prefs(cfg, role.name)       # one chat, every page: the same model and mode
         p = pick_provider(active, body, saved)
         # a saved chat (the default): body.session_id continues one, none starts one. {ephemeral: true,
         # session_id: null} runs on body.messages alone and stores nothing.
@@ -367,7 +367,7 @@ def router(state, ctx):
             raise HTTPException(400, 'session_id is required: only a saved chat can be compacted')
         focus = body.get('focus') if isinstance(body.get('focus'), str) else None
         cfg = store().load()
-        p = pick_provider(active, body, (cfg.get('chat') or {}).get(role.name) or {})
+        p = pick_provider(active, body, store().chat_prefs(cfg, role.name))
         try:
             info = summarize.compact(user, sid, p, budget.effective(cfg['budget']['max_input_tokens'], p), keep=summarize.KEEP_MANUAL,
                                      focus=focus)
@@ -431,7 +431,7 @@ def router(state, ctx):
             'commands': [{'name': n, 'args': a_, 'description': d} for n, a_, d, rs in COMMANDS
                          if rs is None or role.name in rs],
             'providers': provs, 'active': data['active'],
-            'chat': (data.get('chat') or {}).get(role.name) or {},
+            'chat': store().chat_prefs(data, role.name),
             'web': store().clean_web(data.get('web') or {}),
             'limits': {'max_steps': react.MAX_STEPS, 'max_retries': react.MAX_RETRIES},
         }

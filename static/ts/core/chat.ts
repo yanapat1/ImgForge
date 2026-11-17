@@ -753,13 +753,13 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   function autosize(): void { ta.style.height = 'auto'; ta.style.height = `${Math.min(ta.scrollHeight + 2, 160)}px`; }
 
-  // ---------------------------------------------------------------- prefs (remembered per role)
+  // ---------------------------------------------------------------- prefs (remembered for the one chat, on every page)
   function remember(): void {
     clearTimeout(C.cfgTimer);
     C.cfgTimer = window.setTimeout(() => {
       const p = C.prefs;
       const chat = { provider_id: p.provider_id ?? null, model: p.model ?? null, mode: mode(), effort: effort(), think: think(), web: web() };
-      sendJSON('PUT', 'api/llm/config', { chat: { [role]: chat } }).catch(() => { /* not saved: the chips still apply to this page */ });
+      sendJSON('PUT', 'api/llm/config', { chat: { app: chat } })       // one chat on every page: one model and mode.catch(() => { /* not saved: the chips still apply to this page */ });
     }, CONFIG_DEBOUNCE);
   }
   function setMode(m: ChatMode, say = true): void {
