@@ -2485,7 +2485,10 @@ def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
 
 def bucket_only():
     """config image.bucket_only: new sessions take their data from a bucket folder only (off without the key)."""
-    return bool((_cfg().get('image') or {}).get('bucket_only')) and zones.on('bucket')
+    v = (_cfg().get('image') or {}).get('bucket_only')
+    if isinstance(v, str):                      # ${DATAVIZ_IMAGE_BUCKET_ONLY:-true} in config.yaml
+        v = v.strip().lower() not in ('', '0', 'false', 'no', 'off')
+    return bool(v) and zones.on('bucket')
 
 
 def need_bucket_source(user, source):

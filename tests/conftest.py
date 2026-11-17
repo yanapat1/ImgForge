@@ -21,6 +21,8 @@ from pathlib import Path
 # The example database (data/sample.py) lives on the shared test server: an app started by a test (app.py in a
 # subprocess inherits this) does not make it; tests/data/test_sample.py makes its own under a name of its own.
 os.environ.setdefault('DATAVIZ_SAMPLE_DB', '0')
+# tests make sessions from temp folders: the bucket-only rule is off unless a test turns it on (cfg['image'])
+os.environ.setdefault('DATAVIZ_IMAGE_BUCKET_ONLY', 'false')
 
 # Set before anything imports numpy. A serial run is left as it is.
 if os.environ.get('PYTEST_XDIST_WORKER_COUNT'):

@@ -403,4 +403,5 @@ def test_the_shipped_config_has_only_known_keys():
     from dataviz.core import config as vconfig
     said = []
     cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG), log=said.append)
-    assert said == [] and cfg['image']['bucket_only'] is True
+    assert said == [] and cfg['image']['bucket_only'] == 'false'      # tests/conftest.py: DATAVIZ_IMAGE_BUCKET_ONLY
+    assert vconfig.DEFAULTS['image']['bucket_only'] is True
