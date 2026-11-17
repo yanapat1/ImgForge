@@ -482,3 +482,28 @@ body.image-opening .session-card:not(.opening) { opacity: .6; }
   .hs-acts { flex: 1 1 100%; }
   .hs-acts button { flex: 1 1 0; justify-content: center; padding: 0 var(--s2); }
 }
+
+/* ---- Create session (views/session-new.ts): a bucket folder, what its format allows, Visualize / Label / both */
+.ui-dlg.wide:has(.sn) { width: min(680px, calc(100vw - 32px)); }
+.sn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sn-pick { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; min-width: 0; }
+.sn-pick select { max-width: 240px; }
+.sn-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; }
+.sn-dirs { display: flex; flex-wrap: wrap; gap: 4px; max-height: 96px; overflow-y: auto; }
+.sn-fmt { display: flex; flex-direction: column; gap: 6px; padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); font-size: var(--fs-sm); }
+.sn-fmt:has(> .ct-spin) { flex-direction: row; align-items: center; }
+.sn-fmt p { margin: 0; font-size: var(--fs-xs); }
+.sn-fmt-h { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+.sn-tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: var(--fs-2xs); color: var(--text-muted); }
+.sn-tag .ico { width: 12px; height: 12px; }
+.sn-cans { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: var(--fs-xs); }
+.sn-can { display: inline-flex; align-items: center; gap: 4px; }
+.sn-can .ico { width: 13px; height: 13px; }
+.sn-can.ok .ico { color: var(--ok); }
+.sn-can.no { color: var(--text-faint); }
+.sn-can.no .ico { color: var(--danger); }
+.sn-can.off { color: var(--text-faint); }
+.sn-kind { cursor: pointer; }
+.sn-kind.off { opacity: .6; }
+.sn-kind input { flex: none; margin-top: 2px; }
+.sn-other { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }

@@ -70,7 +70,7 @@ const isScope = (v: unknown): v is HomeScope => SCOPES.some(([k]) => k === v) &&
 const RANK: Record<Role, number> = { viewer: 1, labeler: 2, owner: 3 };
 const roleOf = (x: SharedFields): Role => x.my_role || 'owner';     // no role in the row: an older server, single user
 const can = (x: SharedFields, need: Role): boolean => RANK[roleOf(x)] >= RANK[need];
-const NEW_TEXT: Record<TabId, string> = { viz: 'New visualize session', label: 'New label session' };
+const NEW_TEXT: Record<TabId, string> = { viz: 'Create session', label: 'Create session' };
 const MAX_CHIPS = 5;
 
 // ---- find: name contains the query, and the session has every selected tag
@@ -338,8 +338,7 @@ function emptyHTML(): string {
     `<div class="es-mark"><svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" aria-hidden="true"><use href="${ICONS}#i-brand"/></svg></div>` +
     '<h2>No sessions yet</h2>' +
     '<p class="muted">Visualize a folder of images, with or without YOLO labels (on this machine or an S3 / RustFS prefix), or a folder of your own embeddings, or label a folder of images: boxes, polygons, keypoints or tags, one or more tasks at once.</p>' +
-    `<div class="es-actions"><button class="primary big" data-act="new-viz">${icon('scatter')}Visualize a dataset</button>` +
-    `<button class="big" data-act="new-label">${icon('tag')}Label images</button></div>` +
+    `<div class="es-actions"><button class="primary big" data-act="new">${icon('plus')}Create session</button></div>` +
     '<ol class="es-steps">' +
     step(1, 'Pick the images', 'Local folders are read in place; S3 / FTP stream; dropped files are uploaded once.') +
     step(2, 'Explore or label', 'Every box becomes a dot to lasso, or draw boxes and polygons with the keyboard.') +
@@ -371,7 +370,7 @@ const TAB: Record<TabId, TabDef> = {
     items: () => sorted(H.sessions.map((d): Item => ({ d, t: 0 }))),
     of: (x) => x.d ?? x.p,
     card: (x) => (x.d ? cardHTML(x.d) : ''),
-    tile: 'A YOLO folder, an S3 / RustFS prefix, a labeling task, or a folder of your own embeddings',
+    tile: 'From a folder of a bucket: Visualize, Label, or both linked (the default)',
     empty: ['No visualize sessions yet', 'Explore a YOLO dataset as a map of its boxes: lasso groups, find outliers, suspicious labels and near-duplicates. A labeling session can be visualized too, live.'],
   },
   label: {
@@ -379,7 +378,7 @@ const TAB: Record<TabId, TabDef> = {
     items: () => sorted(H.projects.map((p): Item => ({ pid: p.id, p, t: 0 }))),
     of: (x) => x.p ?? x.d,
     card: (x) => (x.p ? labelCardHTML(x.p) : ''),
-    tile: 'Drop or point at a folder of images, then draw boxes, polygons, keypoints or tags',
+    tile: 'From a folder of a bucket: Label, Visualize, or both linked (the default)',
     empty: ['No label sessions yet', 'Label a folder of images for one or more tasks at once, then export YOLO labels or send them to a database.'],
   },
 };
@@ -849,10 +848,11 @@ const CARD_MENU: Record<string, (pid: string) => unknown> = {
 const editSession = (id: string): void => { void openSettings('datasets', { solo: true, edit: id }); };
 const editProject = (pid: string): void => { void wizard({ edit: pid, names: labelNames(pid), tagSuggest: H.projects.flatMap(tagsOf) }); };
 
-/** The new-labeling-session wizard, or why the user's tier cannot open it. */
-function newLabel(): void {
-  if (tierCan('label.create')) void wizard({ names: labelNames(null), tagSuggest: H.projects.flatMap(tagsOf) });
-  else toast(cannot('create labeling projects'), 'err');
+/** Create session: Visualize, Label or both (linked) from a folder of a bucket; or why the user's tier cannot. */
+function createSession(): void {
+  if (!tierCan('dataset.create') && !tierCan('label.create')) { toast(cannot('create sessions'), 'err'); return; }
+  void import('./session-new.js').then((m) => m.openCreateSession())
+    .catch((e: unknown) => toast(`Could not open Create session: ${errText(e)}`, 'err'));
 }
 
 const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
@@ -871,9 +871,11 @@ const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
     const d = H.sessions.find((x) => x.id === dataOf(b, 'id'));
     if (d && d.project_id) open(`.session-card[data-id="${CSS.escape(d.id)}"]`, labelUrl(d.project_id));
   },
-  new: () => (H.tab === 'label' ? newLabel() : openSettings('datasets', { solo: true, view: 'add' })),
-  'new-viz': () => openSettings('datasets', { solo: true, view: 'add' }),
-  'new-label': () => newLabel(),
+  // one Create session for both kinds, from a bucket folder (views/session-new.ts); the tab it was opened on is the
+  // side that is surely ticked, the folder's format decides the other
+  new: () => createSession(),
+  'new-viz': () => createSession(),
+  'new-label': () => createSession(),
   reload: () => load(),
   share: (b) => { const id = dataOf(b, 'id'); return share(id, H.sessions.find((x) => x.id === id)?.name ?? ''); },
   lshare: (b) => { const pid = dataOf(b, 'pid'); return share(pid, H.projects.find((x) => x.id === pid)?.name ?? ''); },

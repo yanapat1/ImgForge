@@ -72,16 +72,10 @@ export function renderDatasetsSec(): string {
     const tile = (act: string, cls: string, ico: string, title: string, text: string): string =>
       `<button class="tile" data-act="${act}"><span class="ds-icon${cls ? ` ${cls}` : ''}">${icon(ico)}</span><b>${title}</b><span>${text}</span></button>`;
     return '<section>' + (add ? '' : `<p class="sec-note">${esc(cannot('add new datasets'))}. You can still combine the ones you can open.</p>`) +
-      '<div class="tiles">' + (add ? tile('new-dc', 'dcsrc', 'db', 'From Bucket',
-        'A bucket (or one of its folders) you keep in Bucket: uploaded, a linked folder or S3. Read in place, nothing is copied.') +
-      tile('new-s3', 's3', 'cloud', 'S3 / RustFS bucket',
-        'A bucket prefix of images (labels optional), or a YOLO folder (images/, labels/). Stream it, or sync a local cache for the fastest browsing.') +
-      tile('new-local', '', 'folder', 'Local folder',
-        'A folder of images (labels optional) or a YOLO folder on this machine. Read in place — nothing is copied, so no extra disk is used.') +
-      tile('new-labeling', 'labeling', 'tag', 'Labeling session',
-        'One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.') +
-      tile('new-embeddings', 'embeddings', 'vectors', 'Embeddings folder',
-        'Vectors you computed anywhere (audio, video, text, tables) as .npy files, plus a meta.csv of labels, previews and columns.') : '') +
+      // data comes from Bucket only (Image › Create session, views/session-new.ts): what is left here are the sessions
+      // made from other sessions. The S3 / local / embeddings forms stay for editing the sessions that exist.
+      '<div class="tiles">' + (add ? tile('new-labeling', 'labeling', 'tag', 'Labeling session',
+        'One task of a labeling session on this server, read live: no export, no copy. Re-open it to see the latest labels.') : '') +
       tile('new-union', 'union', 'layers', 'Combined datasets',
         `2 to ${UNION_MAX} of your visualize sessions as one map, to compare them (what was added, removed, moved or relabelled) or to explore them together. Nothing is copied.`) +
       '</div><div class="form-foot"><button class="ghost" data-act="back">Cancel</button></div></section>';

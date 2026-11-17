@@ -51,6 +51,7 @@ The product is being split into zones, so an analyst can install Bucket + Data w
 | AI skill (how an agent drives the Bucket page) | `.claude/skills/bucket/SKILL.md` | |
 | Home page (the overview cards) | the existing routes | `ts/views/home.ts`, `css/home.css` |
 | Image page (session cards, Visualize / Label tabs, tags, sharing) | `image/sessions.py`, `server/routes/datasets.py` | `ts/views/image.ts`, `ts/views/share.ts`, `css/image.css` |
+| Create session (one dialog: a bucket folder → Visualize, Label or both linked; format check) | `bucket/service.py` `create_session`, `session_check`, `bucket/formats.py` `SESSION_SUPPORT` | `ts/views/session-new.ts` |
 | Where datasets are read from (local / S3 / FTP) | `image/sources.py`, `image/connections.py`, `labeling/media.py` | `ts/settings/forms.ts` |
 | The plot, projections, features | `ml/`, `state.py`, `server/routes/projections.py` | `ts/plot/`, `ts/views/controls.ts` |
 | Curation scans and fixes | `image/curation.py`, `server/routes/curation.py` | `ts/views/curation.ts` |
