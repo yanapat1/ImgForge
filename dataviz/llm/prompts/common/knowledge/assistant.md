@@ -11,6 +11,13 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   answers enter the chat, so long tasks need less context, while small questions cost a little more. Each helper
   shows as a "Sub-agent" row with its steps and tokens; an optional cheaper Sub-agent model can run them. Never on
   small (<= 14B) models.
+- **Background agents** (the same Sub-agents switch; a saved chat): for work of 3 or more steps the assistant starts
+  an agent (`spawn_task`) and stays free to answer meanwhile. The dock's **Agents** strip lists each agent: its short
+  title, what it does now, step, time and tokens, with Stop. An agent works on the server with this page's tools: it
+  cannot press buttons on a page, navigate, or start another agent. A change it wants waits for the user's Approve /
+  Reject on its row (never approved by the assistant); a question or a plan is answered there or in the chat. When
+  it ends the assistant reports the result and opens the page it names. Running at once: 1-4 (Settings › AI
+  assistant › Sub-agents, default 2; more wait in a queue of 8).
 - **Token budget** (Settings › AI assistant): the largest request sent to the model. Auto (the default) = the model's own
   maximum, detected from the provider (or the provider card's Model context in Advanced; 100k when unknown); a number
   is kept under it. Bigger keeps more of a long chat, but each step of an answer sends it again.

@@ -116,6 +116,8 @@ class Ctx:
     sub_usage: dict = field(default_factory=lambda: {'in': 0, 'out': 0})   # tokens of consults / sub-agents, added to the turn
     sub_model: str = ''             # the sub-agents' model (same provider); '' = the run's own
     mode: str = 'ask'               # the run's mode (ask | auto | plan): a database query asks first unless auto
+    chat_id: str = None             # the saved chat (background agents are filed under it: engine/bgtasks.py)
+    task_env: dict = None           # what a background agent started in this turn runs with (the route sets it)
 
 
 @dataclass
@@ -140,6 +142,7 @@ class Run:
     raw_est: int = 0                # the estimate before budget.fit cut anything (auto-compaction looks at it)
     cancel: threading.Event = field(default_factory=threading.Event)
     temperature: float = None
+    confirm_timeout: int = CONFIRM_TIMEOUT      # how long a confirmation waits (a background agent: longer)
     pool: dict = None               # every tool the run may load: run.tools is a part of it for a medium model
 
 
@@ -177,8 +180,9 @@ def options(body, provider):
     steps = min(MAX_STEPS, e['steps'], {'small': SMALL_STEPS, 'medium': MEDIUM_STEPS}.get(profile, MAX_STEPS))
     # sub-agents (tools/agents.py delegate): only when the user switched them on, never for a small model
     agents = body.get('agents') is True and profile != 'small'
+    # background agents (engine/bgtasks.py): the route says the chat is saved (tasks belong to a chat)
     return {'mode': mode, 'effort': effort, 'think': think, 'web': web, 'profile': profile, 'max_steps': steps,
-            'agents': agents}
+            'agents': agents, 'tasks': agents and body.get('tasks') is True}
 
 
 SUMMARY_HEAD = '## Earlier in this chat (summary)'
@@ -245,7 +249,7 @@ def pick_tools(all_tools, question, n=SMALL_TOOLS, keep=()):
 
 
 def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, user_prompts=(), user_skills=(),
-            plugin_tools=(), forced_skills=(), limit=None, summary=None, plan=None):
+            plugin_tools=(), forced_skills=(), limit=None, summary=None, plan=None, worker=False, notes=()):
     """Everything one run needs, checked before the stream starts (LLMError 400 when it cannot fit).
     summary: the chat's compacted earlier part (engine/summarize.py), read as part of the system prompt.
     plan: the chat's saved checklist (the todo items, over every page), shown while a step is open."""
@@ -258,8 +262,18 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     tset = tools.for_role(domains, opts['mode'], extra=plugin)
     if not opts.get('agents'):
         tset.pop('delegate', None)
+    from . import bgtasks
+    if worker:                                  # a background agent: no page, no nesting, ends with finish_task
+        tset = {k: t for k, t in tset.items() if t.risk not in ('ui', 'run') and k not in bgtasks.OUT}
+    else:
+        tset.pop('finish_task', None)
+        if not opts.get('agents') or not opts.get('tasks'):
+            for k in bgtasks.LEAD_TOOLS:
+                tset.pop(k, None)
     pool = dict(tset)                           # what this run may load (a medium model starts with a part of it)
     extra_static = [prompting.template('agents')] if 'delegate' in tset else []
+    if 'spawn_task' in tset:
+        extra_static.append(prompting.template('lead'))
     if opts['profile'] == 'small':
         q = ' '.join(x.get('text', '') for x in msgs[-1]['parts'] if 'text' in x)
         tset = pick_tools(tset, q, keep=role.always)
@@ -282,6 +296,9 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     plan_text = plan_section(plan)
     if plan_text:
         system += '\n\n' + plan_text
+    for n in notes or ():                       # e.g. the chat's background agents (bgtasks.now_text)
+        if n:
+            system += '\n\n' + n
     if summary:
         system += (f'\n\n{SUMMARY_HEAD}\nThe earlier part of this chat was compacted. This summary replaces those '
                    f'messages: trust its numbers, ids and decisions, and continue from its open tasks.\n\n{summary}')
@@ -607,6 +624,8 @@ def events(run):
                 yield {'type': 'ask', 'question': args['question'], 'options': [str(o) for o in args['options']][:8]}
             elif t.name == 'cannot_do':
                 yield {'type': 'cannot', 'reason': args['reason'], 'alternative': args.get('alternative') or None}
+            elif t.name == 'finish_task':
+                yield {'type': 'task_result', 'summary': args['summary'], 'show': args.get('show') or None}
             else:
                 yield {'type': 'plan_proposal', 'summary': args['summary'], 'steps': [str(s) for s in args['steps']][:40]}
             yield done(step)
@@ -757,9 +776,9 @@ def events(run):
             actions = [{'id': f'a{k + 1}', 'call_id': pc[0]['id'], 'tool': pc[1].name, 'args': pc[2],
                         'summary': pc[3], 'risk': pc[4]} for k, pc in enumerate(need)]
             cid = confirm.open_(run.user, run.run_id, actions)
-            yield {'type': 'confirm', 'confirm_id': cid, 'actions': actions, 'timeout_s': CONFIRM_TIMEOUT}
+            yield {'type': 'confirm', 'confirm_id': cid, 'actions': actions, 'timeout_s': run.confirm_timeout}
             waited, decision = 0, 'pending'
-            while decision == 'pending' and waited < CONFIRM_TIMEOUT:
+            while decision == 'pending' and waited < run.confirm_timeout:
                 decision = confirm.wait(cid, run.cancel, PING_S)
                 waited += PING_S
                 if decision == 'pending':
@@ -772,7 +791,7 @@ def events(run):
                 yield {'type': 'confirmed', 'confirm_id': cid, 'results': [], 'status': why}
                 yield {'type': 'notice', 'level': 'info',
                        'text': 'Stopped: nothing was changed.' if why == 'stopped'
-                       else f'No answer in {CONFIRM_TIMEOUT // 60} minutes: nothing was changed.'}
+                       else f'No answer in {run.confirm_timeout // 60} minutes: nothing was changed.'}
                 yield done(step)
                 return
             res_list = []

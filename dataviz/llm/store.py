@@ -96,7 +96,11 @@ class LLMStore:
     def _agents(v):
         """Sub-agents: on (off by default: they spend tokens) and their model ('' = the chat's own)."""
         v = v if isinstance(v, dict) else {}
-        return {'on': v.get('on') is True, 'model': str(v.get('model') or '').strip()[:200]}
+        try:                                    # background agents running at once (engine/bgtasks.py: 1..AGENTS_MAX)
+            n = max(1, min(4, int(v.get('max_running') or 2)))
+        except (TypeError, ValueError):
+            n = 2
+        return {'on': v.get('on') is True, 'model': str(v.get('model') or '').strip()[:200], 'max_running': n}
 
     @staticmethod
     def _budget(v):

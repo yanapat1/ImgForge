@@ -156,7 +156,7 @@ def register(t):
     return t
 
 
-CONTROL_ONLY_ENGINE = {'todo', 'submit_plan', 'more_tools'}     # the engine's planner tools: not part of the old DC agent / CLI
+CONTROL_ONLY_ENGINE = {'todo', 'submit_plan', 'more_tools', 'finish_task'}     # the engine's planner tools: not part of the old DC agent / CLI
 
 
 def for_role(domains, mode='ask', extra=()):
@@ -282,7 +282,7 @@ def risk_card(tools):
     system prompt does not repeat them (tools.catalog is still the table the CLI and SKILL.md show)."""
     by = {}
     for t in tools.values():
-        if t.name in ('enter_plan_mode', 'more_tools'):     # auto only / named by the groups line: kept out, so the
+        if t.name in ('enter_plan_mode', 'more_tools', 'finish_task'):     # auto only / named by the groups line: kept out, so the
             continue                                        # card (cached) is the same in every mode
         k = 'query' if t.confirm_if and t.confirm_risk == 'query' else t.risk
         by.setdefault(k, []).append(f'`{t.name}`')

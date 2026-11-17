@@ -103,8 +103,8 @@ def test_the_sub_agent_model_and_the_limits(monkeypatch, svc):  # noqa: F811
 
 def test_the_switch_is_saved_per_user(client):
     s, u = client.ctx.llm, client.user
-    assert s.load(u)['budget']['agents'] == {'on': False, 'model': ''}
+    assert s.load(u)['budget']['agents'] == {'on': False, 'model': '', 'max_running': 2}
     client.put('/api/llm/config', json={'budget': {'agents': {'on': True}}})
     client.put('/api/llm/config', json={'budget': {'agents': {'model': ' gpt-mini '}}})
-    assert s.load(u)['budget']['agents'] == {'on': True, 'model': 'gpt-mini'}
+    assert s.load(u)['budget']['agents'] == {'on': True, 'model': 'gpt-mini', 'max_running': 2}
     assert any(c['name'] == 'agents' for c in client.get('/api/llm/agent/bucket/catalog').json()['commands'])

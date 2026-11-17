@@ -5,6 +5,7 @@ Control tools (domain 'control'): answered by the user or by the engine itself, 
     todo                   the agent's visible checklist for a multi-step request (a 'todo' card, kept up to date);
                            saved on the chat (sessions.set_plan), so it goes on over page changes and compaction
     submit_plan            mode plan only: the researched plan, shown with Approve (llm/engine/planner.py)
+    finish_task            a background agent (engine/bgtasks.py) only: its result, and where it is shown
     more_tools             a mid-size model (profile medium) only: load another tool group for this turn
     enter_plan_mode        mode auto only: the request needs a plan first; the rest of the turn is plan mode
                            (read-only tools, ask_user, submit_plan) and the page shows the switch
@@ -34,6 +35,14 @@ register(Tool('enter_plan_mode', 'Auto mode: switch to plan mode BEFORE acting w
                                  'ask_user when a choice is the user\'s, and submit_plan; nothing changes until they '
                                  'approve. Not for small, clear requests.',
               _obj({'reason': S('why it needs a plan, one short sentence the user sees')}, ['reason']),
+              False, control=True, domain='control'))
+register(Tool('finish_task', 'A background agent only: end your task and hand the result to the assistant. Ends your turn.',
+              _obj({'summary': S('the result: what you did or found, with the exact names and numbers'),
+                    'show': {'type': 'object', 'additionalProperties': False, 'description': 'where the user should see it, if anywhere',
+                             'properties': {'screen': {'type': 'string', 'enum': ['home', 'image', 'bucket', 'viz', 'label', 'data']},
+                                            'tab': S('the tab there'), 'session_id': S('viz / label: the session'),
+                                            'bucket': S('bucket: the bucket'), 'path': S('bucket: the folder'),
+                                            'goal': S('what to do or show there')}}}, ['summary']),
               False, control=True, domain='control'))
 register(Tool('more_tools', 'Load another group of tools (the system prompt lists the groups that are not loaded). '
                             'Then call the tool you need. Does not end your turn.',

@@ -45,7 +45,7 @@ from ...auth import context as auth_context
 from ...core import logging as vlog
 from ...llm import budget, prompting, providers, tools
 from ...llm import sessions as chat_sessions
-from ...llm.engine import confirm, react, roles, summarize, uiwait
+from ...llm.engine import bgtasks, confirm, react, roles, summarize, uiwait
 from ...llm.engine.events import ENDS
 from ...llm.providers import LLMError
 
@@ -197,6 +197,16 @@ def router(state, ctx):
         msgs_in = body.get('messages') or []
         if not isinstance(msgs_in, list):
             raise HTTPException(400, 'messages must be a list')
+        # task_event: a background agent of this chat ended or needs the user; the page hands its result to the lead
+        # (the text is built here from the task, never taken from the page)
+        task_event = body.get('task_event')
+        if task_event is not None:
+            if not isinstance(task_event, str) or not sid:
+                raise HTTPException(400, 'task_event needs the chat (session_id) and the agent id')
+            try:
+                body = {**body, 'text': bgtasks.take_result(user, sid, task_event)}
+            except tools.ToolError as e:
+                raise HTTPException(409, str(e))
         user_text = body.get('text') if isinstance(body.get('text'), str) and body['text'].strip() else None
         if user_text is None:
             if not msgs_in or not isinstance(msgs_in[-1], dict) or msgs_in[-1].get('role') != 'user':
@@ -215,6 +225,8 @@ def router(state, ctx):
         page = roles.page_of(role.name, scope, chat_scope if role.name == 'visual' else None)
         if body.get('continued') is True:
             page['continued'] = True
+        if task_event:
+            page['task'] = task_event.upper()       # the page shows "T1 reported" instead of the raw text
         if sid:
             try:
                 cx = chat_sessions.context(user, sid, before=from_seq)
@@ -237,6 +249,7 @@ def router(state, ctx):
         opts_in['web'] = min(int(opts_in['web'] or 0), _max_web())
         agents_cfg = cfg['budget']['agents']                # Settings › AI assistant › Sub-agents (or /agents)
         opts_in['agents'] = agents_cfg['on']
+        opts_in['tasks'] = not ephemeral                    # background agents belong to a saved chat
         opts = react.options(opts_in, p)
         a = _assets(user, role.name)
         forced = [str(s) for s in body.get('skills') or [] if isinstance(s, str)][:3]
@@ -246,7 +259,14 @@ def router(state, ctx):
         def build(msgs, summary_):
             r_ = react.prepare(user, role, p, react.history(msgs), scope, opts, state=st, app=ctx,
                                user_prompts=a['prompts'], user_skills=a['skills'], plugin_tools=a['tools'],
-                               forced_skills=forced, limit=limit, summary=summary_, plan=plan)
+                               forced_skills=forced, limit=limit, summary=summary_, plan=plan,
+                               notes=[bgtasks.now_text(user, sid)] if sid and opts.get('tasks') else ())
+            r_.ctx.chat_id = sid
+            # what a background agent started in this turn runs with (engine/bgtasks.py)
+            r_.ctx.task_env = {'provider': p, 'sub_model': agents_cfg['model'], 'agents': agents_cfg, 'scope': scope,
+                               'state': st, 'app': ctx, 'prompts': a['prompts'], 'skills': a['skills'],
+                               'plugin_tools': a['tools'], 'limit': limit, 'web': opts.get('web', 0), 'web_cfg': web_cfg,
+                               'roles_on': roles_on, 'mode': opts.get('mode')}
             r_.ctx.web_cfg = web_cfg
             r_.ctx.ui_ack = body.get('ui_ack') is True
             r_.ctx.roles_on = roles_on
@@ -272,6 +292,7 @@ def router(state, ctx):
                 sid, title, removed = made['session']['id'], made['session']['title'], made['removed']
                 first_turn = True
                 react.claim_chat(sid, run.cancel)
+                run.ctx.chat_id = sid           # a new chat: its agents are filed under the id it just got
             if from_seq is not None:
                 chat_sessions.truncate(user, sid, from_seq)
             user_seq = chat_sessions.append(user, sid, 'user', user_text, meta=meta, page=page)['seq']
@@ -376,6 +397,36 @@ def router(state, ctx):
         except LLMError as e:
             raise HTTPException(e.status if 400 <= (e.status or 0) < 500 else 502, f'the summary failed: {e}')
         return {'compacted': info is not None, **(info or {})}
+
+    # ------------------------------------------------------------ background agents (engine/bgtasks.py)
+    @r.get('/api/llm/agent/tasks')
+    def agent_tasks(session_id: str):
+        """The chat's background agents for the dock's Agents strip: state, topic, steps, time, tokens, what waits."""
+        user = auth_context.user()
+        tiers.check(user, 'llm.use')
+        cfg = store().load()
+        return {'tasks': bgtasks.status(user, session_id),
+                'limits': {'running': bgtasks.max_running(cfg['budget']['agents']), 'max': bgtasks.AGENTS_MAX,
+                           'queue': bgtasks.QUEUE_MAX}}
+
+    @r.post('/api/llm/agent/tasks/{tid}/stop')
+    def agent_task_stop(tid: str, body: dict):
+        user = auth_context.user()
+        tiers.check(user, 'llm.use')
+        try:
+            return bgtasks.stop(user, body.get('session_id'), tid)
+        except tools.ToolError as e:
+            raise HTTPException(409, str(e))
+
+    @r.post('/api/llm/agent/tasks/{tid}/message')
+    def agent_task_message(tid: str, body: dict):
+        """The user's answer on the agent's row: {text} to its question, {approve: true, text?} to its plan."""
+        user = auth_context.user()
+        tiers.check(user, 'llm.use')
+        try:
+            return bgtasks.message(user, body.get('session_id'), tid, body.get('text'), approve_plan=body.get('approve') is True)
+        except tools.ToolError as e:
+            raise HTTPException(409, str(e))
 
     @r.post('/api/llm/agent/ui-result')
     def agent_ui_result(body: dict):
