@@ -127,7 +127,8 @@ def bucket_scope(user, scope):
     if page == 'label':
         pid = str(scope.get('label_project') or '')[:64]
         return (f'The user is on the labeling page of project {pid!r} (editing boxes; its own Label assistant handles '
-                'boxes there). You can answer about the data behind it.')
+                'boxes there). You answer about their buckets, folders and sessions; you have no tool that reads this '
+                'project\'s boxes or progress: say so if asked, the page shows them.')
     if not bid:
         return 'The user is on the Bucket page overview (no bucket open).'
     st = None

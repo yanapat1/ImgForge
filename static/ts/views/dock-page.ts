@@ -11,15 +11,16 @@ import { openSettings } from '../settings/dialog.js';
 
 type Page = 'home' | 'image' | 'label';
 
+// every suggestion is something the Bucket specialist's tools answer (it has none for labeling progress or history)
 const SUGGEST: Record<Page, string[]> = {
-  home: ['Which of my buckets are not YOLO yet?', 'What changed since yesterday?', 'What can you do for me?'],
+  home: ['Which of my buckets are not YOLO yet?', 'Find folders with images but no labels', 'What can you do for me?'],
   image: ['Which sessions use the bucket cars?', 'Find folders with images but no labels', 'What can you do for me?'],
-  label: ['How many images are left in this project?', 'Which folder did these images come from?', 'What can you do for me?'],
+  label: ['Which of my folders still have no labels?', 'Which sessions can I open in the visualizer?', 'What can you do for me?'],
 };
 
 export function initPageDock(page: Page, project: string | null = null): void {
   const emptyHTML = (): string => `<div class="bk-ai-hello"><span class="ai-mark" aria-hidden="true">${icon('gem')}</span><div>` +
-    `<b>${page === 'label' ? 'Ask about the data behind this labeling project.' : 'Ask about your datasets, or tell me what to do.'}</b>` +
+    `<b>${page === 'label' ? 'Ask about your buckets and sessions while you label.' : 'Ask about your datasets, or tell me what to do.'}</b>` +
     '<p class="faint">I read freely and can open the right page for you. Changes wait for your OK in <b>ask</b> mode; Shift+Tab switches to auto or plan.</p>' +
     `<div class="bk-ai-sugg">${SUGGEST[page].map((s) => `<button type="button" class="ct-choice" data-ca="say" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div></div></div>`;
   setDockHost({
