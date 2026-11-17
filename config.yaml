@@ -36,6 +36,10 @@ vectors:                         # a pgvector copy of every computed feature spa
   enabled: true                  #  from it instead of re-running the model
   hnsw_min_rows: 50000           # build an HNSW index above this many boxes (below, an exact scan is faster)
 
+image:
+  bucket_only: true              # new visualize / label sessions take their data from a Bucket folder only (Image ›
+                                 #  Create session); false also lets the API take a local path, an S3 prefix or an upload
+
 dataset:
   # The page opens on the Sessions home: create a session (one dataset each) there and click its card.
   # Sessions are saved in the database (per user, shareable); the old connections.json is imported once.

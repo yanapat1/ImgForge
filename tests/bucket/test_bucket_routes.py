@@ -371,3 +371,28 @@ def test_reformat_writes_a_new_folder_and_leaves_the_original(dc):
     c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'mkdir', 'path': 'docs'}]})
     bad = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'docs', 'to': 'coco'})
     assert bad.status_code == 400 and 're-format reads YOLO' in bad.json()['detail']
+
+
+def test_new_sessions_only_from_bucket_data(dc, tmp_path):
+    """config image.bucket_only: the API refuses a new session whose data is not in a bucket the user sees."""
+    as_user, c = dc
+    c.ctx.cfg['image'] = {'bucket_only': True}
+    try:
+        b = new_bucket(c, name='traffic')
+        upload_zip(c, b['id'])
+        outside = tmp_path / 'outside' / 'images'
+        outside.mkdir(parents=True)
+        (outside / 'a.jpg').write_bytes(jpeg_bytes())
+        r = c.post('/api/datasets', json={'kind': 'local', 'path': str(outside.parent), 'name': 'x', 'unit': 'images'})
+        assert r.status_code == 400 and 'sessions are made from data in Bucket' in r.json()['detail']
+        task = {'name': 'Detect', 'task_type': 'object_detection', 'classes': ['car']}
+        for src in ({'kind': 'local', 'path': str(outside.parent)}, {'kind': 'upload'}):
+            r = c.post('/api/label/projects', json={'name': 'L', 'tasks': [task], 'source': src})
+            assert r.status_code == 400 and 'data in Bucket' in r.json()['detail'], r.text
+        # the same folder kinds inside the bucket are fine, and so is the Create session route
+        assert c.post('/api/datasets', json={'kind': 'local', 'path': b['root'], 'name': 'in bucket'}).status_code == 200
+        r = c.post('/api/label/projects', json={'name': 'L2', 'tasks': [task], 'source': {'kind': 'local', 'path': b['root']}})
+        assert r.status_code == 200, r.text
+        assert c.post('/api/bucket/session', json={'bucket': b['id'], 'name': 'Both'}).status_code == 200
+    finally:
+        c.ctx.cfg['image'] = {'bucket_only': False}

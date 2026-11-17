@@ -226,6 +226,7 @@ def app_ctx(pg, tmp_path):
     from dataviz.server.app import Ctx, create_app
     cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG))
     cfg['logging']['http'] = False
+    cfg['image'] = {'bucket_only': False}      # tests make sessions from temp folders; test_bucket_only turns it on
     root = tmp_path / 'ws'
     ctx = Ctx(None, datasets=connections.Registry(root), cfg=cfg, jobs=JobManager(),
               labeling=ProjectRegistry(root / 'labeling'), llm=LLMStore(root))
@@ -296,6 +297,7 @@ def client_as(pg, tmp_path):
     from dataviz.server.app import Ctx, create_app
     cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG))
     cfg['logging']['http'] = False
+    cfg['image'] = {'bucket_only': False}      # tests make sessions from temp folders; test_bucket_only turns it on
     root = tmp_path / 'ws'
     ctx = Ctx(None, datasets=connections.Registry(root), cfg=cfg, jobs=JobManager(),
               labeling=ProjectRegistry(root / 'labeling'), llm=LLMStore(root),

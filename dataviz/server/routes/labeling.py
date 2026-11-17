@@ -33,6 +33,7 @@ from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import orjson
+from ... import zones
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
@@ -302,6 +303,12 @@ def router(state, ctx):
         data['tasks'] = [{**t, 'classes': [c if isinstance(c, str) else {k: v for k, v in c.items() if v is not None}
                                            for c in t['classes']]} for t in data['tasks']]
         data['source'] = check_source(data.get('source'), user['id'])
+        if zones.on('bucket'):                  # a new session's data lies in a bucket (config image.bucket_only)
+            from ...bucket import service as bucket_service
+            try:
+                bucket_service.need_bucket_source(user, data['source'] or {'kind': 'upload'})
+            except bucket_service.BucketError as e:
+                raise HTTPException(400, str(e))
         data['export_default'] = check_export_default(data.get('export_default'), user['id'])
         with _errors():
             entry = need().create(data, user['id'])

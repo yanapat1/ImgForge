@@ -2483,6 +2483,28 @@ def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
     return _send_label(user, r, rel, fmt, (name or '').strip() or base, task_type)
 
 
+def bucket_only():
+    """config image.bucket_only: new sessions take their data from a bucket folder only (off without the key)."""
+    return bool((_cfg().get('image') or {}).get('bucket_only')) and zones.on('bucket')
+
+
+def need_bucket_source(user, source):
+    """A new session's source ({kind: local | embeddings, path} / {kind: s3, bucket, prefix} / an upload ...) must
+    lie in a bucket the user sees when image.bucket_only is on -> None, or BucketError saying where to add it.
+    Sessions made from other sessions (kind labeling, union) are not data imports."""
+    kind = (source or {}).get('kind')
+    if not bucket_only() or kind in ('labeling', 'union', None):
+        return
+    where = None
+    if kind in ('local', 'embeddings') and source.get('path'):
+        where = locate(user, path=source['path'])
+    elif kind == 's3' and source.get('bucket'):
+        where = locate(user, s3_bucket=source['bucket'], prefix=source.get('prefix') or '')
+    if where is None:
+        raise BucketError('sessions are made from data in Bucket: add this data to a bucket first (the Bucket page: '
+                          'upload, link a folder or an S3 bucket, import from the web), then Image › Create session')
+
+
 def session_check(user, bid, path=''):
     """What a session made from folder `path` can do, before it is made: the detected format, the counts, and for
     Visualize / Label / the linked pair whether it works and why not (formats.SESSION_SUPPORT) ->

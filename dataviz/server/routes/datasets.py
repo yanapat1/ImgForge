@@ -13,6 +13,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from ... import zones
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
@@ -212,6 +213,12 @@ def router(state, ctx):
                 raise HTTPException(403, 'only the owner of this session can do that')
         if not body.get('id') and body.get('kind') != 'union':     # combining what they can already open: no tier
             tiers.check(user, 'dataset.create')
+        if not body.get('id') and zones.on('bucket'):     # a new session's data lies in a bucket (image.bucket_only)
+            from ...bucket import service as bucket_service
+            try:
+                await run_io(bucket_service.need_bucket_source, user, body)
+            except bucket_service.BucketError as e:
+                raise HTTPException(400, str(e))
         if body.get('kind') == 'union' and not body.get('id') and body.get('reuse'):
             # Compare / Combine on the Image page: the caller's existing union over the same members, if any
             ids = [(m.get('id') if isinstance(m, dict) else m) for m in (body.get('parts') or [])]
