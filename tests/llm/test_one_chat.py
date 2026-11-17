@@ -169,3 +169,18 @@ def test_truncate_clears_a_summary_that_covered_the_cut(client):
     assert cx['summary'] is None and [m['text'] for m in cx['messages']] == ['m1', 'm2']
     with pytest.raises(sessions.SessionError):
         sessions.truncate(u, sid, 0)
+
+
+def test_a_bucket_chat_is_saved_with_its_bucket(client, monkeypatch, svc):  # noqa: F811
+    """The Bucket page sends the open bucket as scope.bucket: the chat is filed under it (History › This bucket)."""
+    _connect(client, ['bucket_data'])
+    script(monkeypatch, ('Three folders.', []), ('Hello.', []))
+    evs = _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'what is in here?', 'scope': {'bucket': 'b1', 'path': 'val'}}))
+    sid = next(e for e in evs if e['type'] == 'session')['session_id']
+    assert client.get(f'/api/llm/sessions/{sid}').json()['session']['scope'] == {'bucket_id': 'b1'}
+    assert [s['id'] for s in client.get('/api/llm/sessions', params={'role': 'app', 'bucket_id': 'b1'}).json()['sessions']] == [sid]
+    assert client.get('/api/llm/sessions', params={'role': 'app', 'bucket_id': 'b2'}).json()['sessions'] == []
+    # a chat started on Home has no bucket
+    evs = _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'scope': {'page': 'home'}}))
+    home = next(e for e in evs if e['type'] == 'session')['session_id']
+    assert client.get(f'/api/llm/sessions/{home}').json()['session']['scope'] == {}

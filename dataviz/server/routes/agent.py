@@ -1,6 +1,6 @@
 """
-The ◆ agents API (/api/llm/agent/*): one streamed chat per assistant (role data = Bucket, visual = the
-visualizer), the confirmation of a paused change, stop, and the catalogue the chat box shows (tools, skills,
+The ◆ agents API (/api/llm/agent/*): one streamed chat per assistant (roles bucket, visual = the visualizer,
+data = the Data page), the confirmation of a paused change, stop, and the catalogue the chat box shows (tools, skills,
 commands, models). Events: llm/engine/events.py.
 
 Both roles run on the caller's providers and switches (llm/store.py). The visual role needs the visualizer session
@@ -97,14 +97,16 @@ def _assets(user, role):
 
 
 def _chat_scope(role, scope):
-    """What a new saved chat is about: data -> {bucket_id}; visual -> the bound visualizer session {dataset_id, name}."""
+    """What a new saved chat is about: bucket -> {bucket_id} (the Bucket page sends the open bucket as scope.bucket);
+    visual -> the bound visualizer session {dataset_id, name}; the other pages -> {}."""
     if role.name == 'visual':
         b = auth_context.bound()
         if b is None:
             return {}
         src = getattr(getattr(b.state, 'source', None), 'name', None)
         return {'dataset_id': b.session_id or getattr(b.state, 'dataset_id', None) or '', 'name': src or ''}
-    return {'bucket_id': scope['bucket_id']} if scope.get('bucket_id') else {}
+    bid = scope.get('bucket_id') or scope.get('bucket')
+    return {'bucket_id': str(bid)} if role.name == 'bucket' and isinstance(bid, str) and bid else {}
 
 
 def _lines(run, role):
