@@ -145,6 +145,9 @@ button.bk-tag { height: 24px; padding: 0 9px; font-size: var(--fs-xs); font-weig
 /* The selection bar lies over the folder bar (one grid cell), so selecting never moves the list below */
 .bk-head { flex: none; display: grid; }
 .bk-head > * { grid-area: 1 / 1; min-width: 0; }
+/* the selection bar covers the folder bar in the same cell: the bar is its own layer, so a raised control in it
+   (the active view toggle is z-index 2) cannot paint through the selection bar (z-index 1) */
+.bk-bar { isolation: isolate; }
 .bk-selbar { z-index: 1; display: flex; align-items: center; gap: 4px; padding: 5px var(--s4) 5px 12px; background: linear-gradient(var(--accent-soft), var(--accent-soft)) var(--surface); border-bottom: 1px solid var(--accent-line); font-size: var(--fs-sm); overflow: hidden; animation: bk-fade .12s ease-out; }
 @keyframes bk-fade { from { opacity: 0; } }
 .bk-selbar b { color: var(--accent-text); margin: 0 8px 0 4px; white-space: nowrap; }
