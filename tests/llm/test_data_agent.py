@@ -99,7 +99,7 @@ def test_analysis_prompt_stays_small(prefs):
     s = prompting.build('data', tools_catalog=tools.risk_card(tools.for_role(r.domains, 'ask')),
                         scope_text=roles.data_scope(ALICE, {'connection': 'c1', 'database': 'db'}),
                         mode='ask', effort='medium', pages_text=roles.other_pages('data'))
-    assert 'Your categories' in s and budget.text_tokens(s) < 6500, budget.text_tokens(s)      # 40 categories, 300 tables
+    assert 'Your categories' in s and budget.text_tokens(s) < 6600, budget.text_tokens(s)      # 40 categories, 300 tables
 
 
 # ---------------------------------------------------------------- the editor's SQL

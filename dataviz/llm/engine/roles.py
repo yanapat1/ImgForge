@@ -103,7 +103,8 @@ def other_pages(role):
             + ' '.join(others)
             + ((f' A question about {"it" if len(ask) == len(others) else " or ".join(ask)}: `consult`;' if ask else '')
                + ' to see or change it: `navigate` (`list_sessions` finds ids).'
-               + (' Data has no consult: `navigate` there with the question as goal.'
+               + (' Data has no consult: for an answer from the user\'s databases `navigate` to data with the question '
+                  'as goal (the SQL is written and run in its editor, the rows show in Results).'
                   if role != 'data' and 'data' in here else '')
                + ' Never call another page\'s tools.' if others else '')
             + (f' This install has no {", ".join(missing)}: never offer it, and say so if the user asks for it.'

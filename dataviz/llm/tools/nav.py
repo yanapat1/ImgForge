@@ -31,6 +31,9 @@ SCREENS = ('home', 'bucket', 'image', 'viz', 'label', 'data')
 SCREEN_ZONE = {'bucket': 'bucket', 'viz': 'visualizer', 'label': 'labeling', 'data': 'data'}
 SCREEN_LABEL = {'home': 'Home', 'bucket': 'Bucket', 'image': 'Image', 'viz': 'Visualizer', 'label': 'Labeling', 'data': 'Data'}
 VIZ_TABS = ('explore', 'stats', 'curation', 'aug', 'model', 'eval', 'compare')     # = tools/visual.py TABS without 'ai'
+DATA_TABS = ('query', 'catalog', 'scripts', 'analyze', 'dash', 'history')      # the Data page's workspaces (data/state.ts)
+IMAGE_TABS = ('viz', 'label')                                                   # the Image page's two session lists
+TABS = {'viz': VIZ_TABS, 'data': DATA_TABS, 'image': IMAGE_TABS}                # the tab navigate may open, per screen
 MAX_SESSIONS = 40
 
 
@@ -116,10 +119,6 @@ def _check_nav(ctx, a):
             raise ToolError(f'no {"visualize" if scr == "viz" else "labeling"} session {sid!r} you can open: '
                             'list_sessions shows them')
         out['session_id'] = sid
-        if scr == 'viz' and a.get('tab'):
-            if a['tab'] not in VIZ_TABS:
-                raise ToolError(f'tab must be one of {", ".join(VIZ_TABS)}')
-            out['tab'] = a['tab']
     elif scr == 'bucket':
         if a.get('bucket'):
             from .bucket import resolve_bucket
@@ -127,6 +126,12 @@ def _check_nav(ctx, a):
             out['bucket'] = b['id']
             if a.get('path'):
                 out['path'] = str(a['path']).strip('/')
+    if a.get('tab'):
+        if scr not in TABS:
+            raise ToolError(f'{SCREEN_LABEL[scr]} has no tabs: leave tab out')
+        if a['tab'] not in TABS[scr]:
+            raise ToolError(f'tab of {scr} must be one of {", ".join(TABS[scr])}')
+        out['tab'] = a['tab']
     return out, None
 
 
@@ -225,7 +230,9 @@ register(Tool('navigate', 'Open another page (home = the overview, bucket = Buck
                           'call it last; `goal` is what to do there (this chat continues there with it).',
               _obj({'screen': E('the page', SCREENS), 'goal': S('the next request there'),
                     'session_id': S('viz / label: from list_sessions'), 'bucket': S('bucket: bucket id or name'),
-                    'path': S('bucket: folder'), 'tab': E('viz: view', VIZ_TABS)}, ['screen', 'goal']),
+                    'path': S('bucket: folder'),
+                    'tab': S('the tab to open there. viz: ' + ' | '.join(VIZ_TABS) + '. data: ' + ' | '.join(DATA_TABS)
+                             + '. image: ' + ' | '.join(IMAGE_TABS))}, ['screen', 'goal']),
               False, _nav_run, _nav_label, check=_check_nav, risk='ui', **_C))
 register(Tool('consult', "Ask another page's specialist one question, read-only, without leaving (viz needs "
                          'session_id). To show or change something there: navigate.',

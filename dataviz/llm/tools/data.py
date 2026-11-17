@@ -291,6 +291,17 @@ register(Tool('run_in_editor', 'Page action that runs: write a read in the SQL e
                     'mode': E('replace = this tab, new_tab = a new one', ['replace', 'new_tab']),
                     'name': S('new tab name'), 'note': S('one line: what it shows'), **CONN}, ['sql']),
               False, _ui_run, _editor_run_line, check=_editor_run_check, domain='data', ctx=True, risk='run'))
+WORKSPACES = ('query', 'catalog', 'scripts', 'analyze', 'dash', 'history')
+RESULT_TABS = ('results', 'joins', 'cost', 'messages')
+WS_LABEL = {'query': 'Query', 'catalog': 'Catalog', 'scripts': 'Scripts', 'analyze': 'Analyze', 'dash': 'Dashboards',
+            'history': 'History'}
+register(Tool('open_workspace', 'Page action: show a workspace of the Data page (query = the SQL editor and its results, '
+                                'catalog, scripts, analyze = statistics of the open result, dash = dashboards, history); '
+                                'with query, result_tab opens Results, Joins, Cost or Messages under the editor.',
+              _obj({'workspace': E('the workspace', WORKSPACES), 'result_tab': E('query only: the tab under the editor', RESULT_TABS)},
+                   ['workspace']), False, _ui_run,
+              lambda b, a: 'Open ' + WS_LABEL.get(a.get('workspace'), 'the page')
+              + (f' › {str(a["result_tab"]).capitalize()}' if a.get('result_tab') else ''), check=_ui_ok, **_U))
 NOTE_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'grey', 'yellow']
 DASH_KINDS = ['kpi', 'bar', 'hbar', 'line', 'area', 'donut', 'forecast', 'table', 'text']
 register(Tool('build_dashboard', 'Page action: add charts from the last result to the dashboard.',

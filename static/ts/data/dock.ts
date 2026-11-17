@@ -12,7 +12,7 @@ import { render, saveTabs } from './app.js';
 import { currentResult } from './analyze.js';
 import { applyBoardOps, boardScope } from './board.js';
 import type { BoardOp } from './board.js';
-import type { Widget } from './state.js';
+import type { Widget, Workspace } from './state.js';
 import { addCharts } from './dash.js';
 import { editorText, isRunning, runTab } from './query.js';
 import { A, newTab, sourceOf, tab } from './state.js';
@@ -80,6 +80,10 @@ function uiBody(a: UiAction, ref: string): string {
   return html;
 }
 
+const WORKSPACES = ['query', 'catalog', 'scripts', 'analyze', 'dash', 'history'] as const;
+const isWorkspace = (v: string): v is Workspace => (WORKSPACES as readonly string[]).includes(v);
+const isResultTab = (v: string): v is Tab['rt'] => v === 'results' || v === 'joins' || v === 'cost' || v === 'messages';
+
 const SUGGEST = ['What tables do I have about customers?', 'Why is this query slow?', 'Explain the last result in plain words'];
 
 /** Write the assistant's SQL into the open tab (replace) or a new one, as typed text (a run redraws the builder from
@@ -142,6 +146,14 @@ function pageAction(a: UiAction): UiResult | Promise<UiResult> {
       result: { done: parts.join(', ') || 'nothing', refused: r.refused.slice(0, 20), undo: 'Ctrl+Z on the board',
         ...(r.overlap.length ? { zones_overlap: r.overlap.slice(0, 10), hint: 'call edit_board again with the same zone ops and arrange: true to move the tables apart' } : {}) } };
   }
+  if (a.action === 'open_workspace') {
+    const ws = String(a.args['workspace'] ?? ''), rt = String(a.args['result_tab'] ?? '');
+    if (!isWorkspace(ws)) return { ok: false, detail: `no workspace ${ws}` };
+    A.ws = ws;
+    if (ws === 'query' && isResultTab(rt)) { tab().rt = rt; A.layout.res = true; }
+    render();
+    return { ok: true, detail: `${ws}${ws === 'query' && isResultTab(rt) ? ` › ${rt}` : ''} is open` };
+  }
   if (a.action === 'build_dashboard') {
     addCharts((a.args['charts'] ?? []) as Partial<Widget>[]);
     A.ws = 'dash';
@@ -179,5 +191,7 @@ export function mountDock(): void {
       });
     },
     settings: () => { void openSettings('llm'); },
+    // the assistant came from another page and named a workspace (navigate tab)
+    onHandoff: (h) => { if (h.tab && isWorkspace(h.tab) && h.tab !== A.ws) { A.ws = h.tab; render(); } },
   });
 }

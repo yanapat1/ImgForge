@@ -119,3 +119,28 @@ def test_data_location_and_list_sessions_by_folder(client, tmp_path, monkeypatch
 def test_sending_to_labeling_is_always_confirmed():
     t = tools.REGISTRY['send_to_session']
     assert t.risk_of({'target': 'label'}) == 'danger' and t.risk_of({'target': 'visualize'}) == 'change'
+
+
+def test_navigate_opens_the_tabs_of_every_page(monkeypatch):
+    """navigate's tab is checked per screen: a visualizer view, a Data workspace, an Image list; other pages have none."""
+    from types import SimpleNamespace
+    from dataviz.llm import tools
+    from dataviz.llm.tools import data, nav
+    monkeypatch.setattr(nav, '_sessions', lambda user, kind, ids=None: [{'id': 'a1', 'name': 'traffic'}])
+    ctx = SimpleNamespace(user={'id': 'u'}, roles_on=None)
+    ok = lambda **a: nav._check_nav(ctx, {'goal': 'go on', **a})[0]  # noqa: E731
+    assert ok(screen='data', tab='dash') == {'screen': 'data', 'goal': 'go on', 'tab': 'dash'}
+    assert ok(screen='image', tab='label')['tab'] == 'label'
+    assert ok(screen='viz', session_id='a1', tab='aug')['tab'] == 'aug'
+    for bad, match in (({'screen': 'data', 'tab': 'aug'}, 'tab of data must be one of query'),
+                       ({'screen': 'viz', 'session_id': 'a1', 'tab': 'dash'}, 'tab of viz must be one of explore'),
+                       ({'screen': 'home', 'tab': 'x'}, 'Home has no tabs')):
+        with pytest.raises(tools.ToolError, match=match):
+            ok(**bad)
+    assert nav.DATA_TABS == data.WORKSPACES
+    # the Data specialist shows a workspace itself (applied in ask mode too), and the other pages are sent to Data for SQL
+    t = tools.REGISTRY['open_workspace']
+    assert t.risk == 'ui' and t.preview(None, {'workspace': 'query', 'result_tab': 'results'}) == 'Open Query › Results'
+    from dataviz.llm.engine import react, roles
+    assert 'open_workspace' in react.ALWAYS_APPLY
+    assert "`navigate` to data with the question" in roles.other_pages('bucket')

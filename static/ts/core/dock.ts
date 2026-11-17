@@ -279,7 +279,7 @@ function navUrl(a: Record<string, unknown>): string | null {
   const s = (k: string): string => (typeof a[k] === 'string' ? String(a[k]) : '');
   switch (s('screen')) {
     case 'home': return homeUrl();
-    case 'image': return imageUrl();
+    case 'image': return imageUrl(s('tab') === 'viz' || s('tab') === 'label' ? (s('tab') as 'viz' | 'label') : null);
     case 'bucket': return bucketUrl(s('bucket') || null, s('path') || null);
     case 'viz': return s('session_id') ? vizUrl(s('session_id')) : null;
     case 'label': return s('session_id') ? labelUrl(s('session_id')) : null;

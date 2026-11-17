@@ -15,3 +15,6 @@ summary: what each page of DataViz is for, its URL screen id for navigate, the h
   forecasts, dashboards.
 - Old links: `?analysis` opens Data. The user may still say "Data Center", "Sessions" or "Analysis": they mean Bucket,
   Image and Data.
+- **Tabs `navigate` can open** (`tab`): image `viz | label`; viz (one session) `explore | stats | curation | aug |
+  model | eval | compare`; data `query | catalog | scripts | analyze | dash | history`. Home, Bucket and the labeling
+  page have no tabs (Bucket takes `bucket` and `path`).
