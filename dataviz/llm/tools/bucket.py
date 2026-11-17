@@ -216,6 +216,12 @@ def _send(user, a):
     return res, f'opened {res.get("target")} {res.get("url") or res.get("id")}'
 
 
+def _reformat(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().reformat(user, b['id'], a.get('path') or '', to=a['to'])
+    return res, f'{b["name"]}: re-format to {a["to"]} started → {res["bucket_name"]}/{res["path"]} (job {res["job_id"]})'
+
+
 def _session_check(user, a):
     b = resolve_bucket(user, a['bucket'])
     res = _svc().session_check(user, b['id'], a.get('path') or '')
@@ -493,6 +499,16 @@ _add(Tool('session_check', 'Before a session is made from a folder: its detected
                            'whether Visualize, Label and the linked pair work on it (and why not), whether its labels '
                            'are imported into the Label session, and the formats it can be re-formatted to.',
           _obj({'bucket': BUCKET, 'path': PATH}, ['bucket']), False, _session_check, s3_ok=True))
+_add(Tool('reformat_folder', 'Write a folder again in another label format (yolo, coco, voc, labelme, createml, csv) as '
+                             'a NEW folder of the bucket "<bucket> · formats"; the original is not changed. Reads YOLO '
+                             'detect / segment / pose and COCO labels. A local folder gets its images linked beside '
+                             'the new labels; a streamed S3 folder gets the labels only, with images.txt and '
+                             'source.json (the images stay in S3). A background job: job_status says when it is done.',
+          _obj({'bucket': BUCKET, 'path': PATH,
+                'to': {'type': 'string', 'enum': ['yolo', 'coco', 'voc', 'labelme', 'createml', 'csv'], 'description': 'the format to write'}},
+               ['bucket', 'to']), True, _reformat,
+          lambda b, a: f'Re-format {a.get("path") or "the bucket"} of {_bname(b, a)} to {a["to"]} (a new folder; the original stays)',
+          s3_ok=True))
 _add(Tool('send_to_session', 'Make a session from one folder: target both (the default choice: one linked session, the '
                              'Label side owns the labels, the folder\'s own are imported, Visualize reads them live), '
                              'visualize (the visualizer alone) or label (a labeling project alone).',

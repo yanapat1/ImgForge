@@ -14,3 +14,10 @@ core: true
 - `detect_format` returns the format, a confidence, the checks that decided it (images/, labels/ mirror, data.yaml,
   ≤ 50 label files sampled for their column counts) and the class count; results are cached (force re-detects;
   the page: Re-detect). The bucket root is re-detected after every change and tagged `format:<format>`.
+- **Re-format** (`reformat_folder` bucket, path, to: yolo | coco | voc | labelme | createml | csv; the Bucket and Create
+  session pages offer it too): writes the folder again in another label format as a new folder `<path>-<to>` of the
+  managed bucket "<bucket> · formats"; the original is never changed. It reads YOLO detect / segment / pose and COCO
+  labels (images only, VOC, OBB, classification: nothing to convert). A local or downloaded folder gets a complete
+  dataset (images hard-linked, no extra disk). A **streamed S3** folder gets the labels only plus `images.txt` (the
+  s3:// address of each image) and `source.json`: nothing is downloaded and nothing is written to S3, so a training
+  tool needs the images downloaded first (`download_s3_folders`). It is a job: `job_status`.

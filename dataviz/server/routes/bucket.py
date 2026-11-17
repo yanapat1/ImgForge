@@ -233,6 +233,11 @@ def router(state, ctx):
                      visualize=body.get('visualize', True) is not False, label=body.get('label', True) is not False,
                      name=body.get('name'), task_type=body.get('task_type') or 'detect')
 
+    @r.post('/reformat')
+    def reformat(body: dict, user=Depends(MANAGE)):
+        """Write a folder again in another label format, as a new folder of the bucket "<name> · formats" (a job)."""
+        return _call(service.reformat, user, body.get('bucket'), body.get('path') or '', to=body.get('to') or 'coco')
+
     @r.get('/sources')
     def list_sources(user=Depends(deps.current_user)):
         return _call(service.list_sources, user)

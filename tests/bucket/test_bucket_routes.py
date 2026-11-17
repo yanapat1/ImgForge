@@ -336,3 +336,38 @@ def test_create_session_linked_and_session_check(dc):
     bad = c.get(f'/api/bucket/buckets/{b["id"]}/session-check', params={'path': 'docs'}).json()
     assert bad['can'] == {'visualize': False, 'label': False, 'linked': False}
     assert c.post('/api/bucket/session', json={'bucket': b['id'], 'path': 'docs'}).status_code == 400
+
+
+def test_reformat_writes_a_new_folder_and_leaves_the_original(dc):
+    """Re-format: YOLO -> COCO as a new folder of the bucket "<name> · formats", images hard-linked, the original
+    untouched, the temporary labeling session gone; a folder without readable labels is refused."""
+    _, c = dc
+    b = new_bucket(c, name='traffic')
+    upload_zip(c, b['id'])
+    before = c.get(f'/api/bucket/buckets/{b["id"]}/ls').json()['entries']
+    n_projects = len(c.get('/api/label/projects').json()['projects'])
+    r = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'to': 'coco'})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out['bucket_name'] == 'traffic · formats' and out['path'] == 'all-coco'
+    res = wait_job(c, out['job_id'], timeout=60)
+    assert res['status'] == 'done', res
+    res = res['result']
+    assert res['format'] == 'coco' and res['images_linked'] == 3 and res['labels'] == 3 and not res['streamed']
+    root = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()['root']
+    import glob
+    import json as _json
+    import os
+    files = glob.glob(os.path.join(root, 'all-coco', '**', '*.json'), recursive=True)
+    assert files, 'the COCO annotations were written'
+    coco = _json.load(open(files[0]))
+    assert len(coco['annotations']) >= 2 and {x['name'] for x in coco['categories']} == {'cat', 'dog'}
+    assert len(glob.glob(os.path.join(root, 'all-coco', '**', '*.jpg'), recursive=True)) == 3
+    assert c.get(f'/api/bucket/buckets/{b["id"]}/ls').json()['entries'] == before, 'the original is not changed'
+    assert len(c.get('/api/label/projects').json()['projects']) == n_projects, 'the temporary session is deleted'
+    # the same again: the folder exists
+    assert c.post('/api/bucket/reformat', json={'bucket': b['id'], 'to': 'coco'}).status_code == 400
+    assert c.post('/api/bucket/reformat', json={'bucket': b['id'], 'to': 'nope'}).status_code == 400
+    c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'mkdir', 'path': 'docs'}]})
+    bad = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'docs', 'to': 'coco'})
+    assert bad.status_code == 400 and 're-format reads YOLO' in bad.json()['detail']

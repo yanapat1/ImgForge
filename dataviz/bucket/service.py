@@ -2550,6 +2550,115 @@ def create_session(user, bid, path='', visualize=True, label=True, name=None, ta
             'visualize': {'id': ds['id'], 'url': f's/{ds["id"]}/'}}
 
 
+REFORMAT_FROM = {'yolo-detect': 'detect', 'yolo-seg': 'segment', 'yolo-pose': 'pose', 'coco': 'detect'}
+REFORMAT_WAIT = 6 * 3600
+
+
+def reformat(user, bid, path='', to='coco'):
+    """Write folder `path` again in another label format (labeling/writers key: yolo, coco, voc, labelme, createml,
+    csv ...) as a new folder `<path>-<to>` of the managed bucket "<bucket> · formats"; the original is never
+    changed. The folder's labels are read through a temporary labeling session (the same import a linked session
+    uses) and written by the label writers.
+
+    A local (or downloaded) folder gets a complete dataset: its images are hard-linked next to the new labels (a
+    copy when the disks differ). A streamed S3 folder gets the labels only, with images.txt (the s3:// address of
+    every image) and source.json (connection, S3 bucket, prefix): nothing is downloaded, nothing is written to S3.
+    -> {job_id, bucket, path}; the job's result: {bucket, path, format, labels, images_linked, streamed}."""
+    from ..labeling import writers as lw
+    r = _row(user, bid)
+    _need(user)
+    _need(user, 'label.create')
+    rel = store.clean_rel(path)
+    try:
+        keys = lw.check([to])
+    except ValueError as e:
+        raise BucketError(str(e)) from None
+    chk = session_check(user, bid, rel)
+    task_type = REFORMAT_FROM.get(chk['format'])
+    if task_type is None:
+        raise BucketError(f'{rel or r.name} is “{chk["label"]}”: re-format reads YOLO detect / segment / pose and COCO '
+                          'labels (a folder of images only has no labels to write: label it first)')
+    keys = [k for k in keys if lw.supports(k, TASK_TYPES[task_type])]
+    if not keys:
+        raise BucketError(f'{to} cannot hold {task_type} labels')
+    hook = getattr(_conf['ctx'], 'label_import', None) if _conf['ctx'] is not None else None
+    jobs = _jobs()
+    if hook is None or jobs is None:
+        raise BucketError('re-format runs in the server (the labeling routes are not loaded here)', 501)
+    streamed = r.kind == 's3' and not _writable(r) and not (folder_state(user, bid, rel) or {}).get('editable')
+    dest_name = f'{r.name} · formats'
+    dest = next((b for b in list_buckets(user, q=dest_name) if b['name'] == dest_name and b['kind'] == 'managed'), None) \
+        or create_bucket(user, dest_name)
+    out_rel = f'{(rel.replace("/", "_") or "all")}-{keys[0]}'
+    dr = _row(user, dest['id'])
+    if os.path.exists(_abs(dr, out_rel, must_exist=False)):
+        raise BucketError(f'“{dest_name}/{out_rel}” exists already: delete or rename it first')
+
+    def wait(jid, job):
+        j = jobs.get(jid) if jid is not None else None
+        t0 = time.time()
+        while j is not None and not j.wait(0.5):
+            if job.cancelled.is_set() or time.time() - t0 > REFORMAT_WAIT:
+                jobs.cancel(jid)
+                raise BucketError('stopped')
+        if j is not None and j.status == 'error':
+            raise BucketError(f'{j.label}: {j.error}')
+
+    def fn(job):
+        job.progress(stage='reading the images')
+        made = send(user, bid, [rel], 'label', f'{r.name} {rel} re-format'.strip(), task_type)
+        pid = made['id']
+        try:
+            wait(made.get('job_id'), job)
+            st = _labeling().store(pid)
+            task = st.task(st.tasks()[0]['id'])
+            job.progress(stage='reading the labels')
+            wait(hook(pid, {'task_id': task['id'], 'format': 'auto', 'source': _labeling().get(pid)['source'],
+                            'mode': 'merge', 'add_classes': True}, user)['job_id'], job)
+            task = st.task(task['id'])                      # with the classes the import added
+            base = _abs(dr, out_rel, must_exist=False)
+            os.makedirs(base, exist_ok=True)
+            linked = 0
+            if streamed:
+                import json
+                keys_ = [m.get('uri') for m, _ in st.iter_task_export(task['id']) if m.get('uri')]
+                pre = '/'.join(p for p in (r.prefix.strip('/'), rel) if p)
+                with open(os.path.join(base, 'images.txt'), 'w', encoding='utf-8') as f:
+                    f.writelines(f's3://{r.s3_bucket}/{store.join(pre, k)}\n' for k in keys_)
+                with open(os.path.join(base, 'source.json'), 'w', encoding='utf-8') as f:
+                    json.dump({'connection_id': r.connection_id, 's3_bucket': r.s3_bucket, 'prefix': pre,
+                               'from_bucket': r.id, 'path': rel, 'images': len(keys_),
+                               'note': 'labels only: the images stay in S3 (images.txt lists them)'}, f, indent=1)
+            else:
+                job.progress(stage='linking the images')
+                src_root = _abs(_write_view(r) if r.kind == 's3' else r, rel)
+                for m, _ in st.iter_task_export(task['id']):
+                    k = (m.get('meta') or {}).get('rel_path') or m.get('uri')
+                    a, b = os.path.join(src_root, k or ''), os.path.join(base, k or '')
+                    if not k or not os.path.isfile(a):
+                        continue
+                    os.makedirs(os.path.dirname(b), exist_ok=True)
+                    try:
+                        os.link(a, b)
+                    except OSError:                         # another disk, or no hard links there: a copy
+                        shutil.copy2(a, b)
+                    linked += 1
+            job.progress(stage=f'writing {keys[0]}')
+            res = _write_labels(dr, out_rel, st, task, keys)
+        finally:
+            try:
+                _labeling().delete(pid, delete_files=True)  # the temporary session
+            except Exception:  # noqa: BLE001 - it only leaves a session the user can delete
+                pass
+        return {'bucket': dest['id'], 'bucket_name': dest_name, 'path': out_rel, 'format': keys[0],
+                'labels': res.get('labels'), 'images_linked': linked, 'streamed': streamed,
+                **({'warnings': res['warnings']} if res.get('warnings') else {})}
+
+    job = jobs.submit(f'bk-reformat:{r.id}:{rel}:{keys[0]}', f're-format {r.name}{"/" + rel if rel else ""} to {keys[0]}',
+                      fn, lane=LANE, public_result=True, owner=user['id'])
+    return {'job_id': job.id, 'bucket': dest['id'], 'bucket_name': dest_name, 'path': out_rel}
+
+
 def _send_visualize(user, r, rel, fmt, name):
     f = fmt.get('format')
     if f not in VISUALIZABLE:

@@ -196,8 +196,9 @@ GROUPS = {
                  'inspect_dataset_source import_dataset export_to',
                  'import export kaggle hugging huggingface roboflow zenodo openml url ftp sftp upload fetch'),
     'video': ('cut videos into image frames', 'extract_frames set_video_auto', 'video videos frame frames mp4 mov fps clip'),
-    'sessions': ('make a visualize / labeling session from a folder, and check what it can do', 'session_check send_to_session',
-                 'visualize visualizer visualise labeling labelling session sessions send open map umap tsne project'),
+    'sessions': ('make a visualize / labeling session from a folder, and check what it can do', 'session_check send_to_session reformat_folder',
+                 'visualize visualizer visualise labeling labelling session sessions send open map umap tsne project '
+                 'reformat format convert coco voc yolo'),
     'buckets': ('create, rename or delete a bucket', 'create_bucket update_bucket delete_bucket',
                 'unlink'),
     # Data page

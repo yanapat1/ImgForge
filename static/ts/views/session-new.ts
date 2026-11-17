@@ -9,6 +9,7 @@ import { zoneOn } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { waitJob } from '../core/jobs.js';
 import { bucketUrl, labelUrl, vizUrl } from '../core/nav.js';
+import { toast } from '../core/toast.js';
 import * as api from '../bucket/api.js';
 import type { Bucket, Entry } from '../types-bucket.js';
 import { openSettings } from '../settings/dialog.js';
@@ -52,7 +53,7 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
       `<span class="sn-can ${c.label_import === 'imported' ? 'ok' : 'off'}">${icon(c.label_import === 'imported' ? 'check' : 'circle')}${c.label_import === 'imported' ? 'its labels are imported' : 'no labels to import'}</span></div>` +
       `<p class="muted">${esc(c.note)}</p>` +
       (c.streamed ? '<p class="muted">Streamed data: the images stay in S3 and are read when needed (the first map reads each image once); labels made here are kept in this app, not written to S3.</p>' : '') +
-      (c.convert_to.length ? `<p class="muted">It can be re-formatted to ${esc(c.convert_to.map((x) => x.toUpperCase()).join(' or '))} on the Bucket page.</p>` : '') + '</div>';
+      (c.convert_to.length ? `<div class="sn-other"><span class="muted">Re-format a copy to</span>${c.convert_to.map((x) => `<button type="button" class="ghost sm" data-sn="reformat" data-to="${esc(x)}" title="Writes a new folder in the bucket “… · formats”; this folder is not changed${c.streamed ? ' (labels only: the images stay in S3)' : ''}">${esc(x.toUpperCase())}</button>`).join('')}</div>` : '') + '</div>';
   };
   const crumbs = (): string => {
     const parts = S.path ? S.path.split('/') : [];
@@ -136,6 +137,12 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
       r.addEventListener('click', (e) => {
         const go = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-sn="go"]') : null;
         if (go && !S.busy) void open(S.bid, go.dataset['path'] ?? '');
+        const rf = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-sn="reformat"]') : null;
+        if (rf && !S.busy) {
+          postJSON<{ bucket_name: string; path: string }>('api/bucket/reformat', { bucket: S.bid, path: S.path, to: rf.dataset['to'] })
+            .then((x) => toast(`Re-format started: it will be in ${x.bucket_name}/${x.path} (the Bucket page shows the job)`, 'ok'))
+            .catch((err: unknown) => toast(`Could not re-format: ${errText(err)}`, 'err'));
+        }
         // a session made from other sessions: the Settings form of that kind (closing this dialog)
         const other = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-act="new-union"], [data-act="new-labeling"]') : null;
         if (other && !S.busy) {
