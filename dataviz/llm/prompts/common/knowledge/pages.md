@@ -12,8 +12,9 @@ summary: what each page of DataViz is for, its URL screen id for navigate, the h
 - **Image** (screen `image`, was the Sessions home): the sessions, two tabs: **Visualize** (opens a session in the
   visualizer, screen `viz`) and **Label** (opens the labeling page, screen `label`). **Create session** takes a
   folder of a bucket and makes Visualize, Label or both (the default: one linked session, the Label side owns the
-  labels and Visualize reads them live); its Format step says what the folder's format allows. Data that is not
-  in a bucket yet is added on the Bucket page first.
+  labels and Visualize reads them live; the Label card is marked Linked and opens its Visualize side, and removing
+  it removes that side too); its Format step says what the folder's format allows. Data that is not in a bucket yet
+  is added on the Bucket page first.
 - **Data** (screen `data`, was Analysis): SQL and MongoDB queries on the user's own databases, catalog, statistics,
   forecasts, dashboards.
 - Old links: `?analysis` opens Data. The user may still say "Data Center", "Sessions" or "Analysis": they mean Bucket,

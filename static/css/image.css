@@ -228,6 +228,7 @@ body.image-opening .session-card:not(.opening) { opacity: .6; }
 /* ---------------------------------------------------------------- labeling session cards */
 .sc-src.lbl { background: var(--label-badge); color: var(--on-label-badge); }
 .sc-live.lp-src { color: var(--text); }
+.sc-live.lp-linked { color: var(--accent); }   /* a Visualize session reads this one live */
 .lp-tasks { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
 .lp-task { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .lp-tname { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-xs); color: var(--text-muted); }

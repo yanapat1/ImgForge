@@ -295,10 +295,15 @@ function checklistHTML(p: HomeProject): string {
     '</div>';
 }
 
+// the Visualize sessions that read a labeling session live (kind labeling): Create session links the two sides
+const linkedViz = (pid: string): HomeSession[] => H.sessions.filter((d) => d.kind === 'labeling' && d.project_id === pid);
+
 function labelCardHTML(p: HomeProject): string {
   const src = lpSource(p);
   const cover = p.cover || [];
-  const badge = `<span class="sc-src lbl">${icon('tag')}Labeling</span><span class="sc-live lp-src">${icon(src.ico)}${esc(src.label)}</span>${visBadge(p)}`;
+  const viz = linkedViz(p.id)[0];
+  const badge = `<span class="sc-src lbl">${icon('tag')}Labeling</span><span class="sc-live lp-src">${icon(src.ico)}${esc(src.label)}</span>${visBadge(p)}` +
+    (viz ? `<span class="sc-live lp-linked" title="Linked: the Visualize session “${esc(viz.name)}” shows these labels live">${icon('scatter')}Linked</span>` : '');
   let mosaic: string;
   if (!cover.length) {
     mosaic = `<div class="sc-cover empty">${badge}<div class="sc-glyph">${icon('image')}<span>No images yet: open it to import some</span></div></div>`;
@@ -323,6 +328,7 @@ function labelCardHTML(p: HomeProject): string {
     checklistHTML(p) +
     '</div><footer class="sc-foot">' +
     peopleHTML(p, openedText(p, p.updated ? `updated ${timeAgo(p.updated)}` : '')) +
+    (viz ? `<button class="icon-btn ghost" data-act="toviz" aria-label="Visualize ${esc(p.name)}" title="Open the linked Visualize session ${esc(viz.name)}">${icon('scatter')}</button>` : '') +
     (can(p, 'labeler') ? `<button class="icon-btn ghost" data-act="lexport" aria-label="Export ${esc(p.name)}" title="Export the labels">${icon('download')}</button>` : '') +
     shareBtn(p, 'label') +
     (can(p, 'owner') ? editBtn('ledit', p, 'Edit: name, tags, tasks, classes and export') +
@@ -668,8 +674,10 @@ async function confirmDlg({ title, text, check, ok }: ConfirmOpts): Promise<{ ch
 async function removeProject(pid: string): Promise<void> {
   const p = H.projects.find((x) => x.id === pid);
   if (!p) return;
+  const viz = linkedViz(pid).filter((d) => can(d, 'owner'));
   const r = await confirmDlg({ title: `Remove “${p.name}”?`, ok: 'Remove',
-    text: 'The labeling session leaves this list. Without the box below, its uploaded images and annotations stay on disk (the workspace labeling/ folder); source folders and buckets are never touched.',
+    text: 'The labeling session leaves this list. Without the box below, its uploaded images and annotations stay on disk (the workspace labeling/ folder); source folders and buckets are never touched.' +
+      (viz.length ? `\n\nIts linked Visualize session${viz.length === 1 ? '' : 's'} ${viz.map((d) => `“${d.name}”`).join(', ')} read${viz.length === 1 ? 's' : ''} these labels live, so ${viz.length === 1 ? 'it is' : 'they are'} removed too.` : ''),
     check: 'Also delete the uploaded images and every annotation (cannot be undone)' });
   if (!r) return;
   deferDelete({
@@ -677,6 +685,7 @@ async function removeProject(pid: string): Promise<void> {
     hide: () => { H.projects = H.projects.filter((x) => x.id !== pid); render(); },
     restore: load, after: load,
   });
+  for (const d of viz) remove(d.id);
 }
 
 // the label session names the wizard checks a new name against (minus the one being edited)
@@ -867,6 +876,7 @@ const ACTIONS: Record<string, (b: HTMLElement) => unknown> = {
   'clear-filter': () => clearFilters(false),
   lremove: (b) => removeProject(dataOf(b, 'pid')),
   lmore: (b) => { if (H.menuFrom === b) closeCardMenu(true); else openCardMenu(b); },
+  toviz: (b) => { const d = linkedViz(dataOf(b, 'pid'))[0]; if (d) openSession(d.id); },
   tolabel: (b) => {
     const d = H.sessions.find((x) => x.id === dataOf(b, 'id'));
     if (d && d.project_id) open(`.session-card[data-id="${CSS.escape(d.id)}"]`, labelUrl(d.project_id));
