@@ -29,7 +29,7 @@ import {
 } from './chat-reduce.js';
 
 // the pure reducer and its helpers live in chat-reduce.ts; these are part of this module's public API too
-export { approvedMessage, dateGroup, EFFORTS, expandTrace, stepState, MODES, newTurn, nextMode, parseCommand, reduce, THINKS, turnText, WEBS } from './chat-reduce.js';
+export { approvedMessage, cycle, dateGroup, EFFORTS, expandTrace, stepState, MODES, newTurn, nextMode, parseCommand, reduce, THINKS, turnText, WEBS } from './chat-reduce.js';
 
 const fmtK = (n: number | null | undefined): string => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
 const fmtMs = (ms: number | null | undefined): string => (ms == null ? '' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);

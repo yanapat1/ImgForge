@@ -37,7 +37,8 @@ export const stepClosed = (state: string): boolean => { const s = stepState(stat
 
 /** ask → auto → plan → ask (Shift+Tab, the mode chip). */
 export const nextMode = (m: ChatMode): ChatMode => MODES[(MODES.indexOf(m) + 1) % MODES.length] ?? 'ask';
-export const cycle = <T>(list: readonly T[], v: T): T => list[(list.indexOf(v) + 1) % list.length] ?? v;
+/** the value after `v` in `list`, wrapping round (a null entry, e.g. think "auto", is a value too: not `?? v`) */
+export const cycle = <T>(list: readonly T[], v: T): T => (list.length ? list[(list.indexOf(v) + 1) % list.length] as T : v);
 
 /** A new, empty answer. `t0` is performance.now() when it started (0 in tests and resumed traces). */
 export function newTurn(t0 = 0, kind: string | null = null): AiTurn {

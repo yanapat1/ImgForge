@@ -17,7 +17,7 @@ CHAT_TS = ROOT / 'static' / 'ts' / 'core' / 'chat.ts'
 
 SCRIPT = r"""
 import assert from 'node:assert/strict';
-import { reduce, newTurn, approvedMessage, parseCommand, nextMode, dateGroup, turnText, expandTrace, stepState } from './chat.mjs';
+import { reduce, newTurn, approvedMessage, parseCommand, nextMode, dateGroup, turnText, expandTrace, stepState, cycle, THINKS } from './chat.mjs';
 
 const freeze = (o) => { if (o && typeof o === 'object') { Object.freeze(o); for (const v of Object.values(o)) freeze(v); } return o; };
 // every step runs on a deep-frozen turn: a mutation throws (ESM is strict mode)
@@ -181,6 +181,10 @@ assert.equal(dateGroup(new Date(2026, 9, 28, 23).toISOString(), now), 'Yesterday
 assert.equal(dateGroup(new Date(2026, 9, 24).toISOString(), now), 'Last 7 days');
 assert.equal(dateGroup(new Date(2026, 8, 1).toISOString(), now), 'Older');
 assert.equal(dateGroup(null, now), 'Older');
+// the think chip goes high -> auto (null) -> off ...: a null entry is a value, not "stay where you are"
+assert.equal(cycle(THINKS, 'high'), null, 'after high comes auto');
+assert.equal(cycle(THINKS, null), 'off');
+assert.equal(cycle(['a', 'b'], 'b'), 'a');
 console.log('ok');
 """
 
