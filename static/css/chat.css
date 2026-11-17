@@ -377,6 +377,19 @@
   .chat-hopen .m { max-width: 45%; }
 }
 @media (hover: none) { .chat-hacts { opacity: 1; } }
+/* The chat sits in the dock, 320-640 px wide on any screen: narrow rules follow the chat's own width, not the
+   window's (the rules above only fire on a phone). */
+.chat { container: chat / inline-size; }
+@container chat (max-width: 460px) {
+  .chat-log { padding: var(--s2) var(--s3); }
+  .chat-bubble, .chat .chat-ucol { max-width: 92%; }
+  .chat-title { max-width: 46%; }
+  .chat .chat-hbtn > span { display: none; }          /* History / New: the icon alone (title + aria-label say it) */
+  .chat .chat-chip.model { max-width: 132px; }
+  .chat-hopen .m { max-width: 45%; }
+  .chat-hacts { opacity: 1; }
+  .ai-qgrid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (prefers-reduced-motion: reduce) {
   .ct-spin, .ct-md.streaming > :last-child::after, .ct-wait i, .ct-act-row.live .ct-act-l, .ct-act.live .ct-act-now, .chat-hist, .chat-hint.flash { animation: none !important; }
 }

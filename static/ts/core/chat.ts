@@ -280,8 +280,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       ? `<span class="chat-hconf" role="group" aria-label="Delete this chat?">Delete this chat?<button type="button" class="danger" data-ca="del-cur-yes">Yes</button><button type="button" data-ca="del-cur-no">No</button></span>`
       : (C.sid ? `<button type="button" class="icon-btn ghost" data-ca="del-cur" aria-label="Delete this chat" title="Delete this chat">${icon('trash')}</button>` : '');
     headEl.innerHTML = titleHtml + '<span class="grow"></span>' + del +
-      `<button type="button" class="ghost chat-hbtn" data-ca="history" aria-expanded="${H.open}" aria-controls="${uid}-hist" title="Chat history (/sessions)">${IC_CLOCK}<span>History</span></button>` +
-      `<button type="button" class="ghost chat-hbtn" data-ca="new" title="New chat (/new)">${icon('plus')}<span>New</span></button>`;
+      `<button type="button" class="ghost chat-hbtn" data-ca="history" aria-expanded="${H.open}" aria-controls="${uid}-hist" aria-label="Chat history" title="Chat history (/sessions)">${IC_CLOCK}<span>History</span></button>` +
+      `<button type="button" class="ghost chat-hbtn" data-ca="new" aria-label="New chat" title="New chat (/new)">${icon('plus')}<span>New</span></button>`;
     if (C.renaming) { const i = headEl.querySelector<HTMLInputElement>('input'); i?.focus(); i?.select(); }
   }
 
