@@ -215,7 +215,7 @@ class LLMStore:
         num = lambda k, d, lo, hi, cast=float: max(lo, min(hi, cast(out.get(k) if out.get(k) not in (None, '') else d)))
         try:
             out['timeout_s'] = num('timeout_s', 120, 5, 600)
-            out['max_output_tokens'] = num('max_output_tokens', 2048, 64, 32768, int)
+            out['max_output_tokens'] = num('max_output_tokens', 2048, 64, 131072, int)
             out['temperature'] = num('temperature', 0.2, 0, 2)
             cw = out.get('context_window')         # empty = detect it (providers.model_limits)
             out['context_window'] = None if cw in (None, '', 0) else int(num('context_window', 0, 1000, ABS_MAX, int))

@@ -515,7 +515,7 @@ def router(state, ctx):
             'providers': provs, 'active': data['active'],
             'chat': store().chat_prefs(data, role.name),
             'web': store().clean_web(data.get('web') or {}),
-            'limits': {'max_steps': react.MAX_STEPS, 'max_retries': react.MAX_RETRIES},
+            'limits': {'max_steps': react.step_limits()['max'], 'max_retries': react.MAX_RETRIES},
         }
 
     @r.get('/api/llm/agent/models')

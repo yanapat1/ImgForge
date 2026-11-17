@@ -46,7 +46,14 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   (its SQL can be edited on the card) and runs at once in auto. In auto, a big, unclear or far-reaching request
   makes the assistant switch itself to plan mode first ("Switched to plan mode: …", the mode chip says plan):
   it looks things up read-only, asks what is the user's choice, and shows a plan; Approve · auto runs it.
-- **Effort** sets how many steps (15 / 30 / 50), thinking, and a final check pass (high).
+- **Effort** sets how many steps (15 / 30 / all the admin allows: 50 by default), thinking, and a final check pass
+  (high). A 15-40B model (or a 40k context) stops at 25 steps and a ≤ 14B one at 20 by default: an admin changes
+  these in **Admin › Settings › AI assistants › Limits of one answer**. The **think** chip goes auto → off → low →
+  medium → high → auto (auto = what the effort says).
+- **Output limit**: while a local / OpenAI-style model thinks it gets more output room by itself (low 4k, medium 8k,
+  high 16k, up to the admin's "Output while thinking" and what the context window leaves); a cut-off answer is
+  tried once with twice the room. Still cut off: raise the provider's **Max output tokens** (Settings › AI, up to
+  131072), or the admin raises "Output while thinking"; a lower think level also helps.
 - **Regenerate / Edit**: every answer has **Regenerate** (answer the same message again) and every sent message
   has **Edit** on hover (change it, Enter sends, Esc cancels). Either one replaces that message's answer and every
   message after it, on the page and in the saved chat, so the old branch is gone for good (no versions kept); a

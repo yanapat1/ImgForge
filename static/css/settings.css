@@ -469,6 +469,7 @@ input[type=checkbox].switch:disabled { opacity: .45; cursor: not-allowed; }
 .adm-llm textarea { width: 100%; max-width: 520px; }
 .adm-nums { display: flex; flex-wrap: wrap; gap: var(--s3); }
 .adm-nums .fld { flex: 0 1 220px; }
+.adm-llm .step-head.sub { font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); margin-top: var(--s1); }
 .adm-nums input[type=number] { height: 34px; padding: 0 var(--s3); width: 100%; background: var(--surface-2); border: 1px solid var(--border-strong);
   border-radius: var(--r); font-size: var(--fs-sm); color: var(--text); font-variant-numeric: tabular-nums; }
 .pr-sec .sec-actions input.txt { flex: 1 1 200px; width: auto; min-width: 0; }

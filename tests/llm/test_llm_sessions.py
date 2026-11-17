@@ -189,6 +189,17 @@ def test_admin_settings_change_limit_and_retention(client):
     assert lst['count'] == 3 and lst['max'] == 3 and sessions.retention_days() == 30
 
 
+def test_admin_sets_the_answer_limits(client):
+    """Steps per answer (per model size), the output a thinking answer gets, background agents: whole numbers in range."""
+    from dataviz.llm.engine import bgtasks, react
+    r = client.put('/api/admin/settings', json={'llm_steps_max': 90, 'llm_steps_medium': 70, 'llm_think_output': 32768,
+                                                'llm_agents_max': 12})
+    assert r.status_code == 200, r.text
+    assert react.step_limits() == {'max': 90, 'medium': 70, 'small': 20} and bgtasks._server_max() == 12
+    for bad in ({'llm_steps_max': 4}, {'llm_think_output': 512}, {'llm_agents_max': 0}, {'llm_steps_small': 1.5}):
+        assert client.put('/api/admin/settings', json=bad).status_code == 400
+
+
 # ---------------------------------------------------------------- routes + privacy
 def test_routes_and_other_users_get_404(client_as):
     ann, bob = client_as(make_user('ann')), client_as(make_user('bob'))

@@ -91,8 +91,21 @@ function llmSettingsHTML(st: AdminSettings): string {
     'data-act-change="adm-retention"><span class="help">30–3650; then they are purged for good</span></label>' +
     `<label class="fld">Chats per assistant<input type="number" min="1" max="200" step="1" value="${esc(st.llm_max_sessions ?? 20)}" ` +
     'data-act-change="adm-max-sessions"><span class="help">1–200 per user; the one not opened longest goes first</span></label>' +
+    '</div><div class="step-head sub">Limits of one answer</div><div class="adm-nums">' +
+    LIMITS.map(([k, label, lo, hi, def, help]) => `<label class="fld">${label}<input type="number" min="${lo}" max="${hi}" step="1" ` +
+      `value="${esc(st[k] ?? def)}" data-act-change="adm-limit" data-key="${k}"><span class="help">${help}</span></label>`).join('') +
     '</div></div>';
 }
+
+type LimitKey = 'llm_steps_max' | 'llm_steps_medium' | 'llm_steps_small' | 'llm_think_output' | 'llm_agents_max';
+// [setting, label, lowest, highest, default, help] (auth/settings.py RANGES)
+const LIMITS: ReadonlyArray<[LimitKey, string, number, number, number, string]> = [
+  ['llm_steps_max', 'Steps per answer', 5, 200, 50, 'model calls of one answer; effort high uses all of them'],
+  ['llm_steps_medium', 'Steps: 15–40B model', 5, 200, 25, 'or a model with 40k context or less (at most the line above)'],
+  ['llm_steps_small', 'Steps: ≤ 14B model', 5, 200, 20, 'small models (at most Steps per answer)'],
+  ['llm_think_output', 'Output while thinking (tokens)', 1024, 131072, 16384, 'room for thinking + the answer; never more than the model\'s context leaves'],
+  ['llm_agents_max', 'Background agents on the server', 1, 64, 8, 'running at once, all users together'],
+];
 
 function numIn(el: HTMLElement, lo: number, hi: number): number | null {
   if (!(el instanceof HTMLInputElement)) return null;
@@ -362,6 +375,12 @@ export const USERS_CHANGES: Record<string, SetChange> = {
   },
   'adm-retention': (el) => { const v = numIn(el, 30, 3650); if (v !== null) void saveSettings({ llm_chat_retention_days: v }); },
   'adm-max-sessions': (el) => { const v = numIn(el, 1, 200); if (v !== null) void saveSettings({ llm_max_sessions: v }); },
+  'adm-limit': (el) => {
+    const row = LIMITS.find(([k]) => k === el.dataset['key']);
+    if (!row) return;
+    const v = numIn(el, row[2], row[3]);
+    if (v !== null) void saveSettings({ [row[0]]: v });
+  },
   'adm-draft-tier': (el) => { if (el instanceof HTMLSelectElement) US.draft.tier_id = el.value; },
   'adm-tier': async (el) => {
     const u = el instanceof HTMLSelectElement ? userOf(el) : undefined;

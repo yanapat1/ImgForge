@@ -328,7 +328,7 @@ function renderForm(f: LlmForm): string {
       `<option value="${v}" ${v === p.box_format ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` +
     '<span class="help">how this model writes box coordinates</span></label>' +
     fld('Timeout (s)', 'llm.timeout_s', p.timeout_s, { type: 'number', extra: 'min="5" max="600" step="5"' }) +
-    fld('Max output tokens', 'llm.max_output_tokens', p.max_output_tokens, { type: 'number', extra: 'min="64" max="32768" step="64"' }) +
+    fld('Max output tokens', 'llm.max_output_tokens', p.max_output_tokens, { type: 'number', extra: 'min="64" max="131072" step="64"' }) +
     fld('Model context (tokens)', 'llm.context_window', p.context_window ?? '', { type: 'number', ph: 'detect', extra: 'min="1000" max="2000000" step="1000"', help: 'empty = ask the provider; set it when the size is not detected' }) +
     fld('Temperature', 'llm.temperature', p.temperature, { type: 'number', extra: 'min="0" max="2" step="0.1"', help: 'low = factual, repeatable answers' }) +
     '</div></details>';

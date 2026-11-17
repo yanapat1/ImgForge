@@ -6,7 +6,7 @@ the model answers, asks, gives up, or a limit is hit.
     for ev in events(run): ...                                        -> the NDJSON events (llm/engine/events.py)
 
 Limits (the product's rules, not tuning knobs):
-    MAX_STEPS   = 50   provider calls per agent run (effort / a small model lower it, never raise it)
+    MAX_STEPS   = 50   provider calls per agent run (Admin › Settings llm_steps_max; effort / a smaller model lower it)
     MAX_RETRIES = 50   retries per agent run of a transient failure (timeout, unreachable, 429, 5xx); backoff
                        min(2^n, 20) s or the provider's Retry-After. 400 / 401 / 403 fail at once.
     loop guard         the same call with the same arguments a 3rd time gets a nudge, a 5th time stops the run.
@@ -30,9 +30,13 @@ from . import compact, confirm, roles, uiwait
 
 _log = vlog.get_logger('llm')
 
-MAX_STEPS = 50
+MAX_STEPS = 50                  # the defaults of Admin › Settings llm_steps_max / _medium / _small (step_limits)
 MAX_RETRIES = 50
-OUT_RETRY_MAX = 16384                   # an answer cut off by the output limit is tried once more with up to this
+OUT_RETRY_MAX = 16384           # default of llm_think_output: the output a thinking answer (and the cut-off retry) may get
+# output tokens asked for while a local / OpenAI-style model thinks (Claude and Gemini size theirs in providers.py):
+# the provider's own Max output tokens when it is more; never past llm_think_output or what the context leaves
+THINK_OUT = {'low': 4096, 'medium': 8192, 'high': 16384}
+OUT_MARGIN = 512                # tokens kept free under the model's context window
 CUT_NUDGE = ('(system) Your last answer ran out of output tokens while you were still thinking, so nothing reached the '
              'user. Think briefly: call the next tool now, or answer in a few lines. Let tools do the arithmetic.')
 MAX_TURNS = 40
@@ -166,6 +170,43 @@ def profile_of(provider):
     return 'medium' if (size is not None and size <= MEDIUM_PARAMS) or 0 < ctx <= MEDIUM_CONTEXT else 'large'
 
 
+def _admin(key, default):
+    """A whole-number Admin › Settings value (auth/settings.py), or the default (no database / no row)."""
+    try:
+        from ...auth import settings
+        return int(settings.get(key))
+    except Exception:  # noqa: BLE001 - tests without a database, an older settings table: the built-in value
+        return default
+
+
+def step_limits():
+    """{max, medium, small}: the most steps of one answer per model profile (Admin › Settings)."""
+    top = max(1, _admin('llm_steps_max', MAX_STEPS))
+    return {'max': top, 'medium': max(1, min(top, _admin('llm_steps_medium', MEDIUM_STEPS))),
+            'small': max(1, min(top, _admin('llm_steps_small', SMALL_STEPS)))}
+
+
+def output_room(p, think, used, retry=False):
+    """max_tokens for one step of a thinking answer, or None (the provider's own setting applies). An OpenAI-style /
+    local model gets THINK_OUT[think] (retry: twice the last limit) up to Admin › Settings llm_think_output, and never
+    more than its context window leaves after `used` input tokens; Claude and Gemini add their thinking budget in
+    providers.py. Also the ceiling of the cut-off retry for every kind."""
+    base = providers.out_limit(p)
+    top = max(base, _admin('llm_think_output', OUT_RETRY_MAX))
+    if retry:
+        want = min(base * 2, top)
+    elif think in THINK_OUT and p.get('kind') not in ('anthropic', 'gemini'):
+        want = min(max(base, THINK_OUT[think]), top)
+    else:
+        return None
+    lim = providers.model_limits(p)
+    if lim.get('output'):
+        want = min(want, int(lim['output']))
+    if lim.get('context'):
+        want = min(want, int(lim['context']) - int(used or 0) - OUT_MARGIN)
+    return want if want > base else None
+
+
 def options(body, provider):
     """The run options from a chat body: mode, effort, think, web level, steps (all clamped)."""
     mode = body.get('mode') if body.get('mode') in MODES else 'ask'
@@ -177,7 +218,8 @@ def options(body, provider):
     except (TypeError, ValueError):
         web = 0
     profile = profile_of(provider)
-    steps = min(MAX_STEPS, e['steps'], {'small': SMALL_STEPS, 'medium': MEDIUM_STEPS}.get(profile, MAX_STEPS))
+    lim = step_limits()                 # effort high takes every step the admin allows
+    steps = min(lim['max'], lim['max'] if effort == 'high' else e['steps'], lim.get(profile, lim['max']))
     # sub-agents (tools/agents.py delegate): only when the user switched them on, never for a small model
     agents = body.get('agents') is True and profile != 'small'
     # background agents (engine/bgtasks.py): the route says the chat is saved (tasks belong to a chat)
@@ -466,8 +508,9 @@ def _step(run, state, step_no):
         text, thinking, calls, usage, think_t0, stop = [], [], [], {}, None, None
         streamed = False
         try:
+            out = state.get('max_out') or output_room(run.provider, run.think, state.get('used'))
             for kind, val in providers.stream_tools(run.provider, run.system, run.msgs, specs, think=run.think,
-                                                    native_web=run.native_web, max_tokens=state.get('max_out')):
+                                                    native_web=run.native_web, max_tokens=out):
                 if run.cancel.is_set():
                     break
                 if kind == 'thinking':
@@ -562,6 +605,7 @@ def events(run):
             ctx_now = est + spec_tokens
             yield {'type': 'context', 'used': ctx_now, 'limit': cap, 'exact': False}
         yield {'type': 'step', 'n': step, 'max': run.max_steps}
+        st['used'] = ctx_now                            # the room a thinking answer gets is what the context leaves
         yield from _step(run, st, step)
         ans = st['ans']
         if ans is None:                                     # stopped while waiting to retry
@@ -583,16 +627,18 @@ def events(run):
             if not text and ans.get('stop') in providers.CUT_OFF:
                 # the output limit ran out while the model was still thinking (a small limit, a long plan): once
                 # more with twice the room, the model told to act sooner; then say what to change
-                lim = st.get('max_out') or providers.out_limit(p)
-                if not st.get('max_out') and lim < OUT_RETRY_MAX:
-                    st['max_out'] = min(lim * 2, OUT_RETRY_MAX)
+                lim = st.get('max_out') or output_room(p, run.think, st.get('used')) or providers.out_limit(p)
+                more = None if st.get('max_out') else output_room({**p, 'max_output_tokens': lim}, None, st.get('used'), retry=True)
+                if more:
+                    st['max_out'] = more
                     yield {'type': 'notice', 'level': 'info',
                            'text': f'The model used its whole output limit ({lim} tokens) thinking: trying once more with {st["max_out"]}.'}
                     run.msgs.append({'role': 'user', 'parts': [{'text': CUT_NUDGE}]})
                     continue
                 yield {'type': 'error', 'detail': f'the model used its whole output limit ({lim} tokens) before it '
-                       'answered: raise "Max output tokens" of this provider in Settings › AI, choose a lower '
-                       'thinking effort, or ask for a smaller step'}
+                       'answered: raise "Max output tokens" of this provider in Settings › AI (an admin can raise '
+                       '"Output while thinking" in Admin › Settings), choose a lower thinking level, or ask for a '
+                       'smaller step'}
                 return
             if not text:
                 yield {'type': 'error', 'detail': 'the model returned an empty answer: try again or rephrase'}
@@ -830,7 +876,8 @@ def events(run):
             yield done(step)
             return
     yield {'type': 'error', 'detail': f'stopped after {run.max_steps} steps without an answer: try a narrower '
-                                      'request' + (' or a higher effort' if run.max_steps < MAX_STEPS else '')}
+                                      'request' + (' or a higher effort' if run.max_steps < step_limits()['max']
+                                                   else ' (an admin can allow more steps in Admin › Settings)')}
 
 
 def _enter_plan(run, reason):

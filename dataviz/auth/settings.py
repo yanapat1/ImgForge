@@ -7,6 +7,12 @@ Server-wide switches admins change from the page (app.app_settings, one JSONB va
     llm_org_words             []       organisation special words [{text, strength never | private}]: never searched
     llm_chat_retention_days   730      deleted ◆ chats are purged after this many days (env DATAVIZ_LLM_CHAT_RETENTION_DAYS)
     llm_max_sessions          20       saved ◆ chats per user and assistant (the one not opened longest goes first)
+    llm_steps_max             50       most steps (model calls) of one ◆ answer; effort high uses all of them
+    llm_steps_medium          25       ... with a 15-40B model or a context window of 40k or less
+    llm_steps_small           20       ... with a model of 14B or less
+    llm_think_output          16384    output tokens an answer may get while it thinks (also the cut-off retry's
+                                       ceiling); never more than the model's context leaves
+    llm_agents_max            8        background agents running at once on the whole server
 
 Reads are cached for a few seconds in-process (can_add_connections runs on every connection request);
 update() clears the cache.
@@ -22,7 +28,12 @@ from .. import db
 
 DEFAULTS = {'signup_enabled': True, 'who_can_add_connections': 'everyone', 'llm_web_max_level': 3, 'llm_org_words': [],
             'llm_chat_retention_days': int(os.environ.get('DATAVIZ_LLM_CHAT_RETENTION_DAYS') or 730),
-            'llm_max_sessions': 20}
+            'llm_max_sessions': 20, 'llm_steps_max': 50, 'llm_steps_medium': 25, 'llm_steps_small': 20,
+            'llm_think_output': 16384, 'llm_agents_max': 8}
+# whole-number settings: (lowest, highest)
+RANGES = {'llm_web_max_level': (0, 3), 'llm_chat_retention_days': (30, 3650), 'llm_max_sessions': (1, 200),
+          'llm_steps_max': (5, 200), 'llm_steps_medium': (5, 200), 'llm_steps_small': (5, 200),
+          'llm_think_output': (1024, 131072), 'llm_agents_max': (1, 64)}
 CACHE_TTL = 5.0
 
 _lock = threading.Lock()
@@ -36,8 +47,8 @@ def _validate(key, value):
     elif key == 'who_can_add_connections':
         if value not in ('everyone', 'admins'):
             raise ValueError('who_can_add_connections must be everyone or admins')
-    elif key in ('llm_web_max_level', 'llm_chat_retention_days', 'llm_max_sessions'):
-        lo, hi = {'llm_web_max_level': (0, 3), 'llm_chat_retention_days': (30, 3650), 'llm_max_sessions': (1, 200)}[key]
+    elif key in RANGES:
+        lo, hi = RANGES[key]
         if not isinstance(value, int) or isinstance(value, bool) or not lo <= value <= hi:
             raise ValueError(f'{key} must be a whole number from {lo} to {hi}')
     elif key == 'llm_org_words':

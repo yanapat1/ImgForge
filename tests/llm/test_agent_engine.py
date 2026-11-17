@@ -142,8 +142,9 @@ def test_retry_then_success_and_no_retry_for_setup_errors(monkeypatch, svc):
 
 
 def test_an_answer_cut_off_while_thinking_is_tried_once_with_twice_the_room(monkeypatch, svc):
-    """A small output limit ran out in the thinking (no text, no call, stop 'length'): once more with twice the
-    limit and a nudge to act; cut off again: an error that says what to change, not "empty answer"."""
+    """A thinking answer of an OpenAI-style model gets THINK_OUT room (low: 4096 over the card's 2048); it ran out in
+    the thinking (no text, no call, stop 'length'): once more with twice that and a nudge to act; cut off again: an
+    error that says what to change, not "empty answer"."""
     limits, outs = [], iter([[], [('text', 'Done.')]])
 
     def stream_tools(p, system, msgs, specs, think=None, native_web=False, max_tokens=None):
@@ -156,14 +157,41 @@ def test_an_answer_cut_off_while_thinking_is_tried_once_with_twice_the_room(monk
 
     monkeypatch.setattr(providers, 'stream_tools', stream_tools)
     evs = drain(start('organise the board', provider={**OPENAI, 'max_output_tokens': 2048}))
-    assert limits == [None, 4096]
-    assert any(e['type'] == 'notice' and '2048 tokens' in e['text'] for e in evs)
+    assert limits == [4096, 8192]
+    assert any(e['type'] == 'notice' and '4096 tokens' in e['text'] for e in evs)
     assert not any(e['type'] == 'error' for e in evs)
     outs = iter([[], []])
     limits.clear()
     evs = drain(start('organise the board', provider={**OPENAI, 'max_output_tokens': 2048}))
     err = next(e for e in evs if e['type'] == 'error')
-    assert limits == [None, 4096] and 'output limit (4096 tokens)' in err['detail'] and 'Max output tokens' in err['detail']
+    assert limits == [4096, 8192] and 'output limit (8192 tokens)' in err['detail'] and 'Max output tokens' in err['detail']
+
+
+def test_output_room_and_admin_limits(monkeypatch):
+    """output_room: thinking room for OpenAI-style models only, under Admin › Settings llm_think_output and what the
+    context leaves; the retry doubles under the same ceilings. step_limits: the admin's numbers, profile ones capped."""
+    admin = {}
+    monkeypatch.setattr(react, '_admin', lambda k, d: admin.get(k, d))
+    monkeypatch.setattr(providers, 'model_limits', lambda p: {'context': p.get('context_window'), 'output': None})
+    local = {'kind': 'openai_compat', 'model': 'qwen3-32b', 'max_output_tokens': 4096}
+    assert react.output_room(local, 'high', 1000) == 16384
+    assert react.output_room(local, 'low', 1000) is None, 'the card already gives 4096'
+    assert react.output_room(local, None, 1000) is None and react.output_room(local, 'off', 1000) is None
+    assert react.output_room({**local, 'context_window': 32768}, 'high', 20000) == 32768 - 20000 - react.OUT_MARGIN
+    assert react.output_room({**local, 'context_window': 32768}, 'high', 30000) is None, 'no room: the card value'
+    assert react.output_room({**local, 'kind': 'anthropic'}, 'high', 1000) is None, 'Claude sizes its own'
+    admin['llm_think_output'] = 65536
+    assert react.output_room(local, 'high', 0, retry=True) == 8192
+    assert react.output_room({**local, 'max_output_tokens': 40000}, None, 0, retry=True) == 65536
+    admin['llm_think_output'] = 8192
+    assert react.output_room(local, 'high', 0) == 8192
+    assert react.step_limits() == {'max': 50, 'medium': 25, 'small': 20}
+    admin.update(llm_steps_max=80, llm_steps_medium=60, llm_steps_small=100)
+    assert react.step_limits() == {'max': 80, 'medium': 60, 'small': 80}
+    med = {'kind': 'openai_compat', 'model': 'qwen3-32b', 'context_window': 32768}
+    assert react.options({'effort': 'high'}, med)['max_steps'] == 60
+    assert react.options({'effort': 'medium'}, med)['max_steps'] == 30
+    assert react.options({'effort': 'high'}, {'kind': 'openai', 'model': 'gpt-5'})['max_steps'] == 80
 
 
 def test_loop_guard_nudges_then_stops(monkeypatch, svc):

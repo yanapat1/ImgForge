@@ -312,7 +312,8 @@ export interface AdminTier {
 export interface TierPerm { key: string; label: string }
 /** GET / PUT api/admin/settings */
 export interface AdminSettings { signup_enabled: boolean; who_can_add_connections: 'everyone' | 'admins';
-  llm_web_max_level?: number; llm_org_words?: WebWord[]; llm_chat_retention_days?: number; llm_max_sessions?: number }
+  llm_web_max_level?: number; llm_org_words?: WebWord[]; llm_chat_retention_days?: number; llm_max_sessions?: number;
+  llm_steps_max?: number; llm_steps_medium?: number; llm_steps_small?: number; llm_think_output?: number; llm_agents_max?: number }
 /** One row of GET api/admin/audit */
 export interface AuditEvent {
   at: number | string; user: { id: string; username: string } | null; action: string; target?: string | null;
