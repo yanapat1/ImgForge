@@ -33,7 +33,7 @@ def _call(fn, *a, **k):
 def _sid(ctx):
     sid = (ctx.scope or {}).get('session')
     if not sid:
-        raise ToolError('no analysis session is open')
+        raise ToolError('no Data session is open: the user opens the Data page first (navigate screen data)')
     return str(sid)
 
 

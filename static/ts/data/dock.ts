@@ -175,7 +175,7 @@ export function mountDock(): void {
         onUpdate: () => refreshDock(),
         settings: (sec) => { void openSettings(sec === 'llm' ? 'llm' : 'prompts'); },
         emptyHTML,
-        exportName: () => 'analysis-chat',
+        exportName: () => 'data-chat',
       });
     },
     settings: () => { void openSettings('llm'); },

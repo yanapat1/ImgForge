@@ -1,6 +1,6 @@
 // The Bucket page assistant, in the right-side dock (core/dock.ts: #bk-ai is its host section). On top: what the
 // assistant sees (bucket, folder, selection) and, folded, which tools run on their own / need your OK (read from
-// the agent's catalogue); below it the shared ◆ chat (core/chat.ts, role 'data'). Shown only while an LLM is
+// the agent's catalogue); below it the shared ◆ chat (core/chat.ts, role 'bucket'). Shown only while an LLM is
 // connected and the 'bucket_data' feature is on. The scope sent with every message is the open bucket, folder and
 // selection. A change the agent ran (a change / danger tool_end, an Undo) reloads the folder view, and a format
 // change gets its toast.
@@ -66,7 +66,7 @@ function mount(el: HTMLElement): ChatHandle {
     onUpdate: () => { renderCtx(); refreshDock(); },
     settings: (sec) => { void openSettings(sec === 'llm' ? 'llm' : 'prompts').then(() => { if (sec === 'plugins') document.querySelector<HTMLElement>('[data-act="pr-tab"][data-v="plugins"]')?.click(); }); },
     emptyHTML,
-    exportName: () => `data-center-${bucketOf(D.bid)?.name ?? 'chat'}`,
+    exportName: () => `bucket-${bucketOf(D.bid)?.name ?? 'chat'}`,
   });
   el.addEventListener('click', (e) => {
     if ((e.target as HTMLElement).closest('[data-dcai="tools"]')) { A.toolsOpen = !A.toolsOpen; renderCtx(); }

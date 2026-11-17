@@ -76,7 +76,7 @@ def test_read_tool_then_answer(monkeypatch, svc):
     assert end['ok'] and end['summary'] == '→ 4 buckets' and '"cars"' in end['preview']
     assert evs[-1]['steps'] == 2 and evs[-1]['usage'] == {'in': 20, 'out': 4}
     sysp = seen[0]['system']
-    assert 'You are ◆' in sysp and 'Data assistant' in sysp and '## Mode\n**ask**' in sysp and '`list_buckets`' in sysp
+    assert 'You are ◆' in sysp and 'You are the Bucket assistant' in sysp and '## Mode\n**ask**' in sysp and '`list_buckets`' in sysp
 
 
 def test_context_events_follow_each_step_and_done_has_the_last_not_the_sum(monkeypatch, svc):

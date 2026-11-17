@@ -33,7 +33,7 @@ FEATURES = {
     'ask_selection': ('viz', 'vision'), 'label_check': ('viz', 'vision'), 'report': ('viz', None),
     'nl_filter': ('viz', None), 'auto_tag': ('viz', 'vision'),
     'prelabel': ('label', 'vision'), 'label_assist': ('label', 'vision'), 'voice': ('any', 'audio'),
-    'bucket_data': ('bucket', None),        # the Bucket page agent (llm/agent.py): its own panel, not the ◆ one
+    'bucket_data': ('bucket', None),        # the ◆ of the Bucket pages (Home, Bucket, Image, labeling) and of Data
 }
 # answered in the ◆ panel (their buttons elsewhere open it), so they also need `assistant`
 PANEL = ('dataset_qa', 'explain_eval', 'ask_selection', 'label_check', 'report', 'auto_tag')

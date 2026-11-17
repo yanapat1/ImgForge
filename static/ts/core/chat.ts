@@ -1,5 +1,6 @@
-// The shared ◆ chat of both assistants (Bucket drawer: bucket/ai.ts, role 'bucket'; visualizer tab:
-// views/assistant.ts, role 'visual'). mountChat(root, opts) draws a session header, the transcript and the composer
+// The shared ◆ chat of every page's assistant, in the right dock (core/dock.ts): Bucket (bucket/ai.ts, role 'bucket';
+// Home, Image and labeling: views/dock-page.ts), the visualizer (views/assistant.ts, role 'visual') and Data
+// (data/dock.ts, role 'data'). mountChat(root, opts) draws a session header, the transcript and the composer
 // into `root` and talks to POST api/llm/agent/<role>/chat (NDJSON, dataviz/llm/engine/events.py), /confirm, /stop,
 // /catalog and /models, and to the chat sessions (api/llm/sessions*).
 //
