@@ -37,6 +37,15 @@ OUT_RETRY_MAX = 16384           # default of llm_think_output: the output a thin
 # the provider's own Max output tokens when it is more; never past llm_think_output or what the context leaves
 THINK_OUT = {'low': 4096, 'medium': 8192, 'high': 16384}
 OUT_MARGIN = 512                # tokens kept free under the model's context window
+# at a limit of one answer (context / steps) the work so far is summarised and the answer continues (chat pref compact:
+# auto | ask | off), at most RUN_COMPACT_MAX times per answer, only after RUN_COMPACT_MIN steps of its own
+COMPACTS = ('auto', 'ask', 'off')
+RUN_COMPACT_MAX = 3
+RUN_COMPACT_MIN = 1
+RUN_COMPACT_AT = 0.9            # share of the input budget a step may reach before the work so far is compacted
+RESUME = ('(system) Your work on this request was compacted to save room ({why}). Progress so far:\n\n{summary}\n\n'
+          'Continue from "Next step". Do not repeat finished steps; call tools again only for details you need.')
+LIMIT_WORD = {'context': 'context limit', 'steps': 'step limit'}
 CUT_NUDGE = ('(system) Your last answer ran out of output tokens while you were still thinking, so nothing reached the '
              'user. Think briefly: call the next tool now, or answer in a few lines. Let tools do the arithmetic.')
 MAX_TURNS = 40
@@ -148,6 +157,9 @@ class Run:
     temperature: float = None
     confirm_timeout: int = CONFIRM_TIMEOUT      # how long a confirmation waits (a background agent: longer)
     pool: dict = None               # every tool the run may load: run.tools is a part of it for a medium model
+    compact: str = 'auto'           # at a limit: compact the work so far and go on (auto), ask first, or stop (off)
+    base_n: int = 0                 # run.msgs before this answer's own steps (history + the user's message)
+    todo: list = None               # the answer's last checklist (todo), for its progress summary
 
 
 # ---------------------------------------------------------------- options
@@ -224,7 +236,8 @@ def options(body, provider):
     agents = body.get('agents') is True and profile != 'small'
     # background agents (engine/bgtasks.py): the route says the chat is saved (tasks belong to a chat)
     return {'mode': mode, 'effort': effort, 'think': think, 'web': web, 'profile': profile, 'max_steps': steps,
-            'agents': agents, 'tasks': agents and body.get('tasks') is True}
+            'agents': agents, 'tasks': agents and body.get('tasks') is True,
+            'compact': body.get('compact') if body.get('compact') in COMPACTS else 'auto'}
 
 
 SUMMARY_HEAD = '## Earlier in this chat (summary)'
@@ -358,7 +371,9 @@ def prepare(user, role, provider, msgs, scope, opts, *, state=None, app=None, us
     run = Run(run_id=run_id, user=user, role=role, provider=p, system=system, msgs=list(fitted), tools=tset, ctx=ctx,
                mode=opts['mode'], effort=opts['effort'], think=opts['think'], web=opts['web'],
                native_web=_native_ok(p, opts['web']), profile=opts['profile'], max_steps=opts['max_steps'], limit=lim, est=est,
-               raw_est=raw_est, pool=pool)
+               raw_est=raw_est, pool=pool, compact=opts.get('compact', 'auto'))
+    if worker and run.compact == 'ask':         # a background agent has nobody to ask: it compacts by itself
+        run.compact = 'auto'
     ctx.cancel = run.cancel
     return run
 
@@ -590,7 +605,28 @@ def events(run):
         return {'type': 'done', 'usage': dict(usage), 'ms': round((time.perf_counter() - t0) * 1000), 'steps': steps,
                 'ctx': ctx_now, 'limit': cap}
 
-    for step in range(1, run.max_steps + 1):
+    run.base_n = len(run.msgs)                  # history + the user's message: never folded by _compact_run
+    step, max_now = 0, run.max_steps
+    nc, last_c = 0, 0                           # compactions of this answer, the step of the last one
+
+    def can_compact(next_step):
+        return (run.compact != 'off' and nc < RUN_COMPACT_MAX and next_step - 1 - last_c >= RUN_COMPACT_MIN
+                and len(run.msgs) > run.base_n)
+
+    while True:
+        if step >= max_now:                     # the step limit: compact the work so far and go on, or stop
+            if not can_compact(step + 1):
+                break
+            got = yield from _compact_run(run, 'steps', step - last_c, ctx_now, cap, nc + 1)
+            if got == 'declined':
+                yield done(step)
+                return
+            if got != 'done':
+                break
+            nc, last_c, max_now = nc + 1, step, max_now + run.max_steps
+            repeats.clear()
+            continue
+        step += 1
         if run.cancel.is_set():
             yield {'type': 'notice', 'level': 'info', 'text': 'Stopped.'}
             yield done(step - 1)
@@ -599,12 +635,24 @@ def events(run):
             if spec_tokens is None or spec_n != len(run.tools):       # a tool group was loaded
                 spec_tokens, spec_n = budget.text_tokens(json.dumps([t.spec() for t in run.tools.values()])), len(run.tools)
             ok, est = compact.fit(kind, run.system, run.msgs, cap - spec_tokens)
+            # the context limit: near it (or over it after stubbing old results) the work so far is compacted
+            if (not ok or est + spec_tokens > RUN_COMPACT_AT * cap) and can_compact(step):
+                got = yield from _compact_run(run, 'context', step - 1 - last_c, est + spec_tokens, cap, nc + 1)
+                if got == 'declined':
+                    yield done(step - 1)
+                    return
+                if got == 'done':
+                    nc, last_c = nc + 1, step - 1
+                    repeats.clear()
+                    ok, est = compact.fit(kind, run.system, run.msgs, cap - spec_tokens)
             if not ok:
-                yield {'type': 'error', 'detail': 'the tool results grew over the token budget: ask for less at once'}
+                yield {'type': 'error', 'detail': 'the tool results grew over the token budget: ask for less at once'
+                       + ('' if run.compact != 'off' else ' (or turn on "compact and continue" in Settings › AI '
+                                                          'assistant: /autocompact auto)')}
                 return
             ctx_now = est + spec_tokens
             yield {'type': 'context', 'used': ctx_now, 'limit': cap, 'exact': False}
-        yield {'type': 'step', 'n': step, 'max': run.max_steps}
+        yield {'type': 'step', 'n': step, 'max': max_now}
         st['used'] = ctx_now                            # the room a thinking answer gets is what the context leaves
         yield from _step(run, st, step)
         ans = st['ans']
@@ -729,6 +777,7 @@ def events(run):
                     results.append({**res, 'content': err, 'is_error': True})
                 else:
                     yield {'type': 'todo', 'items': clean['items'][:30]}
+                    run.todo = clean['items'][:30]
                     results.append({**res, 'content': 'checklist shown'})
                 continue
             if t.control:
@@ -875,9 +924,76 @@ def events(run):
         if navigating:                  # the page is leaving: the chat continues there (core/dock.ts hand-off)
             yield done(step)
             return
-    yield {'type': 'error', 'detail': f'stopped after {run.max_steps} steps without an answer: try a narrower '
-                                      'request' + (' or a higher effort' if run.max_steps < step_limits()['max']
-                                                   else ' (an admin can allow more steps in Admin › Settings)')}
+    yield {'type': 'error', 'detail': f'stopped after {step} steps without an answer'
+           + (f' ({nc} compaction{"s" if nc != 1 else ""} of the work so far)' if nc else '') + ': try a narrower '
+           'request' + (' or a higher effort' if run.max_steps < step_limits()['max']
+                        else ' (an admin can allow more steps in Admin › Settings)')
+           + (' or turn on "compact and continue" (/autocompact auto)' if run.compact == 'off' else '')}
+
+
+def _progress_text(run):
+    """This answer's own steps (after run.base_n) as plain lines for its progress summary, plus its checklist."""
+    from .summarize import TOOL_ARGS_MAX, TOOL_RES_MAX, _cut
+    names, lines = {}, []
+    for m in run.msgs[run.base_n:]:
+        for x in m.get('parts') or []:
+            if 'text' in x and str(x['text']).strip():
+                who = 'assistant' if m.get('role') == 'assistant' else 'note'
+                lines.append(f'- {who}: {_cut(str(x["text"]).strip(), 1500)}')
+            elif 'tool_call' in x:
+                c = x['tool_call']
+                names[c.get('id')] = c.get('name')
+                lines.append(f'- call {c.get("name")}({_cut(c.get("args") or {}, TOOL_ARGS_MAX)})')
+            elif 'tool_result' in x:
+                r = x['tool_result']
+                bad = 'FAILED' if r.get('is_error') else 'ok'
+                lines.append(f'  → {names.get(r.get("id"), r.get("name") or "tool")} {bad}: '
+                             f'{_cut(str(r.get("content") or ""), TOOL_RES_MAX)}')
+    if run.todo:
+        lines.append('Checklist: ' + '; '.join(f'{i.get("text")} [{i.get("state")}]' for i in run.todo))
+    return '\n'.join(lines)
+
+
+def _compact_run(run, why, steps, used, cap, n):
+    """At a limit of one answer (why: context | steps): fold this answer's steps into one progress summary and go
+    on. compact 'ask' asks first (the confirm card, POST /api/llm/agent/confirm a1). Yields run_compact events;
+    returns 'done', 'failed' (the caller stops as before) or 'declined' (the user stopped it: the turn ends)."""
+    from . import summarize
+    ev = {'type': 'run_compact', 'n': n, 'reason': why, 'used': int(used or 0), 'limit': int(cap), 'steps': int(steps)}
+    if run.compact == 'ask':
+        cid = confirm.open_(run.user, run.run_id, [{'id': 'a1', 'tool': 'compact_run', 'args': {'reason': why},
+                                                    'summary': f'Compact the work so far and continue ({LIMIT_WORD[why]})',
+                                                    'risk': 'control'}])
+        yield {**ev, 'phase': 'ask', 'confirm_id': cid, 'timeout_s': run.confirm_timeout}
+        waited, decision = 0, 'pending'
+        while decision == 'pending' and waited < run.confirm_timeout:
+            decision = confirm.wait(cid, run.cancel, PING_S)
+            waited += PING_S
+            if decision == 'pending':
+                yield {'type': 'ping'}
+        if decision == 'pending':
+            confirm.cancel_run(cid, 'timeout')
+        if not (isinstance(decision, dict) and 'a1' in decision.get('approve', ())):
+            yield {**ev, 'phase': 'declined', 'confirm_id': cid}
+            yield {'type': 'notice', 'level': 'info', 'text': f'Stopped at the {LIMIT_WORD[why]}: nothing more ran.'}
+            return 'declined'
+    yield {**ev, 'phase': 'start'}
+    t0 = time.perf_counter()
+    text_ = _progress_text(run)
+    before = budget.text_tokens(text_)
+    try:
+        cap_s = summarize.summary_cap(run.limit)
+        system = prompting.template('run_compact', words=str(int(cap_s * 0.7)))
+        summary = summarize._call(run.provider, system, f'WORK ON THE CURRENT REQUEST:\n{text_}\n\nWrite the progress summary.', cap_s)
+    except Exception as e:  # noqa: BLE001 - the answer stops with the limit's own error instead
+        _log.warning(f'run compaction failed: {vlog.esc(_error_text(e))}')
+        yield {**ev, 'phase': 'failed', 'detail': _error_text(e)[:300]}
+        return 'failed'
+    run.msgs = run.msgs[:run.base_n] + [{'role': 'user', 'parts': [{'text': RESUME.format(
+        why=LIMIT_WORD[why], summary=summary.strip())}]}]
+    yield {**ev, 'phase': 'done', 'before': before, 'after': budget.text_tokens(summary),
+           'ms': round((time.perf_counter() - t0) * 1000), 'summary': summary.strip()[:4000]}
+    return 'done'
 
 
 def _enter_plan(run, reason):

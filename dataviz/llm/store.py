@@ -47,7 +47,8 @@ PROFILES = ('auto', 'small', 'medium', 'large')     # agent profile (engine/reac
 ROLES = ('bucket', 'visual', 'data')      # the ◆ agents (llm/engine/roles.py)
 CHAT_APP = 'app'                          # config.chat key of the one chat's settings (every page reads it)
 CHAT_KEYS = {'mode': ('ask', 'auto', 'plan'), 'effort': ('low', 'medium', 'high'),
-             'think': ('off', 'low', 'medium', 'high')}
+             'think': ('off', 'low', 'medium', 'high'),
+             'compact': ('auto', 'ask', 'off')}       # at a limit of one answer: compact and go on, ask first, stop
 WEB_ENGINES = ('auto', 'searxng', 'duckduckgo', 'brave', 'tavily', 'serper', 'google_cse')
 _RETEST = ('kind', 'base_url', 'model', 'api_key')      # changing one of these means "not verified" again
 DEFAULT_BOX = {'gemini': 'norm1000_yxyx'}               # everyone else: norm1000_xyxy

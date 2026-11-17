@@ -14,7 +14,7 @@
 // - Classes are scoped under `.chat` (static/css/chat.css). The answer container also carries `ai-msg bot`.
 
 import type {
-  AiTurn, Block, ChatCatalog, ChatEffort, ChatEvent, ChatMode, ChatPrefs, ChatRole, ChatSession, SessionDetail, SessionList, SessionRef, ThinkLevel, ToolItem, UiAction, UiResult, WebLevel,
+  AiTurn, Block, ChatCatalog, ChatEffort, ChatEvent, ChatMode, ChatPrefs, ChatRole, CompactPref, ChatSession, SessionDetail, SessionList, SessionRef, ThinkLevel, ToolItem, UiAction, UiResult, WebLevel,
 } from '../types-chat.js';
 import { errText, getJSON, isStatus, postJSON, sendJSON } from './api.js';
 import { copyText, esc, icon, morphHTML } from './dom.js';
@@ -92,9 +92,14 @@ const WEB_HINT: Record<WebLevel, string> = {
   technical: 'web: technical terms (class names, formats) may be searched',
   full: 'web: queries may contain names from your data',
 };
+const COMPACT_HINT: Record<CompactPref, string> = {
+  auto: 'at a limit: the work so far is compacted and the answer goes on',
+  ask: 'at a limit: you choose (compact and continue, stop, or regenerate)',
+  off: 'at a limit: the answer stops',
+};
 const DEFAULT_COMMANDS = [
   ['model', '', 'pick the provider and model of this chat'], ['mode', 'ask|auto|plan', 'how changes are confirmed (Shift+Tab)'],
-  ['effort', 'low|medium|high', 'how hard it works'], ['think', 'off|low|medium|high', 'thinking only'],
+  ['effort', 'low|medium|high', 'how hard it works'], ['think', 'off|low|medium|high', 'thinking only'], ['autocompact', 'auto|ask|off', 'at a limit: compact and go on, ask, or stop'],
   ['web', 'off|public|technical|full', 'web search level'], ['skills', '', 'list the skills'], ['skill', '<name>', 'use a skill for the next message'],
   ['sessions', '', 'open the chat history'], ['new', '', 'start a new chat'], ['clear', '', 'start a new chat'],
   ['resume', '<search>', 'open an earlier chat'], ['rename', '<title>', 'rename this chat'], ['delete', '', 'delete this chat'],
@@ -210,6 +215,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     willRemove: null as SessionRef | null,
     blocked: null as string | null,          // "20 pinned chats…" shown in place of the new chat
     queued: [] as string[],                  // messages typed while an answer runs: sent when it ends
+    regenAfter: null as number | null,
+    compactSet: false,                       // /autocompact was used on this page: send it (Settings may have changed it elsewhere)       // Regenerate on a limit card: answer that message again once the run ends
     frame: 0,
     ticker: 0,
     hintTimer: 0,
@@ -328,7 +335,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   // said between tool calls) as one row of the same shape; its header says what the model is doing right now.
   type Step = { b: Block; bi: number };
   const isStep = (b: Block): boolean => b.k === 'think' || (b.k === 'tools' && b.read) || b.k === 'search' || b.k === 'skill' || b.k === 'agent' ||
-    b.k === 'retry' || (b.k === 'notice' && b.level === 'info');
+    b.k === 'retry' || b.k === 'rcompact' || (b.k === 'notice' && b.level === 'info');
   const shortModel = (m: string | null | undefined): string => (m ? m.split('/').pop() || m : 'the model');
   const firstLine = (text: string): string => text.trim().split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? '';
 
@@ -365,16 +372,32 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         () => `<div class="ct-act-text">${esc(b.task)}</div>${b.tools.length ? `<div class="ct-dim">Used ${b.tools.map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : ''}`, `k-agent${b.ok ? '' : ' bad'}`);
       case 'retry': return actRow(key, icon('refresh'), `Retry ${b.attempt}/${b.max}`, esc(firstLine(b.reason)), b.waitS ? `${esc(String(b.waitS))} s` : '',
         () => `<div class="ct-act-text">${esc(b.reason)}</div>`, 'k-retry warn');
+      case 'rcompact': {
+        const live = b.phase === 'start' && t.status === 'streaming';
+        const label = { ask: 'Limit reached', start: 'Compacting the work so far…', done: 'Compacted', failed: 'Compaction failed', declined: 'Stopped at the limit' }[b.phase];
+        const tail = b.phase === 'done' ? ` · ${plural(b.steps, 'step')} → ${fmtK(b.after)} tokens · continuing`
+          : b.phase === 'ask' ? ' · waiting for you' : b.phase === 'failed' ? ` · ${b.detail}` : '';
+        return actRow(key, live ? '<span class="ct-spin"></span>' : icon(b.phase === 'failed' ? 'alert' : 'layers'), label, esc(rcWhy(b) + tail),
+          b.phase === 'done' ? esc(fmtMs(b.ms)) : '', b.summary ? () => `<div class="ct-md">${md(b.summary)}</div>` : null,
+          `k-rcompact ${b.phase}${live ? ' live' : ''}`);
+      }
       case 'notice': return actRow(key, icon('circle'), 'Note', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-note');
       case 'text': return actRow(key, icon('text'), 'Said', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-said');
       default: return '';
     }
   }
 
+  /** "Context limit reached (31.2k of 32k tokens)" / "Step limit reached (25 steps)" */
+  function rcWhy(b: Extract<Block, { k: 'rcompact' }>): string {
+    return b.reason === 'steps' ? `Step limit reached (${plural(b.steps, 'step')})` : `Context limit reached (${fmtK(b.used)} of ${fmtK(b.limit)} tokens)`;
+  }
+
   /** what the model is doing right now (the live header) */
   function nowDoing(t: AiTurn): string {
     if (t.blocks.some((x) => x.k === 'confirm' && (x.state === 'pending' || x.state === 'sent'))) return 'Waiting for your OK';
     const lb = t.blocks[t.blocks.length - 1];
+    if (lb?.k === 'rcompact' && lb.phase === 'start') return '<span class="ct-rc-now">Compacting the work so far…</span>';
+    if (lb?.k === 'rcompact' && lb.phase === 'ask') return '<span class="ct-rc-now">Limit reached: waiting for you</span>';
     if (lb?.k === 'think' && lb.ms === null) return 'Thinking…';
     for (let i = t.blocks.length - 1; i >= 0; i--) {
       const x = t.blocks[i];
@@ -423,11 +446,13 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     const bad = steps.reduce((n, s) => n + (s.b.k === 'tools' ? s.b.items.filter((x) => x.ok === false).length : 0), 0);
     const counts = [thinkMs ? `thought ${fmtMs(thinkMs)}` : '', nTools ? plural(nTools, 'tool') : '', nSearch ? `${nSearch} search${nSearch === 1 ? '' : 'es'}` : '']
       .filter(Boolean).join(' · ');
+    const nRc = steps.filter((s) => s.b.k === 'rcompact' && s.b.phase === 'done').length;
     const head = live
       ? `<span class="ct-spin"></span><span class="ct-act-now">${nowDoing(t)}</span><span class="grow"></span>` +
         `<span class="ct-dim num">${t.step ? `step ${t.step.n}/${t.step.max || '?'} · ` : ''}</span>${since(t.t0)}`
       : `${icon(t.status === 'error' ? 'alert' : 'sparkle')}<span class="ct-act-now">${t.status === 'stopped' ? 'Stopped' : t.status === 'error' ? 'Failed' : 'Worked'}` +
-        `${t.ms != null ? ` ${esc(fmtMs(t.ms))}` : ''}</span><span class="ct-dim">${esc(counts)}</span>${bad ? `<span class="ct-badc">${bad} failed</span>` : ''}<span class="grow"></span>`;
+        `${t.ms != null ? ` ${esc(fmtMs(t.ms))}` : ''}</span><span class="ct-dim">${esc(counts)}</span>${bad ? `<span class="ct-badc">${bad} failed</span>` : ''}` +
+        `${nRc ? `<span class="ct-rc-badge" title="This answer reached a limit and compacted its work to go on">${icon('layers')}compacted ${nRc}×</span>` : ''}<span class="grow"></span>`;
     let body = '';
     if (open) {
       const m = t.meta;
@@ -515,7 +540,25 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'retry': return `<div class="ct-retry">${icon('refresh')}<span class="num">retry ${b.attempt}/${b.max}</span><span class="ct-rr">${esc(b.reason.slice(0, 140))}</span>${b.waitS ? `<span class="num">${esc(String(b.waitS))} s</span>` : ''}</div>`;
       case 'notice': return `<div class="ct-notice ${esc(b.level)}">${icon(b.level === 'warn' || b.level === 'error' ? 'alert' : 'circle')}<span>${md(b.text)}</span></div>`;
       case 'compact': return compactHTML(b, keyOf(ti, bi));
+      case 'rcompact': return rcAskHTML(b, t, ti, bi);
     }
+  }
+
+  /** the card of compact "ask": the answer reached a limit; continue (compact), stop, or regenerate the answer */
+  function rcAskHTML(b: Extract<Block, { k: 'rcompact' }>, t: AiTurn, ti: number, bi: number): string {
+    if (b.phase !== 'ask' && b.phase !== 'declined') return '';               // the other phases are activity rows
+    const open = b.phase === 'ask' && !b.sent && t.status === 'streaming';
+    const at = `data-ti="${ti}" data-bi="${bi}"`;
+    if (!open) {
+      return `<div class="ct-rc folded">${icon('layers')}<span>${esc(rcWhy(b))}</span><span class="ct-dim">${
+        b.phase === 'declined' ? 'stopped there' : b.sent ? 'answer sent…' : 'no answer'}</span></div>`;
+    }
+    return `<div class="ct-rc" role="group" aria-label="Limit reached">` +
+      `<div class="ct-rc-h">${icon('layers')}<b>${esc(rcWhy(b))}</b></div>` +
+      `<p>This answer used ${plural(b.steps, 'step')} so far. Compact them into a short summary and go on, stop here, or answer again from the start.</p>` +
+      `<div class="ct-rc-f"><button type="button" class="ghost" data-ca="rc-regen" ${at}>${icon('refresh')}Regenerate</button>` +
+      `<button type="button" data-ca="rc-stop" ${at}>Stop</button>` +
+      `<button type="button" class="primary" data-ca="rc-go" ${at}>${icon('layers')}Compact and continue</button></div></div>`;
   }
 
   /** the run card of a page action (id, or id.rN of a retry) */
@@ -763,7 +806,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     clearTimeout(C.cfgTimer);
     C.cfgTimer = window.setTimeout(() => {
       const p = C.prefs;
-      const chat = { provider_id: p.provider_id ?? null, model: p.model ?? null, mode: mode(), effort: effort(), think: think(), web: web() };
+      const chat = { provider_id: p.provider_id ?? null, model: p.model ?? null, mode: mode(), effort: effort(), think: think(), web: web(), compact: p.compact ?? 'auto' };
       // one chat on every page: one model and mode
       sendJSON('PUT', 'api/llm/config', { chat: { app: chat } }).catch(() => { /* not saved: the chips still apply to this page */ });
     }, CONFIG_DEBOUNCE);
@@ -789,6 +832,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       if (isEffort(saved['effort'])) p.effort = saved['effort'];
       if (isThink(saved['think'])) p.think = saved['think'];
       if (isWeb(saved['web'])) p.web = saved['web'];
+      if (saved['compact'] === 'auto' || saved['compact'] === 'ask' || saved['compact'] === 'off') p.compact = saved['compact'];
       if (typeof saved['provider_id'] === 'string' && cat.providers.some((x) => x.id === saved['provider_id'] && x.connected)) {
         p.provider_id = saved['provider_id'];
         if (typeof saved['model'] === 'string' && saved['model']) p.model = saved['model'];
@@ -1099,6 +1143,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (C.sid) body['session_id'] = C.sid;
     if (C.sid && o.fromSeq != null) body['from_seq'] = o.fromSeq;     // regenerate / edit: the chat goes on from there
     if (think()) body['think'] = think();
+    if (C.compactSet && C.prefs.compact) body['compact'] = C.prefs.compact;     // /autocompact here (else the saved one)
     if (C.prefs.provider_id) body['model'] = { provider_id: C.prefs.provider_id, model: C.prefs.model ?? '' };
     if (C.forced.length) body['skills'] = C.forced;
     if (opts.onUiAction) body['ui_ack'] = true;     // the page reports how its page actions ended
@@ -1137,8 +1182,11 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       const t = aiAt(idx);
       if (t) opts.onDone?.(t);
       opts.onUpdate?.();
-      const next = C.queued.shift();
-      if (next) window.setTimeout(() => { void send(next); }, 0);
+      const again = C.regenAfter;
+      C.regenAfter = null;
+      const next = again == null ? C.queued.shift() : undefined;
+      if (again != null) window.setTimeout(() => { retry(again); }, 0);
+      else if (next) window.setTimeout(() => { void send(next); }, 0);
     }
   }
 
@@ -1238,6 +1286,12 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'mode': setMode(isMode(a) ? a : nextMode(mode())); break;
       case 'effort': setEffort(isEffort(a) ? a : cycle(EFFORTS, effort())); break;
       case 'think': setThink(a === 'on' ? 'medium' : a === 'auto' ? null : isThink(a) ? a : cycle(THINKS, think())); break;
+      case 'autocompact': {
+        const v = a === 'on' ? 'auto' : a;
+        if (v === 'auto' || v === 'ask' || v === 'off') { C.prefs.compact = v; C.compactSet = true; flash(COMPACT_HINT[v]); remember(); }
+        else note(`At a limit of one answer: **${C.prefs.compact ?? 'auto'}**. \`/autocompact auto\` compacts the work so far and goes on, \`ask\` asks first, \`off\` stops.`);
+        break;
+      }
       case 'web': {
         const lvl = recOf(C.cat?.web)['level'];
         setWeb(a === 'on' ? (isWeb(lvl) && lvl !== 'off' ? lvl : 'public') : isWeb(a) ? a : cycle(WEBS, web()));
@@ -1399,6 +1453,21 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   });
 
   // ---------------------------------------------------------------- actions (one delegated listener)
+  /** the compact "ask" card: approve (compact and go on) or reject (stop; regen: then answer the message again) */
+  async function rcDecide(ti: number, bi: number, go: boolean, regen = false): Promise<void> {
+    const t = aiAt(ti), b = t?.blocks[bi];
+    if (!t || b?.k !== 'rcompact' || b.phase !== 'ask' || b.sent || !b.cid) return;
+    try {
+      await postJSON('api/llm/agent/confirm', { confirm_id: b.cid, approve: go ? ['a1'] : [], reject: go ? [] : ['a1'] });
+      const cur = aiAt(ti);
+      if (cur) C.turns[ti] = reduce(cur, { type: 'x_rcompact_sent', n: b.n });
+      if (regen) C.regenAfter = ti;
+      renderTurn(ti);
+    } catch (e) {
+      toast(`Could not send your answer: ${errText(e)}`, 'err');
+    }
+  }
+
   async function decide(ti: number, bi: number, approve: boolean): Promise<void> {
     const t = aiAt(ti), b = t?.blocks[bi];
     if (!t || b?.k !== 'confirm' || b.state !== 'pending') return;
@@ -1541,6 +1610,9 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'say': void send(el.dataset['text'] ?? '', { raw: true }); break;
       case 'focus': ta.focus(); break;
       case 'approve': void decide(ti, bi, true); break;
+      case 'rc-go': void rcDecide(ti, bi, true); break;
+      case 'rc-stop': void rcDecide(ti, bi, false); break;
+      case 'rc-regen': void rcDecide(ti, bi, false, true); break;
       case 'reject': void decide(ti, bi, false); break;
       case 'ask-again': {
         const b = aiAt(ti)?.blocks[bi];

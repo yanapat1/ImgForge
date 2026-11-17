@@ -511,6 +511,10 @@ export function dockEvent(ev: ChatEvent): void {
       }).filter((s) => s.text).slice(0, 30);
       break;
     case 'ui_action': drive(String(ev['label'] || ev['action'] || '')); break;
+    case 'run_compact':                         // a limit of the answer: said on the page edge too, it is easy to miss
+      if (ev['phase'] === 'start') drive('Compacting the work so far');
+      else if (ev['phase'] === 'ask') drive('Limit reached: waiting for you');
+      break;
     case 'tool_start':
       if (ev['name'] === 'delegate') drive('Sub-agents are looking it up');
       else if (ev['name'] === 'consult') {

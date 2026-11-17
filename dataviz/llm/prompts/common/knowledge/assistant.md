@@ -54,6 +54,13 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   high 16k, up to the admin's "Output while thinking" and what the context window leaves); a cut-off answer is
   tried once with twice the room. Still cut off: raise the provider's **Max output tokens** (Settings › AI, up to
   131072), or the admin raises "Output while thinking"; a lower think level also helps.
+- **At a limit of one answer** (its context is nearly full, or it used all its steps) the assistant **compacts the work
+  so far**: this answer's steps become one short progress summary (goal, done with exact values, found, still to
+  do, next step) and it goes on from there with a new batch of steps. It shows as a highlighted (amber) row
+  "Compacted" in the answer's activity list, with the summary under it, and "compacted 1×" on the folded list; at
+  most 3 times per answer. The user chooses in Settings › AI assistant › "When an answer reaches a limit", or with
+  `/autocompact auto|ask|off`: auto (the default) goes on by itself, ask shows a card with **Compact and
+  continue**, **Stop** and **Regenerate**, off stops the answer with the old message.
 - **Regenerate / Edit**: every answer has **Regenerate** (answer the same message again) and every sent message
   has **Edit** on hover (change it, Enter sends, Esc cancels). Either one replaces that message's answer and every
   message after it, on the page and in the saved chat, so the old branch is gone for good (no versions kept); a

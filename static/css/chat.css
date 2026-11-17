@@ -118,6 +118,24 @@
 .ct-act-row.k-think .ct-act-ic, .ct-act-row.k-skill .ct-act-ic, .ct-act-row.k-sent .ct-act-ic { color: var(--gem-2); }
 .ct-act-row.k-search .ct-act-ic { color: var(--accent); }
 .ct-act-row.warn .ct-act-ic { color: var(--warn); }
+/* a limit of this answer: the work so far was compacted (engine run_compact): a highlighted band in the list */
+.ct-act-row.k-rcompact { margin: 3px 0; border-radius: var(--r-sm); background: var(--warn-soft); box-shadow: inset 2px 0 0 var(--warn); }
+.ct-act-row.k-rcompact .ct-act-ic { background: var(--warn-soft); color: var(--warn); }
+.ct-act-row.k-rcompact .ct-act-l { color: var(--warn-text); }
+.ct-act-row.k-rcompact .ct-act-d { color: var(--text-muted); }
+.ct-act-row.k-rcompact.failed .ct-act-ic, .ct-act-row.k-rcompact.failed .ct-act-l { color: var(--danger-text); }
+.ct-rc-now { color: var(--warn-text); -webkit-text-fill-color: var(--warn-text); font-weight: 600; }
+.ct-rc-badge { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: var(--r-sm); background: var(--warn-soft);
+  color: var(--warn-text); font-size: var(--fs-2xs); font-weight: 600; }
+.ct-rc-badge .ico { width: 12px; height: 12px; }
+/* compact "ask": the card that asks continue / stop / regenerate */
+.ct-rc { border: 1px solid var(--warn); border-radius: var(--r-lg); background: var(--warn-soft); padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
+.ct-rc-h { display: flex; align-items: center; gap: var(--s2); color: var(--warn-text); }
+.ct-rc-h .ico { color: var(--warn); }
+.ct-rc p { margin: 0; font-size: var(--fs-sm); color: var(--text); }
+.ct-rc-f { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); }
+.ct-rc.folded { flex-direction: row; align-items: center; padding: 4px var(--s3); font-size: var(--fs-xs); color: var(--warn-text); }
+.ct-rc.folded .ico { width: 13px; height: 13px; color: var(--warn); }
 .ct-act-l { flex: none; color: var(--text); font-weight: 550; white-space: nowrap; }
 .ct-act-row.live .ct-act-l { animation: pulse 1.6s ease-in-out infinite; }
 .ct-act-d { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text-faint); }

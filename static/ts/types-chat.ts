@@ -24,7 +24,10 @@ export interface ChatPrefs {
   effort?: ChatEffort;
   think?: ThinkLevel | null;
   web?: WebLevel;
+  /** at a limit of one answer: compact the work so far and go on (auto), ask first, or stop (off) */
+  compact?: CompactPref;
 }
+export type CompactPref = 'auto' | 'ask' | 'off';
 export interface ChatCatalog {
   role: string;
   title: string;
@@ -109,7 +112,11 @@ export type Block =
   | ({ k: 'ui' } & UiAction)
   | { k: 'retry'; attempt: number; max: number; reason: string; waitS: number; t0: number }
   | { k: 'notice'; level: string; text: string }
-  | { k: 'compact'; state: 'start' | 'done' | 'failed'; auto: boolean; summary: string; before: number; after: number; turns: number; covered: number | null };
+  | { k: 'compact'; state: 'start' | 'done' | 'failed'; auto: boolean; summary: string; before: number; after: number; turns: number; covered: number | null }
+  /** this answer hit a limit (context / steps): its own steps were folded into a progress summary (engine run_compact) */
+  | { k: 'rcompact'; n: number; phase: RunCompactPhase; reason: 'context' | 'steps'; used: number; limit: number; steps: number;
+      before: number; after: number; ms: number | null; summary: string; detail: string; cid: string | null; sent: boolean };
+export type RunCompactPhase = 'ask' | 'start' | 'done' | 'failed' | 'declined';
 
 export interface TurnMeta {
   runId: string | null; model: string | null; provider: string | null; mode: string | null; effort: string | null; maxSteps: number | null;

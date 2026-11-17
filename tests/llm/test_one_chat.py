@@ -203,6 +203,22 @@ def test_the_chat_keeps_its_model_and_mode_on_every_page(client, monkeypatch, sv
     assert meta['mode'] == 'auto' and meta['effort'] == 'high'
 
 
+
+def test_the_limit_choice_is_a_chat_setting(client, monkeypatch, svc):  # noqa: F811
+    """compact (auto | ask | off) is saved with the chat's settings; the message's own value wins over it."""
+    _connect(client, ['bucket_data'])
+    client.put('/api/llm/config', json={'chat': {'app': {'compact': 'ask'}}})
+    got = []
+    real = react.options
+    monkeypatch.setattr(react, 'options', lambda body, p: got.append(real(body, p)) or got[-1])
+    script(monkeypatch, ('Hello.', []), ('Hi.', []))
+    client.put('/api/llm/config', json={'chat': {'app': {'compact': 'off'}}})
+    assert client.get('/api/llm/agent/bucket/catalog').json()['chat']['compact'] == 'off'
+    _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'scope': {'page': 'home'}}))
+    _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'compact': 'ask', 'scope': {'page': 'home'}}))
+    assert [o['compact'] for o in got] == ['off', 'ask']
+
+
 def test_a_page_drawn_turn_is_saved_as_a_note(client, monkeypatch, svc):  # noqa: F811
     """A label check / auto-tag the page draws itself is kept in the chat as two plain messages (note route)."""
     _connect(client, ['bucket_data'])

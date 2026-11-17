@@ -185,6 +185,26 @@ assert.equal(dateGroup(null, now), 'Older');
 assert.equal(cycle(THINKS, 'high'), null, 'after high comes auto');
 assert.equal(cycle(THINKS, null), 'off');
 assert.equal(cycle(['a', 'b'], 'b'), 'a');
+// a limit of the answer: one rcompact block per compaction, its phase replaced in place; the ask card's answer
+let rc = run([
+  { type: 'meta', run_id: 'r9', model: 'qwen', max_steps: 25 },
+  { type: 'run_compact', n: 1, phase: 'ask', reason: 'context', used: 29000, limit: 32000, steps: 14, confirm_id: 'c9' },
+]);
+assert.equal(rc.blocks.filter((x) => x.k === 'rcompact').length, 1);
+rc = reduce(freeze(rc), { type: 'x_rcompact_sent', n: 1 });
+assert.ok(rc.blocks.find((x) => x.k === 'rcompact').sent, 'the card folds once answered');
+rc = run([{ type: 'run_compact', n: 1, phase: 'start', reason: 'context', used: 29000, limit: 32000, steps: 14 },
+          { type: 'run_compact', n: 1, phase: 'done', reason: 'context', used: 29000, limit: 32000, steps: 14, before: 9000, after: 700, ms: 2100, summary: '## Goal' }], rc);
+const rcs = rc.blocks.filter((x) => x.k === 'rcompact');
+assert.equal(rcs.length, 1);
+assert.equal(rcs[0].phase, 'done');
+assert.equal(rcs[0].cid, 'c9', 'the confirm id stays on the block');
+assert.equal(rcs[0].after, 700);
+rc = run([{ type: 'run_compact', n: 2, phase: 'done', reason: 'steps', steps: 25, after: 500 }], rc);
+assert.deepEqual(rc.blocks.filter((x) => x.k === 'rcompact').map((x) => [x.n, x.reason]), [[1, 'context'], [2, 'steps']]);
+// a saved trace keeps the last phase of each compaction
+const rcSaved = run(expandTrace([{ type: 'run_compact', n: 1, phase: 'done', reason: 'steps', steps: 25, after: 400, summary: 's' }]));
+assert.equal(rcSaved.blocks.find((x) => x.k === 'rcompact').phase, 'done');
 console.log('ok');
 """
 

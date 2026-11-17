@@ -27,6 +27,9 @@ unsummarised messages than sessions.HISTORY_TURNS) folds its older messages into
 before). POST /api/llm/agent/<role>/compact {session_id, focus?} does it on demand (/compact). Ephemeral chats are
 never compacted (nothing to store the summary in).
 
+At a limit of one answer (context, steps) the run compacts its work so far and goes on: body.compact (or the
+saved chat setting) auto | ask | off (engine/react.py _compact_run).
+
 Page actions: body.ui_ack = true says the page reports how each page action ended (POST
 /api/llm/agent/ui-result {run_id, action_id, ok, detail, transient?, result?}, engine/uiwait.py); run actions
 (a model run, a map, a scan) wait for it. A page change (the navigate tool) ends the turn; the new page opens the
@@ -59,6 +62,8 @@ COMMANDS = [
                               'then a plan to approve (Shift+Tab)', None),
     ('effort', 'low|medium|high', 'how hard it works: steps, thinking, a final check', None),
     ('think', 'off|low|medium|high', 'thinking only (where the model supports it)', None),
+    ('autocompact', 'auto|ask|off', 'at a limit of one answer (context, steps): compact the work so far and go on, '
+                                    'ask first, or stop', None),
     ('web', 'off|public|technical|full', 'web search, and how much of your data a query may contain', None),
     ('skills', '', 'list the skills', None),
     ('skill', '<name>', 'use a skill for the next message', None),
@@ -244,7 +249,7 @@ def router(state, ctx):
             msgs_run = msgs_in                  # a transcript the page still holds (first turn of a new chat)
         else:
             msgs_run = [{'role': 'user', 'text': user_text}]
-        opts_in = {**saved, **{k: body[k] for k in ('mode', 'effort', 'think', 'web') if k in body}}
+        opts_in = {**saved, **{k: body[k] for k in ('mode', 'effort', 'think', 'web', 'compact') if k in body}}
         web_cfg = store().clean_web(cfg.get('web') or {})
         w = opts_in.get('web')                  # off unless the chat turns it on; 'on' / true = the level in Settings
         if w is True or w == 'on':

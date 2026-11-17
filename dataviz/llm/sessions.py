@@ -579,7 +579,7 @@ def compact_trace(events):
     item (cut to THINKING_MAX), one 'tool' item per call (start + end merged), one 'confirm' per confirmation (with
     its outcome), search, skill, the last todo, ui_action, ask, cannot, plan_proposal, a retry count, notices,
     error, done. Dropped: ping, step, text (the text is the message itself), session, context."""
-    out, tools_, confirms = [], {}, {}
+    out, tools_, confirms, rcompacts = [], {}, {}, {}
     think, think_item, todo_item, retry_item = [], None, None, None
     for ev in events or []:
         if not isinstance(ev, dict):
@@ -638,6 +638,13 @@ def compact_trace(events):
                 out.append(retry_item)
             retry_item['count'] += 1
             retry_item['reason'] = str(ev.get('reason') or '')[:300]
+        elif t == 'run_compact':        # one item per compaction of the answer: its last phase (done / failed / declined)
+            item = rcompacts.get(ev.get('n'))
+            if item is None:
+                item = rcompacts[ev.get('n')] = {}
+                out.append(item)
+            item.clear()
+            item.update(ev)
         elif t == 'done':
             out.append({'type': 'done', **{k: ev.get(k) for k in ('usage', 'ms', 'steps')}})
         else:       # search, skill, ui_action, ask, cannot, plan_proposal, notice, error (and anything newer)

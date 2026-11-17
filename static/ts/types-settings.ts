@@ -254,6 +254,8 @@ export interface LlmConfig {
   features: Record<string, boolean>;
   budget?: { max_input_tokens?: number | 'auto'; agents?: { on: boolean; model: string; max_running?: number } };
   limits?: { context: number | null; ceiling: number; source: 'manual' | 'api' | 'table' | null };
+  /** the remembered chat settings (app: the one chat on every page) */
+  chat?: Record<string, { compact?: 'auto' | 'ask' | 'off' } & Record<string, unknown>>;
 }
 export type LlmDraft = {
   id?: string;

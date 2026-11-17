@@ -217,7 +217,19 @@ function budgetHTML(llm: LlmConfig): string {
     `<output id="llm-budget-out">${esc(kTok(v))}</output></span></div>` +
     `<label class="check"><input type="checkbox" data-act-change="llm-budget-auto" ${auto ? 'checked' : ''}> Auto: the model's maximum (follows the model you pick)</label>` +
     `<p class="sec-note">${esc(size)} A bigger budget keeps more of a long chat, and every step of an answer sends it again.</p></div>` +
-    agentsHTML(llm);
+    agentsHTML(llm) + limitHTML(llm);
+}
+
+// at a limit of one answer (context, steps): compact the work so far and go on, ask first, or stop (chat pref compact)
+const LIMIT_CHOICES: ReadonlyArray<['auto' | 'ask' | 'off', string]> = [
+  ['auto', 'Compact the work so far and continue'], ['ask', 'Ask me first (continue · stop · regenerate)'], ['off', 'Stop the answer'],
+];
+function limitHTML(llm: LlmConfig): string {
+  const cur = llm.chat?.['app']?.compact ?? 'auto';
+  return '<div class="form-card"><div class="step-head">When an answer reaches a limit</div>' +
+    '<label class="fld">At the context or step limit of one answer<select data-act-change="llm-compact">' +
+    LIMIT_CHOICES.map(([v, t]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(t)}</option>`).join('') + '</select>' +
+    '<span class="help">Compacting folds the steps of this answer into a short summary (highlighted in its activity list) so it can go on; at most 3 times per answer. Also <code>/autocompact auto|ask|off</code>.</span></label></div>';
 }
 
 function agentsHTML(llm: LlmConfig): string {
@@ -482,6 +494,11 @@ export const LLM_CHANGES: Record<string, SetChange> = {
   'llm-agents': (el) => setAgents({ on: el instanceof HTMLInputElement && el.checked }),
   'llm-agents-model': (el) => setAgents({ model: el instanceof HTMLInputElement ? el.value.trim() : '' }),
   'llm-agents-max': (el) => setAgents({ max_running: el instanceof HTMLSelectElement ? Number(el.value) : 2 }),
+  'llm-compact': async (el) => {
+    if (!(el instanceof HTMLSelectElement)) return;
+    try { SET.llm = await put({ chat: { app: { compact: el.value } } }); toast('Saved', 'ok'); } catch (e) { toast(errText(e), 'err'); await loadLlmData(); }
+    renderSettings();
+  },
   'llm-budget-auto': async (el) => {
     const on = el instanceof HTMLInputElement && el.checked;
     const range = $req('settings-body').querySelector<HTMLInputElement>('[data-llm-budget]');

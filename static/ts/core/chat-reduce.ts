@@ -3,7 +3,7 @@
 // (tests/llm/test_chat_js.py, through core/chat.ts which re-exports it). Split out of core/chat.ts.
 
 import type {
-  AiTurn, Block, ChatEffort, ChatEvent, ChatMode, ConfirmAction, ConfirmResult, ConfirmState, ThinkLevel, ToolItem, UiAction, WebLevel,
+  AiTurn, Block, ChatEffort, ChatEvent, ChatMode, ConfirmAction, ConfirmResult, ConfirmState, RunCompactPhase, ThinkLevel, ToolItem, UiAction, WebLevel,
 } from '../types-chat.js';
 
 
@@ -237,6 +237,20 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
       const state = ev['state'] === 'start' ? 'start' : ev['state'] === 'failed' ? 'failed' : 'done';
       return { ...t, ...(state === 'done' ? { ctx: null } : {}), blocks: [...kept, { k: 'compact', state, auto: ev['auto'] !== false, summary: str(ev['summary']), before: num(ev['before']),
         after: num(ev['after']), turns: num(ev['turns']), covered: numOrNull(ev['covered']) }] };
+    }
+    case 'run_compact': {         // a limit of this answer: one block per compaction (n), its phase replaced in place
+      const n = num(ev['n']);
+      const ph = str(ev['phase']);
+      const phase: RunCompactPhase = ph === 'ask' || ph === 'start' || ph === 'failed' || ph === 'declined' ? ph : 'done';
+      const old = b.find((x): x is Extract<Block, { k: 'rcompact' }> => x.k === 'rcompact' && x.n === n);
+      const blk: Block = { k: 'rcompact', n, phase, reason: ev['reason'] === 'steps' ? 'steps' : 'context', used: num(ev['used']), limit: num(ev['limit']),
+        steps: num(ev['steps']), before: num(ev['before']), after: num(ev['after']), ms: numOrNull(ev['ms']), summary: str(ev['summary']),
+        detail: str(ev['detail']), cid: strOrNull(ev['confirm_id']) ?? old?.cid ?? null, sent: false };
+      return { ...t, blocks: old ? b.map((x) => (x === old ? blk : x)) : [...b, blk] };
+    }
+    case 'x_rcompact_sent': {     // the page answered the ask card (the run says the outcome next)
+      const n = num(ev['n']);
+      return { ...t, blocks: b.map((x) => (x.k === 'rcompact' && x.n === n ? { ...x, sent: true } : x)) };
     }
     case 'context': {             // the next provider call's input size (the dock's ring follows it while the turn runs)
       const used = numOrNull(ev['used']), limit = numOrNull(ev['limit']);

@@ -96,6 +96,8 @@ def _trace_lines(trace):
             out.append('- checklist: ' + '; '.join(f"{i.get('text')} [{i.get('state')}]" for i in ev.get('items') or []))
         elif t == 'error':
             out.append(f"- error: {_cut(ev.get('detail') or '', TOOL_RES_MAX)}")
+        elif t == 'run_compact' and ev.get('phase') == 'done':
+            out.append(f"- compacted its work at the {ev.get('reason')} limit: {_cut(ev.get('summary') or '', TOOL_RES_MAX * 3)}")
         elif t == 'meta' and ev.get('model'):
             out.append(f"- (model {ev.get('model')}, mode {ev.get('mode')})")
     return out

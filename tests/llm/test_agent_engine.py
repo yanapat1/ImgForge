@@ -499,3 +499,95 @@ def test_every_tool_group_names_real_tools():
     assert names <= set(tools.REGISTRY), names - set(tools.REGISTRY)
     assert not [n for n in names if tools.REGISTRY[n].domain in ('control', 'common', 'web')]
     assert tools.group_of('move') == 'files' and tools.group_of('list_folder') is None
+
+
+# ---------------------------------------------------------------- at a limit: compact the work so far and go on
+def _summary(monkeypatch, fail=False):
+    """providers.complete for the progress summary: records what it was given."""
+    asked = []
+
+    def complete(p, system, msgs, max_tokens=None, quiet=False, **kw):
+        asked.append({'system': system, 'text': msgs[0]['parts'][0]['text']})
+        if fail:
+            raise LLMError('summary down', 400)
+        return '## Goal\nlist the folders\n## Next step\nanswer', {}
+
+    monkeypatch.setattr(providers, 'complete', complete)
+    return asked
+
+
+def _calls(n):
+    return [('', [('list_folder', {'bucket': 'cars', 'path': f'p{i}'})]) for i in range(n)]
+
+
+def test_step_limit_compacts_the_work_and_goes_on(monkeypatch, svc):
+    seen = script(monkeypatch, *_calls(3), ('Found them all.', []))
+    asked = _summary(monkeypatch)
+    run = start('list every folder')
+    run.max_steps = 3
+    evs = drain(run)
+    rc = [e for e in evs if e['type'] == 'run_compact']
+    assert [e['phase'] for e in rc] == ['start', 'done'] and rc[1]['reason'] == 'steps' and rc[1]['steps'] == 3
+    assert 'list_folder' in asked[0]['text'] and 'p2' in asked[0]['text'], 'the steps go into the summary'
+    assert 'Goal' in asked[0]['system'] and 'Next step' in asked[0]['system']
+    last = seen[3]['msgs']
+    assert [m['role'] for m in last] == ['user', 'user'] and 'compacted' in json.dumps(last[1]) \
+        and 'list the folders' in json.dumps(last[1]), 'only the user turn + the progress note reach the model'
+    assert evs[-1]['type'] == 'done' and any(e['type'] == 'text' for e in evs)
+    assert max(e['max'] for e in evs if e['type'] == 'step') == 6, 'a new batch of steps'
+
+
+def test_context_limit_compacts_and_off_or_failure_stops(monkeypatch, svc):
+    big = 'x' * 5000
+    monkeypatch.setattr(svc, 'ls', lambda user, bid, path='', **k: {
+        'path': path, 'total': 1, 'entries': [{'name': big, 'path': big, 'type': 'file', 'kind': 'image', 'size': 1}]})
+    script(monkeypatch, *_calls(3), ('Done.', []))
+    asked = _summary(monkeypatch)
+    run = start('list every folder')
+    run.limit = run.est + 2000          # (est counts the tool specs) one big result fills it: compacted before the next
+    evs = drain(run)
+    rc = [e for e in evs if e['type'] == 'run_compact']
+    assert rc and rc[-1]['phase'] == 'done' and rc[0]['reason'] == 'context' and asked
+    assert not any(e['type'] == 'error' for e in evs)
+    # off: the old error, no summary
+    script(monkeypatch, *_calls(3), ('Done.', []))
+    asked.clear()
+    run = start('list every folder', compact='off')
+    run.max_steps = 2
+    evs = drain(run)
+    assert not asked and 'stopped after 2 steps' in evs[-1]['detail'] and '/autocompact' in evs[-1]['detail']
+    # the summary call fails: phase failed, then the limit's own error
+    script(monkeypatch, *_calls(3))
+    _summary(monkeypatch, fail=True)
+    run = start('list every folder')
+    run.max_steps = 2
+    evs = drain(run)
+    assert [e['phase'] for e in evs if e['type'] == 'run_compact'] == ['start', 'failed'] and evs[-1]['type'] == 'error'
+
+
+def test_compactions_per_answer_are_capped(monkeypatch, svc):
+    script(monkeypatch, *_calls(20))
+    asked = _summary(monkeypatch)
+    run = start('list every folder')
+    run.max_steps = 2
+    evs = drain(run)
+    assert len(asked) == react.RUN_COMPACT_MAX and evs[-1]['type'] == 'error'
+    assert f'({react.RUN_COMPACT_MAX} compactions' in evs[-1]['detail']
+
+
+def test_ask_mode_waits_for_the_user(monkeypatch, svc):
+    asked = _summary(monkeypatch)
+    for approve, want in ((True, 'done'), (False, 'declined')):
+        script(monkeypatch, *_calls(2), ('Done.', []))
+        asked.clear()
+        run = start('list every folder', compact='ask')
+        run.max_steps = 2
+        out = []
+        for ev in react.events(run):
+            out.append(ev)
+            if ev['type'] == 'run_compact' and ev['phase'] == 'ask':
+                ap, rj = (['a1'], []) if approve else ([], ['a1'])
+                threading.Timer(0.05, lambda e=ev, a=ap, r=rj: confirm.decide(ALICE, e['confirm_id'], a, r)).start()
+        phases = [e['phase'] for e in out if e['type'] == 'run_compact']
+        assert phases[0] == 'ask' and phases[-1] == want
+        assert bool(asked) == approve and out[-1]['type'] == 'done'
