@@ -20,4 +20,6 @@ core: true
   labels (images only, VOC, OBB, classification: nothing to convert). A local or downloaded folder gets a complete
   dataset (images hard-linked, no extra disk). A **streamed S3** folder gets the labels only plus `images.txt` (the
   s3:// address of each image) and `source.json`: nothing is downloaded and nothing is written to S3, so a training
-  tool needs the images downloaded first (`download_s3_folders`). It is a job: `job_status`.
+  tool needs the images downloaded first (`download_s3_folders`). Re-formatted to YOLO, that folder opens in
+  Visualize (session check format `s3-labels`, "YOLO labels · images in S3"): the images stream from S3 and the
+  labels, classes and curation edits are the local ones. Visualize only (no Label session). It is a job: `job_status`.

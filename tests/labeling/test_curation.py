@@ -619,3 +619,31 @@ def test_fix_boxes_set_class_and_undo(ds, tmp_path):
         assert (ds / 'labels' / 'dup.txt').read_text() == LABELS['dup']
         assert client.post('/api/curation/undo', json={'undo_id': r['undo_id']}).status_code == 200
         assert (ds / 'labels' / 'ok.txt').read_text() == LABELS['ok']
+
+
+def test_s3_with_local_labels(monkeypatch, tmp_path):
+    """labels_dir (Re-format of a read-only S3 folder): images stream from S3, labels / classes / writes are local."""
+    moto = pytest.importorskip('moto')
+    import boto3
+    from dataviz.image.sources import S3Source
+    for k, v in {'AWS_ACCESS_KEY_ID': 'x', 'AWS_SECRET_ACCESS_KEY': 'x', 'AWS_DEFAULT_REGION': 'us-east-1'}.items():
+        monkeypatch.setenv(k, v)
+    lab = tmp_path / 'cams-yolo'
+    (lab / 'labels').mkdir(parents=True)
+    (lab / 'labels' / 'a.txt').write_text('0 0.5 0.5 0.1 0.1\n')
+    (lab / 'data.yaml').write_text('names:\n  0: car\n')
+    with moto.mock_aws():
+        c = boto3.client('s3', region_name='us-east-1')
+        c.create_bucket(Bucket='bkt-test')
+        c.put_object(Bucket='bkt-test', Key='ds/images/a.jpg', Body=b'x')
+        c.put_object(Bucket='bkt-test', Key='ds/labels/a.txt', Body=b'9 0.1 0.1 0.1 0.1\n')     # ignored
+        src = S3Source({'id': 'c1'}, 'bkt-test', 'ds', mode='cache', labels_dir=lab, mirror_root=tmp_path / 'm')
+        assert src.mode == 'stream' and src.uri == f's3://bkt-test/ds?labels={lab.resolve()}'
+        assert src.list_labels() == ['a.txt'] and src.read_label('a.txt').startswith('0 ')
+        assert src.read_classes() == ['car'] and src.list_images() == ['a.jpg']
+        assert src.summary()['labels'] == 1 and src.label_writable
+        fp = src.fingerprint()
+        sha = src.write_label('a.txt', '0 0.4 0.4 0.1 0.1\n', sha1_bytes(b'0 0.5 0.5 0.1 0.1\n'))
+        assert (lab / 'labels' / 'a.txt').read_text() == '0 0.4 0.4 0.1 0.1\n' and sha
+        assert c.get_object(Bucket='bkt-test', Key='ds/labels/a.txt')['Body'].read().startswith(b'9 '), 'S3 untouched'
+        assert src.fingerprint() != fp, 'a local label edit is a new index'

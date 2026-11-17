@@ -67,8 +67,8 @@ def router(state, ctx):
         return hit[1]
 
     def dataset_uri(d):
-        if d['kind'] == 's3':
-            return f"s3://{d['bucket']}/{d.get('prefix', '')}".rstrip('/')
+        if d['kind'] == 's3':                       # = S3Source.uri (local labels: their folder is part of it)
+            return f"s3://{d['bucket']}/{d.get('prefix', '')}".rstrip('/') + (f"?labels={d['labels_dir']}" if d.get('labels_dir') else '')
         if d['kind'] == 'labeling':                 # = LabelingSource.uri (workspaces are matched by it)
             return f"label://{d.get('project_id')}/{d.get('task_id')}" + ('?only_done=1' if d.get('only_done') else '')
         if d['kind'] == 'union':                    # = UnionSource.uri

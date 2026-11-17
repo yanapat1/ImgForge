@@ -325,3 +325,34 @@ def test_compare_needs_an_s3_link(dc, tmp_path):
     b = c.post('/api/bucket/buckets', json={'name': 'm', 'kind': 'managed'}).json()
     r = c.post(f"/api/bucket/buckets/{b['id']}/compare", json={'path': ''})
     assert r.status_code == 400 and 'S3 link' in r.json()['detail']
+
+
+def test_reformat_a_streamed_folder_keeps_the_images_in_s3(dc, s3_server, s3_bucket):
+    """Re-format of a read-only S3 folder: labels + images.txt + source.json in "<bucket> · formats", nothing written
+    to S3; the new folder's session check says "images in S3" and Visualize opens it (local labels, streamed images)."""
+    c = dc
+    client, bucket = s3_bucket
+    for i in range(2):
+        client.put_object(Bucket=bucket, Key=f'cars/images/im{i}.jpg', Body=jpeg_bytes())
+        client.put_object(Bucket=bucket, Key=f'cars/labels/im{i}.txt', Body=b'0 0.5 0.5 0.2 0.2\n')
+    client.put_object(Bucket=bucket, Key='cars/data.yaml', Body=b'names:\n  0: car\n')
+    before = sorted(o['Key'] for o in client.list_objects_v2(Bucket=bucket)['Contents'])
+    conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'}).json()
+    b = c.post('/api/bucket/buckets', json={'name': 'road', 'kind': 's3', 'connection_id': conn['id'],
+                                        's3_bucket': bucket, 'prefix': ''}).json()
+    wait_job(c, b['scan_job_id'])
+    _ls(c, b['id'], 'cars')
+    r = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'cars', 'to': 'yolo'})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    j = wait_job(c, out['job_id'], timeout=60)
+    assert j['status'] == 'done' and j['result']['streamed'] and j['result']['images_linked'] == 0, j
+    assert sorted(o['Key'] for o in client.list_objects_v2(Bucket=bucket)['Contents']) == before, 'S3 untouched'
+    chk = c.get(f'/api/bucket/buckets/{out["bucket"]}/session-check', params={'path': out['path']}).json()
+    assert chk['format'] == 's3-labels' and chk['can'] == {'visualize': True, 'label': False, 'linked': False}, chk
+    s = c.post('/api/bucket/session', json={'bucket': out['bucket'], 'path': out['path'], 'label': False})
+    assert s.status_code == 200, s.text
+    ds = c.ctx.datasets.dataset(s.json()['visualize']['id'])
+    assert ds['kind'] == 's3' and ds['labels_dir'].endswith(out['path']) and ds['prefix'] == 'cars'
+    src = c.ctx.datasets.source(ds)
+    assert src.list_labels() == ['im0.txt', 'im1.txt'] and src.list_images() == ['im0.jpg', 'im1.jpg']

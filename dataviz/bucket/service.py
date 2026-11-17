@@ -11,6 +11,7 @@ registries it needs are then built from the config.
 """
 
 import fnmatch
+import json
 import mimetypes
 import os
 import shutil
@@ -2520,6 +2521,12 @@ def session_check(user, bid, path=''):
     ent = _cached(r, rel, want_tree=True)
     fmt, tree = ent['format'], ent.get('tree') or {}
     f = fmt.get('format') or 'other'
+    s3l = _s3_labels(r, rel)
+    if s3l is not None:                 # a Re-format of a streamed folder: local YOLO labels, images in S3
+        f = 's3-labels'
+        fmt = {**fmt, 'format': f, 'label': 'YOLO labels · images in S3', 'confidence': 'high',
+               'reason': f's3://{s3l["s3_bucket"]}/{s3l["prefix"]}'}
+        tree = {**tree, 'images': s3l.get('images')}
     sup = formats.SESSION_SUPPORT.get(f, formats.SESSION_SUPPORT['other'])
     targets = zones.send_targets(_cfg())
     can = {'visualize': bool(sup['visualize']) and 'visualize' in targets, 'label': bool(sup['label']) and 'label' in targets}
@@ -2684,7 +2691,33 @@ def reformat(user, bid, path='', to='coco'):
     return {'job_id': job.id, 'bucket': dest['id'], 'bucket_name': dest_name, 'path': out_rel}
 
 
+def _s3_labels(r, rel):
+    """source.json of a folder Re-format wrote for a streamed S3 folder (labels/ here, the images in S3) -> the dict
+    {connection_id, s3_bucket, prefix, images, ...}, or None for any other folder."""
+    if r.kind == 's3':
+        return None
+    try:
+        base = _abs(r, rel)
+        with open(os.path.join(base, 'source.json'), encoding='utf-8') as f:
+            src = json.load(f)
+    except (OSError, ValueError, BucketError):
+        return None
+    if not isinstance(src, dict) or not src.get('s3_bucket') or not src.get('connection_id') \
+            or not os.path.isdir(os.path.join(base, 'labels')):
+        return None
+    return src
+
+
 def _send_visualize(user, r, rel, fmt, name):
+    s3l = _s3_labels(r, rel)
+    if s3l is not None:                 # images streamed from S3, labels from this folder
+        body = {'name': name or rel.rsplit('/', 1)[-1] or None, 'kind': 's3', 'connection_id': s3l['connection_id'], 'bucket': s3l['s3_bucket'],
+                'prefix': str(s3l.get('prefix') or ''), 'mode': 'stream', 'labels_dir': _abs(r, rel)}
+        try:
+            ds = _datasets().upsert_dataset(body, user['id'], None, _allowed())
+        except (ValueError, KeyError) as e:
+            raise BucketError(str(e).strip("'\"")) from None
+        return {'target': 'visualize', 'id': ds['id'], 'url': f's/{ds["id"]}/', 'name': ds['name']}
     f = fmt.get('format')
     if f not in VISUALIZABLE:
         why = f' ({fmt["reason"]})' if fmt.get('reason') else ''

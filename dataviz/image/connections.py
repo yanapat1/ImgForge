@@ -145,6 +145,8 @@ def _ds_dict(r):
         opts = r.options or {}
         d['unit'] = opts.get('unit') or 'auto'
         d['class_from_folder'] = bool(opts.get('class_from_folder'))
+        if kind == 's3' and opts.get('labels_dir'):
+            d['labels_dir'] = opts['labels_dir']     # local labels, images streamed (sources.S3Source)
     return d
 
 
@@ -447,6 +449,12 @@ class Registry:
                 raise ValueError('a dataset needs an S3 connection')
             ds['prefix'] = (ds.get('prefix') or '').strip('/')
             ds['mode'] = ds.get('mode') if ds.get('mode') in ('stream', 'cache') else 'stream'
+            lab = body.get('labels_dir') if 'labels_dir' in body else (old or {}).get('labels_dir')
+            if lab:                                  # labels kept in a local folder: streamed images only
+                ds['labels_dir'] = check_local(lab, roots) if roots is not None else str(Path(lab).expanduser().resolve())
+                if not (Path(ds['labels_dir']) / 'labels').is_dir():
+                    raise ValueError(f'{ds["labels_dir"]} has no labels/ folder')
+                ds['mode'] = 'stream'
         elif kind == 'union':
             parts = _parts(body)
             names = []
@@ -480,6 +488,8 @@ class Registry:
         cols = {k: ds.get(k) for k in _SRC_COLS}
         cols['only_done'] = bool(cols['only_done'])
         cols['options'] = _options(body, kind)
+        if ds.get('labels_dir'):
+            cols['options']['labels_dir'] = ds['labels_dir']
         with db.begin() as c:
             others = sessions.names(owner, 'viz', c, exclude=sid)
             if ds['name'].casefold() != ((old or {}).get('name') or '').casefold() and name_taken(ds['name'], others):
@@ -568,7 +578,7 @@ class Registry:
         except KeyError:
             raise ValueError('its connection was deleted') from None
         return sources.S3Source(conn, ds['bucket'], ds.get('prefix', ''), name=ds.get('name'), mode=ds.get('mode', 'stream'),
-                                mirror_root=self.mirror_root(), s3cfg=s3cfg)
+                                mirror_root=self.mirror_root(), s3cfg=s3cfg, labels_dir=ds.get('labels_dir'))
 
     def union_source(self, ds, s3cfg=None, labeling=None, check_write=None):
         """UnionSource of a combined dataset: each member's source as its own session indexes it (same unit, so the

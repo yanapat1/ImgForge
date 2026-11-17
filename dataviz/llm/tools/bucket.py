@@ -503,7 +503,8 @@ _add(Tool('reformat_folder', 'Write a folder again in another label format (yolo
                              'a NEW folder of the bucket "<bucket> · formats"; the original is not changed. Reads YOLO '
                              'detect / segment / pose and COCO labels. A local folder gets its images linked beside '
                              'the new labels; a streamed S3 folder gets the labels only, with images.txt and '
-                             'source.json (the images stay in S3). A background job: job_status says when it is done.',
+                             'source.json (the images stay in S3; to yolo it opens in Visualize, images streamed). '
+                             'A background job: job_status says when it is done.',
           _obj({'bucket': BUCKET, 'path': PATH,
                 'to': {'type': 'string', 'enum': ['yolo', 'coco', 'voc', 'labelme', 'createml', 'csv'], 'description': 'the format to write'}},
                ['bucket', 'to']), True, _reformat,

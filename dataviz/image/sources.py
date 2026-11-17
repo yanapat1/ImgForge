@@ -19,6 +19,10 @@ S3 has two modes:
 
 Downloads run on a thread pool: boto3 releases the GIL while waiting on the network, so
 `concurrency` requests really are in flight at once.
+
+A streamed S3 source can keep its labels in a local folder instead (`labels_dir`: labels/*.txt + classes.txt /
+data.yaml, the Bucket page's Re-format of a read-only S3 folder): the images still stream from the bucket, the
+labels, classes and curation writes are local, and nothing is written to S3.
 """
 
 import io
@@ -357,13 +361,16 @@ def browse(conn, bucket=None, prefix='', s3cfg=None):
 class S3Source:
     kind = 's3'
 
-    def __init__(self, conn, bucket, prefix='', name=None, mode='stream', mirror_root=None, s3cfg=None):
+    def __init__(self, conn, bucket, prefix='', name=None, mode='stream', mirror_root=None, s3cfg=None,
+                 labels_dir=None):
         self.conn = conn
         self.bucket = bucket
         self.prefix = _norm_prefix(prefix)
-        self.mode = mode
+        # local labels (Re-format of a read-only folder): always streamed, workspaces told apart by the uri
+        self.labs = LocalSource(labels_dir) if labels_dir else None
+        self.mode = 'stream' if self.labs else mode
         self.s3cfg = {**S3_DEFAULTS, **(s3cfg or {})}
-        self.uri = f's3://{bucket}/{self.prefix}'.rstrip('/')
+        self.uri = f's3://{bucket}/{self.prefix}'.rstrip('/') + (f'?labels={self.labs.root}' if self.labs else '')
         self.name = name or (self.prefix.rstrip('/').rsplit('/', 1)[-1] or bucket)
         self.client = make_client(conn, s3cfg)
         self.pool = ThreadPoolExecutor(int(self.s3cfg['concurrency']), thread_name_prefix='s3')
@@ -373,7 +380,7 @@ class S3Source:
         self.mirror = (mirror_root / _safe(conn.get('id') or conn.get('name') or 'conn') / bucket /
                        self.prefix.rstrip('/')) if mirror_root else None
         self.local = None                  # LocalSource on the mirror, once synced (cache mode)
-        if mode == 'cache' and self.mirror is not None and (self.mirror / '.manifest.json').exists():
+        if self.mode == 'cache' and self.mirror is not None and (self.mirror / '.manifest.json').exists():
             self.local = LocalSource(self.mirror, name=self.name)
 
     @property
@@ -398,6 +405,10 @@ class S3Source:
     def label_writable(self):              # data curation: only a YOLO prefix has label files to write
         return self.layout == 'yolo'
 
+    def _local_labels(self):
+        """The labels_dir source when the labels are local and the images are a YOLO prefix's images/."""
+        return self.labs if self.labs is not None and self.layout == 'yolo' else None
+
     def check(self):
         try:
             self.client.head_bucket(Bucket=self.bucket)
@@ -415,6 +426,10 @@ class S3Source:
             return {'layout': 'flat', 'images': len(imgs), 'labels': 0, 'classes': False,
                     'bytes': sum(lst[k][0] for k in imgs)}
         imgs = [k for k in lst if k.startswith('images/') and _is_image(k)]
+        if self.labs is not None:
+            return {'layout': 'yolo', 'images': len(imgs), 'labels': len(self.labs.list_labels()),
+                    'classes': bool(self.labs.read_classes()), 'labels_dir': str(self.labs.root),
+                    'bytes': sum(s for k, (s, _) in lst.items() if k.startswith('images/'))}
         return {'layout': 'yolo', 'images': len(imgs),
                 'labels': sum(1 for k in lst if k.startswith('labels/') and k.endswith('.txt')),
                 'classes': 'classes.txt' in lst or 'data.yaml' in lst,
@@ -429,14 +444,22 @@ class S3Source:
                     h.update(f'{k}:{size}:{etag}'.encode())
             return h.hexdigest()
         h = hashlib.sha1(f'{INDEX_VERSION}|s3'.encode())
+        labs = self._local_labels()
         for k, (size, etag) in sorted(self.listing().items()):
-            if k.startswith(('images/', 'labels/')) or k == 'classes.txt':
+            if k.startswith('images/') or (labs is None and (k.startswith('labels/') or k == 'classes.txt')):
                 h.update(f'{k}:{size}:{etag}'.encode())
+        if labs is not None:                       # the local labels: names, sizes, mtimes (+ the class files)
+            for p in sorted((labs.root / 'labels').glob('*.txt')) + [labs.root / 'classes.txt', labs.root / 'data.yaml']:
+                if p.is_file():
+                    st = p.stat()
+                    h.update(f'local/{p.name}:{st.st_size}:{st.st_mtime_ns}'.encode())
         return h.hexdigest()
 
     def list_labels(self):
         if self.local:
             return self.local.list_labels()
+        if self.labs is not None:
+            return self.labs.list_labels() if self._local_labels() else []
         return sorted(k[7:] for k in self.listing() if k.startswith('labels/') and k.endswith('.txt') and '/' not in k[7:])
 
     def list_images(self):
@@ -454,16 +477,20 @@ class S3Source:
         return self.client.get_object(Bucket=self.bucket, Key=self.prefix + rel)['Body'].read()
 
     def read_label(self, name):
+        if self.labs is not None:
+            return self.labs.read_label(name)
         return self.local.read_label(name) if self.local else self.get(f'labels/{name}').decode('utf-8', 'replace')
 
     def read_labels(self, names):
         """All label files at once, downloaded in parallel (ordered like `names`)."""
-        if self.local:
-            return [self.local.read_label(n) for n in names]
+        if self.local or self.labs is not None:
+            return [self.read_label(n) for n in names]
         return list(self.pool.map(self.read_label, names))
 
     # -- writing labels (data curation): the bucket is the truth; cache mode also updates the mirror
     def read_label_bytes(self, name):
+        if self.labs is not None:
+            return self.labs.read_label_bytes(name)
         if self.local:
             return self.local.read_label_bytes(name)
         try:
@@ -477,11 +504,13 @@ class S3Source:
 
     def read_labels_bytes(self, names):
         """Raw bytes of many label files, downloaded in parallel (ordered like `names`)."""
-        if self.local:
-            return [self.local.read_label_bytes(n) for n in names]
+        if self.local or self.labs is not None:
+            return [self.read_label_bytes(n) for n in names]
         return list(self.pool.map(self.read_label_bytes, names))
 
     def write_label(self, name, text, expect_sha1=None):
+        if self.labs is not None:                  # local labels: the bucket is never written
+            return self.labs.write_label(name, text, expect_sha1)
         if '/' in name or not name:
             raise ValueError(f'bad label name {name!r}')
         data = _as_bytes(text)
@@ -517,6 +546,8 @@ class S3Source:
             raise
 
     def read_classes(self):
+        if self.labs is not None:
+            return self.labs.read_classes()
         if self.local:
             return self.local.read_classes()
         lst = self.listing()
@@ -555,6 +586,8 @@ class S3Source:
         return imagehash.quick(head, tail, size), head
 
     def label_ref(self, name):
+        if self.labs is not None:
+            return self.labs.label_ref(name)
         return self.local.label_ref(name) if self.local else f'{self.uri}/labels/{name}'
 
     # -- cache mode
