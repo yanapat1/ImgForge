@@ -24,6 +24,17 @@ export const isEffort = (v: unknown): v is ChatEffort => EFFORTS.includes(v as C
 export const isThink = (v: unknown): v is ThinkLevel => v === 'off' || v === 'low' || v === 'medium' || v === 'high';
 export const isWeb = (v: unknown): v is WebLevel => WEBS.includes(v as WebLevel);
 
+/** A checklist step's state as it is drawn (the todo tool sends pending | active | done | skipped; older traces
+ *  have in_progress / completed): a skipped step is finished, not still to do. */
+export type StepState = 'done' | 'doing' | 'skipped' | 'todo';
+export function stepState(state: string): StepState {
+  if (/skip|cancel/.test(state)) return 'skipped';
+  if (/done|complete/.test(state)) return 'done';
+  return /progress|doing|active/.test(state) ? 'doing' : 'todo';
+}
+/** nothing left to do on it */
+export const stepClosed = (state: string): boolean => { const s = stepState(state); return s === 'done' || s === 'skipped'; };
+
 /** ask → auto → plan → ask (Shift+Tab, the mode chip). */
 export const nextMode = (m: ChatMode): ChatMode => MODES[(MODES.indexOf(m) + 1) % MODES.length] ?? 'ask';
 export const cycle = <T>(list: readonly T[], v: T): T => list[(list.indexOf(v) + 1) % list.length] ?? v;

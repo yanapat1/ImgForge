@@ -23,6 +23,7 @@
 // showing the same chat reload it when a turn ends (BroadcastChannel), and the server answers one turn at a time.
 
 import { continuedLabel, type ChatHandle } from './chat.js';
+import { stepClosed, stepState } from './chat-reduce.js';
 import { esc, icon, morphInner } from './dom.js';
 import { LLM } from './llm.js';
 import { bucketUrl, dataUrl, homeUrl, imageUrl, labelUrl, vizUrl } from './nav.js';
@@ -151,7 +152,7 @@ function railHTML(): string {
 function tasksHTML(): string {
   const jobs = [...D.jobs.entries()];
   if (!D.running && !D.steps.length && !jobs.some(([, j]) => !j.done)) return '';
-  const done = D.steps.filter((s) => /done|complete/.test(s.state)).length;
+  const done = D.steps.filter((s) => stepClosed(s.state)).length;
   const head = `<button type="button" class="dock-tasks-h" data-dock="tasks" aria-expanded="${D.tasksOpen}">` +
     `<span>Tasks</span>${D.steps.length ? `<span class="num">${done} / ${D.steps.length}</span>` : ''}${D.pending ? `<span class="dock-wait">${D.pending} waiting for you</span>` : ''}` +
     `<span class="grow"></span>${icon(D.tasksOpen ? 'chev-u' : 'chev-d')}</button>`;
@@ -160,9 +161,9 @@ function tasksHTML(): string {
     (D.driving.length ? D.driving.map((d) => `<span class="sep">›</span><span class="d">${esc(d)}</span>`).join('') : '<span class="sep">›</span><span class="d faint">thinking</span>') +
     `<span class="grow"></span><button type="button" class="ghost sm" data-dock="stop" title="Stop the assistant (Esc in the chat box)">${icon('stop')}Stop</button></div>` : '';
   const steps = D.steps.map((s) => {
-    const st = /done|complete/.test(s.state) ? 'done' : /progress|doing|active/.test(s.state) ? 'doing' : 'todo';
+    const st = stepState(s.state);
     const pg = s.page ? PAGE_NAME[s.page] ?? s.page : '';
-    return `<li class="${st}"><span class="dot" aria-hidden="true">${st === 'done' ? icon('check') : ''}</span><span>${esc(s.text)}</span>` +
+    return `<li class="${st}"${st === 'skipped' ? ' title="skipped"' : ''}><span class="dot" aria-hidden="true">${st === 'done' ? icon('check') : st === 'skipped' ? icon('x') : ''}</span><span>${esc(s.text)}</span>` +
       (pg ? `<span class="grow"></span><span class="dock-page">${esc(pg)}</span>` : '') + '</li>';
   }).join('');
   const jobRows = jobs.map(([, j]) => `<li class="job${j.done ? (j.ok ? ' done' : ' bad') : ''}"><span class="dot" aria-hidden="true">${j.done ? icon(j.ok ? 'check' : 'x') : ''}</span>` +
@@ -408,7 +409,7 @@ export function dockDone(): void {
   syncSid();
   const sid = D.chat?.sessionId();
   if (sid) { try { D.bc?.postMessage({ sid }); } catch (e) { /* ignore */ } }
-  if (D.steps.length && D.steps.every((s) => /done|complete/.test(s.state))) D.tasksOpen = false;
+  if (D.steps.length && D.steps.every((s) => stepClosed(s.state))) D.tasksOpen = false;
   schedule();
   if (D.navTo) window.setTimeout(go, 150);       // the answer is saved: leave for the page the agent opened
 }

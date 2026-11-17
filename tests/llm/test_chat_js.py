@@ -17,7 +17,7 @@ CHAT_TS = ROOT / 'static' / 'ts' / 'core' / 'chat.ts'
 
 SCRIPT = r"""
 import assert from 'node:assert/strict';
-import { reduce, newTurn, approvedMessage, parseCommand, nextMode, dateGroup, turnText, expandTrace } from './chat.mjs';
+import { reduce, newTurn, approvedMessage, parseCommand, nextMode, dateGroup, turnText, expandTrace, stepState } from './chat.mjs';
 
 const freeze = (o) => { if (o && typeof o === 'object') { Object.freeze(o); for (const v of Object.values(o)) freeze(v); } return o; };
 // every step runs on a deep-frozen turn: a mutation throws (ESM is strict mode)
@@ -136,6 +136,10 @@ assert.equal(cf.results[0].ok, true);
 assert.equal(o.blocks.find((b) => b.k === 'retry').attempt, 2);
 assert.equal(expandTrace([{ type: 'confirm', confirm_id: 'k', actions: [], status: 'pending' }]).length, 1, 'an undecided one still expires');
 assert.deepEqual(expandTrace([null, 'x', { type: 'tool', id: 'c', name: 'n' }]).map((e) => e.type), ['tool_start'], 'a call that never ended');
+
+// checklist states: the todo tool's pending | active | done | skipped (and the older in_progress / completed)
+assert.deepEqual(['pending', 'active', 'done', 'skipped', 'in_progress', 'completed', ''].map(stepState),
+  ['todo', 'doing', 'done', 'skipped', 'doing', 'done', 'todo']);
 
 // errors and stops
 assert.equal(run([{ type: 'error', detail: 'stopped after 50 steps' }]).err, 'stopped after 50 steps');

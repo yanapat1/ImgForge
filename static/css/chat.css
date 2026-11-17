@@ -167,6 +167,7 @@
 .ct-todo li.done { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--border-strong); }
 .ct-todo li.done .ico { color: var(--ok); }
 .ct-todo li.doing { font-weight: 600; }
+.ct-todo li.skipped { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--border-strong); }
 
 /* confirmation card */
 .ct-confirm { border: 1px solid var(--accent-line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }

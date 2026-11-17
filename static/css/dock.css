@@ -71,6 +71,8 @@ html[data-dock="open"] .dock-rail { display: none; }
 .dock-steps .dot .ico { width: 9px; height: 9px; stroke-width: 3; }
 .dock-steps li.done .dot { background: var(--ok); border-color: var(--ok); color: var(--bg); }
 .dock-steps li.done > span:not(.dot) { color: var(--text-muted); }
+.dock-steps li.skipped .dot { border-color: var(--border); color: var(--text-faint); }
+.dock-steps li.skipped > span:not(.dot) { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--border-strong); }
 .dock-steps li.doing .dot { border-color: var(--gem-2); box-shadow: 0 0 0 3px var(--gem-glow); }
 .dock-steps li.bad .dot { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
 .dock-steps .grow { flex: 1; }

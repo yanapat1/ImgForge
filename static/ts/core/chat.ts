@@ -24,11 +24,11 @@ import { isAbort, streamNDJSON } from './stream.js';
 import { actionToast, toast } from './toast.js';
 import { saveFile } from './format.js';
 import {
-  approvedMessage, arr, cycle, dateGroup, EFFORTS, expandTrace, isEffort, isMode, isRec, isThink, isWeb, newTurn, nextMode, num, parseCommand, recOf, reduce, str, strOrNull, THINKS, turnText, WEBS,
+  approvedMessage, arr, cycle, dateGroup, EFFORTS, expandTrace, isEffort, isMode, isRec, isThink, isWeb, newTurn, nextMode, num, parseCommand, recOf, reduce, stepClosed, stepState, str, strOrNull, THINKS, turnText, WEBS,
 } from './chat-reduce.js';
 
 // the pure reducer and its helpers live in chat-reduce.ts; these are part of this module's public API too
-export { approvedMessage, dateGroup, EFFORTS, expandTrace, MODES, newTurn, nextMode, parseCommand, reduce, THINKS, turnText, WEBS } from './chat-reduce.js';
+export { approvedMessage, dateGroup, EFFORTS, expandTrace, stepState, MODES, newTurn, nextMode, parseCommand, reduce, THINKS, turnText, WEBS } from './chat-reduce.js';
 
 const fmtK = (n: number | null | undefined): string => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
 const fmtMs = (ms: number | null | undefined): string => (ms == null ? '' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);
@@ -479,10 +479,11 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'tools': return cardHTML(b, ti, bi);
       case 'think': case 'search': case 'skill': case 'agent': return '';      // rows of the activity dropdown
       case 'todo': {
-        const done = b.items.filter((x) => /done|complete/.test(x.state)).length;
+        const done = b.items.filter((x) => stepClosed(x.state)).length;
         return `<div class="ct-todo"><div class="ct-lbl">Checklist · ${done}/${b.items.length}</div><ul>${b.items.map((x) => {
-          const st = /done|complete/.test(x.state) ? 'done' : /progress|doing|active/.test(x.state) ? 'doing' : 'todo';
-          return `<li class="${st}">${st === 'done' ? icon('check-c') : st === 'doing' ? '<span class="ct-spin"></span>' : icon('circle')}<span>${esc(x.text)}</span></li>`;
+          const st = stepState(x.state);
+          const mark = st === 'done' ? icon('check-c') : st === 'skipped' ? icon('x') : st === 'doing' && t.status === 'streaming' ? '<span class="ct-spin"></span>' : icon('circle');
+          return `<li class="${st}"${st === 'skipped' ? ' title="skipped"' : ''}>${mark}<span>${esc(x.text)}</span></li>`;
         }).join('')}</ul></div>`;
       }
       case 'confirm': return confirmHTML(b, ti, bi);
