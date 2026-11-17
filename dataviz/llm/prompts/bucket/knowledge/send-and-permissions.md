@@ -2,7 +2,17 @@
 title: Send to the visualizer / labeling, and permissions
 summary: send_to_session targets and task types, what each permission (bucket.manage, dataset.create, label.create) allows
 ---
-- `send_to_session` opens folders / files as a **visualize** session (formats yolo-detect / seg / pose / obb, images,
+- **One session, usually both sides.** `send_to_session` target **both** (what the Image page's Create session does
+  by default) makes one linked session from a folder: a Label project that owns the labels (the folder's own YOLO /
+  COCO labels are imported into it, a job) and a Visualize session that reads that project live, so a box fixed in
+  Label shows in Visualize with no export. The result has `visualize.url`, `label.url` and `label.import_job_id`.
+  `session_check` bucket, path says first what works on the folder: its format and counts, `can.visualize /
+  can.label / can.linked` with the reason, whether its labels are imported, and what it can be re-formatted to.
+  A folder with only images works for both (Visualize shows whole images, Label starts empty). COCO opens in
+  Visualize only through a linked session; YOLO OBB, classification folders and embeddings cannot be linked.
+- Sessions are made only from data in a bucket: new data goes into Bucket first (upload, link a folder, an S3
+  link, import from the web), then Image › Create session picks the bucket folder.
+- `send_to_session` also opens folders / files as a **visualize** session alone (formats yolo-detect / seg / pose / obb, images,
   classification, embeddings) or a **label** project (target label; task_type detect (default), segment, pose, obb or
   classify; classes come from its data.yaml). The result has the new session's id and url. Each send makes a NEW
   session: first look for one with `list_sessions` bucket + path. To work there, `navigate` to it (viz / label,

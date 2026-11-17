@@ -2483,6 +2483,73 @@ def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
     return _send_label(user, r, rel, fmt, (name or '').strip() or base, task_type)
 
 
+def session_check(user, bid, path=''):
+    """What a session made from folder `path` can do, before it is made: the detected format, the counts, and for
+    Visualize / Label / the linked pair whether it works and why not (formats.SESSION_SUPPORT) ->
+    {bucket, path, format, label, confidence, reason, images, labels, classes, streamed, can: {visualize, label,
+    linked}, labels: imported | none, note, convert_to, default: {visualize, label}}."""
+    r = _row(user, bid)
+    rel = store.clean_rel(path)
+    if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
+        raise BucketError(f'{rel} is a file: pick the folder that holds it')
+    ent = _cached(r, rel, want_tree=True)
+    fmt, tree = ent['format'], ent.get('tree') or {}
+    f = fmt.get('format') or 'other'
+    sup = formats.SESSION_SUPPORT.get(f, formats.SESSION_SUPPORT['other'])
+    targets = zones.send_targets(_cfg())
+    can = {'visualize': bool(sup['visualize']) and 'visualize' in targets, 'label': bool(sup['label']) and 'label' in targets}
+    can['linked'] = bool(sup['linked']) and 'visualize' in targets and 'label' in targets
+    names, _ = _yaml_names(r, rel)
+    both = can['linked']
+    return {'bucket': r.id, 'path': rel, 'format': f, 'label': fmt.get('label'), 'confidence': fmt.get('confidence'),
+            'reason': fmt.get('reason'), 'images': tree.get('images'), 'labels': tree.get('labels'),
+            'classes': names[:200] or fmt.get('classes'), 'streamed': r.kind == 's3' and not _writable(r),
+            'can': can, 'label_import': sup['labels'], 'note': sup['note'], 'convert_to': list(sup['to']),
+            'default': {'visualize': both or can['visualize'], 'label': both or (can['label'] and not can['visualize'])}}
+
+
+def create_session(user, bid, path='', visualize=True, label=True, name=None, task_type='detect'):
+    """One session from a bucket folder: Visualize, Label, or both linked (the default). Linked = the labeling
+    project owns the labels (the folder's own are imported into it) and the Visualize session reads that project
+    live (a dataset of kind 'labeling'), so a box fixed in Label shows in Visualize without export.
+    -> {name, linked, visualize?: {id, url}, label?: {id, url, job_id, import_job_id?}}."""
+    if not visualize and not label:
+        raise BucketError('choose Visualize, Label or both')
+    r = _row(user, bid)
+    rel = store.clean_rel(path)
+    chk = session_check(user, bid, rel)
+    name = (name or '').strip()
+    if not (visualize and label):
+        out = send(user, bid, [rel], 'visualize' if visualize else 'label', name or None, task_type)
+        key = 'visualize' if visualize else 'label'
+        return {'name': out['name'], 'linked': False, key: {k: out[k] for k in ('id', 'url', 'job_id') if k in out}}
+    if not chk['can']['linked']:
+        raise BucketError(f'{rel or r.name} ({chk["label"]}) cannot be a linked Visualize + Label session: {chk["note"]}')
+    _need(user, 'dataset.create')
+    made = send(user, bid, [rel], 'label', name or None, task_type)
+    pid = made['id']
+    entry = _labeling().get(pid)
+    tid = _labeling().store(pid).tasks()[0]['id']
+    lab = {'id': pid, 'url': made['url'], 'job_id': made.get('job_id')}
+    hook = getattr(_conf['ctx'], 'label_import', None) if _conf['ctx'] is not None else None
+    if chk['label_import'] == 'imported' and hook is not None:     # the folder's own labels become the project's
+        try:
+            lab['import_job_id'] = hook(pid, {'task_id': tid, 'format': 'auto', 'source': entry['source'], 'mode': 'merge',
+                                              'add_classes': True}, user)['job_id']
+        except Exception as e:  # noqa: BLE001 - the session exists: say the labels were not brought along
+            lab['import_error'] = str(getattr(e, 'detail', e))[:300]
+    from ..core.names import unique_name
+    from ..image import sessions
+    try:
+        ds = _datasets().upsert_dataset({'kind': 'labeling', 'project_id': pid, 'task_id': tid,
+                                         'name': unique_name(made['name'], sessions.names(user['id'], 'viz'))}, user['id'])
+    except (ValueError, KeyError) as e:
+        raise BucketError(f'the Label session {made["name"]!r} was created, its Visualize side was not: '
+                          + str(e).strip("'\"")) from None
+    return {'name': made['name'], 'linked': True, 'label': lab,
+            'visualize': {'id': ds['id'], 'url': f's/{ds["id"]}/'}}
+
+
 def _send_visualize(user, r, rel, fmt, name):
     f = fmt.get('format')
     if f not in VISUALIZABLE:

@@ -243,6 +243,11 @@ def router(state, ctx):
 
     @r.post('/api/label/projects/{pid}/import-annotations', dependencies=[Depends(LABELER)])
     def start(pid: str, body: dict, user=Depends(deps.current_user)):
+        return start_import(pid, body, user)
+
+    def start_import(pid, body, user):
+        """The import job of one session (also bucket.service.create_session, through ctx.label_import: the labels of
+        the folder a linked session is made from)."""
         need()
         conns = conns_for(user, pid)
         try:
@@ -303,5 +308,6 @@ def router(state, ctx):
                               fn, lane='io', public_result=True, session_id=pid)
         return {'job_id': job.id}
 
+    ctx.label_import = start_import
     return r
 

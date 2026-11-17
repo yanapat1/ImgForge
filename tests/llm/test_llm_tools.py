@@ -578,3 +578,20 @@ def test_job_status_service(monkeypatch):
     assert service.job_status({'id': 'root', 'is_admin': True}, 4)['label'] == 'Export cars'
     reg[5] = J('u-alice', status='error', cancelled=True)
     assert service.job_status(alice, 5)['state'] == 'cancelled'
+
+
+def test_session_check_and_a_linked_session(svc):
+    svc.session_check = lambda user, bid, path='': {'format': 'yolo-detect', 'label': 'YOLO detect', 'can': {
+        'visualize': True, 'label': True, 'linked': True}}
+    svc.create_session = lambda user, bid, path, **kw: (svc.calls.append(('create_session', bid, path, kw)) or {
+        'name': 'cars', 'linked': True, 'visualize': {'id': 'd1', 'url': 's/d1/'},
+        'label': {'id': 'p1', 'url': '?label=p1', 'import_job_id': 9}})
+    out, summary = tools.run(ALICE, 'session_check', {'bucket': 'cars', 'path': 'val'})
+    assert summary == '→ YOLO detect: visualize, label, linked'
+    clean, line = tools.prepare(ALICE, 'send_to_session', {'bucket': 'cars', 'paths': ['val'], 'target': 'both'})
+    assert 'a linked Visualize + Label session' in line and tools.TOOLS['send_to_session'].risk_of(clean) == 'danger'
+    out, summary = tools.run(ALICE, 'send_to_session', clean)
+    assert svc.calls[-1][:3] == ('create_session', 'b1', 'val') and svc.calls[-1][3]['visualize'] and svc.calls[-1][3]['label']
+    assert 'Visualize s/d1/ + Label ?label=p1 (linked)' in summary and 'job 9' in summary
+    with pytest.raises(tools.ToolError, match='one folder at a time'):
+        tools.run(ALICE, 'send_to_session', {'bucket': 'cars', 'paths': ['a', 'b'], 'target': 'both'})

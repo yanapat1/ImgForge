@@ -290,3 +290,49 @@ def test_export_zip_thai_name_old_mtime_and_symlinks(dc):
     assert c.get(f'/api/bucket/buckets/{b["id"]}/export/check').json()['name'] == 'ชุดข้อมูล.zip'
     assert c.get(f'/api/bucket/buckets/{b["id"]}/export/check', params={'path': 'nope'}).status_code == 404
     assert c.get(f'/api/bucket/buckets/{b["id"]}/export/check', params={'path': '../x'}).status_code == 400
+
+
+def test_create_session_linked_and_session_check(dc):
+    """One Create session from a bucket folder: the format check says what works; both = a Label session that owns
+    the labels (the folder's are imported) and a Visualize session reading it live; one side alone = send()."""
+    _, c = dc
+    b = new_bucket(c, name='traffic')
+    upload_zip(c, b['id'])
+    chk = c.get(f'/api/bucket/buckets/{b["id"]}/session-check').json()
+    assert chk['format'] == 'yolo-detect' and chk['images'] == 3 and chk['streamed'] is False
+    assert chk['can'] == {'visualize': True, 'label': True, 'linked': True} and chk['label_import'] == 'imported'
+    assert chk['default'] == {'visualize': True, 'label': True} and 'coco' in chk['convert_to']
+
+    r = c.post('/api/bucket/session', json={'bucket': b['id'], 'name': 'Traffic'})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out['linked'] and out['label']['url'] == f'?label={out["label"]["id"]}' and out['visualize']['url'].startswith('s/')
+    for k in ('job_id', 'import_job_id'):
+        assert wait_job(c, out['label'][k])['status'] == 'done', k
+    imp = c.get(f'/api/jobs/{out["label"]["import_job_id"]}').json()['result']
+    assert imp['images'] == 3 and imp['annotations'] >= 3, 'the folder\'s own labels are in the Label session'
+    ds = next(d for d in c.get('/api/datasets').json()['datasets'] if d['id'] == out['visualize']['id'])
+    assert ds['kind'] == 'labeling' and ds['project_id'] == out['label']['id'], 'Visualize reads the Label session'
+
+    # one side only
+    v = c.post('/api/bucket/session', json={'bucket': b['id'], 'label': False, 'name': 'Only viz'}).json()
+    assert not v['linked'] and 'label' not in v and v['visualize']['url'].startswith('s/')
+    lb = c.post('/api/bucket/session', json={'bucket': b['id'], 'visualize': False}).json()
+    assert not lb['linked'] and 'visualize' not in lb and lb['label']['url'].startswith('?label=')
+    assert c.post('/api/bucket/session', json={'bucket': b['id'], 'visualize': False, 'label': False}).status_code == 400
+
+    # a folder with only images: both sides work, nothing to import
+    c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'mkdir', 'path': 'raw'},
+                                                               {'op': 'copy', 'paths': ['images/train/a0.jpg'], 'to': 'raw'}]})
+    raw = c.get(f'/api/bucket/buckets/{b["id"]}/session-check', params={'path': 'raw'}).json()
+    if raw['format'] == 'images':
+        assert raw['can']['linked'] and raw['label_import'] == 'none'
+        out = c.post('/api/bucket/session', json={'bucket': b['id'], 'path': 'raw'}).json()
+        assert out['linked'] and 'import_job_id' not in out['label']
+    # a folder no session can read
+    c.post(f'/api/bucket/buckets/{b["id"]}/ops', json={'ops': [{'op': 'mkdir', 'path': 'docs'}]})
+    c.post(f'/api/bucket/buckets/{b["id"]}/upload', params={'path': 'docs'},
+           files=[('files', ('a.docx', b'xx', 'application/octet-stream'))])
+    bad = c.get(f'/api/bucket/buckets/{b["id"]}/session-check', params={'path': 'docs'}).json()
+    assert bad['can'] == {'visualize': False, 'label': False, 'linked': False}
+    assert c.post('/api/bucket/session', json={'bucket': b['id'], 'path': 'docs'}).status_code == 400

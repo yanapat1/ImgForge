@@ -119,6 +119,7 @@ def test_data_location_and_list_sessions_by_folder(client, tmp_path, monkeypatch
 def test_sending_to_labeling_is_always_confirmed():
     t = tools.REGISTRY['send_to_session']
     assert t.risk_of({'target': 'label'}) == 'danger' and t.risk_of({'target': 'visualize'}) == 'change'
+    assert t.risk_of({'target': 'both'}) == 'danger'            # a linked session makes a labeling project too
 
 
 def test_navigate_opens_the_tabs_of_every_page(monkeypatch):

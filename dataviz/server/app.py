@@ -73,6 +73,7 @@ class Ctx:
         self.labeling = labeling            # labeling.projects.ProjectRegistry (labeling sessions, keyed by pid)
         self.llm = llm                      # llm.store.LLMStore (saved LLM providers + feature switches)
         self.curation = lambda st: None     # State -> its scanned data.curation.Curation or None (routes/curation.py)
+        self.label_import = None            # routes/label_import.py: start an annotation import (Bucket create_session)
         self.label_auto = None              # routes/labeling.py: link / activate / label_all (Bucket autolabel)
         self.states = OrderedDict()         # session id -> State, least recently used first
         self.max_loaded = max(1, int((cfg.get('sessions') or {}).get('max_loaded', 4)))

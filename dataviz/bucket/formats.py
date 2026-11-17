@@ -28,6 +28,36 @@ LABELS = {'yolo-detect': 'YOLO detect', 'yolo-seg': 'YOLO segment', 'yolo-pose':
           'yolo-obb': 'YOLO OBB', 'coco': 'COCO', 'voc': 'Pascal VOC', 'classification': 'Classification folders',
           'images': 'Images', 'embeddings': 'Embeddings', 'other': 'Other', 'empty': 'Empty'}
 FORMATS = tuple(LABELS)
+# What a session made from a folder of each format can do (the Create session dialog and the assistant read it):
+#   visualize  the visualizer opens the folder itself (its own label files / folder names)
+#   label      a labeling session lists its images
+#   labels     'imported' = its annotations are imported into the Label session, so a linked Visualize + Label pair
+#              shows and edits the same boxes; 'none' = the Label session starts empty
+#   linked     a Visualize session that reads the Label session live is possible (labels were imported, or none exist)
+#   to         formats Re-format can write it as
+_Y = dict(visualize=True, label=True, labels='imported', linked=True, to=('coco', 'voc'))
+SESSION_SUPPORT = {
+    'yolo-detect': {**_Y, 'note': 'boxes are imported into the Label session; Visualize reads them from there'},
+    'yolo-seg': {**_Y, 'note': 'polygons are imported into the Label session; Visualize reads them from there'},
+    'yolo-pose': {**_Y, 'note': 'keypoints are imported into the Label session; Visualize reads them from there'},
+    'yolo-obb': {**_Y, 'labels': 'none', 'linked': False,
+                 'note': 'rotated boxes are not imported into a Label session: create Visualize alone, or Label alone (it starts empty)'},
+    'coco': dict(visualize=False, label=True, labels='imported', linked=True, to=('yolo',),
+                 note='Visualize alone cannot read COCO: create both (the boxes are imported into the Label session and '
+                      'Visualize reads them), or re-format to YOLO'),
+    'voc': dict(visualize=False, label=True, labels='none', linked=True, to=(),
+                note='Pascal VOC boxes are not imported: the Label session starts empty and Visualize shows whole images'),
+    'classification': dict(visualize=True, label=True, labels='none', linked=False, to=(),
+                           note='the class of an image is its folder name, which only Visualize alone reads: a Label '
+                                'session starts without classes'),
+    'images': dict(visualize=True, label=True, labels='none', linked=True, to=('yolo',),
+                   note='images only: Visualize shows whole images, Label starts empty; create both to label and watch '
+                        'the map fill'),
+    'embeddings': dict(visualize=True, label=False, labels='none', linked=False, to=(),
+                       note='vector files: Visualize only'),
+    'other': dict(visualize=False, label=False, labels='none', linked=False, to=(), note='no images or dataset found here'),
+    'empty': dict(visualize=False, label=False, labels='none', linked=False, to=(), note='the folder is empty'),
+}
 SAMPLE = 50                        # label files whose column counts are read
 WALK_CAP = 1_000_000               # entries walked when counting
 IMAGES_CAP = 20_000                # entries looked at for "only images"

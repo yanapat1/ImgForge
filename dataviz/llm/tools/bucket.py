@@ -204,9 +204,23 @@ def _set_tags(user, a, add):
 
 def _send(user, a):
     b = resolve_bucket(user, a['bucket'])
+    if a.get('target') == 'both':               # one linked session: Label owns the labels, Visualize reads it live
+        if len(a['paths']) != 1:
+            raise ToolError('send one folder at a time (the folder that holds the images)')
+        res = _svc().create_session(user, b['id'], a['paths'][0], visualize=True, label=True, name=a.get('name'),
+                                    task_type=a.get('task_type', 'detect'))
+        return res, (f'created {res["name"]!r}: Visualize {res["visualize"]["url"]} + Label {res["label"]["url"]} (linked)'
+                     + (f'; its labels are being imported (job {res["label"]["import_job_id"]})' if res['label'].get('import_job_id') else ''))
     res = _svc().send(user, b['id'], a['paths'], target=a.get('target', 'visualize'), name=a.get('name'),
                       task_type=a.get('task_type', 'detect'))
     return res, f'opened {res.get("target")} {res.get("url") or res.get("id")}'
+
+
+def _session_check(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().session_check(user, b['id'], a.get('path') or '')
+    can = [k for k in ('visualize', 'label', 'linked') if res['can'][k]]
+    return res, f'→ {res.get("label") or res["format"]}: ' + (', '.join(can) if can else 'no session can read it')
 
 
 def _s3_mode(user, a):
@@ -475,18 +489,24 @@ _add(Tool('remove_tags', 'Remove user tags (automatic format:* tags cannot be re
           _obj({'bucket': BUCKET, 'path': PATH, 'tags': A('tags to remove')}, ['bucket', 'tags']),
           True, lambda u, a: _set_tags(u, a, False),
           lambda b, a: f'Untag {a.get("path") or "the bucket"} in {_bname(b, a)}: − {", ".join(a["tags"])}', s3_ok=True))
-_add(Tool('send_to_session', 'Open folders / files in the visualizer (target visualize) or as a labeling project '
-                             '(target label).',
+_add(Tool('session_check', 'Before a session is made from a folder: its detected format, image / label counts, and '
+                           'whether Visualize, Label and the linked pair work on it (and why not), whether its labels '
+                           'are imported into the Label session, and the formats it can be re-formatted to.',
+          _obj({'bucket': BUCKET, 'path': PATH}, ['bucket']), False, _session_check, s3_ok=True))
+_add(Tool('send_to_session', 'Make a session from one folder: target both (the default choice: one linked session, the '
+                             'Label side owns the labels, the folder\'s own are imported, Visualize reads them live), '
+                             'visualize (the visualizer alone) or label (a labeling project alone).',
           _obj({'bucket': BUCKET, 'paths': PATHS,
-                'target': {'type': 'string', 'enum': ['visualize', 'label'], 'description': 'where to open it'},
+                'target': {'type': 'string', 'enum': ['both', 'visualize', 'label'], 'description': 'what to create'},
                 'name': S('session / project name (optional)'),
                 'task_type': {'type': 'string', 'description': 'label task type (default detect)',
                               'enum': ['detect', 'segment', 'pose', 'obb', 'classify']}},
                ['bucket', 'paths', 'target']),
           True, _send, lambda b, a: f'Send {_items(a["paths"])} from {_bname(b, a)} to '
-                                    f'{"the visualizer" if a["target"] == "visualize" else "a labeling project"}'
+                                    + {'visualize': 'the visualizer', 'both': 'a linked Visualize + Label session'}.get(
+                                        a['target'], 'a labeling project')
                                     + (f' as {a["name"]!r}' if a.get('name') else ''), s3_ok=True,
-          danger_if=lambda a: a.get('target') == 'label'))       # a labeling project: always confirmed
+          danger_if=lambda a: a.get('target') in ('label', 'both')))      # a labeling project: always confirmed
 
 _add(Tool('set_s3_mode', 'Choose how a WHOLE S3 bucket is read: stream (from S3 on every request) or local '
                         '(every object downloaded into an editable local folder that can be re-synced and exported). '

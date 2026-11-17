@@ -221,6 +221,18 @@ def router(state, ctx):
                      target=body.get('target') or 'visualize', name=body.get('name'),
                      task_type=body.get('task_type') or 'detect')
 
+    @r.get('/buckets/{bid}/session-check')
+    def session_check(bid: str, path: str = '', user=Depends(deps.current_user)):
+        """What a session made from this folder can do (Create session's Format step)."""
+        return _call(service.session_check, user, bid, path)
+
+    @r.post('/session')
+    def create_session(body: dict, user=Depends(MANAGE)):
+        """One session from a bucket folder: Visualize, Label or both linked (the default)."""
+        return _call(service.create_session, user, body.get('bucket'), body.get('path') or '',
+                     visualize=body.get('visualize', True) is not False, label=body.get('label', True) is not False,
+                     name=body.get('name'), task_type=body.get('task_type') or 'detect')
+
     @r.get('/sources')
     def list_sources(user=Depends(deps.current_user)):
         return _call(service.list_sources, user)

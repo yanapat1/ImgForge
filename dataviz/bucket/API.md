@@ -38,6 +38,8 @@ create_bucket(user, name, kind='managed', path=None, connection_id=None, s3_buck
 update_bucket(user, bid, name=None, mode=None)                 -> Bucket (+ job_id when switched to local)
 fetch_local(user, bid, paths, mirror=False)                    -> {job_id, paths, result}   # stream: download folders (again = update)
 check_local(user, bid)                                         -> {job_id}   # compare the downloaded folders with S3
+session_check(user, bid, path='')                             -> {format, label, images, labels, classes, streamed, can: {visualize, label, linked}, label_import, note, convert_to, default}   # what a session from this folder can do
+create_session(user, bid, path='', visualize=True, label=True, name=None, task_type='detect') -> {name, linked, visualize?: {id, url}, label?: {id, url, job_id, import_job_id?}}   # both = linked: the labeling project owns the labels (the folder's are imported), Visualize is a `labeling` dataset on it
 job_status(user, job_id, wait_s=0)                             -> {id, label, state, stage, pct, eta_s, elapsed_s, error?, result?}   # one of the caller's own jobs; wait_s <= 60 waits for it
 compare_cloud(user, bid, path='', verify=False)                -> {job_id, path}   # local copy vs S3, file by file
 compare_result(user, bid, path='', status=None, q='', offset=0, limit=200)   -> {ready, running, counts, rows ...}
