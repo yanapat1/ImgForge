@@ -396,3 +396,11 @@ def test_new_sessions_only_from_bucket_data(dc, tmp_path):
         assert c.post('/api/bucket/session', json={'bucket': b['id'], 'name': 'Both'}).status_code == 200
     finally:
         c.ctx.cfg['image'] = {'bucket_only': False}
+
+
+def test_the_shipped_config_has_only_known_keys():
+    """config.yaml's image.bucket_only is read (a key missing from DEFAULTS is dropped with a warning)."""
+    from dataviz.core import config as vconfig
+    said = []
+    cfg = vconfig.load_config(str(vconfig.DEFAULT_CONFIG), log=said.append)
+    assert said == [] and cfg['image']['bucket_only'] is True

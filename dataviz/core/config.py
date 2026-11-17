@@ -95,6 +95,7 @@ DEFAULTS = {
         'ai_table_columns': 200,            # columns of one describe_table page
         'sample_database': True,            # the first start makes the example database sample_shop (data/sample.py)
     },
+    'image': {'bucket_only': True},         # new Image sessions take their data from a Bucket folder only
     'sessions': {'max_loaded': 4},          # visualizer sessions kept loaded at once (shared by every user)
     # folders users may read datasets / models from (and browse in the page); relative = to the project root
     'storage': {'allowed_roots': ['.'], 'data_root': 'data'},   # data_root: Bucket managed buckets
