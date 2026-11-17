@@ -93,6 +93,36 @@ export function confirmResult(x: unknown): ConfirmResult {
   return { id: str(r['id']), ok: r['ok'] !== false, summary: str(r['summary']), declined: !!r['declined'], undoId: strOrNull(r['undo_id']), undone: false };
 }
 
+/** A saved chat's trace (dataviz/llm/sessions.py compact_trace: one `tool` item per call, one `thinking` item with
+ *  its time, one `confirm` item with its outcome, one `retry` count) as the live events reduce() folds, so a reopened
+ *  chat shows its tool rows, change cards (with Undo) and decided confirmations as they were. */
+export function expandTrace(items: unknown[]): ChatEvent[] {
+  const out: ChatEvent[] = [];
+  for (const x of items) {
+    if (!isRec(x) || typeof x['type'] !== 'string') continue;
+    const ev = { ...x, type: x['type'], _t: 0 } as ChatEvent;
+    switch (ev.type) {
+      case 'tool':
+        out.push({ ...ev, type: 'tool_start' });
+        if (typeof ev['ok'] === 'boolean') out.push({ ...ev, type: 'tool_end' });
+        break;
+      case 'thinking':
+        out.push(ev);
+        if (typeof ev['ms'] === 'number') out.push({ type: 'thinking_end', ms: ev['ms'], _t: 0 });
+        break;
+      case 'confirm':
+        out.push(ev);
+        if (typeof ev['status'] === 'string' && ev['status'] !== 'pending') out.push({ ...ev, type: 'confirmed' });
+        break;
+      case 'retry':
+        out.push(typeof ev['count'] === 'number' ? { ...ev, attempt: ev['count'], wait_s: 0 } : ev);
+        break;
+      default: out.push(ev);
+    }
+  }
+  return out;
+}
+
 /** Fold one event into an answer. Pure: `t` is never mutated, a new object comes back when anything changed. */
 export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
   const at = num(ev._t, t.t0);
@@ -245,7 +275,9 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
     }
     case 'x_expire': {             // a resumed chat: nothing waits any more
       const blocks = mapBlocks(b, (x) => (x.k === 'confirm' && (x.state === 'pending' || x.state === 'sent') ? { ...x, state: 'expired' }
-        : x.k === 'think' && x.ms === null ? { ...x, ms: 0 } : x));
+        : x.k === 'think' && x.ms === null ? { ...x, ms: 0 }
+          : x.k === 'tools' && x.items.some((i) => i.ok === null)       // a call the turn ended in: no spinner for ever
+            ? { ...x, items: x.items.map((i) => (i.ok === null ? { ...i, ok: false, summary: i.summary || 'did not finish' } : i)) } : x));
       return { ...t, blocks, resumed: true, status: t.status === 'streaming' ? 'done' : t.status };
     }
     default:

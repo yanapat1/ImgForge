@@ -24,11 +24,11 @@ import { isAbort, streamNDJSON } from './stream.js';
 import { actionToast, toast } from './toast.js';
 import { saveFile } from './format.js';
 import {
-  approvedMessage, arr, cycle, dateGroup, EFFORTS, isEffort, isMode, isRec, isThink, isWeb, newTurn, nextMode, num, parseCommand, recOf, reduce, str, strOrNull, THINKS, turnText, WEBS,
+  approvedMessage, arr, cycle, dateGroup, EFFORTS, expandTrace, isEffort, isMode, isRec, isThink, isWeb, newTurn, nextMode, num, parseCommand, recOf, reduce, str, strOrNull, THINKS, turnText, WEBS,
 } from './chat-reduce.js';
 
 // the pure reducer and its helpers live in chat-reduce.ts; these are part of this module's public API too
-export { approvedMessage, dateGroup, EFFORTS, MODES, newTurn, nextMode, parseCommand, reduce, THINKS, turnText, WEBS } from './chat-reduce.js';
+export { approvedMessage, dateGroup, EFFORTS, expandTrace, MODES, newTurn, nextMode, parseCommand, reduce, THINKS, turnText, WEBS } from './chat-reduce.js';
 
 const fmtK = (n: number | null | undefined): string => (n == null ? '–' : n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
 const fmtMs = (ms: number | null | undefined): string => (ms == null ? '' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);
@@ -357,7 +357,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'skill': return actRow(null, icon('layers'), 'Loaded skill', `<b>${esc(b.name)}</b>`, '', null, 'k-skill');
       case 'agent': return actRow(key, okIcon(b.ok), 'Sub-agent', esc(firstLine(b.task)), esc([plural(b.steps, 'step'), b.tokens ? `${fmtK(b.tokens)} tokens` : ''].filter(Boolean).join(' · ')),
         () => `<div class="ct-act-text">${esc(b.task)}</div>${b.tools.length ? `<div class="ct-dim">Used ${b.tools.map((x) => `<code>${esc(x)}</code>`).join(', ')}</div>` : ''}`, `k-agent${b.ok ? '' : ' bad'}`);
-      case 'retry': return actRow(key, icon('refresh'), `Retry ${b.attempt}/${b.max}`, esc(firstLine(b.reason)), `${esc(String(b.waitS))} s`,
+      case 'retry': return actRow(key, icon('refresh'), `Retry ${b.attempt}/${b.max}`, esc(firstLine(b.reason)), b.waitS ? `${esc(String(b.waitS))} s` : '',
         () => `<div class="ct-act-text">${esc(b.reason)}</div>`, 'k-retry warn');
       case 'notice': return actRow(key, icon('circle'), 'Note', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-note');
       case 'text': return actRow(key, icon('text'), 'Said', esc(firstLine(b.text)), '', () => `<div class="ct-md">${md(b.text)}</div>`, 'k-said');
@@ -505,7 +505,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
         const body = opts.uiBody?.(b, `data-ti="${ti}" data-bi="${bi}"`) ?? '';
         return body ? `<div class="ct-uiw${b.applied ? ' applied' : ''}">${row}${body}</div>` : row;
       }
-      case 'retry': return `<div class="ct-retry">${icon('refresh')}<span class="num">retry ${b.attempt}/${b.max}</span><span class="ct-rr">${esc(b.reason.slice(0, 140))}</span><span class="num">${esc(String(b.waitS))} s</span></div>`;
+      case 'retry': return `<div class="ct-retry">${icon('refresh')}<span class="num">retry ${b.attempt}/${b.max}</span><span class="ct-rr">${esc(b.reason.slice(0, 140))}</span>${b.waitS ? `<span class="num">${esc(String(b.waitS))} s</span>` : ''}</div>`;
       case 'notice': return `<div class="ct-notice ${esc(b.level)}">${icon(b.level === 'warn' || b.level === 'error' ? 'alert' : 'circle')}<span>${md(b.text)}</span></div>`;
       case 'compact': return compactHTML(b, keyOf(ti, bi));
     }
@@ -842,7 +842,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   function traceTurn(m: { text: string; trace: unknown; usage: unknown }): AiTurn {
     let t = newTurn(0);
-    for (const ev of arr(m.trace)) if (isRec(ev) && typeof ev['type'] === 'string') t = reduce(t, { ...ev, type: ev['type'], _t: 0 });
+    for (const ev of expandTrace(arr(m.trace))) t = reduce(t, ev);
     if (!t.blocks.some((b) => b.k === 'text') && m.text && !t.err) t = { ...t, blocks: [...t.blocks, { k: 'text', text: m.text, step: t.step?.n ?? 0 }] };
     const u = recOf(m.usage);
     if (!t.usage && (u['in'] != null || u['out'] != null)) t = { ...t, usage: { in: num(u['in']), out: num(u['out']) } };

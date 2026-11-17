@@ -4,6 +4,8 @@ grouped and change tools as cards, a retry that discards the step's streamed tex
 UI actions, plan proposals and the page-only x_* events; it never mutates its input. Also the approved-plan message
 (the same text as planner.approved_message), slash-command parsing, the mode cycle and the History date groups."""
 
+import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,7 +17,7 @@ CHAT_TS = ROOT / 'static' / 'ts' / 'core' / 'chat.ts'
 
 SCRIPT = r"""
 import assert from 'node:assert/strict';
-import { reduce, newTurn, approvedMessage, parseCommand, nextMode, dateGroup, turnText } from './chat.mjs';
+import { reduce, newTurn, approvedMessage, parseCommand, nextMode, dateGroup, turnText, expandTrace } from './chat.mjs';
 
 const freeze = (o) => { if (o && typeof o === 'object') { Object.freeze(o); for (const v of Object.values(o)) freeze(v); } return o; };
 // every step runs on a deep-frozen turn: a mutation throws (ESM is strict mode)
@@ -120,6 +122,21 @@ assert.equal(r.blocks[0].ms, 0);
 assert.equal(r.status, 'done');
 assert.equal(r.resumed, true);
 
+// a saved chat reopened: the stored trace (sessions.compact_trace) replays to the same cards as the live answer
+const saved = JSON.parse(process.env.SAVED_TRACE);
+let o = run([...expandTrace(saved), { type: 'x_expire' }]);
+assert.equal(o.blocks.find((b) => b.k === 'think').ms, 1200, 'the thinking time is kept');
+const tl = o.blocks.filter((b) => b.k === 'tools').flatMap((b) => b.items);
+assert.deepEqual(tl.map((i) => [i.name, i.ok]), [['list_folder', true], ['add_tags', true]], 'tool rows and change cards are back');
+assert.equal(tl[1].undoId, 'u9', 'with their Undo');
+assert.equal(tl[1].risk, 'change');
+const cf = o.blocks.find((b) => b.k === 'confirm');
+assert.equal(cf.state, 'decided', 'an approved confirmation is not shown as expired');
+assert.equal(cf.results[0].ok, true);
+assert.equal(o.blocks.find((b) => b.k === 'retry').attempt, 2);
+assert.equal(expandTrace([{ type: 'confirm', confirm_id: 'k', actions: [], status: 'pending' }]).length, 1, 'an undecided one still expires');
+assert.deepEqual(expandTrace([null, 'x', { type: 'tool', id: 'c', name: 'n' }]).map((e) => e.type), ['tool_start'], 'a call that never ended');
+
 // errors and stops
 assert.equal(run([{ type: 'error', detail: 'stopped after 50 steps' }]).err, 'stopped after 50 steps');
 assert.equal(run([{ type: 'x_stopped' }]).status, 'stopped');
@@ -164,6 +181,25 @@ console.log('ok');
 """
 
 
+def _saved_trace():
+    """One answer's live events as the session store keeps them (a read, a confirmed change, thinking, retries)."""
+    from dataviz.llm import sessions
+    return sessions.compact_trace([
+        {'type': 'meta', 'model': 'm', 'mode': 'ask', 'effort': 'medium', 'run_id': 'r'}, {'type': 'step', 'n': 1, 'max': 30},
+        {'type': 'thinking', 'text': 'hmm '}, {'type': 'thinking', 'text': 'ok'}, {'type': 'thinking_end', 'ms': 1200},
+        {'type': 'tool_start', 'id': 'c1', 'name': 'list_folder', 'args': {'bucket': 'b'}, 'risk': 'read'},
+        {'type': 'tool_end', 'id': 'c1', 'name': 'list_folder', 'ok': True, 'summary': '→ 3 entries', 'ms': 12, 'preview': '{}'},
+        {'type': 'confirm', 'confirm_id': 'k1', 'timeout_s': 600, 'actions': [
+            {'id': 'a1', 'call_id': 'c2', 'tool': 'add_tags', 'args': {'bucket': 'b'}, 'summary': 'Tag b', 'risk': 'change'}]},
+        {'type': 'tool_start', 'id': 'c2', 'name': 'add_tags', 'args': {'bucket': 'b'}, 'risk': 'change', 'summary': 'Tag b'},
+        {'type': 'tool_end', 'id': 'c2', 'name': 'add_tags', 'ok': True, 'summary': '→ tagged', 'ms': 30, 'risk': 'change', 'undo_id': 'u9'},
+        {'type': 'confirmed', 'confirm_id': 'k1', 'status': 'decided',
+         'results': [{'id': 'a1', 'ok': True, 'summary': '→ tagged', 'undo_id': 'u9'}]},
+        {'type': 'retry', 'attempt': 1, 'max': 50, 'reason': '429', 'wait_s': 1, 'discard': False, 'step': 2},
+        {'type': 'retry', 'attempt': 2, 'max': 50, 'reason': '429', 'wait_s': 2, 'discard': False, 'step': 2},
+        {'type': 'text', 'text': 'Done.'}, {'type': 'done', 'usage': {'in': 10, 'out': 2}, 'ms': 900, 'steps': 2}])
+
+
 def test_chat_reducer_js(tmp_path):
     node = shutil.which('node')
     if node is None:
@@ -176,7 +212,8 @@ def test_chat_reducer_js(tmp_path):
                         f'--outfile={tmp_path / "chat.mjs"}'], capture_output=True, text=True, timeout=60)
     assert b.returncode == 0, b.stderr
     (tmp_path / 't.mjs').write_text(SCRIPT)
-    r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([node, str(tmp_path / 't.mjs')], capture_output=True, text=True, timeout=60,
+                       env={**os.environ, 'SAVED_TRACE': json.dumps(_saved_trace())})
     assert r.returncode == 0 and r.stdout.strip() == 'ok', r.stderr + r.stdout
 
 
