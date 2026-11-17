@@ -12,4 +12,5 @@ when: the user asks to export, download, back up, upload elsewhere or hand a dat
    `data/images/` with prefix `v1/` gives `v1/data/images/...`).
 5. `export_to` with `connection`, `s3_bucket` (S3), `prefix` or `to`, `create_bucket` when the bucket must be made.
    Use `overwrite` only when the user says so (it is dangerous and confirmed).
-6. It runs as a job: report that it started and where the files will land; the result lists files, bytes and URI.
+6. It runs as a job: report that it started and where the files will land; `job_status` with its job_id shows the
+   progress and, when done, the result (files, bytes, URI).

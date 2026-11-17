@@ -387,6 +387,7 @@ export function dockEvent(ev: ChatEvent): void {
       const state = String(ev['state'] ?? 'running');
       D.jobs.set(id, { label: String(ev['label'] || 'Job'), pct: typeof ev['pct'] === 'number' ? ev['pct'] : null,
         done: state === 'done' || state === 'error' || state === 'cancelled', ok: state === 'done' });
+      D.tasksOpen = true;                    // a job the assistant started: its progress is worth seeing
       break;
     }
     case 'confirm': D.pending++; break;

@@ -12,5 +12,7 @@ when: the user asks to download / import / get a dataset from the internet
 4. `import_dataset` with `source`, `ref`, a `name` for the new bucket (or `bucket` + `path` to import into an existing
    writable folder), `version` / `revision` / `patterns` / `format` as needed (Roboflow: a YOLO format such as
    yolov8 for detection).
-5. It runs as a job: report the bucket it lands in. Afterwards `detect_format` and `get_stats`; offer
+5. It runs as a job (the result has `job_id`): report the bucket it lands in. `job_status` job_id, wait_s 60 says
+   when it is done (repeat while it runs; a long one: tell the user it continues and stop). Then `detect_format`
+   and `get_stats`; offer
    `organise-yolo-dataset` if the format is not YOLO, `add_tags` (e.g. `source:kaggle`), or `send_to_session`.

@@ -8,7 +8,7 @@ when: the user wants to edit, move or delete in an S3 bucket, asks why it is rea
 2. To change one folder (prefix) of a streamed bucket: if the scope / `list_folder` says it is downloaded, just do
    the changes (create_folder / move / rename / delete / upload) on the same bucket: they land in the local copy.
    If not, propose `download_s3_folders` for **only that folder** first (only that prefix is downloaded; the rest
-   keeps streaming), then, after the job, the changes inside it. Never ask to load the whole bucket for one folder.
+   keeps streaming), then, after the job (`job_status` with its job_id, wait_s 60: state done), the changes inside it. Never ask to load the whole bucket for one folder.
    To update a downloaded folder later: the same tool again (`check_s3_local` first if you need to know what
    changed; S3 versions replace local edits of the same name; `mirror` only when the user wants files S3 dropped
    removed).

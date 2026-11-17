@@ -9,5 +9,5 @@ when: the user mentions a video, mp4 / mov files, frames, fps, cutting, sampling
    "only when the scene changes" → `mode` scene. Add `start` / `end` for a part, `dedupe` 0.01 for a static camera.
 3. Pick the `layout`: yolo to label next, yolo-split for training splits, per-video for many clips.
 4. Propose `extract_frames`; on a streamed S3 bucket use `target` copy with a `new_name`.
-5. Report the job, the folder it writes and the frame count; offer `send_to_session` (label or visualize) next.
+5. Report the job and the folder it writes; `job_status` (job_id, wait_s 60) says when it is done and the frame count; offer `send_to_session` (label or visualize) next.
 6. "Every new video" → `set_video_auto` with the same settings (`off` to stop).

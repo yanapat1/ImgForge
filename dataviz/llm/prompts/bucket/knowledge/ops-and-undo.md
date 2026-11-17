@@ -27,3 +27,7 @@ summary: create folder, move, copy, rename, delete, write a text file, upload; u
     skipped and a half-sent big file continues from what the server holds (Retry on a failed row does the same).
   - "Upload stopped after N files: the connection was cut" means even the smallest chunk failed: check the proxy or
     the network, then Retry.
+- **Background jobs.** Import, export, video → frames, an S3 download / sync / compare return a `job_id` and go
+  on in the background (the activity strip under the header shows them). `job_status` job_id tells queued |
+  running | done | error | cancelled, the stage, percent and seconds left; `wait_s` (up to 60) waits for it. Check
+  it before a step that needs the job's files; a job of many minutes: say it continues and stop, do not poll for long.

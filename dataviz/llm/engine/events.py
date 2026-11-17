@@ -35,6 +35,9 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
     agent         {task, ok, steps, tools, in, out}          a sub-agent of delegate finished (tools/agents.py)
     compact       {state: start|done, auto, summary?, covered?, before?, after?, turns?}   the older messages were
                                                              folded into the chat's summary (engine/summarize.py)
+    job           {id, label, state, pct}                    a background job a tool started (state running) or
+                                                             job_status looked at (queued | running | done | error
+                                                             | cancelled): the dock's Tasks strip shows its row
     notice        {level, text}
     ping          {}                                         keep-alive while waiting for a confirmation
     error         {detail}                                   ends the turn
@@ -44,5 +47,5 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
 
 ENDS = ('done', 'error')
 TYPES = ('meta', 'context', 'session', 'step', 'thinking', 'thinking_end', 'text', 'tool_start', 'tool_end', 'skill', 'search', 'todo',
-         'ui_action', 'confirm', 'confirmed', 'ask', 'cannot', 'plan_proposal', 'retry', 'consult', 'agent', 'compact', 'notice', 'ping', 'error',
+         'ui_action', 'confirm', 'confirmed', 'ask', 'cannot', 'plan_proposal', 'retry', 'consult', 'agent', 'compact', 'mode', 'job', 'notice', 'ping', 'error',
          'done')

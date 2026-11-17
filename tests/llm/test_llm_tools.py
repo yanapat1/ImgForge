@@ -7,6 +7,7 @@ user only, expiry), and the /api/llm/bucket/* routes gated like every AI feature
 import json
 
 import pytest
+from types import SimpleNamespace
 
 from dataviz.llm import agent, providers, tools
 
@@ -174,6 +175,11 @@ class FakeService:
             {'id': 'b3', 'name': 'dupe', 'kind': 'local', 'writable': True, 'tags': [], 'stats': {}},
             {'id': 'b4', 'name': 'cloud', 'kind': 's3', 'writable': False, 'tags': [], 'stats': {}},
         ]
+
+    def job_status(self, user, job_id, wait_s=0):
+        self.calls.append(('job_status', job_id, wait_s))
+        return {'id': job_id, 'label': 'Import cars', 'state': 'running', 'stage': 'download', 'pct': 42.0, 'eta_s': 30,
+                'elapsed_s': 12}
 
     def list_buckets(self, user, q='', tags=(), formats=()):
         self.calls.append(('list_buckets', q))
@@ -522,3 +528,53 @@ def test_video_frame_tools(svc):
     assert svc.calls[-1] == ('set_video_auto', 'b1', {'fps': 2, 'layout': 'flat'})
     tools.run(ALICE, 'set_video_auto', {'bucket': 'cars', 'off': True})
     assert svc.calls[-1] == ('set_video_auto', 'b1', None)
+
+
+# ---------------------------------------------------------------- background jobs
+def test_job_status_tool_and_the_job_events(svc):
+    """A tool that starts a job returns its job_id; job_status reads it, and both give the page a `job` row."""
+    from dataviz.llm.engine import react
+    out, summary = tools.run(ALICE, 'job_status', {'job_id': '7', 'wait_s': 5})
+    assert out['state'] == 'running' and summary == '→ Import cars: running 42%'
+    assert svc.calls[-1] == ('job_status', 7, 5)
+    with pytest.raises(tools.ToolError, match='between 0 and 60'):
+        tools.run(ALICE, 'job_status', {'job_id': 7, 'wait_s': 600})
+    assert tools.TOOLS['job_status'].kind == 'read'
+    assert react._job_event('job_status', out, summary) == {'type': 'job', 'id': '7', 'label': 'Import cars',
+                                                            'state': 'running', 'pct': 42.0}
+    started = react._job_event('import_dataset', {'bucket': 'b9', 'job_id': 8}, 'import of x started')
+    assert started == {'type': 'job', 'id': '8', 'label': 'import of x started', 'state': 'running', 'pct': None}
+    assert react._job_event('list_folder', {'entries': []}, '→ 0') is None and react._job_event('x', None, '') is None
+
+
+def test_job_status_service(monkeypatch):
+    """bucket.service.job_status: the caller's own jobs only (an admin sees all), waits at most 60 s."""
+    from dataviz.bucket import service
+
+    class J:
+        def __init__(self, owner, status='running', cancelled=False, result=None):
+            self.owner, self.status, self.c, self.result, self.waited = owner, status, cancelled, result, None
+
+        def wait(self, t):
+            self.waited = t
+            self.status = 'done'
+
+        def to_dict(self):
+            return {'id': 3, 'label': 'Export cars', 'status': self.status, 'stage': 'upload', 'pct': 50.0, 'eta': 9.0,
+                    'elapsed': 4.0, 'error': None, 'cancelled': self.c,
+                    **({'result': self.result} if self.result is not None and self.status == 'done' else {})}
+
+    mine, theirs = J('u-alice', result={'files': 2}), J('u-bob')
+    reg = {3: mine, 4: theirs}
+    monkeypatch.setattr(service, '_jobs', lambda: SimpleNamespace(get=reg.get))
+    monkeypatch.setattr(service, '_need', lambda user, perm=None: None)
+    alice = {'id': 'u-alice'}
+    assert service.job_status(alice, 3)['state'] == 'running' and mine.waited is None
+    got = service.job_status(alice, '3', wait_s=600)
+    assert mine.waited == service.JOB_WAIT_MAX and got['state'] == 'done' and got['result'] == {'files': 2}
+    for bad in (4, 99, 'x'):
+        with pytest.raises(service.BucketError):
+            service.job_status(alice, bad)
+    assert service.job_status({'id': 'root', 'is_admin': True}, 4)['label'] == 'Export cars'
+    reg[5] = J('u-alice', status='error', cancelled=True)
+    assert service.job_status(alice, 5)['state'] == 'cancelled'

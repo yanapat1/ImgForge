@@ -372,6 +372,19 @@ def _extras(out):
     return ex
 
 
+def _job_event(name, out, summary):
+    """The page's job row (the dock's Tasks strip) for a tool that started a background job or looked at one."""
+    if not isinstance(out, dict):
+        return None
+    if name == 'job_status' and out.get('id') is not None:
+        return {'type': 'job', 'id': str(out['id']), 'label': str(out.get('label') or 'Job')[:120],
+                'state': out.get('state') or 'running', 'pct': out.get('pct')}
+    if out.get('job_id') is not None:
+        return {'type': 'job', 'id': str(out['job_id']), 'label': str(summary or name).lstrip('→ ')[:120],
+                'state': 'running', 'pct': None}
+    return None
+
+
 def register_run(run):
     with _runs_lock:
         _runs[run.run_id] = {'user_id': (run.user or {}).get('id'), 'cancel': run.cancel, 'at': time.time()}
@@ -665,6 +678,9 @@ def events(run):
             yield {'type': 'tool_end', 'id': c['id'], 'name': name, 'ok': ok, 'summary': summary, 'ms': ms,
                    'preview': _preview(out) if ok else content}
             yield from _tool_events(run.ctx)
+            job = _job_event(name, out, summary) if ok else None
+            if job:
+                yield job
             if name == 'use_skill' and ok:
                 yield {'type': 'skill', 'name': args.get('name')}
             results.append({**res, 'content': content + nudge, **({} if ok else {'is_error': True})})
@@ -863,8 +879,11 @@ def _run_change(run, c, t, clean, summary, risk):
         if t.domain != 'web':
             _remember_names(run.ctx, out)
     except Exception as e:  # noqa: BLE001 - one failed action does not stop the others
-        ok, content, done_summary, ex = False, _error_text(e), '→ ' + _error_text(e), {}
+        ok, content, done_summary, ex, out = False, _error_text(e), '→ ' + _error_text(e), {}, None
     yield {'type': 'tool_end', 'id': c['id'], 'name': t.name, 'ok': ok, 'summary': done_summary,
            'ms': round((time.perf_counter() - t1) * 1000), 'risk': risk, **ex}
     yield from _tool_events(run.ctx)
+    job = _job_event(t.name, out, summary)
+    if job:
+        yield job
     return {'ok': ok, 'content': content, 'summary': done_summary, 'extras': ex}

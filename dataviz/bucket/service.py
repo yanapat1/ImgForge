@@ -1417,6 +1417,34 @@ def _jobs():
     return getattr(ctx, 'jobs', None) if ctx is not None else None
 
 
+JOB_WAIT_MAX = 60
+
+
+def job_status(user, job_id, wait_s=0):
+    """One background job the user started (import, export, frames, S3 download / sync / compare, label with model)
+    -> {id, label, state: queued | running | done | error | cancelled, stage, pct, eta_s, elapsed_s, error?, result?}.
+    wait_s (<= JOB_WAIT_MAX) waits that long for it to finish first. Jobs of other users do not exist here."""
+    _need(user)
+    jobs = _jobs()
+    try:
+        j = jobs.get(int(job_id)) if jobs is not None else None
+    except (TypeError, ValueError):
+        raise BucketError(f'job_id must be the number a tool returned, not {job_id!r}') from None
+    if j is None or (j.owner != user.get('id') and not user.get('is_admin')):
+        raise BucketError(f'no job {job_id} of yours (finished jobs are kept for a while, then forgotten)')
+    if wait_s and j.status in ('queued', 'running'):
+        j.wait(max(0.0, min(float(wait_s), JOB_WAIT_MAX)))
+    d = j.to_dict()
+    state = 'cancelled' if d['cancelled'] and d['status'] != 'done' else d['status']
+    out = {'id': d['id'], 'label': d['label'], 'state': state, 'stage': d['stage'], 'pct': d['pct'],
+           'eta_s': d['eta'], 'elapsed_s': d['elapsed']}
+    if d.get('error'):
+        out['error'] = str(d['error'])[:500]
+    if 'result' in d and isinstance(d['result'], (dict, list, str, int, float)):
+        out['result'] = d['result']
+    return out
+
+
 def _busy(key):
     jobs = _jobs()
     return bool(jobs is not None and jobs.busy(key))

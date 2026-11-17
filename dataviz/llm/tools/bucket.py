@@ -234,6 +234,12 @@ def _s3_check(user, a):
     return res, f'{b["name"]}: comparing the downloaded folders with S3 (a job)'
 
 
+def _job_status(user, a):
+    res = _svc().job_status(user, a['job_id'], a.get('wait_s') or 0)
+    pct = f' {res["pct"]:.0f}%' if isinstance(res.get('pct'), (int, float)) else ''
+    return res, f'→ {res["label"]}: {res["state"]}{pct}' + (f' ({res["error"]})' if res.get('error') else '')
+
+
 COMPARE_WAIT_S = 90
 
 
@@ -510,6 +516,11 @@ _add(Tool('download_s3_folders', 'Download folders (or files) of a STREAMED S3 b
 _add(Tool('check_s3_local', 'Compare the downloaded folders of a streamed S3 bucket with S3 now: new / changed / '
                             'removed files per folder (a job; list_folder then shows local_copy.state outdated).',
           _obj({'bucket': BUCKET}, ['bucket']), False, _s3_check, s3_ok=True))
+_add(Tool('job_status', 'How a background job is doing (the job_id an import, export, frames, S3 download / sync / '
+                        'compare tool returned): state queued | running | done | error | cancelled, stage, percent, '
+                        'seconds left. Call it before a step that needs the job finished; wait_s waits for it first.',
+          _obj({'job_id': I('the job_id a tool returned', 1), 'wait_s': I('wait up to this many seconds for it to finish', 0, 60)},
+               ['job_id']), False, _job_status, s3_ok=True))
 _add(Tool('compare_s3_local', 'File by file, the local copy of a folder of an S3 bucket against S3 (a streamed link\'s '
                               'downloaded folder, or a bucket loaded into local): what the user added, deleted or '
                               'edited here, and what is new, changed or removed in S3 since the download. Read-only. '
