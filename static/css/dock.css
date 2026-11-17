@@ -80,6 +80,42 @@ html[data-dock="open"] .dock-rail { display: none; }
 .dock-bar { flex-basis: 100%; height: 4px; margin-left: 22px; border-radius: 2px; background: var(--prog-track); overflow: hidden; }
 .dock-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--gem-1), var(--gem-2)); transition: width var(--t) var(--ease); }
 
+/* background agents (the Agents strip): one row each: title, what it does now, step · time · tokens, Stop; unfolded:
+   its checklist, what it waits for (Approve / Reject, a question, a plan), its result */
+.dock-agents-h { display: flex; align-items: baseline; gap: var(--s2); color: var(--text-faint); font-size: var(--fs-2xs); font-weight: 650;
+  text-transform: uppercase; letter-spacing: .05em; }
+.dock-agents-n { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-muted); }
+.dock-agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dock-agent { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); min-width: 0; }
+.dock-agent.s-waiting { border-color: var(--warn); }
+.dock-agent-h { display: flex; align-items: center; gap: 2px; min-width: 0; padding-right: 2px; }
+.dock-agent-b { flex: 1; min-width: 0; height: auto; display: flex; align-items: flex-start; gap: var(--s2); padding: 5px 6px 5px 8px; background: none;
+  border: 0; text-align: left; font-weight: 400; cursor: pointer; }
+.dock-agent-b:hover:not(:disabled) { background: var(--surface-2); }
+.dock-agent-b > .ct-spin, .dock-agent-b > .dot { flex: none; margin-top: 2px; }
+.dock-agent-b > .dot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; }
+.dock-agent-b > .dot .ico { width: 9px; height: 9px; stroke-width: 3; }
+.dock-agent.s-done .dock-agent-b > .dot { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+.dock-agent.s-failed .dock-agent-b > .dot { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
+.dock-agent-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
+.dock-agent-t > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-agent-t .t { color: var(--text); }
+.dock-agent-t .t b { color: var(--gem-2); font-weight: 650; margin-right: 2px; }
+.dock-agent-t .d { color: var(--text-muted); }
+.dock-agent.s-waiting .dock-agent-t .d { color: var(--warn-text); font-weight: 600; }
+.dock-agent-t .m { color: var(--text-faint); font-size: var(--fs-2xs); }
+.dock-agent-h .icon-btn { flex: none; width: 24px; height: 24px; }
+.dock-agent-d { display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 8px 30px; }
+.dock-agent-w { display: flex; flex-direction: column; gap: 4px; }
+.dock-agent-w ul, .dock-agent-w ol { margin: 0; padding-left: 16px; color: var(--text-muted); }
+.dock-agent-w li { overflow-wrap: anywhere; }
+.dock-agent-w li.danger { color: var(--danger-text); }
+.dock-agent-f { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.dock-agent-f .grow { flex: 1; }
+.dock-agent-f button { height: 24px; padding: 0 8px; }
+.dock-agent-r { max-height: 140px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); }
+.dock-agent-r.bad { color: var(--danger-text); }
+
 /* body: the page's host section with the shared chat */
 .dock-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dock-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }

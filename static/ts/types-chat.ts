@@ -59,7 +59,7 @@ export interface ChatSession {
   plan?: Array<{ text: string; state: string; page?: string }>;
 }
 /** Where a message was written (llm_messages.page). */
-export interface ChatPage { role?: string; screen?: string; label?: string; session_id?: string; bucket?: string; path?: string; tab?: string; continued?: boolean }
+export interface ChatPage { role?: string; screen?: string; label?: string; session_id?: string; bucket?: string; path?: string; tab?: string; continued?: boolean; task?: string }
 export interface SessionRef { id: string; title: string; last_opened_at?: string | null }
 export interface SessionList {
   sessions: ChatSession[];

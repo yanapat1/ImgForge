@@ -41,6 +41,8 @@ const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}
 const LIST_ROLE = 'app';
 /** A navigate goal the new page sent on in the same chat. */
 export const continuedLabel = (goal: string, page?: string): string => `↪ Continued${page ? ` on ${page}` : ' here'}: ${goal}`;
+/** A background agent's report the page handed to the lead (the model reads the server's text, not this). */
+export const taskLabel = (id: string): string => `↪ Agent ${id} reported`;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtWhen(iso: string | null | undefined): string {
   const d = iso ? new Date(iso) : null;
@@ -96,7 +98,7 @@ const DEFAULT_COMMANDS = [
   ['web', 'off|public|technical|full', 'web search level'], ['skills', '', 'list the skills'], ['skill', '<name>', 'use a skill for the next message'],
   ['sessions', '', 'open the chat history'], ['new', '', 'start a new chat'], ['clear', '', 'start a new chat'],
   ['resume', '<search>', 'open an earlier chat'], ['rename', '<title>', 'rename this chat'], ['delete', '', 'delete this chat'],
-  ['cost', '', 'tokens used by this chat'], ['agents', 'on|off', 'sub-agents for big look-ups'], ['compact', '[focus]', 'summarise older messages to free context'], ['export', '', 'download this chat as Markdown'],
+  ['cost', '', 'tokens used by this chat'], ['agents', 'on|off|max <1-4>', 'sub-agents and background agents for long work'], ['compact', '[focus]', 'summarise older messages to free context'], ['export', '', 'download this chat as Markdown'],
   ['prompts', '', 'your own instructions and skills (Settings)'], ['plugins', '', 'installed plugins (Settings)'], ['help', '', 'list the commands'],
 ].map(([name, args, description]) => ({ name: name ?? '', args: args ?? '', description: description ?? '' }));
 
@@ -205,6 +207,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     sessionsOK: null as boolean | null,
     willRemove: null as SessionRef | null,
     blocked: null as string | null,          // "20 pinned chats…" shown in place of the new chat
+    queued: [] as string[],                  // messages typed while an answer runs: sent when it ends
     frame: 0,
     ticker: 0,
     hintTimer: 0,
@@ -759,7 +762,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     C.cfgTimer = window.setTimeout(() => {
       const p = C.prefs;
       const chat = { provider_id: p.provider_id ?? null, model: p.model ?? null, mode: mode(), effort: effort(), think: think(), web: web() };
-      sendJSON('PUT', 'api/llm/config', { chat: { app: chat } })       // one chat on every page: one model and mode.catch(() => { /* not saved: the chips still apply to this page */ });
+      // one chat on every page: one model and mode
+      sendJSON('PUT', 'api/llm/config', { chat: { app: chat } }).catch(() => { /* not saved: the chips still apply to this page */ });
     }, CONFIG_DEBOUNCE);
   }
   function setMode(m: ChatMode, say = true): void {
@@ -836,6 +840,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     C.editing = -1;
     C.picks.clear();
     C.edits.clear();
+    C.queued = [];
     setFollow(true);
     renderAll();
     void peekLimit();
@@ -856,7 +861,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     if (C.busy) stop();
     try {
       const r = await getJSON<SessionDetail>(`api/llm/sessions/${encodeURIComponent(id)}`);
-      C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: m.page?.continued ? continuedLabel(m.text, m.page.label) : null, voice: false, seq: m.seq } : traceTurn(m)));
+      C.turns = r.messages.map((m): Entry => (m.role === 'user' ? { role: 'user', text: m.text, label: m.page?.task ? taskLabel(m.page.task) : m.page?.continued ? continuedLabel(m.text, m.page.label) : null, voice: false, seq: m.seq } : traceTurn(m)));
       // a /compact (not in any trace): its divider goes after the last message it covered
       const cov = r.session.summary_seq ?? null;
       const shown = C.turns.some((e) => e.role === 'ai' && e.blocks.some((x) => x.k === 'compact' && x.covered === cov));
@@ -1130,6 +1135,8 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       const t = aiAt(idx);
       if (t) opts.onDone?.(t);
       opts.onUpdate?.();
+      const next = C.queued.shift();
+      if (next) window.setTimeout(() => { void send(next); }, 0);
     }
   }
 
@@ -1146,6 +1153,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   }
 
   function stop(): void {
+    C.queued = [];
     if (C.runId) postJSON('api/llm/agent/stop', { run_id: C.runId }).catch(() => { /* the abort below ends it anyway */ });
     C.busy?.abort();
   }
@@ -1260,6 +1268,13 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
       case 'cost': note(costText()); break;
       case 'agents': {
         const want = arg.trim().toLowerCase();
+        const mx = /^max\s+([1-4])$/.exec(want);
+        if (mx) {
+          sendJSON('PUT', 'api/llm/config', { budget: { agents: { max_running: Number(mx[1]) } } })
+            .then(() => { note(`Up to **${mx[1]}** background agents run at once; more wait in a queue.`); window.dispatchEvent(new CustomEvent('llm-changed')); })
+            .catch((e: unknown) => note(errText(e)));
+          break;
+        }
         if (want !== 'on' && want !== 'off') {
           void getJSON<{ budget?: { agents?: { on?: boolean } } }>('api/llm/config')
             .then((c) => note(`Sub-agents are **${c.budget?.agents?.on ? 'on' : 'off'}**. \`/agents on\` lets the assistant split big look-ups across helper agents (each in its own context: long tasks need less, small questions cost a little more); \`/agents off\` stops it.`))
@@ -1482,9 +1497,16 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
   }
 
   function submit(): void {
-    if (C.busy) return;
     const text = ta.value.trim();
     if (!text) return;
+    if (C.busy) {                              // always receiving: it is sent as soon as this answer ends
+      if (parseCommand(text)) return;
+      C.queued.push(text);
+      ta.value = '';
+      autosize();
+      flash(`queued (${C.queued.length}): sent when this answer ends · Esc stops the answer and drops the queue`);
+      return;
+    }
     follow();
     ta.value = '';
     autosize();

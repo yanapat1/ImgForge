@@ -68,7 +68,7 @@ COMMANDS = [
     ('rename', '<title>', 'rename this chat', None),
     ('delete', '', 'delete this chat', None),
     ('cost', '', 'tokens used by this chat', None),
-    ('agents', 'on|off', 'sub-agents for big look-ups: they save context on long tasks, small questions cost a little more', None),
+    ('agents', 'on|off|max <1-4>', 'sub-agents and background agents for long work (max = how many run at once)', None),
     ('compact', '[focus]', 'summarise the older messages to free context (it also happens on its own at 80%)', None),
     ('export', '', 'download this chat as Markdown', None),
     ('prompts', '', 'your own instructions and skills (Settings)', None),

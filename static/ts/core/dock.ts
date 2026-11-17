@@ -22,9 +22,11 @@
 // sends the goal as a continued message. A page with unsaved work (an edited file, uploads) asks first. Other tabs
 // showing the same chat reload it when a turn ends (BroadcastChannel), and the server answers one turn at a time.
 
-import { continuedLabel, type ChatHandle } from './chat.js';
+import { errText, getJSON, postJSON } from './api.js';
+import { continuedLabel, taskLabel, type ChatHandle } from './chat.js';
 import { stepClosed, stepState } from './chat-reduce.js';
 import { esc, icon, morphInner } from './dom.js';
+import { toast } from './toast.js';
 import { LLM } from './llm.js';
 import { bucketUrl, dataUrl, homeUrl, imageUrl, labelUrl, vizUrl } from './nav.js';
 import type { AiTurn, ChatEvent, UiAction, UiResult } from '../types-chat.js';
@@ -56,6 +58,15 @@ export interface DockHost {
 export interface Handoff { sid: string | null; goal: string; to: string; tab?: string; mode?: string; at: number }
 
 type DockState = 'open' | 'rail';
+/** A background agent of the chat (GET api/llm/agent/tasks, dataviz/llm/engine/bgtasks.py Task.status). */
+interface Agent {
+  id: string; title: string; state: 'queued' | 'running' | 'waiting' | 'done' | 'failed' | 'stopped'; topic: string;
+  step: number; max_steps: number; done: string[]; next: string[]; tokens: { in: number; out: number };
+  elapsed_s: number; eta_s: number | null; delivered: boolean; result?: string; error?: string;
+  waiting?: { kind: 'confirm' | 'ask' | 'plan'; confirm_id?: string; actions?: Array<{ id: string; tool: string; summary: string; risk?: string }>;
+    question?: string; options?: string[]; summary?: string; steps?: string[] };
+}
+const AGENT_POLL_MS = 1500;
 interface TaskStep { text: string; state: string; page?: string }
 const PAGE_NAME: Record<string, string> = { home: 'Home', bucket: 'Bucket', image: 'Image', viz: 'Visualizer', label: 'Labeling', data: 'Data' };
 
@@ -85,6 +96,13 @@ const D = {
   sid: null as string | null,                // the chat this dock shows (what CURRENT holds)
   stale: false,                              // another tab answered in this chat while this one was hidden
   bc: null as BroadcastChannel | null,
+  // the chat's background agents (the Agents strip)
+  agents: [] as Agent[],
+  agentsFor: null as string | null,          // the chat D.agents belongs to
+  agentOpen: new Set<string>(),              // rows the user unfolded
+  agentTold: new Set<string>(),              // what the lead was already told (a result, a wait): `${chat}:${id}:${what}`
+  agentTimer: 0,
+  agentBusy: false,
 };
 
 const maxW = (): number => Math.max(MIN_W, Math.min(640, Math.round(window.innerWidth * 0.55)));
@@ -117,6 +135,7 @@ function syncSid(): void {
   if (sid === D.sid) return;
   D.sid = sid;
   try { localStorage.setItem(CURRENT, sid ?? ''); } catch (e) { /* ignore */ }
+  if (D.agentsFor !== sid) { D.agents = []; D.agentsFor = sid; void pollAgents(); }      // another chat: its own agents
 }
 
 // ---------------------------------------------------------------- markup
@@ -143,20 +162,130 @@ function headHTML(): string {
 }
 
 function railHTML(): string {
-  const n = D.pending;
-  return `<button type="button" class="dock-rail-btn" data-dock="open" aria-label="Open the assistant (Ctrl+.)" title="Open the assistant (Ctrl+.)">` +
+  const n = D.pending + D.agents.filter((a) => a.state === 'waiting').length;
+  const working = D.agents.filter((a) => a.state === 'running' || a.state === 'queued').length;
+  return `<button type="button" class="dock-rail-btn" data-dock="open" aria-label="Open the assistant (Ctrl+.)" title="Open the assistant (Ctrl+.)${working ? ` · ${working} agent${working === 1 ? '' : 's'} working` : ''}">` +
     `<span class="dock-gem" aria-hidden="true">${icon('gem')}</span>${n ? `<span class="dock-badge num">${n}</span>` : ''}</button>` +
-    (D.running ? '<span class="ct-spin" title="The assistant is working"></span>' : '') + ringHTML();
+    (D.running || working ? `<span class="ct-spin" title="${working ? `${working} agent${working === 1 ? '' : 's'} working` : 'The assistant is working'}"></span>` : '') + ringHTML();
+}
+
+// ---------------------------------------------------------------- background agents
+
+const AGENT_LIVE = new Set(['queued', 'running', 'waiting']);
+const fmtDur = (s: number): string => (s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`);
+const fmtTok = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+
+function agentWaitHTML(a: Agent): string {
+  const w = a.waiting;
+  if (!w) return '';
+  const id = esc(a.id);
+  if (w.kind === 'confirm') {
+    return `<div class="dock-agent-w"><b>Needs your OK</b><ul>${(w.actions ?? []).map((x) => `<li${x.risk === 'danger' ? ' class="danger"' : ''}><code>${esc(x.tool)}</code> ${esc(x.summary)}</li>`).join('')}</ul>` +
+      `<div class="dock-agent-f"><span class="faint">Nothing changes until you approve</span><span class="grow"></span>` +
+      `<button type="button" class="sm" data-dock="agent-reject" data-id="${id}">Reject</button>` +
+      `<button type="button" class="primary sm" data-dock="agent-approve" data-id="${id}">${icon('check')}Approve ${(w.actions ?? []).length}</button></div></div>`;
+  }
+  if (w.kind === 'ask') {
+    return `<div class="dock-agent-w"><b>${esc(w.question ?? 'It asks')}</b><div class="dock-agent-f">` +
+      (w.options ?? []).map((o) => `<button type="button" class="sm" data-dock="agent-answer" data-id="${id}" data-text="${esc(o)}">${esc(o)}</button>`).join('') +
+      '<span class="faint">or answer in the chat</span></div></div>';
+  }
+  return `<div class="dock-agent-w"><b>Plan: ${esc(w.summary ?? '')}</b><ol>${(w.steps ?? []).map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` +
+    `<div class="dock-agent-f"><span class="faint">Nothing has changed yet</span><span class="grow"></span>` +
+    `<button type="button" class="primary sm" data-dock="agent-plan" data-id="${id}">${icon('play')}Approve the plan</button></div></div>`;
+}
+
+function agentHTML(a: Agent): string {
+  const live = AGENT_LIVE.has(a.state);
+  const open = D.agentOpen.has(a.id) || a.state === 'waiting';
+  const mark = a.state === 'running' ? '<span class="ct-spin" aria-label="working"></span>'
+    : `<span class="dot" aria-hidden="true">${a.state === 'done' ? icon('check') : a.state === 'failed' || a.state === 'stopped' ? icon('x') : ''}</span>`;
+  const meta = [a.state === 'queued' ? 'queued' : `step ${a.step}/${a.max_steps}`, fmtDur(a.elapsed_s),
+    a.eta_s != null ? `about ${Math.max(1, Math.round(a.eta_s / 60))} min left` : '', `${fmtTok(a.tokens.in + a.tokens.out)} tokens`].filter(Boolean).join(' · ');
+  const detail = open ? '<div class="dock-agent-d">' +
+    (a.done.length || a.next.length ? `<ol class="dock-steps">${a.done.map((x) => `<li class="done"><span class="dot" aria-hidden="true">${icon('check')}</span><span>${esc(x)}</span></li>`).join('')}` +
+      `${a.next.map((x, i) => `<li class="${i === 0 && a.state === 'running' ? 'doing' : 'todo'}"><span class="dot" aria-hidden="true"></span><span>${esc(x)}</span></li>`).join('')}</ol>` : '') +
+    agentWaitHTML(a) +
+    (a.result && !live ? `<div class="dock-agent-r">${esc(a.result)}</div>` : '') +
+    (a.error ? `<div class="dock-agent-r bad">${esc(a.error)}</div>` : '') + '</div>' : '';
+  return `<li class="dock-agent s-${a.state}"><div class="dock-agent-h">` +
+    `<button type="button" class="dock-agent-b" data-dock="agent-open" data-id="${esc(a.id)}" aria-expanded="${open}">${mark}` +
+    `<span class="dock-agent-t"><span class="t"><b>${esc(a.id)}</b> ${esc(a.title)}</span><span class="d">${esc(a.state === 'waiting' ? 'waiting for you' : a.topic)}</span>` +
+    `<span class="m num">${esc(meta)}</span></span></button>` +
+    (live ? `<button type="button" class="icon-btn ghost" data-dock="agent-stop" data-id="${esc(a.id)}" aria-label="Stop agent ${esc(a.id)}" title="Stop this agent">${icon('stop')}</button>` : '') +
+    `</div>${detail}</li>`;
+}
+
+function agentsHTML(): string {
+  if (!D.agents.length) return '';
+  const n = (st: string): number => D.agents.filter((a) => a.state === st).length;
+  const parts = [n('running') ? `${n('running')} working` : '', n('queued') ? `${n('queued')} queued` : '',
+    n('waiting') ? `<span class="dock-wait">${n('waiting')} waiting for you</span>` : '',
+    !n('running') && !n('queued') && !n('waiting') ? `${D.agents.length} finished` : ''].filter(Boolean).join(' · ');
+  return `<div class="dock-agents-h"><span>Agents</span><span class="dock-agents-n">${parts}</span></div><ul class="dock-agents">${D.agents.map(agentHTML).join('')}</ul>`;
+}
+
+/** The chat's agents from the server; while one is live it is asked again every AGENT_POLL_MS. A result that is ready
+ *  (or an agent that needs the user) is handed to the lead once, when the chat is free. */
+async function pollAgents(): Promise<void> {
+  window.clearTimeout(D.agentTimer);
+  const sid = D.chat?.sessionId() ?? null;
+  if (!sid || !D.host?.enabled()) { if (D.agents.length) { D.agents = []; schedule(); } return; }
+  if (D.agentBusy) return;
+  D.agentBusy = true;
+  try {
+    const r = await getJSON<{ tasks: Agent[] }>(`api/llm/agent/tasks?session_id=${encodeURIComponent(sid)}`);
+    if (sid !== (D.chat?.sessionId() ?? null)) return;
+    D.agents = r.tasks ?? [];
+    D.agentsFor = sid;
+    if (D.agents.some((a) => AGENT_LIVE.has(a.state))) D.tasksOpen = true;
+    tellLead(sid);
+    schedule();
+  } catch (e) { /* an older server, or signed out: no agents */ } finally {
+    D.agentBusy = false;
+    if (D.agents.some((a) => AGENT_LIVE.has(a.state)) && document.visibilityState === 'visible') D.agentTimer = window.setTimeout(() => { void pollAgents(); }, AGENT_POLL_MS);
+  }
+}
+
+function tellLead(sid: string): void {
+  const chat = D.chat;
+  if (!chat || chat.busy()) return;                    // the next poll (or the end of this answer) tries again
+  for (const a of D.agents) {
+    const ended = !AGENT_LIVE.has(a.state) && !a.delivered;
+    const what = ended ? 'end' : a.state === 'waiting' && a.waiting ? `wait:${a.waiting.confirm_id ?? a.waiting.question ?? a.waiting.summary ?? ''}` : '';
+    const key = `${sid}:${a.id}:${what}`;
+    if (!what || D.agentTold.has(key)) continue;
+    D.agentTold.add(key);
+    void chat.send(`Agent ${a.id} reported.`, { label: ended ? taskLabel(a.id) : `↪ Agent ${a.id} needs you`, extra: { task_event: a.id } });
+    return;                                            // one at a time: the lead answers each
+  }
+}
+
+async function agentAct(act: string, id: string, text = ''): Promise<void> {
+  const sid = D.chat?.sessionId();
+  const a = D.agents.find((x) => x.id === id);
+  if (!sid || !a) return;
+  try {
+    if (act === 'stop') await postJSON(`api/llm/agent/tasks/${encodeURIComponent(id)}/stop`, { session_id: sid });
+    else if (act === 'answer') await postJSON(`api/llm/agent/tasks/${encodeURIComponent(id)}/message`, { session_id: sid, text });
+    else if (act === 'plan') await postJSON(`api/llm/agent/tasks/${encodeURIComponent(id)}/message`, { session_id: sid, approve: true });
+    else if (a.waiting?.kind === 'confirm') {
+      const ids = (a.waiting.actions ?? []).map((x) => x.id);
+      await postJSON('api/llm/agent/confirm', { confirm_id: a.waiting.confirm_id, approve: act === 'approve' ? ids : [], reject: act === 'approve' ? [] : ids });
+    }
+  } catch (e) { toast(`Agent ${id}: ${errText(e)}`, 'err'); }
+  void pollAgents();
 }
 
 function tasksHTML(): string {
   const jobs = [...D.jobs.entries()];
-  if (!D.running && !D.steps.length && !jobs.some(([, j]) => !j.done)) return '';
+  const agents = agentsHTML();
+  if (!D.running && !D.steps.length && !jobs.some(([, j]) => !j.done)) return agents;
   const done = D.steps.filter((s) => stepClosed(s.state)).length;
   const head = `<button type="button" class="dock-tasks-h" data-dock="tasks" aria-expanded="${D.tasksOpen}">` +
     `<span>Tasks</span>${D.steps.length ? `<span class="num">${done} / ${D.steps.length}</span>` : ''}${D.pending ? `<span class="dock-wait">${D.pending} waiting for you</span>` : ''}` +
     `<span class="grow"></span>${icon(D.tasksOpen ? 'chev-u' : 'chev-d')}</button>`;
-  if (!D.tasksOpen) return head;
+  if (!D.tasksOpen) return head + agents;
   const drive = D.running ? `<div class="dock-drive"><span class="dock-gem sm" aria-hidden="true">${icon('gem')}</span><b>is driving</b>` +
     (D.driving.length ? D.driving.map((d) => `<span class="sep">›</span><span class="d">${esc(d)}</span>`).join('') : '<span class="sep">›</span><span class="d faint">thinking</span>') +
     `<span class="grow"></span><button type="button" class="ghost sm" data-dock="stop" title="Stop the assistant (Esc in the chat box)">${icon('stop')}Stop</button></div>` : '';
@@ -169,7 +298,7 @@ function tasksHTML(): string {
   const jobRows = jobs.map(([, j]) => `<li class="job${j.done ? (j.ok ? ' done' : ' bad') : ''}"><span class="dot" aria-hidden="true">${j.done ? icon(j.ok ? 'check' : 'x') : ''}</span>` +
     `<span>${esc(j.label)}</span><span class="grow"></span><span class="num">${j.done ? '' : j.pct == null ? '…' : `${Math.round(j.pct)}%`}</span>` +
     (j.done ? '' : `<span class="dock-bar"><i style="width:${Math.max(2, j.pct ?? 0)}%"></i></span>`) + '</li>').join('');
-  return head + drive + (steps || jobRows ? `<ol class="dock-steps">${steps}${jobRows}</ol>` : '');
+  return head + drive + (steps || jobRows ? `<ol class="dock-steps">${steps}${jobRows}</ol>` : '') + agents;
 }
 
 function render(): void {
@@ -222,6 +351,7 @@ function ensureMounted(): void {
   void (sid ? chat.open(sid) : Promise.resolve(false)).then((ok) => {
     D.ready = true;
     D.sid = ok ? sid : null;
+    void pollAgents();
     if (!ok && sid) { try { localStorage.setItem(CURRENT, ''); } catch (e) { /* ignore */ } }
     if (h) {                                   // the agent came from another page: the same chat goes on here
       D.host?.onHandoff?.(h);
@@ -243,7 +373,11 @@ function initChannel(): void {
     if (typeof sid !== 'string' || !D.chat || sid !== D.chat.sessionId()) return;
     if (document.visibilityState === 'visible') reloadChat(); else D.stale = true;
   };
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && D.stale) reloadChat(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (D.stale) reloadChat();
+    void pollAgents();
+  });
 }
 
 function reloadChat(): void {
@@ -412,6 +546,7 @@ export function dockDone(): void {
   if (sid) { try { D.bc?.postMessage({ sid }); } catch (e) { /* ignore */ } }
   if (D.steps.length && D.steps.every((s) => stepClosed(s.state))) D.tasksOpen = false;
   schedule();
+  void pollAgents();                             // an agent it started shows at once; a ready result goes to the lead
   if (D.navTo) window.setTimeout(go, 150);       // the answer is saved: leave for the page the agent opened
 }
 
@@ -458,6 +593,12 @@ function onClick(e: MouseEvent): void {
     case 'settings': D.host?.settings?.(); break;
     case 'stop': D.chat?.stop(); D.running = false; schedule(); break;
     case 'tasks': D.tasksOpen = !D.tasksOpen; renderTasks(); break;
+    case 'agent-open': { const id = b.dataset['id'] ?? ''; if (D.agentOpen.has(id)) D.agentOpen.delete(id); else D.agentOpen.add(id); renderTasks(); break; }
+    case 'agent-stop': void agentAct('stop', b.dataset['id'] ?? ''); break;
+    case 'agent-approve': void agentAct('approve', b.dataset['id'] ?? ''); break;
+    case 'agent-reject': void agentAct('reject', b.dataset['id'] ?? ''); break;
+    case 'agent-answer': void agentAct('answer', b.dataset['id'] ?? '', b.dataset['text'] ?? ''); break;
+    case 'agent-plan': void agentAct('plan', b.dataset['id'] ?? ''); break;
     default: break;
   }
 }

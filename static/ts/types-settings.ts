@@ -252,7 +252,7 @@ export interface LlmConfig {
   providers: LlmProvider[];
   active: string | null;
   features: Record<string, boolean>;
-  budget?: { max_input_tokens?: number | 'auto'; agents?: { on: boolean; model: string } };
+  budget?: { max_input_tokens?: number | 'auto'; agents?: { on: boolean; model: string; max_running?: number } };
   limits?: { context: number | null; ceiling: number; source: 'manual' | 'api' | 'table' | null };
 }
 export type LlmDraft = {
