@@ -27,6 +27,7 @@ import { continuedLabel, taskLabel, type ChatHandle } from './chat.js';
 import { stepClosed, stepState } from './chat-reduce.js';
 import { esc, icon, morphInner } from './dom.js';
 import { toast } from './toast.js';
+import { confirmDialog } from '../views/dialog.js';
 import { LLM } from './llm.js';
 import { bucketUrl, dataUrl, homeUrl, imageUrl, labelUrl, vizUrl } from './nav.js';
 import type { AiTurn, ChatEvent, UiAction, UiResult } from '../types-chat.js';
@@ -429,12 +430,14 @@ function go(): void {
   location.assign(url);
 }
 
-function navigate(a: Record<string, unknown>): UiResult {
+async function navigate(a: Record<string, unknown>): Promise<UiResult> {
   const url = navUrl(a);
   if (!url) return { ok: false, detail: 'that page needs a session_id (list_sessions finds it)' };
   const why = D.host?.unsaved?.() ?? null;
   if (why) {
-    if (!window.confirm(`The assistant wants to open another page.\n\nLeave this page? ${why}`)) {
+    const leave = await confirmDialog({ title: 'Leave this page?', text: `The assistant wants to open another page.\n\n${why}`,
+      ok: 'Leave page', danger: true });
+    if (!leave) {
       return { ok: false, detail: `the user stayed on this page (${why}): do the rest here or ask them to finish first` };
     }
     D.host?.discard?.();

@@ -424,7 +424,8 @@ async function runCheck(ids0: number[] | null = null): Promise<void> {
   const all = liveSel();
   const ids = ids0 || sample(all, CHECK_MAX);
   if (!ids.length) { chat.note('Select some boxes first (lasso dots on the plot), then ask me to check them.'); return; }
-  chat.user(`Check the labels of ${ids.length} selected boxes${all.length > ids.length && !ids0 ? ` (a sample of ${all.length.toLocaleString()})` : ''}`);
+  const asked = `Check the labels of ${ids.length} selected boxes${all.length > ids.length && !ids0 ? ` (a sample of ${all.length.toLocaleString()})` : ''}`;
+  chat.user(asked);
   const st = { items: [] as CheckItem[], pending: ids.length as number | null, text: '', err: null as string | null, ms: null as number | null };
   const turn = chat.custom(() => checkHTML(st.items, st.pending, st.text, st.err, st.ms));
   const ac = new AbortController();
@@ -446,6 +447,14 @@ async function runCheck(ids0: number[] | null = null): Promise<void> {
     turn.update();
     renderHead();
   }
+  void chat.record(asked, st.err ? `Label check: ${st.err}` : checkNote(st.text, st.items));
+}
+
+/** The label check as the saved chat keeps it: the summary and the boxes found wrong or unsure (ids, why). */
+function checkNote(summary: string, items: CheckItem[]): string {
+  const rows = items.filter((x) => x.verdict !== 'ok').slice(0, 30)
+    .map((x) => `- box ${x.id}: ${x.verdict}${x.suggest ? ` (maybe ${x.suggest})` : ''}${x.why ? `, ${x.why}` : ''}`);
+  return [`Label check (shown on the page): ${summary.replace(/ Click a card.*$/, '')}`, ...rows].join('\n');
 }
 
 function runReport(): void {
@@ -457,7 +466,9 @@ async function runTag(): Promise<void> {
   const chat = A.chat;
   if (!chat || !llmOn('auto_tag')) return;
   const body: TagBody = selOn() ? { scope: 'selection', ids: liveSel().slice(0, 20000) } : { scope: 'all' };
-  chat.user(body.scope === 'selection' ? `Auto-tag the images of the ${body.ids.length.toLocaleString()} selected boxes` : 'Auto-tag every image');
+  const asked = body.scope === 'selection' ? `Auto-tag the images of the ${body.ids.length.toLocaleString()} selected boxes` : 'Auto-tag every image';
+  chat.user(asked);
+  let saved = '';
   const st = { job: { text: 'starting…' } as (Partial<Job> & { text: string }) | null, text: '', err: null as string | null };
   const html = (): string => st.job ? `<div class="ai-job"><div class="bar" role="progressbar" aria-label="Auto-tag progress"><div></div></div><span class="muted num">${esc(st.job.text)}</span></div>`
     : st.err ? `<div class="status-line err">${icon('alert')}<span>${esc(st.err)}</span></div>` : `<div class="ct-md">${st.text}</div>`;
@@ -479,13 +490,17 @@ async function runTag(): Promise<void> {
     st.text = `Tagged <b>${esc(res['images'] ?? '?')}</b> images.` + (tags.length
       ? `<ul>${tags.map(([t, n]) => `<li><code>${esc(t)}</code> · ${n}</li>`).join('')}</ul>They are in the filter bar under <b>More filters › Tags</b>, and in <b>Load tag…</b>.`
       : ' No tag matched.');
+    saved = `Auto-tag (shown on the page): tagged ${String(res['images'] ?? '?')} images.` +
+      (tags.length ? ` Tags: ${tags.slice(0, 30).map(([t, n]) => `${t} (${n})`).join(', ')}.` : ' No tag matched.');
     try { await refreshTagList(); runNow(false); } catch (e) { /* the tags show after a reload */ }
   } catch (e) {
     st.err = errText(e);
+    saved = `Auto-tag failed: ${st.err}`;
   } finally {
     st.job = null;
     paint();
   }
+  void chat.record(asked, saved);
 }
 
 // ---------------------------------------------------------------- voice

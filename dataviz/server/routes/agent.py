@@ -18,7 +18,8 @@ Every chat is saved (llm/sessions.py): body.session_id continues a chat (its his
 page sends only body.text), none starts one (409 before the stream when every chat is pinned). The user
 message is stored before the run, the answer (with the compacted trace and usage) when the stream ends, also on
 stop or a closed connection ('(stopped)'). {ephemeral: true, session_id: null} runs on body.messages and stores
-nothing.
+nothing. POST /api/llm/agent/<role>/note {session_id?, request, result} saves a turn the page drew itself (label
+check, auto-tag) as two messages.
 
 Compaction (llm/engine/summarize.py): a saved chat whose request passes 80% of the input budget (or has more
 unsummarised messages than sessions.HISTORY_TURNS) folds its older messages into the chat's summary before the run
@@ -94,6 +95,9 @@ def _assets(user, role):
     except ImportError:
         return {'prompts': [], 'skills': [], 'tools': []}
     return assets.for_run(user, role)
+
+
+NOTE_MAX = 4000         # characters of a page turn's result kept in the chat
 
 
 def _chat_scope(role, scope):
@@ -376,6 +380,33 @@ def router(state, ctx):
                 except Exception as e:  # noqa: BLE001 - e.g. the chat was deleted meanwhile
                     _log.debug(f'agent {role.name}: answer not saved: {type(e).__name__}: {vlog.esc(str(e))}')
         return _stream(gen())
+
+    @r.post('/api/llm/agent/{role_name}/note')
+    def agent_note(role_name: str, body: dict):
+        """A page-drawn turn (the Visualizer's label check, auto-tag) saved in the chat as two plain messages, so a
+        reload shows it and the model knows it happened. {session_id?, request, result, scope?}; no session_id
+        starts a chat. -> {session_id}"""
+        role = role_of(role_name)
+        gate(role)
+        user = auth_context.user()
+        req, res = body.get('request'), body.get('result')
+        if not isinstance(req, str) or not req.strip() or not isinstance(res, str) or not res.strip():
+            raise HTTPException(400, 'request and result must be non-empty text')
+        req, res = req.strip()[:2000], res.strip()[:NOTE_MAX]
+        sid = body.get('session_id')
+        if sid is not None and (not isinstance(sid, str) or not sid):
+            raise HTTPException(400, 'session_id must be a string')
+        scope = body.get('scope') if isinstance(body.get('scope'), dict) else {}
+        chat_scope = _chat_scope(role, scope)
+        page = roles.page_of(role.name, scope, chat_scope if role.name == 'visual' else None)
+        try:
+            if not sid:
+                sid = chat_sessions.create(user, chat_sessions.APP, chat_scope, req)['session']['id']
+            chat_sessions.append(user, sid, 'user', req, page=page)
+            chat_sessions.append(user, sid, 'assistant', res, page=page)
+        except chat_sessions.SessionError as e:
+            raise HTTPException(e.status, str(e))
+        return {'session_id': sid}
 
     @r.post('/api/llm/agent/{role_name}/compact')
     def agent_compact(role_name: str, body: dict):

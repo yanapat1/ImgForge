@@ -201,3 +201,18 @@ def test_the_chat_keeps_its_model_and_mode_on_every_page(client, monkeypatch, sv
     evs = _lines(client.post('/api/llm/agent/bucket/chat', json={'text': 'hi', 'scope': {'page': 'home'}}))
     meta = next(e for e in evs if e['type'] == 'meta')
     assert meta['mode'] == 'auto' and meta['effort'] == 'high'
+
+
+def test_a_page_drawn_turn_is_saved_as_a_note(client, monkeypatch, svc):  # noqa: F811
+    """A label check / auto-tag the page draws itself is kept in the chat as two plain messages (note route)."""
+    _connect(client, ['bucket_data'])
+    seen = script(monkeypatch, ('It found 2 wrong boxes.', []))
+    r = client.post('/api/llm/agent/bucket/note', json={'request': 'Check the labels of 5 boxes',
+                                                        'result': 'Label check: 2 likely wrong.', 'scope': {'bucket': 'b1'}})
+    sid = r.json()['session_id']
+    msgs = client.get(f'/api/llm/sessions/{sid}').json()['messages']
+    assert [(m['role'], m['text']) for m in msgs] == [('user', 'Check the labels of 5 boxes'),
+                                                      ('assistant', 'Label check: 2 likely wrong.')]
+    assert client.post('/api/llm/agent/bucket/note', json={'session_id': sid, 'request': 'x', 'result': ' '}).status_code == 400
+    client.post('/api/llm/agent/bucket/chat', json={'text': 'what did the check find?', 'session_id': sid})
+    assert '2 likely wrong' in json.dumps(seen[0]['msgs']), 'the model sees the note'

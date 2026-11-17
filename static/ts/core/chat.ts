@@ -178,6 +178,8 @@ export interface ChatHandle {
   sessionId: () => string | null;
   /** open a saved chat (quiet: no toast / focus; false when it is gone) */
   open: (id: string, quiet?: boolean) => Promise<boolean>;
+  /** save a page-drawn turn (user()/custom()) in the chat as plain text, so a reload and the model see it */
+  record: (request: string, result: string) => Promise<void>;
 }
 
 let uidSeq = 0;
@@ -1748,5 +1750,13 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
     },
     sessionId: () => C.sid,
     open: (id: string, quiet = true) => openSession(id, quiet),
+    record: async (request, result) => {
+      const body: Record<string, unknown> = { request, result, scope: opts.scope() };
+      if (C.sid) body['session_id'] = C.sid;
+      try {
+        const r = await postJSON<{ session_id: string }>(`api/llm/agent/${role}/note`, body);
+        if (!C.sid) { C.sid = r.session_id; C.sessionsOK = true; renderHead(); }
+      } catch (e) { /* the turn stays on screen; only a reload loses it */ }
+    },
   };
 }
