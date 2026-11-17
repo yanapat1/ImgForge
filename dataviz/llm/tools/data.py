@@ -411,43 +411,35 @@ def _read_board(ctx, a):
     return b, f'→ {len(b.get("tables") or [])} tables, {len(b.get("notes") or [])} notes'
 
 
+# add / update note fields: names and types only (what each means is in knowledge/board.md: read_docs board)
+_N = {'type': 'number'}
 _NOTE_PROPS = {
-    'shape': E('rect, round (rounded), pill, ellipse, diamond, hexagon, callout (speech bubble), none (text only)', NOTE_SHAPES),
-    'layer': E('back = a zone behind the tables, front = above them (text, sticky notes)', ['back', 'front']),
-    'x': {'type': 'number', 'description': 'left, board px (the same space as the table cards, read_board)'}, 'y': {'type': 'number', 'description': 'top, board px'},
-    'w': {'type': 'number', 'description': 'width px (≥ 40)'}, 'h': {'type': 'number', 'description': 'height px (≥ 24)'},
-    'fill': S(f'one of {", ".join(NOTE_COLORS)}, #rrggbb, or "" for none'),
-    'alpha': {'type': 'number', 'description': 'fill opacity 0..1: zones about 0.14, sticky notes 1'},
-    'border': E('outline', ['solid', 'dashed', 'none']), 'text': S('plain text, new lines kept'),
-    'size': {'type': 'number', 'description': 'font px 11..48'}, 'bold': {'type': 'boolean', 'description': 'bold text'},
-    'ha': E('text across', ['left', 'center', 'right']), 'va': E('text up and down', ['top', 'middle', 'bottom']),
-    'carry': {'type': 'boolean', 'description': 'zones: dragging the zone moves the tables inside it'},
-    'rot': {'type': 'number', 'description': 'rotation, degrees clockwise about its centre, -180..180 (0 = straight); x, y, w, h stay the unrotated box'},
+    'shape': {'type': 'string', 'enum': list(NOTE_SHAPES)}, 'layer': {'type': 'string', 'enum': ['back', 'front']},
+    'x': _N, 'y': _N, 'w': _N, 'h': _N, 'fill': {'type': 'string'}, 'alpha': _N,
+    'border': {'type': 'string', 'enum': ['solid', 'dashed', 'none']}, 'text': {'type': 'string'}, 'size': _N,
+    'bold': {'type': 'boolean'}, 'ha': {'type': 'string', 'enum': ['left', 'center', 'right']},
+    'va': {'type': 'string', 'enum': ['top', 'middle', 'bottom']}, 'carry': {'type': 'boolean'}, 'rot': _N,
 }
 register(Tool('read_board', 'The visual builder\'s board: each table card (id, name, x, y, w, h, its description when the '
                             'catalog has one), the joins (with 1:N / N:M when known) and the notes (zones, text, sticky '
                             'notes; describes = the table a description note belongs to) with their ids. Read it before edit_board.',
               _obj({}), False, _read_board, **_R))
-register(Tool('edit_board', 'Page action: group and explain the tables on the visual builder board. Easiest: '
-                            'op zone {label, tables: [table ids]} draws a zone around those tables and op describe '
-                            '{table, text} pins a short description note above a table (it moves with the card): the '
-                            'page measures and places them, so never work out coordinates for these. arrange: true first '
-                            'lays the tables out zone by zone so no zones overlap (moves the cards, not the SQL). add / '
-                            'update / remove change one note by id (text, sticky notes, shapes; x, y in board px; rot turns it). Never '
-                            'moves or deletes a locked note; never removes the user\'s notes unless they asked. One undo '
-                            'step (Ctrl+Z).',
-              _obj({'ops': {'type': 'array', 'description': 'the edits (at most 60); describe ops before the zones that hold those tables', 'items': {
-                  'type': 'object', 'properties': {'op': E('zone = a zone around tables, describe = a table\'s description note, add / update / remove = one note by id',
-                                                           ['zone', 'describe', 'add', 'update', 'remove']),
+register(Tool('edit_board', 'Page action: group and explain the tables on the builder board, one undo step. op zone '
+                            '{label, tables} draws a zone around tables; op describe {table, text} pins a note above a '
+                            'table; the page places both (give no coordinates). arrange: true first lays the tables out '
+                            'zone by zone. add / update / remove: one note by id. Never touches locked notes or removes '
+                            'the user\'s notes unasked. Details: read_docs board.',
+              _obj({'ops': {'type': 'array', 'description': 'at most 60; describe ops before the zones that hold those tables', 'items': {
+                  'type': 'object', 'properties': {'op': {'type': 'string', 'enum': ['zone', 'describe', 'add', 'update', 'remove']},
                                                    'label': S('zone: its title, a few words'),
-                                                   'tables': {'type': 'array', 'items': {'type': 'string'}, 'description': 'zone: the table ids from read_board'},
-                                                   'fill': S(f'zone: one of {", ".join(NOTE_COLORS)} (optional: a new colour per zone)'),
-                                                   'table': S('describe: the table id from read_board'),
-                                                   'text': S('describe: one or two short sentences (what one row is, what it is for)'),
-                                                   'id': S('the note id (update, remove; optional on add / zone: a zone with this id or label is redrawn)'),
-                                                   'note': {'type': 'object', 'description': 'add / update: the fields to set', 'properties': _NOTE_PROPS,
+                                                   'tables': {'type': 'array', 'items': {'type': 'string'}, 'description': 'zone: table ids (read_board)'},
+                                                   'fill': S(f'zone: {", ".join(NOTE_COLORS)} (optional)'),
+                                                   'table': S('describe: a table id (read_board)'),
+                                                   'text': S('describe: one or two short sentences'),
+                                                   'id': S('note id: update, remove (a zone with this id or label is redrawn)'),
+                                                   'note': {'type': 'object', 'description': 'add / update: the fields to set (board px)', 'properties': _NOTE_PROPS,
                                                             'additionalProperties': False}},
                   'required': ['op'], 'additionalProperties': False}},
-                    'arrange': {'type': 'boolean', 'description': 'move the tables so each zone\'s tables sit together and zones do not overlap (use when tables of different zones are mixed on the board)'},
+                    'arrange': {'type': 'boolean', 'description': 'move the tables so each zone\'s tables sit together'},
                     'note': S('one line: what this edit does to the board')}, ['ops']), False, _ui_run,
               lambda b, a: a.get('note') or f'Edit the board ({len(a.get("ops") or [])} changes{", tables arranged" if a.get("arrange") else ""})', check=_board_check, **_U))
