@@ -30,7 +30,7 @@ from . import E, S, Tool, ToolError, _obj, register
 SCREENS = ('home', 'bucket', 'image', 'viz', 'label', 'data')
 SCREEN_ZONE = {'bucket': 'bucket', 'viz': 'visualizer', 'label': 'labeling', 'data': 'data'}
 SCREEN_LABEL = {'home': 'Home', 'bucket': 'Bucket', 'image': 'Image', 'viz': 'Visualizer', 'label': 'Labeling', 'data': 'Data'}
-VIZ_TABS = ('explore', 'stats', 'curation', 'model', 'eval', 'compare')
+VIZ_TABS = ('explore', 'stats', 'curation', 'aug', 'model', 'eval', 'compare')     # = tools/visual.py TABS without 'ai'
 MAX_SESSIONS = 40
 
 
@@ -174,6 +174,9 @@ def _consult(ctx, a):
     """Another page's specialist answers one question, read-only, on the server: its tools and steps stay in its
     own run, only the answer comes back (no page change, no extra tools in this prompt)."""
     from ..engine import roles, subrun
+    if a['page'] == 'data':
+        raise ToolError('Data has no consult (its tools need the Data page: the open connection and session): call '
+                        'navigate(screen="data", goal=<the question>) as your last call, the chat continues there')
     target = 'visual' if a['page'] == 'viz' else 'bucket'
     _need_zone(a['page'])
     if getattr(ctx, 'depth', 0):
@@ -226,7 +229,7 @@ register(Tool('navigate', 'Open another page (home = the overview, bucket = Buck
               False, _nav_run, _nav_label, check=_check_nav, risk='ui', **_C))
 register(Tool('consult', "Ask another page's specialist one question, read-only, without leaving (viz needs "
                          'session_id). To show or change something there: navigate.',
-              _obj({'page': E('whose specialist', ['bucket', 'viz']), 'question': S('the full question, with names'),
+              _obj({'page': E('whose specialist (data: not by consult, navigate there)', ['bucket', 'viz', 'data']), 'question': S('the full question, with names'),
                     'session_id': S('viz: from list_sessions')}, ['page', 'question']),
               False, _consult, **_C))
 # the visualizer's way back to its folder (domain visual: only the Visual specialist has it; it only reads)

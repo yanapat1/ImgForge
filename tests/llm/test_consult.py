@@ -90,3 +90,20 @@ def test_a_failing_specialist_is_a_tool_error(monkeypatch, session):  # noqa: F8
                           roles_on=None, depth=0)
     with pytest.raises(tools.ToolError, match='Visualizer assistant failed: bad request'):
         nav._consult(ctx, {'page': 'viz', 'question': 'x', 'session_id': 'a1'})
+
+
+def test_data_is_reached_by_navigate_not_consult():
+    """The Other pages card promises consult only for the pages consult can ask; a Data consult says navigate."""
+    from dataviz.llm.engine import roles
+    from dataviz.llm.tools import visual
+    for role in ('bucket', 'visual'):
+        card = roles.other_pages(role)
+        other = 'Visualizer' if role == 'bucket' else 'Bucket'
+        assert f'A question about {other}: `consult`' in card and 'Data has no consult' in card
+    assert 'A question about it: `consult`' in roles.other_pages('data')        # both other pages can be asked
+    assert 'no consult' not in roles.other_pages('data')
+    ctx = SimpleNamespace(user=ALICE, role='bucket', scope={}, provider=OPENAI, depth=0, roles_on=None)
+    with pytest.raises(tools.ToolError, match='navigate\\(screen="data"'):
+        nav._consult(ctx, {'page': 'data', 'question': 'total sales?'})
+    # navigate opens every tab of a session the Visual specialist can open itself (the assistant is the dock, not a tab)
+    assert set(nav.VIZ_TABS) == set(visual.TABS) - {'ai'}

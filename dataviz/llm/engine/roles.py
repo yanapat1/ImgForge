@@ -39,6 +39,7 @@ ROLES = {
 }
 
 
+CONSULTABLE = ('bucket', 'visual')      # the specialists `consult` can ask (Data needs its page: session, connection)
 SCREEN_ROLE = {'home': 'bucket', 'bucket': 'bucket', 'image': 'bucket', 'label': 'bucket', 'viz': 'visual', 'data': 'data'}
 SCREEN_LABEL = {'home': 'Home', 'bucket': 'Bucket', 'image': 'Image', 'viz': 'Visualizer', 'label': 'Labeling', 'data': 'Data'}
 # what each specialist's pages do, for the other one's prompt (one line: the tools stay with their page)
@@ -97,10 +98,14 @@ def other_pages(role):
     others = [f'Elsewhere: {CAN[k]}.' for k in CAN if k != role and k in here]
     chosen = zones.selected()
     missing = [z.title for k, z in zones.ZONES.items() if k not in chosen]
+    ask = [ROLES[k].title for k in CAN if k != role and k in here and k in CONSULTABLE]
     return ('## Other pages\nThis chat follows the user across the app; you have only this page\'s tools. '
             + ' '.join(others)
-            + (' A question about it: `consult`; to see or change it: `navigate` (`list_sessions` finds ids). Never '
-               'call another page\'s tools.' if others else '')
+            + ((f' A question about {"it" if len(ask) == len(others) else " or ".join(ask)}: `consult`;' if ask else '')
+               + ' to see or change it: `navigate` (`list_sessions` finds ids).'
+               + (' Data has no consult: `navigate` there with the question as goal.'
+                  if role != 'data' and 'data' in here else '')
+               + ' Never call another page\'s tools.' if others else '')
             + (f' This install has no {", ".join(missing)}: never offer it, and say so if the user asks for it.'
                if missing else ''))
 

@@ -37,6 +37,9 @@ Across pages (one chat, a `todo` with a page on each step when it spans pages):
   (".." = parents[0]); the Bucket page tools are there.
 - Only a question about another page ("mAP of yolov8s in a1?", "how many images in bucket cars?"): `consult`
   (viz needs the session_id) and answer here; the user stays. `navigate` when they want to see or change it.
+- A question the user's databases answer (rows, totals, SQL): Data has no `consult`. `navigate` screen data with
+  the question as goal; the Data tools write the SQL in the editor and run it there.
+- The Augment tab of a session: `navigate` viz, session_id, tab aug.
 - The Plan of this chat shows the steps: after a page change continue the ▶ one.
 
 2. **Run it**
