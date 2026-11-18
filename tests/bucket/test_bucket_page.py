@@ -344,9 +344,9 @@ def test_status_bar_shows_every_task(server):
                 'extra': extra, 'pct': 100 * done / total if total else None, 'eta': eta, 'elapsed': 3, 'error': None,
                 'cancelled': False}
     jobs = {'active': [
-        job(901, f'dc-frames:{bid}:v', 'Frames from clip.mp4', 'running', 'downloading clip.mp4', 0, 300,
+        job(901, f'bk-frames:{bid}:v', 'Frames from clip.mp4', 'running', 'downloading clip.mp4', 0, 300,
             '42% · 120.0 MB of 290.0 MB · 12.3 MB/s · ETA 14 s', 14),
-        job(902, f'dc-autolabel:{bid}:', 'Label status-bucket with yolov8n', 'queued', '', 0, 0, '', None),
+        job(902, f'bk-autolabel:{bid}:', 'Label status-bucket with yolov8n', 'queued', '', 0, 0, '', None),
     ]}
     state = {'jobs': jobs}
 

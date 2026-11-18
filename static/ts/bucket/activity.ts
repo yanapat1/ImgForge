@@ -17,8 +17,10 @@ import { hooks } from './state.js';
 import { stripPart, uploadBadge, uploadLine, uploadRows, upStrip } from './uploads.js';
 import type { StatusLine } from './uploads.js';
 
-const MINE = /^(dc-(autolabel|scan|fetch|check|sync|import|reimport|convert|export|frames)|label-(import|predict)):/;
-const VERB: Record<string, string> = { autolabel: 'Labeling', scan: 'Scanning', fetch: 'Downloading', check: 'Checking', sync: 'Loading', import: 'Importing', reimport: 'Updating', convert: 'Converting', export: 'Exporting', frames: 'Cutting' };
+// The job keys of the Bucket page (dataviz/bucket/service.py jobs.submit: bk-<kind>:<bid>…) and the labeling jobs
+// it starts. tests/bucket/test_bucket_job_keys.py checks that every bk- kind the backend submits is listed here.
+const MINE = /^(bk-(autolabel|scan|fetch|check|compare|sync|import|convert|export|frames|reformat)|label-(import|predict)):/;
+const VERB: Record<string, string> = { autolabel: 'Labeling', scan: 'Scanning', fetch: 'Downloading', check: 'Checking', compare: 'Comparing', sync: 'Loading', import: 'Importing', convert: 'Converting', export: 'Exporting', frames: 'Cutting', reformat: 'Reformatting' };
 
 let active: Job[] = [];
 let timer = 0;
@@ -26,8 +28,8 @@ let started = false;
 let byBucket = new Map<string, Job>();
 
 /** The bucket a job writes into: bk-autolabel:<bid>:<path>, bk-sync:<bid>, bk-import:<bid>, … */
-const bucketOfJob = (j: Job): string | null => /^dc-[a-z]+:([^:]+)/.exec(j.key)?.[1] ?? null;
-const verb = (j: Job): string => VERB[/^dc-([a-z]+):/.exec(j.key)?.[1] ?? ''] ?? 'Working';
+const bucketOfJob = (j: Job): string | null => /^bk-[a-z]+:([^:]+)/.exec(j.key)?.[1] ?? null;
+const verb = (j: Job): string => VERB[/^bk-([a-z]+):/.exec(j.key)?.[1] ?? ''] ?? 'Working';
 const pct = (j: Job): string => (j.total ? `${Math.round(j.pct ?? 0)}%` : '…');
 const LIST_MAX = 50;                             // rows in the open list (the rest: "+N more queued")
 let listOpen = false;
