@@ -11,7 +11,7 @@ Always `inspect_dataset_source` first (title, size, files, license, versions), t
 | `url` | a direct link to a file or archive (Google Drive, Dropbox, GitHub links work) | none | |
 | `zenodo` | a record id, its DOI or link | optional (restricted) | patterns (e.g. *.zip) |
 | `openml` | a dataset id or its link | none | format (parquet, else ARFF) |
-- The job (activity strip): download (resumable, parallel parts, internal addresses blocked), unpack archives (zip,
+- The job (status bar at the bottom): download (resumable, parallel parts, internal addresses blocked), unpack archives (zip,
   tar.*, gz, 7z; `extract` default true, `nested` unpacks archives inside), detect the format and tag it.
 - While a Bucket job (import, frames, sync, export, …) runs, sessions still open at once (their own job
   lane). Each account's Bucket jobs run one after another; other accounts' jobs do not wait for them.

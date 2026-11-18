@@ -49,7 +49,7 @@ export function diffText(r: LocalRow): string {
 }
 
 async function track(jobId: number | null, what: string): Promise<void> {
-  watchJobs();                                      // progress + Cancel in the activity strip
+  watchJobs();                                      // progress + Cancel in the status bar
   await hooks.reload();                             // the badges turn to "downloading" at once
   if (jobId == null) return;
   try {

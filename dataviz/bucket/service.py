@@ -884,6 +884,26 @@ def extract_frames(user, bid, paths, opts=None, target='inplace', new_name=None,
     return _frames_job(user, r, rels, o, est, name, target, new_name)
 
 
+def _download_meter(prog, stage, cancelled):
+    """progress(n, total) for S3View.download inside a job counting something else (frames): the bytes go in the
+    job's `extra` ("42% · 120 MB of 290 MB · 12.3 MB/s · ETA 14 s"), its done / total stay. Cancel stops the copy."""
+    from .sources.fetch import Meter, fmt_bytes
+    box = {}
+
+    def show(done, total, _stage, extra=''):
+        head = f'{done * 100 // total}% · {fmt_bytes(done)} of {fmt_bytes(total)}' if total else fmt_bytes(done)
+        prog(stage=stage, extra=f'{head} · {extra}' if extra else head)
+
+    def on(n, total):
+        if cancelled():
+            raise store.Cancelled()
+        m = box.get('m')
+        if m is None:
+            m = box['m'] = Meter(show, total, stage)
+        m.add(n)
+    return on
+
+
 def _frames_job(user, r, rels, o, est, name, target='inplace', new_name=None):
     """Queue (or, without a job runner, run) the extraction; the checks are the caller's."""
     if target == 'copy':
@@ -918,7 +938,7 @@ def _frames_job(user, r, rels, o, est, name, target='inplace', new_name=None):
                     dl = os.path.join(tmp, f'.src-{i}{os.path.splitext(rel)[1]}')
                     view = _s3(r)
                     try:
-                        view.download(rel, dl)
+                        view.download(rel, dl, _download_meter(prog, f'downloading {shown}', cancelled))
                     finally:
                         view.close()
                     src = dl

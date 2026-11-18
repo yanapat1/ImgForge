@@ -16,7 +16,7 @@ import { toast } from '../core/toast.js';
 import { mountUserMenu } from '../views/usermenu.js';
 import { appHeader } from '../core/header.js';
 import * as api from './api.js';
-import { ACTIVITY_ACTIONS, watchJobs } from './activity.js';
+import { ACTIVITY_ACTIONS, bindStatus, STATUS_BAR, watchJobs } from './activity.js';
 import { AI_ACTIONS, aiScopeChanged, bindAi, renderAi } from './ai.js';
 import { closeFile, EDITOR_ACTIONS, fileDirty, fileOpen, leaveFile } from './editor.js';
 import { BROWSER_ACTIONS, bindBrowser, loadListing, renderFolder, renderSearch, selChanged } from './browser.js';
@@ -47,7 +47,6 @@ const SKELETON = (): string => `
 ${appHeader({ page: 'bucket', cls: 'bk-header', actionsId: 'bk-hactions',
     middle: `<div class="bk-hsearch" role="search">${icon('search')}<input id="bk-q" type="search" placeholder="Search files, folders, tags…" aria-label="Search files, folders and tags" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">/</kbd></div>`,
     actions: `<button type="button" class="icon-btn ghost bk-only-narrow" data-act="toggle-tree" aria-label="Show the bucket tree" title="Buckets">${icon('list')}</button>` })}
-<div id="bk-activity" class="bk-activity hidden" role="status" aria-live="polite" aria-label="Running jobs"></div>
 <div id="bk-app" class="bk-app">
   <aside id="bk-tree" class="bk-tree" aria-label="Buckets and folders"></aside>
   <section id="bk-main" class="bk-main" role="main" tabindex="-1" aria-label="Files">
@@ -63,6 +62,7 @@ ${appHeader({ page: 'bucket', cls: 'bk-header', actionsId: 'bk-hactions',
   <div id="bk-split-tree" class="bk-split v" role="separator" aria-orientation="vertical" aria-controls="bk-tree" aria-label="Resize the bucket tree (double-click: default)" title="Drag to resize · double-click: default" tabindex="0"></div>
   <div id="bk-scrim" class="bk-scrim" data-act="close-overlays"></div>
 </div>
+${STATUS_BAR}
 <div id="bk-menu" class="bk-pop bk-menu hidden" role="menu"></div>
 <input id="bk-file" type="file" multiple class="hidden" aria-hidden="true" tabindex="-1">`;
 
@@ -326,6 +326,7 @@ export async function start(): Promise<void> {
   bindAi();
   bindCtxMenu();
   bindResize();
+  bindStatus();
   readLocation();
   const wantAdd = new URLSearchParams(location.search).get('add') === '1';     // Home's "Add data": the import dialog, once
   history.replaceState({ bk: 1 }, '', bucketUrl(D.bid, D.path));

@@ -30,9 +30,33 @@ body.resizing { user-select: none; cursor: col-resize; }
 body.resizing iframe, body.resizing img { pointer-events: none; }
 .bk-scrim { display: none; }
 
-/* ---------------------------------------------------------------- activity strip (activity.ts) + card job badge */
-.bk-activity { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 6px var(--s4); background: var(--surface);
-  border-bottom: 1px solid var(--border); font-size: var(--fs-sm); }
+/* ---------------------------------------------------------------- status bar at the bottom (activity.ts) + card job badge */
+.bk-status { flex: none; position: relative; z-index: 6; display: flex; flex-direction: column; background: var(--surface);
+  border-top: 1px solid var(--border); font-size: var(--fs-xs); }
+.bk-st-line { display: flex; align-items: center; gap: var(--s3); height: 26px; padding: 0 var(--s3) 0 var(--s4); min-width: 0; }
+.bk-st-ic { flex: none; display: inline-flex; width: 14px; justify-content: center; }
+.bk-st-ic:empty { display: none; }
+.bk-st-ic .ico { width: 14px; height: 14px; }
+.bk-status[data-s="err"] .bk-st-ic, .bk-status[data-s="err"] .bk-st-t { color: var(--danger-text); }
+.bk-status[data-s="idle"] .bk-st-t, .bk-status[data-s="busy"] .bk-st-t { color: var(--text-faint); }
+.bk-st-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.bk-st-n, .bk-st-eta { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bk-st-eta { color: var(--text-faint); }
+.bk-st-n:empty, .bk-st-eta:empty, .bk-st-btn:empty { display: none; }
+.bk-st-more { flex: none; height: 20px; padding: 0 6px; font-size: var(--fs-xs); }
+.bk-st-btn { flex: none; display: inline-flex; }
+.bk-st-btn .sm { height: 20px; min-width: 20px; }
+/* a 2px line along the top edge: the task in front's progress (sliding when it has no total) */
+.bk-st-bar { position: absolute; left: 0; right: 0; top: -1px; height: 2px; overflow: hidden; pointer-events: none; }
+.bk-st-bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s var(--ease); }
+.bk-st-bar.indeterminate > div { width: 30% !important; animation: slide 1.4s infinite ease-in-out; }
+.bk-status[data-s="err"] .bk-st-bar > div { background: var(--danger); }
+.bk-status[data-s="idle"] .bk-st-bar { display: none; }
+/* the list of every task, opened upwards from the bar */
+.bk-st-list { position: absolute; right: var(--s3); bottom: calc(100% + 6px); width: min(760px, calc(100vw - 32px)); max-height: min(60vh, 480px);
+  overflow: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px var(--s3); font-size: var(--fs-sm);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3); }
+.bk-st-list.hidden { display: none; }
 .bk-act-row { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) minmax(120px, 280px) auto auto auto; gap: var(--s3); align-items: center; min-height: 28px; }
 .bk-act-l, .bk-act-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bk-act-row .bar { width: 100%; }
@@ -44,6 +68,8 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
 @media (max-width: 760px) {
   .bk-act-row { grid-template-columns: minmax(0, 1fr) 90px auto auto; }
   .bk-act-s, .bk-act-row > .muted.num { display: none; }
+  .bk-st-eta { display: none; }
+  .bk-st-line { padding-left: var(--s3); }
 }
 
 /* ---------------------------------------------------------------- format dot + badge, tags */

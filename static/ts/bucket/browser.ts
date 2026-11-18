@@ -14,6 +14,7 @@ import { $, copyText, esc, icon } from '../core/dom.js';
 import { toast } from '../core/toast.js';
 import { closeFloat, floatPopover } from '../core/popover.js';
 import * as api from './api.js';
+import { previewStarted } from './busy.js';
 import type { Action } from './app.js';
 import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } from './ops.js';
 import { downloadZip, openExportDialog } from './export.js';
@@ -343,6 +344,7 @@ function observeThumbs(): void {
         img.src = u;
         img.removeAttribute('data-src');
         seen.add(u);
+        previewStarted(img);
       }
     }, { root: body, rootMargin: '600px 0px' });
   }

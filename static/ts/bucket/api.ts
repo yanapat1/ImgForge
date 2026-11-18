@@ -3,6 +3,8 @@
 // Errors are thrown as core/api.ts Errors; errText(e) gives the server's {detail}.
 
 import { getJSON, postJSON, sendJSON } from '../core/api.js';
+import { busy } from './busy.js';
+import { bucketOf } from './state.js';
 import type {
   AutolabelBody, AutolabelResult, Bucket, CompareResult, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
   FramesBody, FramesEstimate, FramesOpts, FramesResult, ImportBody, Listing, LocalJob, LsSort, Op, OpsResult,
@@ -20,32 +22,34 @@ const qs = (o: Record<string, string | number | boolean | null | undefined | rea
   const s = p.toString();
   return s ? `?${s}` : '';
 };
+/** "coco/train" for the status bar's page-work text */
+const where = (bid: string, path = ''): string => `${bucketOf(bid)?.name ?? 'bucket'}${path ? `/${path}` : ''}`;
 
-export const summary = (): Promise<Summary> => getJSON<Summary>('api/bucket/summary');
+export const summary = (): Promise<Summary> => busy('Refreshing the buckets…', getJSON<Summary>('api/bucket/summary'));
 
 /** Buckets list; the server may answer a bare array or {buckets: [...]}: both are accepted. */
 export async function listBuckets(q = '', tags: readonly string[] = [], formats: readonly string[] = []): Promise<Bucket[]> {
-  const r = await getJSON<Bucket[] | { buckets: Bucket[] }>(`api/bucket/buckets${qs({ q, tag: tags, format: formats })}`);
+  const r = await busy('Loading the buckets…', getJSON<Bucket[] | { buckets: Bucket[] }>(`api/bucket/buckets${qs({ q, tag: tags, format: formats })}`));
   return Array.isArray(r) ? r : r.buckets || [];
 }
-export const getBucket = (bid: string): Promise<Bucket> => getJSON<Bucket>(B(bid));
+export const getBucket = (bid: string): Promise<Bucket> => busy(`Reading ${where(bid)}…`, getJSON<Bucket>(B(bid)));
 export const createBucket = (body: CreateBucketBody): Promise<Bucket> => postJSON<Bucket>('api/bucket/buckets', body);
 export const renameBucket = (bid: string, name: string): Promise<Bucket> => sendJSON<Bucket>('PATCH', B(bid), { name });
 export const updateBucket = (bid: string, body: { name?: string; mode?: S3Mode }): Promise<Bucket> => sendJSON<Bucket>('PATCH', B(bid), body);
 export const syncBucket = (bid: string): Promise<SyncResult> => postJSON<SyncResult>(`${B(bid)}/sync`, {});
 export const exportUrl = (bid: string, path = ''): string => `${B(bid)}/export${qs({ path })}`;
 /** Ask first whether the zip can be made (the download itself is an anchor, so its error would be a broken file). */
-export const exportCheck = (bid: string, path = ''): Promise<ExportCheck> => getJSON<ExportCheck>(`${B(bid)}/export/check${qs({ path })}`);
+export const exportCheck = (bid: string, path = ''): Promise<ExportCheck> => busy(`Checking ${where(bid, path)} for export…`, getJSON<ExportCheck>(`${B(bid)}/export/check${qs({ path })}`));
 /** Copy a folder to S3 / FTP / SFTP through a saved connection (a job on the dc lane, bk-export:<bid>). */
 export const exportTo = (bid: string, body: ExportRemoteBody): Promise<ExportRemoteResult> => postJSON<ExportRemoteResult>(`${B(bid)}/export`, body);
 export const createRemoteBucket = (id: string, bucket: string): Promise<{ ok: boolean; bucket: string; created: boolean }> =>
   postJSON<{ ok: boolean; bucket: string; created: boolean }>('api/connections/create-bucket', { id, bucket });
-export const source = (bid: string, path = ''): Promise<DcSource> => getJSON<DcSource>(`${B(bid)}/source${qs({ path })}`);
+export const source = (bid: string, path = ''): Promise<DcSource> => busy(`Reading the source of ${where(bid, path)}…`, getJSON<DcSource>(`${B(bid)}/source${qs({ path })}`));
 export const convert = (bid: string, path: string, to: string): Promise<{ job_id: number | null; path: string }> =>
   postJSON<{ job_id: number | null; path: string }>(`${B(bid)}/convert`, { path, to });
 export const sources = (): Promise<{ sources: WebSource[] }> => getJSON<{ sources: WebSource[] }>('api/bucket/sources');
 export const inspectSource = (source: string, ref: string, connectionId: string | null, opts: Record<string, unknown>): Promise<SourceInfo> =>
-  postJSON<SourceInfo>('api/bucket/sources/inspect', { source, ref, connection_id: connectionId, opts });
+  busy(`Asking ${source} about ${ref}…`, postJSON<SourceInfo>('api/bucket/sources/inspect', { source, ref, connection_id: connectionId, opts }));
 export const importSource = (body: ImportBody): Promise<{ job_id: number | null; bucket: string }> =>
   postJSON<{ job_id: number | null; bucket: string }>('api/bucket/import', body);
 export const reimport = (bid: string): Promise<{ job_id: number | null; bucket: string }> =>
@@ -57,7 +61,8 @@ export const deleteBucket = (bid: string, deleteFiles = false): Promise<{ ok: bo
 export const PAGE = 500;
 /** One page of a folder. retry: ask an unreachable S3 again now; refresh: list S3 again (Reload), not the kept listing. */
 export const ls = (bid: string, path = '', offset = 0, limit = PAGE, sort: LsSort = 'name', q = '', retry = false, refresh = false, signal?: AbortSignal): Promise<Listing> =>
-  getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null, refresh: refresh ? 1 : null })}`, signal);
+  busy(offset ? `Loading more of ${where(bid, path)}…` : bucketOf(bid)?.kind === 's3' ? `Listing ${where(bid, path)} on S3…` : `Opening ${where(bid, path)}…`,
+    getJSON<Listing>(`${B(bid)}/ls${qs({ path, offset, limit, sort, q, retry: retry ? 1 : null, refresh: refresh ? 1 : null })}`, signal));
 /** A streamed S3 link: download folders into its read-only local copy (again = update; mirror removes what S3 lost). */
 export const fetchLocal = (bid: string, paths: string[], mirror = false): Promise<LocalJob> =>
   postJSON<LocalJob>(`${B(bid)}/local`, { paths, mirror });
@@ -66,13 +71,13 @@ export const checkLocal = (bid: string): Promise<LocalJob> => postJSON<LocalJob>
 export const compareCloud = (bid: string, path: string, verify = false): Promise<LocalJob> =>
   postJSON<LocalJob>(`${B(bid)}/compare`, { path, verify });
 export const compareResult = (bid: string, path: string, statuses: readonly string[], q: string, offset: number, limit: number): Promise<CompareResult> =>
-  getJSON<CompareResult>(`${B(bid)}/compare${qs({ path, status: statuses.join(',') || null, q: q || null, offset, limit })}`);
+  busy(`Reading the comparison of ${where(bid, path)}…`, getJSON<CompareResult>(`${B(bid)}/compare${qs({ path, status: statuses.join(',') || null, q: q || null, offset, limit })}`));
 export const dropLocal = (bid: string, paths: string[]): Promise<{ removed: string[] }> =>
   postJSON<{ removed: string[] }>(`${B(bid)}/local/remove`, { paths });
 
 /** URL of a file (raw), or of its scaled JPEG thumbnail when `w` is given (a video: its frame at `t` seconds, else a poster). */
 export const fileUrl = (bid: string, path: string, w?: number, t?: number): string => `${B(bid)}/file${qs({ path, w: w ?? null, t: t ?? null })}`;
-export const videoInfo = (bid: string, path: string): Promise<VideoInfo> => getJSON<VideoInfo>(`${B(bid)}/video${qs({ path })}`);
+export const videoInfo = (bid: string, path: string): Promise<VideoInfo> => busy(`Reading the video ${path.split('/').pop() ?? ''}…`, getJSON<VideoInfo>(`${B(bid)}/video${qs({ path })}`));
 export const framesEstimate = (bucket: string, paths: string[], opts: FramesOpts): Promise<FramesEstimate> =>
   postJSON<FramesEstimate>('api/bucket/frames/estimate', { bucket, paths, opts });
 /** Cut videos into frames: one bucket-lane job (bk-frames:<bucket>:<out path>). */
@@ -103,12 +108,12 @@ export async function allTags(): Promise<TagCount[]> {
   return Array.isArray(r) ? r : r.tags || [];
 }
 export const detect = (bid: string, path = '', force = false): Promise<Format> =>
-  getJSON<Format>(`${B(bid)}/detect${qs({ path, force: force ? 1 : null })}`);
-export const stats = (bid: string, path = ''): Promise<FolderStats> => getJSON<FolderStats>(`${B(bid)}/stats${qs({ path })}`);
+  busy(`Detecting the format of ${where(bid, path)}…`, getJSON<Format>(`${B(bid)}/detect${qs({ path, force: force ? 1 : null })}`));
+export const stats = (bid: string, path = ''): Promise<FolderStats> => busy(`Counting ${where(bid, path)}…`, getJSON<FolderStats>(`${B(bid)}/stats${qs({ path })}`));
 
 export interface SearchQuery { q?: string; tags?: string[]; formats?: string[]; bucket?: string; path?: string; glob?: string }
 export const search = (o: SearchQuery, signal?: AbortSignal): Promise<SearchResult> =>
-  getJSON<SearchResult>(`api/bucket/search${qs({ q: o.q ?? '', tag: o.tags ?? [], format: o.formats ?? [], bucket: o.bucket ?? '', path: o.path ?? '', glob: o.glob ?? '' })}`, signal);
+  busy(`Searching${o.q ? ` for “${o.q}”` : ''}…`, getJSON<SearchResult>(`api/bucket/search${qs({ q: o.q ?? '', tag: o.tags ?? [], format: o.formats ?? [], bucket: o.bucket ?? '', path: o.path ?? '', glob: o.glob ?? '' })}`, signal));
 
 export const send = (bucket: string, paths: string[], target: SendTarget, name: string, taskType: string): Promise<SendResult> =>
   postJSON<SendResult>('api/bucket/send', { bucket, paths, target, name, task_type: taskType });

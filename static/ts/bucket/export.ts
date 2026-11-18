@@ -3,7 +3,7 @@
 // SFTP), a saved connection of that kind, then for S3 a bucket (a combobox over the connection's buckets, with
 // Create bucket "x") and a prefix, for FTP / SFTP a path, and Overwrite. The folder layout is kept: a file at
 // data/image/im1.png of the bucket lands at <prefix>data/image/im1.png, and the live preview shows that key for the
-// folder's first file. POST …/export starts a bk-export:<bid> job (the activity strip shows it); a toast reports the
+// folder's first file. POST …/export starts a bk-export:<bid> job (the status bar shows it); a toast reports the
 // result. The last target / connection / bucket / prefix / path is a user pref (PREF.exp).
 
 import { errText, getJSON, postJSON } from '../core/api.js';
@@ -55,7 +55,7 @@ export async function downloadZip(bid: string, path: string): Promise<void> {
   a.remove();
 }
 
-/** Follow an export job: progress in the activity strip, the result in a toast. */
+/** Follow an export job: progress in the status bar, the result in a toast. */
 async function trackExport(jobId: number, what: string): Promise<void> {
   toast(`Exporting ${what}…`);
   watchJobs();

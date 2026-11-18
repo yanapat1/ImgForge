@@ -4,8 +4,9 @@
 // chunk size (8 MB, halved down to 256 KB when a proxy such as JupyterHub's cuts or refuses one, then one lane
 // fewer; the browser keeps the size that worked). A big file's upload id comes from bucket, folder, name, size and
 // mtime, so uploading it again after a cut or a reload asks the server what it holds and sends only the gaps.
-// Each task is a row at the top of the page (the activity strip, activity.ts): files, MB/s, bytes, time left and the
-// finish clock, Cancel; an error keeps the row with Retry. Rows are updated in place (one frame per change), never
+// Each task shows in the status bar at the bottom of the page (activity.ts): in its line when it is the task in
+// front, and as a row in its "+N more" list: files, MB/s, bytes, time left and the finish clock, Cancel; an error
+// keeps the row (and the line) with Retry. Rows are updated in place (one frame per change), never
 // the whole page, so nothing else repaints while bytes go up. Leaving the page asks first (the tab sends the bytes).
 
 import { errText, postXHR, XRW } from '../core/api.js';
@@ -60,15 +61,21 @@ interface Task {
   done: number; inflight: Map<XMLHttpRequest, number>; xhrs: Set<XMLHttpRequest>;
   added: number; skipped: number; filesDone: number; retagged: UploadResult['retagged'];
   status: 'queued' | 'running' | 'error'; err: string | null; samples: Array<[number, number]>; stop: boolean;
+  view: { s: string; n: string; eta: string; pct: number };    // what its row shows now (the status line reuses it)
 }
 
 const tasks: Task[] = [];
 let ids = 0, running = false, frame = 0;
-/** activity.ts sets it: repaint the strip (shown / hidden) when a row comes or goes */
-export const upStrip = { changed: (): void => {} };
+/** activity.ts sets them: changed = a row came or went (repaint the list and line), tick = numbers moved (the line) */
+export const upStrip = { changed: (): void => {}, tick: (): void => {} };
+
+/** One task as the status bar's line shows it (activity.ts makes the same for a job). */
+export interface StatusLine {
+  key: string; text: string; nums: string; eta: string; pct: number | null; err: boolean; running: boolean; btn: string;
+}
 
 export const hasUploads = (): boolean => tasks.some((t) => t.status !== 'error');
-/** rows in the strip (running, queued or failed uploads) */
+/** rows in the status bar's list (running, queued or failed uploads) */
 export const uploadRows = (): number => tasks.length;
 const sent = (t: Task): number => t.done + [...t.inflight.values()].reduce((a, n) => a + n, 0);
 
@@ -113,12 +120,13 @@ async function fileId(t: Task, f: File): Promise<string> {
   }
 }
 
-/** Upload `files` into bucket `bid` folder `path` in the background (progress at the top of the page). */
+/** Upload `files` into bucket `bid` folder `path` in the background (progress in the status bar at the bottom). */
 export function queueUpload(bid: string, path: string, files: File[]): void {
   if (!files.length) return;
   if (!can('bucket.manage')) { toast(cannot('upload data'), 'err'); return; }
   tasks.push({ id: (ids += 1), bid, path, files, bytes: files.reduce((a, f) => a + f.size, 0) || 1, done: 0, inflight: new Map(), xhrs: new Set(),
-    added: 0, skipped: 0, filesDone: 0, retagged: null, status: 'queued', err: null, samples: [], stop: false });
+    added: 0, skipped: 0, filesDone: 0, retagged: null, status: 'queued', err: null, samples: [], stop: false,
+    view: { s: 'queued', n: '', eta: '', pct: 0 } });
   addEventListener('beforeunload', onUnload);
   upStrip.changed();
   schedule();
@@ -260,7 +268,7 @@ function drop(t: Task): void {
   upStrip.changed();
 }
 
-// ---------------------------------------------------------------- the rows at the top
+// ---------------------------------------------------------------- the rows in the status bar
 
 /** Bytes per second over the last RATE_WINDOW (null until there is enough to tell). */
 function rate(t: Task): number | null {
@@ -288,9 +296,9 @@ function rowHtml(t: Task): string {
     `<span class="num" data-u="n"></span><span class="muted num" data-u="eta"></span>${btns}</div>`;
 }
 
-/** The strip's upload area (created on first use, above the jobs). */
+/** The status bar list's upload area or job area (created on first use, uploads above the jobs). */
 export function stripPart(cls: 'bk-act-up' | 'bk-act-jobs'): HTMLElement | null {
-  const el = document.getElementById('bk-activity');
+  const el = document.getElementById('bk-st-list');
   if (!el) return null;
   let p = el.querySelector<HTMLElement>(`:scope > .${cls}`);
   if (!p) {
@@ -320,18 +328,38 @@ function paint(): void {
     const set = (k: string, v: string): void => { const n = row?.querySelector<HTMLElement>(`[data-u="${k}"]`); if (n && n.textContent !== v) n.textContent = v; };
     const b = Math.min(sent(t), t.bytes), r = t.status === 'running' ? rate(t) : null;
     const pct = Math.min(100, (100 * b) / t.bytes);
+    const v = t.view;
+    v.pct = pct;
+    if (t.status === 'error') { v.s = t.err ?? ''; v.eta = ''; }
+    else {
+      v.s = t.status === 'queued' ? 'queued' : `${fmtN(t.filesDone)} of ${fmtN(t.files.length)} files${r ? ` · ${fmtSize(r)}/s` : ''}`;
+      const left = r ? (t.bytes - b) / r : null;
+      v.eta = left == null ? '' : `${fmtEta(left)} · done ≈ ${clock(left)}`;
+    }
+    v.n = `${fmtSize(b)} / ${fmtSize(t.bytes)}`;
     const bar = row.querySelector<HTMLElement>('[data-u="bar"]');
     if (bar) bar.style.width = `${pct.toFixed(1)}%`;
-    if (t.status === 'error') { set('s', t.err ?? ''); set('eta', ''); }
-    else set('s', t.status === 'queued' ? 'queued' : `${fmtN(t.filesDone)} of ${fmtN(t.files.length)} files${r ? ` · ${fmtSize(r)}/s` : ''}`);
-    set('n', `${fmtSize(b)} / ${fmtSize(t.bytes)}`);
-    if (t.status !== 'error') {
-      const left = r ? (t.bytes - b) / r : null;
-      set('eta', left == null ? '' : `${fmtEta(left)} · done ≈ ${clock(left)}`);
-    }
+    set('s', v.s);
+    set('n', v.n);
+    set('eta', v.eta);
     const badge = document.querySelector(`.bk-jobb[data-up="${CSS.escape(t.bid)}"] b`);
     if (badge) badge.textContent = `${Math.round(pct)}%`;
   }
+  upStrip.tick();
+}
+
+/** The upload the status line shows (a failed one first, then the running one, then the next queued), or null. */
+export function uploadLine(): StatusLine | null {
+  const t = tasks.find((x) => x.status === 'error') ?? tasks.find((x) => x.status === 'running') ?? tasks[0];
+  if (!t) return null;
+  const err = t.status === 'error', v = t.view;
+  return {
+    key: `u${t.id}:${t.status}`, text: `${label(t)} · ${v.s}`, nums: err ? '' : `${Math.round(v.pct)}% · ${v.n}`, eta: v.eta,
+    pct: v.pct, err, running: t.status === 'running',
+    btn: err
+      ? `<button type="button" class="ghost sm" data-act="retry-upload" data-upid="${t.id}">${icon('refresh')}Retry</button>`
+      : `<button type="button" class="icon-btn ghost sm" data-act="cancel-upload" data-upid="${t.id}" aria-label="Cancel the upload" title="Cancel">${icon('x')}</button>`,
+  };
 }
 
 /** "Uploading 42%" on the card of a bucket an upload is writing into ('' when none). */

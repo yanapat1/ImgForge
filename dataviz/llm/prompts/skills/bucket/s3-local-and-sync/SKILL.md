@@ -4,7 +4,7 @@ description: work on an S3 bucket: stream vs load into local, re-sync, publishin
 when: the user wants to edit, move or delete in an S3 bucket, asks why it is read-only, or wants to sync
 ---
 1. `list_buckets` (or the scope) and check the bucket's kind and `mode`. Stream = read-only, except its downloaded folders (editable in place). A just-linked
-   bucket with no format yet is still being scanned (activity strip): wait for it rather than re-linking.
+   bucket with no format yet is still being scanned (the status bar at the bottom): wait for it rather than re-linking.
 2. To change one folder (prefix) of a streamed bucket: if the scope / `list_folder` says it is downloaded, just do
    the changes (create_folder / move / rename / delete / upload) on the same bucket: they land in the local copy.
    If not, propose `download_s3_folders` for **only that folder** first (only that prefix is downloaded; the rest

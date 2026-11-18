@@ -5,7 +5,7 @@
 // for the frame count, the size and a film strip of the planned frames (file?w=&t=). The output: format, size,
 // near-duplicate skip, the folder layout (YOLO, YOLO + train/val/test by time block, per video, flat) and where it
 // goes (this bucket, or a new one: the only way for a bucket streamed from S3). POST api/bucket/frames runs one job;
-// progress shows in the activity strip, and at the end the folder opens or goes on to Label / Visualize.
+// progress shows in the status bar at the bottom, and at the end the folder opens or goes on to Label / Visualize.
 
 import { zoneOn } from '../core/auth.js';
 import { errText } from '../core/api.js';

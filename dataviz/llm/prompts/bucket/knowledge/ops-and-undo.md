@@ -17,7 +17,7 @@ summary: create folder, move, copy, rename, delete, write a text file, upload; u
 - Upload (page only): files, folders (with their sub-folders) or archives (zip / tar / tar.gz / 7z, unpacked) into the
   open folder, or a new bucket from Import data. Dropping files or folders from the desktop onto the file grid
   uploads them too (onto a folder tile: into that folder; folders keep their sub-folders). It runs in the background: the dialog closes at once and the user
-  keeps working in the Bucket page while a row at the top of the page (the activity strip) shows files done, MB/s,
+  keeps working in the Bucket page while the status bar at the bottom of the page shows files done, MB/s,
   bytes, time left and the finish clock, with Cancel. Several uploads queue one after another.
   - Speed: 4 requests in flight (small files in batches, a big file in chunks sent in parallel). No request is
     bigger than 8 MB; the size halves (down to 256 KB) when a proxy in front of the app (JupyterHub, nginx) cuts or
@@ -28,6 +28,9 @@ summary: create folder, move, copy, rename, delete, write a text file, upload; u
   - "Upload stopped after N files: the connection was cut" means even the smallest chunk failed: check the proxy or
     the network, then Retry.
 - **Background jobs.** Import, export, video → frames, an S3 download / sync / compare return a `job_id` and go
-  on in the background (the activity strip under the header shows them). `job_status` job_id tells queued |
+  on in the background (the status bar at the bottom shows them: one small line for the task in front with its stage,
+  %, count, MB/s and time left, a thin bar and Cancel; "+N more" lists every task. With no task it names the page's
+  own work: "Listing … on S3…", "Detecting the format…", "Loading previews · n left", else "Ready". Video → frames
+  from an S3 link first shows the video's download %, MB and MB/s, then frames n/total). `job_status` job_id tells queued |
   running | done | error | cancelled, the stage, percent and seconds left; `wait_s` (up to 60) waits for it. Check
   it before a step that needs the job's files; a job of many minutes: say it continues and stop, do not poll for long.

@@ -4,7 +4,7 @@
 // only be copied), the confidence, and the output formats written into the bucket at the end (YOLO, COCO, VOC, LabelMe,
 // CreateML, CSV, …: GET api/label/formats, filtered by the model's task, with a live preview of the folder tree).
 // POST /api/bucket/autolabel runs it as one job (copy → labeling session → label all → label files); progress shows in
-// the activity strip.
+// the status bar at the bottom.
 
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
@@ -83,7 +83,7 @@ function body(A: AL, canInplace: boolean, where: string, loose: boolean): string
     `<p class="hint">${icon('lock')}Every image is labeled in a new labeling session, so you can review and fix the boxes. Existing label files with the same names are replaced.</p></div>`;
 }
 
-/** Follow an autolabel job: progress (and Cancel) in the activity strip, which reloads the page when it ends; a toast
+/** Follow an autolabel job: progress (and Cancel) in the status bar, which reloads the page when it ends; a toast
  * at the end, and the session opens when asked. The images move into images/ early on: reload then too. */
 async function track(jobId: number, name: string, open: boolean): Promise<void> {
   watchJobs();

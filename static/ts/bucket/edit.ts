@@ -34,7 +34,7 @@ export const modeCards = (mode: S3Mode): string =>
 /** Follow a pull job: progress in a toast, then reload the buckets. */
 export async function trackPull(jobId: number, name: string): Promise<void> {
   toast(`Loading ${name} from S3…`);
-  watchJobs();                                     // progress shows in the activity strip
+  watchJobs();                                     // progress shows in the status bar
   try {
     const j = await waitJob(jobId);
     const r = (j as { result?: { downloaded?: number; skipped?: number; bytes?: number } }).result;

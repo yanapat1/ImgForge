@@ -3,7 +3,7 @@
 // and the labeling wizard), or a link to an S3 bucket + prefix through one of the user's S3 connections, streamed (read-only)
 // or loaded into local (a pull job; edit.ts trackPull follows it).
 // Also the folder's Upload button and files dropped on the folder view (browser.ts). Every upload goes to
-// uploads.ts queueUpload: it runs in the background with its progress at the top of the page.
+// uploads.ts queueUpload: it runs in the background with its progress in the status bar at the bottom.
 
 import { errText, getJSON, postJSON } from '../core/api.js';
 import { can, cannot } from '../core/auth.js';
@@ -114,7 +114,7 @@ function webPane(W: Web): string {
     `<div class="bk-src-opts"><label class="check"><input type="checkbox" data-wflag="extract"${W.extract ? ' checked' : ''}> Unpack archives (zip, tar.gz, …)</label>` +
     `<label class="check"><input type="checkbox" data-wflag="nested"${W.nested ? ' checked' : ''}${W.extract ? '' : ' disabled'}> Also unpack archives inside</label>` +
     `<label class="check"><input type="checkbox" data-wflag="keep"${W.keep ? ' checked' : ''}${W.extract ? '' : ' disabled'}> Keep the downloaded archive</label></div>` +
-    '<p class="hint">The download runs in the background (progress at the top of the page); the format is detected when it is done.</p>';
+    '<p class="hint">The download runs in the background (progress in the status bar at the bottom); the format is detected when it is done.</p>';
 }
 
 /** Files of a drop, folders walked (each file named by its path inside the dropped folder). The entries are taken
@@ -317,12 +317,12 @@ export async function openImport(way: Way = 'managed'): Promise<void> {
       try { b = await api.createBucket(req); } catch (e) { return `Could not create the bucket: ${errText(e)}`; }
       if (kind === 'managed' && I.files.length) {
         queueUpload(b.id, '', I.files);
-        toast(`Uploading ${fmtN(I.files.length)} file${I.files.length === 1 ? '' : 's'} in the background: progress at the top of the page`);
+        toast(`Uploading ${fmtN(I.files.length)} file${I.files.length === 1 ? '' : 's'} in the background: progress at the bottom of the page`);
       }
       await hooks.reload();
       hooks.navigate(b.id, '');
       if (b.job_id != null) void trackPull(b.job_id, b.name);
-      if (b.scan_job_id != null) { toast(`Linked ${b.name} · scanning S3…`); watchJobs(); }   // count + Cancel in the strip
+      if (b.scan_job_id != null) { toast(`Linked ${b.name} · scanning S3…`); watchJobs(); }   // count + Cancel in the status bar
       return null;
     },
   });

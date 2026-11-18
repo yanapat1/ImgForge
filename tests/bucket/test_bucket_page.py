@@ -331,3 +331,60 @@ def make_jpeg_bytes(i):
     buf = io.BytesIO()
     Image.new('RGB', (16, 12), (i * 2 % 255, 80, 120)).save(buf, 'JPEG')
     return buf.getvalue()
+
+
+def test_status_bar_shows_every_task(server):
+    """The status bar at the bottom (activity.ts): "Ready" when idle; the running task in front in small text (stage,
+    %, count, download rate in `extra`, time left) with a 2px bar; "+N more" opens the list of every task; Esc closes
+    it; when the jobs end it is "Ready" again. The jobs are mocked (GET api/jobs), the page is real."""
+    bid = _send(f'{server}/api/bucket/buckets', {'name': 'status-bucket', 'kind': 'managed'})['id']
+
+    def job(i, key, label, status, stage, done, total, extra, eta):
+        return {'id': i, 'key': key, 'label': label, 'status': status, 'stage': stage, 'done': done, 'total': total,
+                'extra': extra, 'pct': 100 * done / total if total else None, 'eta': eta, 'elapsed': 3, 'error': None,
+                'cancelled': False}
+    jobs = {'active': [
+        job(901, f'dc-frames:{bid}:v', 'Frames from clip.mp4', 'running', 'downloading clip.mp4', 0, 300,
+            '42% · 120.0 MB of 290.0 MB · 12.3 MB/s · ETA 14 s', 14),
+        job(902, f'dc-autolabel:{bid}:', 'Label status-bucket with yolov8n', 'queued', '', 0, 0, '', None),
+    ]}
+    state = {'jobs': jobs}
+
+    errors = []
+    with sync_api.sync_playwright() as p:
+        browser = _browser(p)
+        page = browser.new_page(viewport={'width': 1400, 'height': 900})
+        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
+        page.on('console', lambda m: m.type == 'error' and errors.append(f'console: {m.text}'))
+        page.route('**/api/jobs', lambda r: r.fulfill(status=200, content_type='application/json',
+                                                     body=json.dumps({'jobs': [], **state['jobs']})))
+        state['jobs'] = {'active': []}
+        page.goto(f'{server}/?bucket')
+        page.wait_for_selector(f'#bk-body .bk-bcard[data-bid="{bid}"]', timeout=30000)
+        page.wait_for_function("document.querySelector('#bk-status .bk-st-t')?.textContent === 'Ready'", timeout=10000)
+        box = page.locator('#bk-status').bounding_box()
+        assert box and abs(box['y'] + box['height'] - 900) <= 1 and box['height'] <= 32        # a slim bar at the bottom
+        assert page.locator('#bk-activity').count() == 0                                      # the old top strip is gone
+
+        state['jobs'] = jobs
+        page.wait_for_selector('#bk-status[data-s="run"]', timeout=10000)                    # the 5 s idle poll
+        assert 'Frames from clip.mp4 · downloading clip.mp4' in page.inner_text('#bk-status .bk-st-t')
+        n = page.inner_text('#bk-status .bk-st-n')
+        assert n.startswith('0% · 0/300') and '12.3 MB/s' in n
+        assert page.inner_text('#bk-status .bk-st-eta').strip() == '~14s left'
+        assert page.locator('#bk-status .bk-st-btn [data-act="cancel-job"][data-jid="901"]').count() == 1
+        more = page.locator('#bk-status .bk-st-more')
+        assert more.is_visible() and more.inner_text().strip() == '+1 more'
+        assert page.locator('#bk-st-list').is_hidden()
+        more.click()
+        assert page.locator('#bk-st-list').is_visible()
+        assert page.locator('#bk-st-list .bk-act-row').count() == 2
+        assert more.get_attribute('aria-expanded') == 'true'
+        page.keyboard.press('Escape')
+        assert page.locator('#bk-st-list').is_hidden()
+
+        state['jobs'] = {'active': []}                                                       # both ended
+        page.wait_for_function("document.querySelector('#bk-status .bk-st-t')?.textContent === 'Ready'", timeout=10000)
+        assert page.locator('#bk-status .bk-st-more').is_hidden()
+        browser.close()
+    assert not errors, errors

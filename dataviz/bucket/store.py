@@ -491,11 +491,18 @@ def purge_trash(trash_root, keep_ids, max_age=7 * 86400):
 
 
 # ---------------------------------------------------------------------------------------------- uploads
-def _write_stream(fileobj, dest):
+def _write_stream(fileobj, dest, on_bytes=None):
+    """Copy `fileobj` into `dest` through a temp file (no half file on a failure); on_bytes(n) after each chunk
+    (it may raise Cancelled to stop: the temp file is removed)."""
     tmp = f'{dest}.part-{uuid.uuid4().hex[:8]}'
     try:
         with open(tmp, 'wb') as f:
-            shutil.copyfileobj(fileobj, f, CHUNK)
+            if on_bytes is None:
+                shutil.copyfileobj(fileobj, f, CHUNK)
+            else:
+                while b := fileobj.read(CHUNK):
+                    f.write(b)
+                    on_bytes(len(b))
         os.replace(tmp, dest)
     except BaseException:
         try:
@@ -1266,13 +1273,15 @@ class S3View:
             raise BucketError(f'cannot read {rel}: {e}', 404) from None
         return data, obj.get('ETag', ''), int(obj.get('ContentLength') or 0)
 
-    def download(self, rel, dest):
-        """Stream object `rel` into local file `dest` (never whole in memory: a video can be gigabytes)."""
+    def download(self, rel, dest, progress=None):
+        """Stream object `rel` into local file `dest` (never whole in memory: a video can be gigabytes).
+        progress(n, total) after each chunk of n bytes (total: the object's size, None when S3 does not say)."""
         try:
-            body = self.client.get_object(Bucket=self.bucket, Key=self.key(rel))['Body']
+            obj = self.client.get_object(Bucket=self.bucket, Key=self.key(rel))
         except Exception as e:  # noqa: BLE001 - botocore's NoSuchKey / ClientError
             raise BucketError(f'cannot read {rel}: {e}', 404) from None
-        _write_stream(body, dest)
+        total = int(obj.get('ContentLength') or 0) or None
+        _write_stream(obj['Body'], dest, None if progress is None else (lambda n: progress(n, total)))
 
     def size(self, rel):
         try:
