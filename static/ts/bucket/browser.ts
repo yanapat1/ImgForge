@@ -20,6 +20,7 @@ import { copySel, deleteSel, moveSel, moveTo, newFile, newFolder, renameSel, und
 import { downloadZip, openExportDialog } from './export.js';
 import { openFile, TEXTY } from './editor.js';
 import { clip, clipSel, paste } from './clip.js';
+import { changeDot, changesBtn } from './changes.js';
 import { openFrames } from './frames.js';
 import { localBadge, localStrip, streamed } from './localcopy.js';
 import { openSend } from './send.js';
@@ -181,7 +182,7 @@ function tile(e: Entry): string {
       (e.kind === 'video' ? `<span class="vb" aria-hidden="true">${icon('play')}</span>` : '');
   } else media = `<span class="ph${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}</span>`;
   return `<div class="bk-th${sel ? ' sel' : ''}${e.type === 'dir' ? ' dir' : ''}" role="option" aria-selected="${sel}" tabindex="-1" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag} title="${esc(e.name)}">` +
-    `<div class="im">${media}${labelBadge(e)}${localBadge(e)}<i class="ck" data-ck="1" aria-hidden="true"></i></div>` +
+    `<div class="im">${media}${labelBadge(e)}${localBadge(e)}${changeDot(e)}<i class="ck" data-ck="1" aria-hidden="true"></i></div>` +
     `<div class="cap"><span class="fn">${esc(e.name)}</span>${cap}</div></div>`;
 }
 
@@ -197,7 +198,7 @@ function lrow(e: Entry): string {
   const drag = writable() ? ' draggable="true"' : '';
   return `<div class="bk-lrow${sel ? ' sel' : ''}" role="row" tabindex="-1" aria-selected="${sel}" data-act="pick" data-path="${esc(e.path)}"${e.type === 'dir' ? ' data-drop="1"' : ''}${drag}>` +
     `<span class="c-ck"><i class="cb${sel ? ' on' : ''}" data-ck="1" aria-hidden="true"></i></span>` +
-    `<span class="c-n${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}<span>${esc(e.name)}${e.type === 'dir' ? '/' : ''}</span>${localBadge(e)}</span>` +
+    `<span class="c-n${e.type === 'dir' ? ' dir' : ''}">${fileIcon(e)}<span>${esc(e.name)}${e.type === 'dir' ? '/' : ''}</span>${changeDot(e)}${localBadge(e)}</span>` +
     `<span class="r num">${e.type === 'dir' ? '' : fmtSize(e.size)}</span>` +
     `<span class="r num">${e.w && e.h ? `${e.w}×${e.h}` : ''}</span>` +
     `<span class="c-l">${labelsCell(e)}</span>` +
@@ -230,6 +231,7 @@ function renderBar(): void {
     `<button type="button" class="icon-btn" data-act="sort-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Sort: ${esc(SORTS.find(([k]) => k === D.sort)?.[1] ?? '')}" title="Sort">${icon('sort')}</button>` +
     `<button type="button" class="bk-dd" data-act="filter-menu" aria-haspopup="dialog" aria-expanded="false" title="Filter by name">${icon('filter')}<span class="bk-wide-txt">${D.nameQ ? esc(D.nameQ) : 'Filter'}</span>${nm}${icon('chev-d')}</button>` +
     `<button type="button" class="icon-btn" data-act="refresh" aria-label="Reload this folder" title="Reload">${icon('refresh')}</button>` +
+    changesBtn() +
     '<span class="tb-sep" aria-hidden="true"></span>' +
     `<button type="button" class="icon-btn" data-act="mkdir" aria-label="New folder" title="New folder"${w ? '' : ' disabled'}>${icon('folder-plus')}</button>` +
     `<button type="button" class="icon-btn" data-act="mkfile" aria-label="New file" title="New file (pick its extension)"${w ? '' : ' disabled'}>${icon('file-plus')}</button>` +

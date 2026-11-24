@@ -143,6 +143,13 @@ write_text(user, bid, path, text, expect_mtime_ns=None, create=False) -> {path, 
 ops(user, bid, ops) -> {applied: [..], errors: [{op, error}], undo_id, retagged: {...}|None}
     op: {op:'mkdir', path} | {op:'create', path} (empty file) | {op:'move', path, to} | {op:'copy', path, to} | {op:'rename', path, name} | {op:'delete', path}
     `to` is a destination folder; delete moves into `<data_root>/.trash/<undo_id>/`, and undo restores it.
+list_changes(user, bid, prefix='', offset=0, limit=200) -> {total, items: [{path, kind, source, at}]}   # GET …/changes
+clear_changes(user, bid, paths=(), prefix=None) -> {cleared}      # POST …/changes/clear {paths} | {prefix}: Mark as seen
+    # bucket/changes.py, table app.bucket_changes (one row per path): kind edited|created|copied|moved|deleted|uploaded|
+    # external, source bucket|visual|label|external. ls adds entries[].changed {kind, source, at, n, self} (one range
+    # scan per page) and `changes` (the total under the folder). Written by ops / undo (clears) / write_text / upload /
+    # copy_to, image/sources.py WRITE_HOOKS (Visualize's label writes, in a background thread), the bk-check job
+    # (external: a downloaded file that left the manifest); a download (fetch) clears the files it replaced.
 copy_to(user, src_bid, paths, dst_bid, dst_rel='') -> {job_id, result}     # POST /api/bucket/copy {from_bucket, paths, to_bucket, to_path}
     # job bk-copy:<dst>:<hash8> (lane bucket; the same request twice: one job). Any source (local, downloaded, streamed
     # S3: objects read in 1 MB chunks), 8 files at a time, each through <name>.part then os.replace; progress in bytes

@@ -194,6 +194,19 @@ def _copy_to(user, a):
     return res, (f'copy into {d["name"]} started' if res.get('job_id') else f'copied into {d["name"]}')
 
 
+def _list_changes(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().list_changes(user, b['id'], a.get('path', ''), 0, 200)
+    return res, f'→ {_plural(int(res.get("total") or 0), "changed path")}'
+
+
+def _mark_seen(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    paths = a.get('paths') or []
+    res = _svc().clear_changes(user, b['id'], paths, None if paths else a.get('path', ''))
+    return res, f'{res.get("cleared", 0)} marked as seen'
+
+
 def _rename(user, a):
     return _ops(user, a, [{'op': 'rename', 'path': a['path'], 'name': a['name']}], 'renamed')
 
@@ -496,6 +509,15 @@ _add(Tool('copy_to_bucket', 'Copy files / folders into a folder of ANOTHER bucke
                 'to_bucket': S('the destination bucket (id or exact name)'),
                 'to': S("destination folder in it ('' = root)")}, ['bucket', 'paths', 'to_bucket', 'to']),
           True, _copy_to, lambda b, a: f'Copy {_items(a["paths"])} of {_bname(b, a)} → {a["to_bucket"]}/{_folder(a["to"])}',
+          s3_ok=True))
+_add(Tool('list_changes', 'What changed in a bucket (under a folder) since it was downloaded or marked seen: edits on '
+                         'the Bucket page, label fixes in Visualize (source visual), labeling exports, edits outside the '
+                         'app (external), newest first. The page shows them as dots; ls entries carry `changed` too.',
+          _obj({'bucket': BUCKET, 'path': S("folder ('' = the whole bucket)")}, ['bucket']), False, _list_changes, s3_ok=True))
+_add(Tool('mark_seen', 'Clear change marks ("Mark as seen"): of `paths` (each with what is below), or of everything under '
+                      '`path` when no paths. Nothing on disk changes.',
+          _obj({'bucket': BUCKET, 'paths': PATHS, 'path': S("folder whose marks all go ('' = the whole bucket)")}, ['bucket']),
+          True, _mark_seen, lambda b, a: f'Mark as seen: {_items(a["paths"]) if a.get("paths") else _folder(a.get("path", ""))} in {_bname(b, a)}',
           s3_ok=True))
 _add(Tool('rename', 'Rename one file or folder (a new name, not a path).',
           _obj({'bucket': BUCKET, 'path': S('what to rename'), 'name': S('the new name')}, ['bucket', 'path', 'name']),

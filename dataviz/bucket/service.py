@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import db, zones
 from ..auth import tiers as vtiers
-from . import cloudiff, formats, s3dir, s3list, store, tags as vtags, video
+from . import changes, cloudiff, formats, s3dir, s3list, store, tags as vtags, video
 from .store import BucketError
 
 __all__ = ['BucketError', 'configure', 'list_buckets', 'get_bucket', 'create_bucket', 'update_bucket', 'delete_bucket',
@@ -62,6 +62,8 @@ def configure(cfg=None, ctx=None):
     one (CLI), at a config dict."""
     with _lock:
         _conf.update(ctx=ctx, cfg=cfg, datasets=None, labeling=None)
+    if ctx is not None:
+        changes.install()                               # Visualize's label fixes mark their files in the Bucket page
 
 
 def _cfg():
@@ -1403,6 +1405,16 @@ def ls(user, bid, path='', offset=0, limit=500, sort='name', q='', retry=False, 
     except BucketError:
         out['format'] = None
     out['tags'] = vtags.get(r.id, rel)
+    try:
+        mk, out['changes'] = changes.marks(r.id, rel)
+    except Exception as e:  # noqa: BLE001 - the marks are a hint: a listing never fails for them
+        mk, out['changes'] = {}, 0
+        changes._log.debug(f'change marks of {r.id}: {e}')
+    if mk:
+        for e in out.get('entries') or ():
+            m = mk.get(e.get('name'))
+            if m:
+                e['changed'] = m
     edit = out.pop('editable', False)
     out['writable'] = edit or _writable(r)
     out['location'] = os.path.join(r.local_root, rel) if edit and rel else r.local_root if edit else _location(r, rel)
@@ -1712,6 +1724,8 @@ def fetch_local(user, bid, paths, mirror=False):
                 for k in ('downloaded', 'skipped', 'bytes', 'removed'):
                     out[k] += res[k]
                 out['failed'] += res['failed']
+                if not cancelled():                        # these files are S3's version again: no mark
+                    store._try(lambda p=p: changes.clear_exact(r.id, [k for k, _, _ in cloudiff.rows_under(_manifest(r), p)]))
                 if p in own:
                     _set_local(r.id, p, state='outdated' if cancelled() or res['failed'] else 'fresh',
                                objects=res['total'], bytes=res['size'], diff=None, fetched=True, checked=True)
@@ -1820,6 +1834,7 @@ def _check_job(user, r):
                         break
                     state = 'outdated' if d['new'] or d['changed'] or d['removed'] else 'fresh'
                     _set_local(r.id, p, state=state, diff=d, checked=True)
+                    store._try(_mark_local_edits, r, p)     # edits made outside the app: their change marks
                     out[p] = {'state': state, **{k: d[k] for k in ('new', 'changed', 'removed')}}
             finally:
                 view.close()
@@ -1838,6 +1853,16 @@ def _check_job(user, r):
         return None
     return jobs.submit(f'bk-check:{r.id}', f'check {r.name} against S3', fn, lane=LANE, public_result=True,
                        owner=(user or {}).get('id') or r.owner_id).id
+
+
+def _mark_local_edits(r, rel):
+    """Files of downloaded folder `rel` whose size / mtime left what the download wrote (the manifest): edited outside
+    the app (a script, another tool). Marked `external` unless the app already marked them."""
+    edited = [k for k, size, lm in cloudiff.rows_under(_manifest(r), rel)
+              if os.path.isfile(os.path.join(r.local_root, k)) and not store._unchanged(os.path.join(r.local_root, k), size, lm)]
+    if edited:
+        changes.record(r.id, edited, 'external', 'external', None, keep=True)
+    return len(edited)
 
 
 def check_local(user, bid):
@@ -2163,6 +2188,7 @@ def write_text(user, bid, path, text, expect_mtime_ns=None, create=False):
                   {'id': undo_id, 'b': r.id, 'u': user['id'],
                    'manifest': {'root': r.root, 'trash': str(trash), 'steps': [step]}})
         c.execute(sql('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
+        changes.record(r.id, [rel], 'edited' if old is not None else 'created', 'bucket', user['id'], conn=c)
     return {'path': rel, 'size': st.st_size, 'mtime_ns': str(st.st_mtime_ns), 'undo_id': undo_id,
             'created': old is None, 'retagged': _revalidate(r)}
 
@@ -2202,6 +2228,7 @@ def ops(user, bid, ops):
                 vtags.move_paths(r.id, step['to'], step['from'], c)
             elif step['undo'] == 'restore':
                 step['tags'] = vtags.take_paths(r.id, step['path'], c)
+            _mark_op(r.id, info, user, c)
         applied.append(info)
         steps.append(step)
     if steps:
@@ -2349,12 +2376,38 @@ def copy_to(user, src_bid, paths, dst_bid, dst_rel=''):
 
 
 def _changed(bid, paths, kind, user, source='bucket'):
-    """Hook for the change marks (bucket/changes.py); a no-op until that module exists."""
-    try:
-        from . import changes
-    except ImportError:
-        return
+    """The change marks (bucket/changes.py) of `paths`; a failure never fails the change itself."""
     store._try(lambda: changes.record(bid, paths, kind, source, (user or {}).get('id')))
+
+
+def list_changes(user, bid, prefix='', offset=0, limit=200):
+    """The changed paths of a bucket under `prefix`, newest first -> {total, items: [{path, kind, source, at}]}."""
+    r = _row(user, bid)
+    return changes.listing(r.id, store.clean_rel(prefix), offset, limit)
+
+
+def clear_changes(user, bid, paths=(), prefix=None):
+    """Mark as seen: forget the marks of `paths` (and what is below them), or of everything under `prefix`
+    ('' = the whole bucket) -> {cleared}."""
+    r = _row(user, bid)
+    if prefix is None and not paths:
+        raise BucketError('say which paths (or a prefix) to mark as seen')
+    return {'cleared': changes.clear(r.id, [store.clean_rel(p) for p in paths or ()],
+                                     None if prefix is None else store.clean_rel(prefix))}
+
+
+def _mark_op(bid, info, user, c):
+    """The change mark of one applied op (store.apply_op's info)."""
+    k, uid = info.get('op'), user['id']
+    if k in ('mkdir', 'create'):
+        changes.record(bid, [info['path']], 'created', 'bucket', uid, conn=c)
+    elif k == 'copy':
+        changes.record(bid, [info['to']], 'copied', 'bucket', uid, conn=c)
+    elif k in ('move', 'rename'):
+        changes.moved(bid, info['path'], info['to'], uid, conn=c)
+    elif k == 'delete':
+        changes.clear(bid, [info['path']], conn=c)
+        changes.record(bid, [info['path']], 'deleted', 'bucket', uid, conn=c)
 
 
 def undo(user, bid, undo_id):
@@ -2385,6 +2438,8 @@ def undo(user, bid, undo_id):
                 vtags.move_paths(r.id, step['from'], step['to'], c)
             elif step['undo'] == 'restore':
                 vtags.put_back(r.id, step.get('tags'), c)
+            changes.clear(r.id, [step.get('from') or step.get('path') or ''] if (step.get('from') or step.get('path'))
+                          else (), conn=c)       # back as it was: no mark
     with db.begin() as c:
         c.execute(text('DELETE FROM app.bucket_undo WHERE id = :id'), {'id': u.id})
     if not errors:
@@ -2406,6 +2461,11 @@ def _after_upload(user, r, path, out, before):
     """The bucket's touch, format re-check and auto-extract of the new videos after files landed in `path`."""
     with db.begin() as c:
         c.execute(text('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': r.id})
+        if out.get('added'):                            # an archive unpacks into its folder: that folder is marked
+            base = store.clean_rel(path)
+            got = [store.posix_parent(f) if f.lower().endswith(store.UPLOAD_ARCHIVES) else f for f in out.get('files') or ()]
+            changes.record(r.id, [store.join(base, f) if base else f for f in got], 'uploaded', 'bucket', user['id'],
+                           conn=c)
     out['retagged'] = _revalidate(r) if out['added'] else None
     if before is not None and out['added']:
         out['frames'] = _auto_frames(user, r, sorted(_videos_below(r, path) - before))

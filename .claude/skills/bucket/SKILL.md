@@ -43,6 +43,8 @@ tools.py). `?` marks an optional argument.
 | `move` | change | bucket, paths, to | Move files / folders into another folder of the same bucket. |
 | `copy` | change | bucket, paths, to | Copy files / folders into another folder of the same bucket. |
 | `copy_to_bucket` | change | bucket, paths, to_bucket, to | Copy files / folders into a folder of ANOTHER bucket (or a big copy in the same one) as a background job with progress (the status bar; task_status / job_status). Any source (local, downloaded or streamed S3); the destination must be writable. A clashing name gets "(copy)"; the job result has an undo_id. |
+| `list_changes` | read | bucket, path? | What changed in a bucket (under a folder) since it was downloaded or marked seen: edits on the Bucket page, label fixes in Visualize (source visual), labeling exports, edits outside the app (external), newest first. The page shows them as dots; ls entries carry `changed` too. |
+| `mark_seen` | change | bucket, paths?, path? | Clear change marks ("Mark as seen"): of `paths` (each with what is below), or of everything under `path` when no paths. Nothing on disk changes. |
 | `rename` | change | bucket, path, name | Rename one file or folder (a new name, not a path). |
 | `delete` | change | bucket, paths | Delete files / folders (they go to the trash and can be undone). |
 | `add_tags` | change | bucket, path?, tags | Add user tags to a bucket ('' path) or a folder / file. format:* tags are automatic. |

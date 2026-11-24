@@ -6,7 +6,7 @@ import { getJSON, postJSON, sendJSON } from '../core/api.js';
 import { busy } from './busy.js';
 import { bucketOf } from './state.js';
 import type {
-  AutolabelBody, AutolabelResult, Bucket, CompareResult, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
+  AutolabelBody, AutolabelResult, Bucket, Change, CompareResult, CreateBucketBody, DcSource, ExportCheck, ExportRemoteBody, ExportRemoteResult, Format, FolderStats,
   FramesBody, FramesEstimate, FramesOpts, FramesResult, ImportBody, Listing, LocalJob, LsSort, Op, OpsResult,
   S3Mode, SourceInfo, WebSource, SearchResult, SendResult, SendTarget, Summary, SyncResult, Tag, TagCount, TextFile, TextSaved, UndoResult, VideoInfo,
 } from '../types-bucket.js';
@@ -91,6 +91,10 @@ export const writeText = (bid: string, path: string, text: string, expectMtime: 
   sendJSON<TextSaved>('PUT', `${B(bid)}/text`, { path, text, expect_mtime_ns: expectMtime, create });
 
 export const ops = (bid: string, list: Op[]): Promise<OpsResult> => postJSON<OpsResult>(`${B(bid)}/ops`, { ops: list });
+export const changes = (bid: string, prefix: string, offset = 0, limit = 200): Promise<{ total: number; items: Change[] }> =>
+  getJSON(`${B(bid)}/changes${qs({ prefix, offset, limit })}`);
+export const clearChanges = (bid: string, paths: string[] | null, prefix: string | null): Promise<{ cleared: number }> =>
+  postJSON(`${B(bid)}/changes/clear`, prefix !== null ? { prefix } : { paths });
 /** Copy files / folders into a folder of any bucket: a job bk-copy (bytes, ETA); its result has the undo id */
 export const copyTo = (from: string, paths: string[], to: string, toPath: string): Promise<{ job_id: string | null; result: CopyResult | null }> =>
   postJSON('api/bucket/copy', { from_bucket: from, paths, to_bucket: to, to_path: toPath });

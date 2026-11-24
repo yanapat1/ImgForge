@@ -427,6 +427,18 @@ bucket_s3_local = Table(                                     # a folder of a str
     PrimaryKeyConstraint('bucket_id', 'path'),
     schema='app')
 
+bucket_changes = Table(                                      # a file / folder changed since it was downloaded or seen
+    'bucket_changes', metadata,                              # (bucket/changes.py: the marks on the Bucket page)
+    _bucket_fk(),
+    Column('path', Text, nullable=False),
+    Column('kind', String(16), nullable=False),          # edited|created|copied|moved|deleted|uploaded|external
+    Column('source', String(16), nullable=False),        # bucket|visual|label|external
+    _user_fk(ondelete='SET NULL', nullable=True),
+    _now('at'),
+    PrimaryKeyConstraint('bucket_id', 'path'),
+    Index('ix_bucket_changes_prefix', 'bucket_id', 'path', postgresql_ops={'path': 'text_pattern_ops'}),
+    schema='app')
+
 bucket_undo = Table(                                         # one ops batch: the steps that reverse it
     'bucket_undo', metadata,
     Column('id', String(32), primary_key=True),

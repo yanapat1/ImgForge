@@ -6,6 +6,7 @@
 import { errText } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
 import * as api from './api.js';
+import { changeDot } from './changes.js';
 import type { Action } from './app.js';
 import { compact, D, fdot, fmtKey, fmtN, fmtSize, hooks, isImage, key, SOURCE, srcIcon } from './state.js';
 import type { Bucket, Entry } from '../types-bucket.js';
@@ -34,13 +35,13 @@ function childrenOf(b: Bucket, path: string, depth: number): string {
     const open = D.expanded.has(key(b.id, e.path));
     const sel = D.bid === b.id && D.path === e.path;
     out.push(row({ depth, act: 'go', bid: b.id, path: e.path, sel, twist: open ? 'open' : 'shut', drop: b.writable,
-      body: `${icon(sel ? 'folder' : 'folder-o').replace('class="ico"', 'class="ico fi"')}<span class="nm">${esc(e.name)}</span>${sel ? '<i class="here" aria-hidden="true"></i>' : ''}`,
+      body: `${icon(sel ? 'folder' : 'folder-o').replace('class="ico"', 'class="ico fi"')}<span class="nm">${esc(e.name)}</span>${changeDot(e)}${sel ? '<i class="here" aria-hidden="true"></i>' : ''}`,
       n: e.items != null ? fmtN(e.items) : '' }));
     if (open) out.push(childrenOf(b, e.path, depth + 1));
   }
   for (const e of files) {
     out.push(row({ depth, act: 'go', bid: b.id, path: path, sel: false, twist: 'none', title: e.path,
-      body: `${icon('file').replace('class="ico"', 'class="ico fi"')}<span class="nm">${esc(e.name)}</span>` }));
+      body: `${icon('file').replace('class="ico"', 'class="ico fi"')}<span class="nm">${esc(e.name)}</span>${changeDot(e)}` }));
   }
   return out.join('');
 }

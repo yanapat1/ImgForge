@@ -94,7 +94,12 @@ export interface Entry {
   kind?: EntryKind; items?: number; w?: number; h?: number; labels?: number;
   /** streamed S3 links: the state of its local copy */
   local?: LocalState | null;
+  /** changed since downloaded / marked seen (bucket/changes.py): itself (self) or n files below it */
+  changed?: ChangeMark;
 }
+export interface ChangeMark { kind: string; source: string; at: string | null; n: number; self: boolean }
+/** GET /api/bucket/buckets/{bid}/changes */
+export interface Change { path: string; kind: string; source: string; at: string | null }
 
 export type LsSort = 'name' | '-mtime' | 'size';
 /** GET /api/bucket/buckets/{bid}/ls */
@@ -106,6 +111,8 @@ export interface Listing {
   /** where the folder is read from (s3://bucket/prefix/path, or a local path: also a downloaded S3 folder's copy);
    *  an S3 link's own s3:// path */
   location?: string; s3_url?: string;
+  /** how many files below this folder changed (the toolbar's "N changed") */
+  changes?: number;
 }
 
 /** GET /api/bucket/buckets/{bid}/stats */

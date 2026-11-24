@@ -205,6 +205,18 @@ class FakeService:
         return {'applied': ops, 'errors': [], 'undo_id': 'u1',
                 'retagged': {'path': '', 'from': 'yolo-detect', 'to': 'other', 'reason': 'labels/ missing'}}
 
+    def copy_to(self, user, src, paths, dst, to=''):
+        self.calls.append(('copy_to', src, list(paths), dst, to))
+        return {'job_id': 'j9', 'result': None}
+
+    def list_changes(self, user, bid, prefix='', offset=0, limit=200):
+        self.calls.append(('list_changes', bid, prefix))
+        return {'total': 1, 'items': [{'path': 'labels/a.txt', 'kind': 'edited', 'source': 'visual', 'at': None}]}
+
+    def clear_changes(self, user, bid, paths=(), prefix=None):
+        self.calls.append(('clear_changes', bid, list(paths), prefix))
+        return {'cleared': 1}
+
     def set_tags(self, user, bid, path='', add=(), remove=()):
         self.calls.append(('set_tags', bid, path, tuple(add), tuple(remove)))
         return [{'tag': t, 'auto': False} for t in add]
@@ -500,6 +512,20 @@ def test_web_import_and_write_text_tools(svc):
     tools.run(ALICE, 'write_text_file', {'bucket': 'cars', 'path': 'new.txt', 'text': 'y'})
     assert svc.calls[-1] == ('write_text', 'b1', 'new.txt', 'y', None, True)
     assert tools.TOOLS['write_text_file'].kind == 'change' and tools.TOOLS['inspect_dataset_source'].kind == 'read'
+
+
+def test_copy_between_buckets_and_change_marks(svc):
+    _, line = tools.prepare(ALICE, 'copy_to_bucket', {'bucket': 'cars', 'paths': ['night'], 'to_bucket': 'b3', 'to': 'in'})
+    assert line.startswith('Copy') and 'in/' in line
+    res, summary = tools.run(ALICE, 'copy_to_bucket', {'bucket': 'cars', 'paths': ['night'], 'to_bucket': 'b3', 'to': 'in'})
+    assert svc.calls[-1] == ('copy_to', 'b1', ['night'], 'b3', 'in') and 'started' in summary
+    res, summary = tools.run(ALICE, 'list_changes', {'bucket': 'cars'})
+    assert res['items'][0]['source'] == 'visual' and '1 changed path' in summary
+    tools.run(ALICE, 'mark_seen', {'bucket': 'cars', 'path': 'labels'})
+    assert svc.calls[-1] == ('clear_changes', 'b1', [], 'labels')
+    tools.run(ALICE, 'mark_seen', {'bucket': 'cars', 'paths': ['labels/a.txt']})
+    assert svc.calls[-1] == ('clear_changes', 'b1', ['labels/a.txt'], None)
+    assert tools.TOOLS['list_changes'].kind == 'read' and tools.TOOLS['copy_to_bucket'].kind == 'change'
 
 
 def test_video_frame_tools(svc):

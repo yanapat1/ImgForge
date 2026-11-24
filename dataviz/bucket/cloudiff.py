@@ -150,6 +150,19 @@ def _drop_under(con, rel):
         con.execute('DELETE FROM m')
 
 
+def rows_under(path, rel):
+    """(path, size, lm) of the manifest rows below `rel` ('' = all), or [] without a manifest."""
+    p = Path(path)
+    if not p.exists():
+        return []
+    with closing(sqlite3.connect(p, timeout=30)) as con:
+        if rel:
+            esc = rel.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            return con.execute("SELECT path, size, lm FROM m WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+                               (rel, esc + '/%')).fetchall()
+        return con.execute('SELECT path, size, lm FROM m').fetchall()
+
+
 def forget(root, bid, rel):
     """Drop the manifest rows below `rel` (its local copy was removed)."""
     p = manifest_path(root, bid)

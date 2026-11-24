@@ -32,6 +32,7 @@ import { LOCAL_ACTIONS } from './localcopy.js';
 import { renderTree, TREE_ACTIONS } from './tree.js';
 import { bindCtxMenu, CTX_ACTIONS } from './ctxmenu.js';
 import { CLIP_ACTIONS } from './clip.js';
+import { CHANGES_ACTIONS } from './changes.js';
 import { bindResize } from './resize.js';
 import { bindUpload, UPLOAD_ACTIONS, openImport } from './upload.js';
 import { hasUploads } from './uploads.js';
@@ -315,7 +316,7 @@ export async function start(): Promise<void> {
   if (c === 'grid' || c === 'list') D.cards = c as CardMode;
   if (s === 'name' || s === '-mtime' || s === 'size') D.sort = s as LsSort;
   if (bs === 'recent' || bs === 'name' || bs === 'size' || bs === 'images') D.bucketSort = bs as BucketSort;
-  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, UPLOADS_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS, LOCAL_ACTIONS, COMPARE_ACTIONS, CTX_ACTIONS, CLIP_ACTIONS);
+  Object.assign(ACTIONS, APP_ACTIONS, TREE_ACTIONS, BUCKET_ACTIONS, BROWSER_ACTIONS, DETAIL_ACTIONS, OPS_ACTIONS, UPLOAD_ACTIONS, UPLOADS_ACTIONS, AI_ACTIONS, EDIT_ACTIONS, AUTOLABEL_ACTIONS, ACTIVITY_ACTIONS, EDITOR_ACTIONS, FRAMES_ACTIONS, LOCAL_ACTIONS, COMPARE_ACTIONS, CTX_ACTIONS, CLIP_ACTIONS, CHANGES_ACTIONS);
   hooks.navigate = navigate;
   hooks.reload = reload;
   hooks.render = render;

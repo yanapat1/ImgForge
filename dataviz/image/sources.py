@@ -117,6 +117,19 @@ def clear_image_cache():
     _IMAGES.clear()
 
 
+# fn(path=…) for a local file, fn(connection_id=…, bucket=…, key=…) for an S3 object: a label file was written
+# (data curation). bucket/changes.py adds one (the change marks of the Bucket page); a hook never fails the write.
+WRITE_HOOKS = []
+
+
+def _wrote(**info):
+    for fn in WRITE_HOOKS:
+        try:
+            fn(**info)
+        except Exception as e:  # noqa: BLE001
+            _log.debug(f'write hook: {vlog.esc(str(e))}')
+
+
 class Conflict(Exception):
     """write_label: the label file changed since it was read (its sha1 is not the expected one)."""
 
@@ -262,6 +275,7 @@ class LocalSource:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
+        _wrote(path=str(path))
         return sha1_bytes(data)
 
     def read_classes(self):
@@ -520,6 +534,7 @@ class S3Source:
                 raise Conflict(name, cur)
         key = f'labels/{name}'
         r = self.client.put_object(Bucket=self.bucket, Key=self.prefix + key, Body=bytes(data), ContentType='text/plain')
+        _wrote(connection_id=(self.conn or {}).get('id'), bucket=self.bucket, key=self.prefix + key)
         etag = (r.get('ETag') or '').strip('"')
         with self._lock:
             if self._listing is not None:

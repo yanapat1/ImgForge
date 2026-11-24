@@ -818,3 +818,19 @@ html[data-dock="open"] #bucket { container-type: inline-size; }
 /* the clipboard (Copy / Cut, then Paste): a pill in the folder toolbar while it holds something */
 .bk-clip { display: inline-flex; align-items: center; gap: 2px; padding-left: 4px; border-left: 1px solid var(--border); }
 .bk-clip > button.sm { height: 28px; padding: 0 8px; gap: 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* change marks (bucket/changes.py): a dot on a changed file, a dot + count on a folder with changes below it;
+   amber = changed here (the Bucket page / Visualize / a labeling export), muted = changed outside the app */
+.bk-chg { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: 6px; color: var(--warn-text); font-size: var(--fs-2xs); font-weight: 600; line-height: 1; }
+.bk-chg > i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 25%, transparent); }
+.bk-chg.k-deleted > i { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 25%, transparent); }
+.bk-chg.s-external > i { background: var(--text-faint); box-shadow: none; }
+.bk-th .im > .bk-chg { position: absolute; left: 6px; bottom: 6px; margin: 0; padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.bk-chg-btn .bk-chg { margin-left: 0; }
+.bk-chg-pop { display: flex; flex-direction: column; gap: 8px; width: min(440px, 86vw); padding: 10px; }
+.bk-chg-pop .row { display: flex; align-items: center; gap: 8px; }
+.bk-chg-pop .grow { flex: 1; }
+.bk-chg-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; }
+.bk-chg-list button { display: flex; align-items: center; gap: 8px; width: 100%; height: auto; padding: 5px 6px; text-align: left; font-weight: 400; }
+.bk-chg-list code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-chg-list .faint { flex: none; font-size: var(--fs-2xs); }
