@@ -13,7 +13,10 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   small (<= 14B) models.
 - **Background agents** (the same Sub-agents switch; a saved chat): for work of 3 or more steps the assistant starts
   an agent (`spawn_task`) and stays free to answer meanwhile. The dock's **Agents** strip lists each agent: its short
-  title, what it does now, step, time and tokens, with Stop. An agent works on the server with this page's tools: it
+  title, what it does now, step, time and tokens, with Stop. Its header **Agents** folds the strip to one line (counts
+  + what the working agent does now; an agent waiting for the user keeps an **Open A2** button there) so the chat box
+  has the room; it also folds itself when the user types and the chat would be under 160 px. The handle between the
+  strip and the chat drags its height (double-click: default); folded / height are remembered. An agent works on the server with this page's tools: it
   cannot press buttons on a page, navigate, or start another agent. A change it wants waits for the user's Approve /
   Reject on its row (never approved by the assistant); a question or a plan is answered there or in the chat. When
   it ends the assistant reports the result and opens the page it names. Running at once: 1-4 (Settings › AI
@@ -27,7 +30,7 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   keeps every message; if the summary fails, the oldest messages are left out instead.
 - **Where it is**: a dock on the right of every page; Ctrl+. or its collapse button folds it to a slim rail whose ◆ opens it again, its left edge resizes
   it, a floating ◆ opens it on a phone. Head ring = how full this chat's context is now (the latest model call's input of the limit; it moves while an answer runs and is kept after a reload; compaction at 80%), not the tokens billed (`/cost` sums those over every step); Tasks strip = the checklist,
-  "is driving …" and Stop.
+  "is driving …" and Stop (its header folds it; the handle under it resizes it).
 - **The pages**, in the header's order: **Bucket** (buckets of files), **Image** (the visualize and label sessions,
   one tab each; a visualizer session and the labeling page open from it) and **Data** (database queries,
   statistics, dashboards). The DataViz logo opens **Home**, the overview with one card per page.

@@ -54,7 +54,12 @@ html[data-dock="open"] .dock-rail { display: none; }
 
 /* tasks: is driving › …, the checklist, jobs, confirmations waiting */
 .dock-tasks { flex: none; display: flex; flex-direction: column; gap: 6px; padding: var(--s2) var(--s3); background: var(--surface-2);
-  border-bottom: 1px solid var(--border); font-size: var(--fs-xs); max-height: 40%; overflow-y: auto; }
+  border-bottom: 1px solid var(--border); font-size: var(--fs-xs); max-height: var(--dock-tasks-h, 40%); overflow-y: auto; }
+/* the handle between the strip and the chat (drag: its height; double-click: the default) */
+.dock-split { flex: none; height: 6px; margin-top: -3px; margin-bottom: -3px; position: relative; z-index: 2; cursor: row-resize; touch-action: none; }
+.dock-split::after { content: ''; position: absolute; left: 50%; top: 2px; width: 32px; height: 2px; margin-left: -16px; border-radius: 1px;
+  background: var(--border-strong); opacity: 0; transition: opacity var(--t) var(--ease); }
+.dock-split:hover::after, .dock-split:focus-visible::after, .dock-dragging .dock-split::after { opacity: 1; }
 .dock-tasks-h { display: flex; align-items: center; gap: var(--s2); width: 100%; height: 22px; padding: 0; background: none; border: 0;
   color: var(--text-faint); font-size: var(--fs-2xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; }
 .dock-tasks-h:hover:not(:disabled) { background: none; color: var(--text-muted); }
@@ -82,8 +87,16 @@ html[data-dock="open"] .dock-rail { display: none; }
 
 /* background agents (the Agents strip): one row each: title, what it does now, step · time · tokens, Stop; unfolded:
    its checklist, what it waits for (Approve / Reject, a question, a plan), its result */
-.dock-agents-h { display: flex; align-items: baseline; gap: var(--s2); color: var(--text-faint); font-size: var(--fs-2xs); font-weight: 650;
-  text-transform: uppercase; letter-spacing: .05em; }
+.dock-agents-h { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.dock-agents-t { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); height: 22px; padding: 0; background: none; border: 0;
+  color: var(--text-faint); font-size: var(--fs-2xs); font-weight: 650; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; text-align: left; }
+.dock-agents-t:hover:not(:disabled) { background: none; color: var(--text-muted); }
+.dock-agents-t .ico { width: 13px; height: 13px; flex: none; }
+.dock-agents-t .k, .dock-agents-t .ct-spin { flex: none; }
+.dock-agents-t .grow { flex: 1; }
+.dock-agents-now { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0;
+  font-weight: 400; color: var(--text-muted); }
+.dock-agents-go { flex: none; height: 22px; padding: 0 8px; border-color: var(--warn); color: var(--warn-text); }
 .dock-agents-n { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-muted); }
 .dock-agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .dock-agent { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); min-width: 0; }

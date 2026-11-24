@@ -92,6 +92,8 @@ const D = {
   jobs: new Map<string, { label: string; pct: number | null; done: boolean; ok: boolean }>(),
   pending: 0,
   tasksOpen: true,
+  agentsOpen: true,                          // the Agents strip unfolded (folded: one summary line, the chat keeps the room)
+  tasksH: 0,                                 // the strip's height the user dragged (px; 0: the default, 40% at most)
   navTo: null as string | null,              // the agent navigated: go there when its turn has ended
   ready: false,                              // the remembered chat was opened (or there was none): sid changes count
   sid: null as string | null,                // the chat this dock shows (what CURRENT holds)
@@ -111,13 +113,18 @@ const clampW = (w: number): number => Math.max(MIN_W, Math.min(maxW(), Math.roun
 
 function load(): void {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) || 'null') as { state?: unknown; width?: unknown } | null;
+    const v = JSON.parse(localStorage.getItem(KEY) || 'null') as { state?: unknown; width?: unknown; tasksOpen?: unknown; agentsOpen?: unknown; tasksH?: unknown } | null;
     if (v && (v.state === 'open' || v.state === 'rail')) D.state = v.state;
     if (v && typeof v.width === 'number' && Number.isFinite(v.width)) D.width = v.width;
+    if (v && typeof v.tasksOpen === 'boolean') D.tasksOpen = v.tasksOpen;
+    if (v && typeof v.agentsOpen === 'boolean') D.agentsOpen = v.agentsOpen;
+    if (v && typeof v.tasksH === 'number' && Number.isFinite(v.tasksH) && v.tasksH >= 0) D.tasksH = v.tasksH;
   } catch (e) { /* private window / blocked storage: the defaults */ }
 }
 function save(): void {
-  try { localStorage.setItem(KEY, JSON.stringify({ state: D.state, width: D.width })); } catch (e) { /* ignore */ }
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ state: D.state, width: D.width, tasksOpen: D.tasksOpen, agentsOpen: D.agentsOpen, tasksH: D.tasksH }));
+  } catch (e) { /* ignore */ }
 }
 // the one current chat of the app: a reload, another page or another session continues it
 function lastSid(): string | null {
@@ -223,7 +230,16 @@ function agentsHTML(): string {
   const parts = [n('running') ? `${n('running')} working` : '', n('queued') ? `${n('queued')} queued` : '',
     n('waiting') ? `<span class="dock-wait">${n('waiting')} waiting for you</span>` : '',
     !n('running') && !n('queued') && !n('waiting') ? `${D.agents.length} finished` : ''].filter(Boolean).join(' · ');
-  return `<div class="dock-agents-h"><span>Agents</span><span class="dock-agents-n">${parts}</span></div><ul class="dock-agents">${D.agents.map(agentHTML).join('')}</ul>`;
+  const open = D.agentsOpen;
+  // folded: one line (counts + what the working agent does now); an agent waiting for the user gets its own button
+  const now = open ? '' : D.agents.find((a) => a.state === 'running')?.topic ?? '';
+  const wait = open ? undefined : D.agents.find((a) => a.state === 'waiting');
+  const head = `<div class="dock-agents-h${open ? '' : ' folded'}"><button type="button" class="dock-agents-t" data-dock="agents" aria-expanded="${open}" ` +
+    `title="${open ? 'Fold the agents (the chat keeps the room)' : 'Show the agents'}">` +
+    `${!open && n('running') ? '<span class="ct-spin" aria-hidden="true"></span>' : ''}<span class="k">Agents</span><span class="dock-agents-n">${parts}</span>` +
+    `${now ? `<span class="dock-agents-now">${esc(now)}</span>` : ''}<span class="grow"></span>${icon(open ? 'chev-u' : 'chev-d')}</button>` +
+    (wait ? `<button type="button" class="sm dock-agents-go" data-dock="agent-show" data-id="${esc(wait.id)}" title="Open agent ${esc(wait.id)}">Open ${esc(wait.id)}</button>` : '') + '</div>';
+  return head + (open ? `<ul class="dock-agents">${D.agents.map(agentHTML).join('')}</ul>` : '');
 }
 
 /** The chat's agents from the server; while one is live it is asked again every AGENT_POLL_MS. A result that is ready
@@ -323,6 +339,62 @@ function renderTasks(): void {
   const html = tasksHTML();
   morphInner(el, html);
   el.classList.toggle('hidden', !html);
+  D.root?.querySelector<HTMLElement>('.dock-split')?.classList.toggle('hidden', !html);
+  el.style.setProperty('--dock-tasks-h', D.tasksH ? `${clampTasksH(D.tasksH)}px` : '');
+}
+
+/** the strip's dragged height: 15-60% of the panel */
+function clampTasksH(h: number): number {
+  const ph = D.root?.querySelector<HTMLElement>('.dock-panel')?.clientHeight || window.innerHeight;
+  return Math.round(Math.max(ph * 0.15, Math.min(ph * 0.6, h)));
+}
+
+/** the handle between the strip and the chat: drag for its height, double-click for the default; the height is a CSS
+ *  variable of the strip only, so a drag repaints the strip and lays out nothing else per move */
+function bindSplit(split: HTMLElement): void {
+  let y0 = 0; let h0 = 0; let next = 0;
+  const strip = (): HTMLElement | null => D.root?.querySelector<HTMLElement>('.dock-tasks') ?? null;
+  const move = (e: PointerEvent): void => {
+    next = clampTasksH(h0 + e.clientY - y0);
+    strip()?.style.setProperty('--dock-tasks-h', `${next}px`);
+  };
+  const up = (): void => {
+    split.removeEventListener('pointermove', move);
+    document.documentElement.classList.remove('dock-dragging');
+    if (next) { D.tasksH = next; save(); }
+  };
+  split.addEventListener('pointerdown', (e) => {
+    const el = strip();
+    if (e.button !== 0 || !el) return;
+    e.preventDefault();
+    y0 = e.clientY; h0 = el.getBoundingClientRect().height; next = 0;
+    split.setPointerCapture(e.pointerId);
+    document.documentElement.classList.add('dock-dragging');
+    split.addEventListener('pointermove', move);
+    split.addEventListener('pointerup', up, { once: true });
+    split.addEventListener('pointercancel', up, { once: true });
+  });
+  split.addEventListener('dblclick', () => { D.tasksH = 0; save(); renderTasks(); });
+  split.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const el = strip();
+    D.tasksH = clampTasksH((D.tasksH || el?.getBoundingClientRect().height || 0) + (e.key === 'ArrowDown' ? 24 : -24));
+    save(); renderTasks();
+  });
+}
+
+/** typing in the chat box with the strip leaving it under MIN_CHAT px: the strip folds (open again on demand) */
+const MIN_CHAT = 160;
+function onFocusIn(e: FocusEvent): void {
+  const t = e.target as HTMLElement | null;
+  if (!t || !(t instanceof HTMLTextAreaElement || t.isContentEditable)) return;
+  const body = D.root?.querySelector<HTMLElement>('.dock-body');
+  if (!body || body.clientHeight >= MIN_CHAT) return;
+  let changed = false;
+  if (D.agentsOpen && D.agents.length) { D.agentsOpen = false; changed = true; }
+  if (D.tasksOpen && (D.steps.length || D.jobs.size)) { D.tasksOpen = false; changed = true; }
+  if (changed) renderTasks();
 }
 
 /** at most one repaint per frame (streamed events arrive many per frame) */
@@ -599,7 +671,9 @@ function onClick(e: MouseEvent): void {
     case 'rail': collapseDock(); break;
     case 'settings': D.host?.settings?.(); break;
     case 'stop': D.chat?.stop(); D.running = false; schedule(); break;
-    case 'tasks': D.tasksOpen = !D.tasksOpen; renderTasks(); break;
+    case 'tasks': D.tasksOpen = !D.tasksOpen; save(); renderTasks(); break;
+    case 'agents': D.agentsOpen = !D.agentsOpen; save(); renderTasks(); break;
+    case 'agent-show': D.agentsOpen = true; D.agentOpen.add(b.dataset['id'] ?? ''); save(); renderTasks(); break;
     case 'agent-open': { const id = b.dataset['id'] ?? ''; if (D.agentOpen.has(id)) D.agentOpen.delete(id); else D.agentOpen.add(id); renderTasks(); break; }
     case 'agent-stop': void agentAct('stop', b.dataset['id'] ?? ''); break;
     case 'agent-approve': void agentAct('approve', b.dataset['id'] ?? ''); break;
@@ -620,7 +694,9 @@ export function setDockHost(host: DockHost): void {
     root.className = 'ai-dock';
     root.setAttribute('aria-label', 'AI assistant');
     root.innerHTML = '<div class="dock-grip" role="separator" aria-orientation="vertical" aria-label="Resize the assistant (double-click: default)" tabindex="0"></div>' +
-      '<div class="dock-panel"><div class="dock-head"></div><div class="dock-tasks hidden" aria-live="polite"></div><div class="dock-body"></div></div>' +
+      '<div class="dock-panel"><div class="dock-head"></div><div class="dock-tasks hidden" aria-live="polite"></div>' +
+      '<div class="dock-split hidden" role="separator" aria-orientation="horizontal" aria-label="Resize the tasks and agents (double-click: default)" tabindex="0"></div>' +
+      '<div class="dock-body"></div></div>' +
       '<div class="dock-rail"></div>';
     document.body.append(root);
     const fab = document.createElement('button');
@@ -645,6 +721,8 @@ export function setDockHost(host: DockHost): void {
     root.addEventListener('click', onClick);
     fab.addEventListener('click', onClick);
     bindGrip(root.querySelector<HTMLElement>('.dock-grip')!);
+    bindSplit(root.querySelector<HTMLElement>('.dock-split')!);
+    root.addEventListener('focusin', onFocusIn);
     const mq = window.matchMedia(`(max-width: ${NARROW - 1}px)`);
     const narrow = (): void => {
       const was = D.narrow;

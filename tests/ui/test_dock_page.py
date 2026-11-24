@@ -102,6 +102,27 @@ def test_dock_on_home(server):  # noqa: F811 - the fixture
             assert page.inner_text('#ai-dock .dock-ring b').strip() == '50'
             _shot(page, 'dock-tasks')
 
+            # the Agents strip folds to one line (the chat keeps the room), remembers it, and opens a waiting agent
+            agents = [
+                {'id': 'A1', 'title': 'Count boxes', 'state': 'running', 'topic': 'reading labels', 'step': 2, 'max_steps': 25,
+                 'done': [], 'next': ['count'], 'tokens': {'in': 10, 'out': 2}, 'elapsed_s': 3, 'eta_s': None, 'delivered': False},
+                {'id': 'A2', 'title': 'Tag night', 'state': 'waiting', 'topic': 'tags', 'step': 1, 'max_steps': 25, 'done': [],
+                 'next': [], 'tokens': {'in': 5, 'out': 1}, 'elapsed_s': 1, 'eta_s': None, 'delivered': False,
+                 'waiting': {'kind': 'ask', 'question': 'Which bucket?', 'options': ['cars']}}]
+            page.route('**/api/llm/agent/tasks?*', lambda r: r.fulfill(
+                status=200, content_type='application/json', body=json.dumps({'tasks': agents})))
+            page.evaluate("() => import('./static/js/core/dock.js').then((d) => d.dockDone())")
+            page.wait_for_selector('#ai-dock .dock-agents .dock-agent', timeout=10000)
+            assert page.locator('#ai-dock .dock-agent').count() == 2 and page.is_visible('#ai-dock .dock-split')
+            page.click('#ai-dock [data-dock="agents"]')
+            page.wait_for_selector('#ai-dock .dock-agents-h.folded')
+            assert page.locator('#ai-dock .dock-agent').count() == 0
+            assert 'reading labels' in page.inner_text('#ai-dock .dock-agents-now')
+            assert json.loads(page.evaluate("localStorage.getItem('dataviz.dock')"))['agentsOpen'] is False
+            page.click('#ai-dock [data-dock="agent-show"]')           # the waiting agent's button opens it
+            page.wait_for_selector('#ai-dock .dock-agent.s-waiting .dock-agent-d')
+            page.unroute('**/api/llm/agent/tasks?*')
+
             # narrow: a sheet opened from the floating button
             page.set_viewport_size({'width': 600, 'height': 900})
             page.wait_for_function(f"{_DOCK} === 'rail'")
