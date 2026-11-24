@@ -389,6 +389,7 @@ export function mountChat(root: HTMLElement, opts: ChatOptions): ChatHandle {
 
   /** "Context limit reached (31.2k of 32k tokens)" / "Step limit reached (25 steps)" */
   function rcWhy(b: Extract<Block, { k: 'rcompact' }>): string {
+    if (b.reason === 'loop') return 'Recovered from a loop (the same call 5 times: it is blocked now)';
     return b.reason === 'steps' ? `Step limit reached (${plural(b.steps, 'step')})` : `Context limit reached (${fmtK(b.used)} of ${fmtK(b.limit)} tokens)`;
   }
 

@@ -243,7 +243,7 @@ export function reduce(t: AiTurn, ev: ChatEvent): AiTurn {
       const ph = str(ev['phase']);
       const phase: RunCompactPhase = ph === 'ask' || ph === 'start' || ph === 'failed' || ph === 'declined' ? ph : 'done';
       const old = b.find((x): x is Extract<Block, { k: 'rcompact' }> => x.k === 'rcompact' && x.n === n);
-      const blk: Block = { k: 'rcompact', n, phase, reason: ev['reason'] === 'steps' ? 'steps' : 'context', used: num(ev['used']), limit: num(ev['limit']),
+      const blk: Block = { k: 'rcompact', n, phase, reason: ev['reason'] === 'steps' || ev['reason'] === 'loop' ? ev['reason'] : 'context', used: num(ev['used']), limit: num(ev['limit']),
         steps: num(ev['steps']), before: num(ev['before']), after: num(ev['after']), ms: numOrNull(ev['ms']), summary: str(ev['summary']),
         detail: str(ev['detail']), cid: strOrNull(ev['confirm_id']) ?? old?.cid ?? null, sent: false };
       return { ...t, blocks: old ? b.map((x) => (x === old ? blk : x)) : [...b, blk] };

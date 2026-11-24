@@ -194,12 +194,63 @@ def test_output_room_and_admin_limits(monkeypatch):
     assert react.options({'effort': 'high'}, {'kind': 'openai', 'model': 'gpt-5'})['max_steps'] == 80
 
 
-def test_loop_guard_nudges_then_stops(monkeypatch, svc):
-    seen = script(monkeypatch, *[('', [('list_folder', {'bucket': 'cars'})]) for _ in range(6)])
-    evs = drain(start('again'))
-    assert evs[-1]['type'] == 'error' and 'repeating itself' in evs[-1]['detail']
+def _same(n):
+    return [('', [('list_folder', {'bucket': 'cars'})]) for _ in range(n)]
+
+
+def _tool_texts(seen):
+    return [m['parts'][0]['tool_result']['content'] for s in seen for m in s['msgs'][-1:]
+            if m['role'] == 'tool']
+
+
+def test_loop_guard_nudges_recovers_then_stops(monkeypatch, svc):
+    seen = script(monkeypatch, *_same(20))
+    asked = _summary(monkeypatch)
+    run = start('again')
+    run.max_steps = 40
+    evs = drain(run)
     third = seen[3]['msgs'][-1]['parts'][0]['tool_result']['content']
-    assert 'same arguments' in third
+    assert 'same arguments' in third, 'the 3rd identical call is nudged'
+    rc = [e for e in evs if e['type'] == 'run_compact']
+    assert [e['phase'] for e in rc] == ['start', 'done'] * react.LOOP_RECOVER_MAX
+    assert all(e['reason'] == 'loop' for e in rc)
+    assert 'repeating list_folder' in asked[0]['text'], 'the summary is told about the loop'
+    resumed = json.dumps(seen[5]['msgs'][-1])
+    assert 'compacted' in resumed and 'do not call it with those arguments again' in resumed
+    # after a recovery the call is blocked: its last result comes back, the tool does not run again
+    blocked = seen[6]['msgs'][-1]['parts'][0]['tool_result']['content']
+    assert blocked.startswith('(blocked:')
+    assert len([x for x in svc.calls if x[0] == 'ls']) == 4, 'only the first 4 calls ran'
+    assert evs[-1]['type'] == 'error' and 'repeating itself' in evs[-1]['detail'] \
+        and f'after {react.LOOP_RECOVER_MAX} loop recoveries' in evs[-1]['detail']
+
+
+def test_loop_guard_off_stops_at_the_fifth(monkeypatch, svc):
+    script(monkeypatch, *_same(6))
+    asked = _summary(monkeypatch)
+    evs = drain(start('again', compact='off'))
+    assert not asked and not [e for e in evs if e['type'] == 'run_compact']
+    assert evs[-1]['type'] == 'error' and 'repeating itself' in evs[-1]['detail'] and '/autocompact' in evs[-1]['detail']
+
+
+def test_loop_guard_ask_declined_ends_the_turn(monkeypatch, svc):
+    script(monkeypatch, *_same(6))
+    asked = _summary(monkeypatch)
+    out = []
+    for ev in react.events(start('again', compact='ask')):
+        out.append(ev)
+        if ev['type'] == 'run_compact' and ev['phase'] == 'ask':
+            threading.Timer(0.05, lambda e=ev: confirm.decide(ALICE, e['confirm_id'], [], ['a1'])).start()
+    assert [e['phase'] for e in out if e['type'] == 'run_compact'] == ['ask', 'declined']
+    assert not asked and out[-1]['type'] == 'done'
+
+
+def test_loop_guard_recovers_into_an_answer(monkeypatch, svc):
+    script(monkeypatch, *_same(5), ('The bucket cars has the files listed.', []))
+    _summary(monkeypatch)
+    evs = drain(start('again'))
+    assert evs[-1]['type'] == 'done' and any(e['type'] == 'text' for e in evs)
+    assert not any(e['type'] == 'error' for e in evs)
 
 
 # ---------------------------------------------------------------- modes and confirmations

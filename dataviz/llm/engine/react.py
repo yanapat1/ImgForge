@@ -9,7 +9,9 @@ Limits (the product's rules, not tuning knobs):
     MAX_STEPS   = 50   provider calls per agent run (Admin › Settings llm_steps_max; effort / a smaller model lower it)
     MAX_RETRIES = 50   retries per agent run of a transient failure (timeout, unreachable, 429, 5xx); backoff
                        min(2^n, 20) s or the provider's Retry-After. 400 / 401 / 403 fail at once.
-    loop guard         the same call with the same arguments a 3rd time gets a nudge, a 5th time stops the run.
+    loop guard         the same call with the same arguments a 3rd time gets a nudge; at the 5th the work so far is
+                       compacted, that call is blocked (its last result is given back) and the answer goes on, at
+                       most LOOP_RECOVER_MAX times (compact auto | ask; off stops as before).
 
 Modes: ask (every change is confirmed), auto (changes run, dangerous ones are confirmed), plan (read-only: the
 agent researches and submits a plan the user approves). Confirmations pause the run (engine/confirm.py) and the
@@ -45,7 +47,13 @@ RUN_COMPACT_MIN = 1
 RUN_COMPACT_AT = 0.9            # share of the input budget a step may reach before the work so far is compacted
 RESUME = ('(system) Your work on this request was compacted to save room ({why}). Progress so far:\n\n{summary}\n\n'
           'Continue from "Next step". Do not repeat finished steps; call tools again only for details you need.')
-LIMIT_WORD = {'context': 'context limit', 'steps': 'step limit'}
+LIMIT_WORD = {'context': 'context limit', 'steps': 'step limit', 'loop': 'loop guard'}
+LOOP_RECOVER_MAX = 2            # loop recoveries per answer (their own budget, beside RUN_COMPACT_MAX)
+LOOP_NOTE = ('The model was repeating {call} with the same arguments. Its last result was:\n{result}')
+LOOP_RESUME = ('\n\nYou were repeating {call}: do not call it with those arguments again. Use its result (above) or '
+               'take a different step: another tool, other arguments, ask_user, or answer with what you have.')
+BLOCKED = ('(blocked: you called this with the same arguments again after being told not to. Its last result: '
+           '{result}) Take a different step.')
 CUT_NUDGE = ('(system) Your last answer ran out of output tokens while you were still thinking, so nothing reached the '
              'user. Think briefly: call the next tool now, or answer in a few lines. Let tools do the arithmetic.')
 MAX_TURNS = 40
@@ -595,6 +603,7 @@ def events(run):
     usage = {'in': 0, 'out': 0}
     t0 = time.perf_counter()
     repeats, changed, verified = {}, False, False
+    blocked, last_res, loops = set(), {}, 0     # loop guard: the calls blocked after a recovery, their last results
 
     def done(steps):
         if not usage['in']:
@@ -730,6 +739,8 @@ def events(run):
         bad_change = False
         planned = False         # enter_plan_mode in this step: the changes of the step do not run
         navigating = False      # a navigate was applied: the page reloads, the turn ends after this step
+        looping = None          # (call, sig) at the loop guard: the step stops, the work is compacted (or the run)
+        sig_of = {}             # call id -> signature, for the last result of each call
         for c in calls:
             name, args = c.get('name'), c.get('args')
             t = run.tools.get(name)
@@ -744,10 +755,12 @@ def events(run):
             sig = _sig(c)
             repeats[sig] = repeats.get(sig, 0) + 1
             if repeats[sig] >= REPEAT_STOP:
-                yield {'type': 'error', 'detail': f'stopped: the model called {name} with the same arguments '
-                                                  f'{REPEAT_STOP} times (it is repeating itself). Rephrase, or try a '
-                                                  'larger model / higher effort.'}
-                return
+                looping = (c, sig)
+                break
+            if sig in blocked:                  # repeated after a recovery: its last result again, nothing runs
+                results.append({**res, 'content': BLOCKED.format(result=_cut_res(last_res.get(sig)))})
+                continue
+            sig_of[c['id']] = sig
             nudge = (' (you already called this with the same arguments: use the result you have, or change approach)'
                      if repeats[sig] >= REPEAT_NUDGE else '')
             if t.name == 'enter_plan_mode':
@@ -849,6 +862,31 @@ def events(run):
                 yield {'type': 'skill', 'name': args.get('name')}
             results.append({**res, 'content': content + nudge, **({} if ok else {'is_error': True})})
 
+        if looping is not None:
+            c, sig = looping
+            call = f'{c.get("name")}({json.dumps(c.get("args"), ensure_ascii=False, default=str)[:300]})'
+            prev = _cut_res(last_res.get(sig))
+            if (run.compact == 'off' or loops >= LOOP_RECOVER_MAX or len(run.msgs) <= run.base_n):
+                yield {'type': 'error', 'detail': f'stopped: the model called {c.get("name")} with the same arguments '
+                       f'{REPEAT_STOP} times (it is repeating itself)'
+                       + (f' after {loops} loop recover{"ies" if loops != 1 else "y"}' if loops else '')
+                       + '. Rephrase, or try a larger model / higher effort'
+                       + (' (or turn on "compact and continue": /autocompact auto)' if run.compact == 'off' else '')}
+                return
+            got = yield from _compact_run(run, 'loop', step - last_c, ctx_now, cap, nc + 1,
+                                          note=LOOP_NOTE.format(call=call, result=prev),
+                                          resume=LOOP_RESUME.format(call=call))
+            if got == 'declined':
+                yield done(step)
+                return
+            if got != 'done':
+                yield {'type': 'error', 'detail': f'stopped: the model called {c.get("name")} with the same arguments '
+                       f'{REPEAT_STOP} times (it is repeating itself). Rephrase, or try a larger model / higher effort.'}
+                return
+            nc, last_c, loops = nc + 1, step, loops + 1
+            blocked.add(sig)
+            repeats.clear()
+            continue
         # run the changes in model order; from the first one that needs the user, the rest go on one card.
         # If one change of the step was wrong, none runs: the model resends the whole set fixed.
         outcome = {}
@@ -920,6 +958,9 @@ def events(run):
                 o = outcome.get(c['id']) or {'ok': False, 'content': 'not run'}
                 results[i] = {'id': c['id'], 'name': c['name'], 'content': o['content'],
                               **({} if o.get('ok') or o.get('declined') else {'is_error': True})}
+        for r in results:
+            if r.get('id') in sig_of:
+                last_res[sig_of[r['id']]] = r.get('content')
         run.msgs.append({'role': 'tool', 'parts': [{'tool_result': r} for r in results]})
         if navigating:                  # the page is leaving: the chat continues there (core/dock.ts hand-off)
             yield done(step)
@@ -954,8 +995,14 @@ def _progress_text(run):
     return '\n'.join(lines)
 
 
-def _compact_run(run, why, steps, used, cap, n):
-    """At a limit of one answer (why: context | steps): fold this answer's steps into one progress summary and go
+def _cut_res(text, n=1500):
+    t = str(text if text is not None else '(no result yet)')
+    return t if len(t) <= n else t[:n] + ' …'
+
+
+def _compact_run(run, why, steps, used, cap, n, note='', resume=''):
+    """At a limit of one answer (why: context | steps | loop; note: an extra line for the summary, resume: one for the
+    model after it): fold this answer's steps into one progress summary and go
     on. compact 'ask' asks first (the confirm card, POST /api/llm/agent/confirm a1). Yields run_compact events;
     returns 'done', 'failed' (the caller stops as before) or 'declined' (the user stopped it: the turn ends)."""
     from . import summarize
@@ -984,13 +1031,14 @@ def _compact_run(run, why, steps, used, cap, n):
     try:
         cap_s = summarize.summary_cap(run.limit)
         system = prompting.template('run_compact', words=str(int(cap_s * 0.7)))
-        summary = summarize._call(run.provider, system, f'WORK ON THE CURRENT REQUEST:\n{text_}\n\nWrite the progress summary.', cap_s)
+        summary = summarize._call(run.provider, system, f'WORK ON THE CURRENT REQUEST:\n{text_}\n\n'
+                                  + (f'NOTE: {note}\n\n' if note else '') + 'Write the progress summary.', cap_s)
     except Exception as e:  # noqa: BLE001 - the answer stops with the limit's own error instead
         _log.warning(f'run compaction failed: {vlog.esc(_error_text(e))}')
         yield {**ev, 'phase': 'failed', 'detail': _error_text(e)[:300]}
         return 'failed'
     run.msgs = run.msgs[:run.base_n] + [{'role': 'user', 'parts': [{'text': RESUME.format(
-        why=LIMIT_WORD[why], summary=summary.strip())}]}]
+        why=LIMIT_WORD[why], summary=summary.strip()) + resume}]}]
     yield {**ev, 'phase': 'done', 'before': before, 'after': budget.text_tokens(summary),
            'ms': round((time.perf_counter() - t0) * 1000), 'summary': summary.strip()[:4000]}
     return 'done'

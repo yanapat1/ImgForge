@@ -35,7 +35,7 @@ static/ts/core/chat.ts renders it; the session store keeps a compacted copy as t
     agent         {task, ok, steps, tools, in, out}          a sub-agent of delegate finished (tools/agents.py)
     compact       {state: start|done, auto, summary?, covered?, before?, after?, turns?}   the older messages were
                                                              folded into the chat's summary (engine/summarize.py)
-    run_compact   {n, phase: ask|start|done|failed|declined, reason: context|steps, used, limit, steps, confirm_id?,
+    run_compact   {n, phase: ask|start|done|failed|declined, reason: context|steps|loop, used, limit, steps, confirm_id?,
                    before?, after?, ms?, summary?, detail?}   this answer hit a limit: its own steps were folded into one
                                                              progress summary and it goes on (chat pref compact: auto |
                                                              ask = a card, approved on /api/llm/agent/confirm a1 | off)

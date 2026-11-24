@@ -114,7 +114,7 @@ export type Block =
   | { k: 'notice'; level: string; text: string }
   | { k: 'compact'; state: 'start' | 'done' | 'failed'; auto: boolean; summary: string; before: number; after: number; turns: number; covered: number | null }
   /** this answer hit a limit (context / steps): its own steps were folded into a progress summary (engine run_compact) */
-  | { k: 'rcompact'; n: number; phase: RunCompactPhase; reason: 'context' | 'steps'; used: number; limit: number; steps: number;
+  | { k: 'rcompact'; n: number; phase: RunCompactPhase; reason: 'context' | 'steps' | 'loop'; used: number; limit: number; steps: number;
       before: number; after: number; ms: number | null; summary: string; detail: string; cid: string | null; sent: boolean };
 export type RunCompactPhase = 'ask' | 'start' | 'done' | 'failed' | 'declined';
 

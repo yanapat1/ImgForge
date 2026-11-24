@@ -512,8 +512,8 @@ export function dockEvent(ev: ChatEvent): void {
       break;
     case 'ui_action': drive(String(ev['label'] || ev['action'] || '')); break;
     case 'run_compact':                         // a limit of the answer: said on the page edge too, it is easy to miss
-      if (ev['phase'] === 'start') drive('Compacting the work so far');
-      else if (ev['phase'] === 'ask') drive('Limit reached: waiting for you');
+      if (ev['phase'] === 'start') drive(ev['reason'] === 'loop' ? 'Repeating itself: compacting and changing approach' : 'Compacting the work so far');
+      else if (ev['phase'] === 'ask') drive(ev['reason'] === 'loop' ? 'Repeating itself: waiting for you' : 'Limit reached: waiting for you');
       break;
     case 'tool_start':
       if (ev['name'] === 'delegate') drive('Sub-agents are looking it up');

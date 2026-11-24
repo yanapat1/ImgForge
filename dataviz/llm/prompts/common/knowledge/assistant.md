@@ -61,6 +61,11 @@ summary: one chat on every page, chat commands (/model, /mode, /effort, /web, /c
   most 3 times per answer. The user chooses in Settings › AI assistant › "When an answer reaches a limit", or with
   `/autocompact auto|ask|off`: auto (the default) goes on by itself, ask shows a card with **Compact and
   continue**, **Stop** and **Regenerate**, off stops the answer with the old message.
+- **Loop guard**: the same tool call with the same arguments a 3rd time gets a note "use the result you have"; at
+  the 5th the answer does not fail any more: the work so far is compacted (same setting: auto goes on, ask shows the
+  card, off stops), that exact call is blocked (calling it again only returns its last result) and the model is told
+  to take a different step. Shown as the amber row "Recovered from a loop". At most 2 recoveries per answer, then it
+  stops with "repeating itself": rephrase the request, pick a larger model or a higher effort.
 - **Regenerate / Edit**: every answer has **Regenerate** (answer the same message again) and every sent message
   has **Edit** on hover (change it, Enter sends, Esc cancels). Either one replaces that message's answer and every
   message after it, on the page and in the saved chat, so the old branch is gone for good (no versions kept); a
