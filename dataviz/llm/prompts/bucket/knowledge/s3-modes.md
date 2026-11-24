@@ -22,7 +22,14 @@ summary: what stream (read-only) and local (downloaded copy) allow, per-folder d
   a move into a folder that is not downloaded, renaming or deleting the downloaded folder itself (use Remove local
   copy), any change while a download into the bucket runs (409). The rest of the bucket keeps streaming, read-only.
   To change a folder that is not downloaded: `download_s3_folders` it first, then the changes. Export and Send to
-  read S3, so to publish local edits use `export_to` from a fully loaded copy, or re-upload them.
+  read S3. To send local edits back to S3: **Upload to S3** (below).
+- **Upload to S3** (right-click a file / folder of a downloaded folder, or the folder's empty space › Upload this
+  folder to S3; tool `push_to_s3`): the local files go back to the **same keys** (`<prefix>/<path>`) as a job
+  `bk-push` (bytes, ETA, Cancel in the status bar). Unchanged files are skipped. A file **S3 changed since the
+  download** (someone else updated it) is a **conflict**: not uploaded, listed in a toast with **Overwrite these N**
+  (uploads them anyway) and **Download the S3 versions** (takes S3's copy; the local edit is lost). Files deleted
+  locally stay in S3 (reported). Uploaded files read as fresh again and lose their change mark. Needs a connection
+  that may write (an access error says so). Works in mode local too (the whole copy).
 - **Badges** (`local` on each listed entry): stream only (cloud, none) · `fresh` (downloaded, same as S3) ·
   `outdated` (S3 changed it) · `new` (S3 has it, the copy not yet) · `gone` (only the copy has it: S3 removed it) ·
   `partial` (some folders inside are downloaded) · `fetching`. A downloaded folder is compared with S3
@@ -46,5 +53,6 @@ summary: what stream (read-only) and local (downloaded copy) allow, per-folder d
   is reused for a minute.
 - Big folders list progressively: the first entries show at once and the rest fill in (`partial` while it runs).
 - Switching back to stream keeps the copy on disk; a later switch to local downloads again over it.
-- Changes made in mode local stay local: they are **not** written back to S3. To publish them, use `export_to` to S3.
+- Changes made in mode local stay local until **Upload to S3** (`push_to_s3`) sends them to the same keys; to publish
+  them somewhere else (another bucket / prefix), use `export_to`.
 - Use stream to browse / tag / send big buckets; local to reorganise, fix labels in place, or work offline.

@@ -13,6 +13,7 @@ import * as api from './api.js';
 import type { Action } from './app.js';
 import { openEntry, selChanged } from './browser.js';
 import { clip } from './clip.js';
+import { canPush } from './push.js';
 import { bucketMenuItems } from './details.js';
 import { fileOpen } from './editor.js';
 import { downloadZip } from './export.js';
@@ -86,6 +87,7 @@ function entryMenu(): string {
     [...sendItems(bid, paths),
       es.some((x) => x.kind === 'video') && item({ act: 'extract-frames', ico: 'film', label: 'Extract frames…' }),
       e && item({ act: 'ctx-zip', ico: 'download', label: 'Export (zip)', data: { path: e.path }, hint: 'download' })],
+    [canPush(es) && item({ act: 'push', ico: 'cloud-up', label: 'Upload to S3', hint: 'same keys', data: { bid, paths: paths.join('\n') } })],
     s3 ? [notLocal.length > 0 && item({ act: 'dl-local', ico: 'hdd', label: 'Download to local', hint: 'editable copy' }),
       local.length > 0 && item({ act: 'drop-local', ico: 'x-c', label: 'Remove local copy' })] : [],
     [item({ act: 'delete', ico: 'trash', label: 'Delete', kbd: 'Del', danger: true, dis: ro })],
@@ -115,6 +117,7 @@ function folderMenu(): string {
       item({ act: 'export-zip', ico: 'download', label: 'Export (zip)', hint: 'download' }),
       item({ act: 'export-to', ico: 'upload', label: 'Export to…', hint: 'S3, FTP, SFTP' })],
     sendItems(bid, [D.path]),
+    (here || (curBucket()?.kind === 's3' && !s3)) && !L?.offline ? [item({ act: 'push', ico: 'cloud-up', label: 'Upload this folder to S3', hint: 'same keys', data: { bid, paths: D.path } })] : [],
     s3 ? (here
       ? [item({ act: 'update-local', ico: 'download', label: 'Update from S3…' }), item({ act: 'check-local', ico: 'refresh', label: 'Check for updates' }),
         item({ act: 'compare-cloud', ico: 'cloud', label: 'Compare with cloud…', hint: 'every file' })]

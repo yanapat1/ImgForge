@@ -9,8 +9,9 @@ The Bucket page keeps a user's image datasets in **buckets**. Three kinds:
 
 - `managed`: a folder under `storage.data_root` (default `data/`). Imports land here.
 - `local`: a linked folder inside `storage.allowed_roots`, used in place.
-- `s3`: a linked bucket + prefix through one of the owner's S3 connections. **Read-only**: you can list, view,
-  detect, tag and send it, never change its files.
+- `s3`: a linked bucket + prefix through one of the owner's S3 connections. Streamed it is read-only (list, view,
+  detect, tag, send); a **downloaded folder** (or the whole bucket in mode local) is an editable local copy, and
+  `push_to_s3` uploads its changes back to the same keys (conflicts when S3 changed since the download).
 
 Buckets are private to their owner (admins see every one). Paths are relative to the bucket root, POSIX, no
 leading slash; `''` is the root. Changing data needs the tier permission `bucket.manage`.
@@ -43,6 +44,7 @@ tools.py). `?` marks an optional argument.
 | `move` | change | bucket, paths, to | Move files / folders into another folder of the same bucket. |
 | `copy` | change | bucket, paths, to | Copy files / folders into another folder of the same bucket. |
 | `copy_to_bucket` | change | bucket, paths, to_bucket, to | Copy files / folders into a folder of ANOTHER bucket (or a big copy in the same one) as a background job with progress (the status bar; task_status / job_status). Any source (local, downloaded or streamed S3); the destination must be writable. A clashing name gets "(copy)"; the job result has an undo_id. |
+| `push_to_s3` | change | bucket, paths, overwrite? | Upload to S3: files / folders of the local copy of an S3 link (a downloaded folder, or a bucket loaded into local) go back to the SAME keys (<prefix>/<path>) as a background job. Unchanged files are skipped; a file S3 changed since the download is a conflict (listed, not uploaded) unless its path is in overwrite. Files deleted here stay in S3. |
 | `list_changes` | read | bucket, path? | What changed in a bucket (under a folder) since it was downloaded or marked seen: edits on the Bucket page, label fixes in Visualize (source visual), labeling exports, edits outside the app (external), newest first. The page shows them as dots; ls entries carry `changed` too. |
 | `mark_seen` | change | bucket, paths?, path? | Clear change marks ("Mark as seen"): of `paths` (each with what is below), or of everything under `path` when no paths. Nothing on disk changes. |
 | `rename` | change | bucket, path, name | Rename one file or folder (a new name, not a path). |

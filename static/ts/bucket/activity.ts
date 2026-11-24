@@ -19,8 +19,8 @@ import type { StatusLine } from './uploads.js';
 
 // The job keys of the Bucket page (dataviz/bucket/service.py jobs.submit: bk-<kind>:<bid>…) and the labeling jobs
 // it starts. tests/bucket/test_bucket_job_keys.py checks that every bk- kind the backend submits is listed here.
-const MINE = /^(bk-(autolabel|scan|fetch|check|compare|sync|import|convert|export|frames|reformat|copy)|label-(import|predict)):/;
-const VERB: Record<string, string> = { autolabel: 'Labeling', scan: 'Scanning', fetch: 'Downloading', check: 'Checking', compare: 'Comparing', sync: 'Loading', import: 'Importing', convert: 'Converting', export: 'Exporting', frames: 'Cutting', reformat: 'Reformatting', copy: 'Copying' };
+const MINE = /^(bk-(autolabel|scan|fetch|check|compare|sync|import|convert|export|frames|reformat|copy|push)|label-(import|predict)):/;
+const VERB: Record<string, string> = { autolabel: 'Labeling', scan: 'Scanning', fetch: 'Downloading', check: 'Checking', compare: 'Comparing', sync: 'Loading', import: 'Importing', convert: 'Converting', export: 'Exporting', frames: 'Cutting', reformat: 'Reformatting', copy: 'Copying', push: 'Uploading' };
 
 let active: Job[] = [];
 let timer = 0;

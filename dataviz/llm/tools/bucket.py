@@ -194,6 +194,12 @@ def _copy_to(user, a):
     return res, (f'copy into {d["name"]} started' if res.get('job_id') else f'copied into {d["name"]}')
 
 
+def _push(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    res = _svc().push(user, b['id'], a['paths'], a.get('overwrite') or ())
+    return res, (f'{b["name"]}: upload to S3 started' if res.get('job_id') else f'{b["name"]}: uploaded')
+
+
 def _list_changes(user, a):
     b = resolve_bucket(user, a['bucket'])
     res = _svc().list_changes(user, b['id'], a.get('path', ''), 0, 200)
@@ -510,6 +516,17 @@ _add(Tool('copy_to_bucket', 'Copy files / folders into a folder of ANOTHER bucke
                 'to': S("destination folder in it ('' = root)")}, ['bucket', 'paths', 'to_bucket', 'to']),
           True, _copy_to, lambda b, a: f'Copy {_items(a["paths"])} of {_bname(b, a)} → {a["to_bucket"]}/{_folder(a["to"])}',
           s3_ok=True))
+_add(Tool('push_to_s3', 'Upload to S3: files / folders of the local copy of an S3 link (a downloaded folder, or a bucket '
+                       'loaded into local) go back to the SAME keys (<prefix>/<path>) as a background job. Unchanged '
+                       'files are skipped; a file S3 changed since the download is a conflict (listed, not uploaded) '
+                       'unless its path is in overwrite. Files deleted here stay in S3.',
+          _obj({'bucket': BUCKET, 'paths': PATHS,
+                'overwrite': {'type': 'array', 'items': {'type': 'string'},
+                              'description': 'conflicting paths to upload anyway (replaces S3\'s newer copy)'}},
+               ['bucket', 'paths']),
+          True, _push, lambda b, a: f'Upload {_items(a["paths"])} of {_bname(b, a)} to S3 (same keys'
+                                    + (f', overwriting {len(a["overwrite"])} changed in S3)' if a.get('overwrite') else ')'),
+          s3_ok=True, danger_if=lambda a: bool(a.get('overwrite'))))
 _add(Tool('list_changes', 'What changed in a bucket (under a folder) since it was downloaded or marked seen: edits on '
                          'the Bucket page, label fixes in Visualize (source visual), labeling exports, edits outside the '
                          'app (external), newest first. The page shows them as dots; ls entries carry `changed` too.',

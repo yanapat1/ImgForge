@@ -1,6 +1,6 @@
 ---
 name: s3-local-and-sync
-description: work on an S3 bucket: stream vs load into local, re-sync, publishing changes back
+description: work on an S3 bucket: stream vs load into local, re-sync, uploading changes back (push_to_s3)
 when: the user wants to edit, move or delete in an S3 bucket, asks why it is read-only, or wants to sync
 ---
 1. `list_buckets` (or the scope) and check the bucket's kind and `mode`. Stream = read-only, except its downloaded folders (editable in place). A just-linked
@@ -17,6 +17,7 @@ when: the user wants to edit, move or delete in an S3 bucket, asks why it is rea
 3. After the download finished, do the requested changes with the normal tools on the same bucket.
 4. Re-sync (`sync_from_s3`) only when the user wants the S3 version again: S3 files **replace** local files with the
    same name (local edits to them are lost), unchanged files are skipped, local-only files stay. It is always confirmed.
-5. Local changes are never written back to S3. To publish them, `export_to` the user's S3 connection (prefix =
-   where it should land; the layout is kept from the bucket root; `overwrite` only when asked).
+5. To send local changes back to the same S3 keys, `push_to_s3` the changed files / folders (see the push-to-s3
+   skill): unchanged files are skipped, files S3 changed since the download are conflicts (listed, not uploaded).
+   To publish somewhere else (another bucket / prefix), `export_to` the user's S3 connection.
 6. Back to stream (`set_s3_mode` mode stream) keeps the local copy on disk.

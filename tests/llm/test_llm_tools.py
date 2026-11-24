@@ -209,6 +209,10 @@ class FakeService:
         self.calls.append(('copy_to', src, list(paths), dst, to))
         return {'job_id': 'j9', 'result': None}
 
+    def push(self, user, bid, paths, overwrite=()):
+        self.calls.append(('push', bid, list(paths), list(overwrite)))
+        return {'job_id': 'j8', 'result': None}
+
     def list_changes(self, user, bid, prefix='', offset=0, limit=200):
         self.calls.append(('list_changes', bid, prefix))
         return {'total': 1, 'items': [{'path': 'labels/a.txt', 'kind': 'edited', 'source': 'visual', 'at': None}]}
@@ -526,6 +530,10 @@ def test_copy_between_buckets_and_change_marks(svc):
     tools.run(ALICE, 'mark_seen', {'bucket': 'cars', 'paths': ['labels/a.txt']})
     assert svc.calls[-1] == ('clear_changes', 'b1', ['labels/a.txt'], None)
     assert tools.TOOLS['list_changes'].kind == 'read' and tools.TOOLS['copy_to_bucket'].kind == 'change'
+    tools.run(ALICE, 'push_to_s3', {'bucket': 'cars', 'paths': ['night']})
+    assert svc.calls[-1] == ('push', 'b1', ['night'], [])
+    t = tools.TOOLS['push_to_s3']
+    assert t.risk_of({'paths': ['a'], 'overwrite': ['a']}) == 'danger' and t.risk_of({'paths': ['a']}) == 'change'
 
 
 def test_video_frame_tools(svc):

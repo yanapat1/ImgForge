@@ -1865,6 +1865,164 @@ def _mark_local_edits(r, rel):
     return len(edited)
 
 
+PUSH_BIG = 16 << 20                     # bytes: a file this big goes up in parts (multipart, 8 at a time)
+PUSH_THREADS = 16
+
+
+def push(user, bid, paths, overwrite=()):
+    """Upload to S3: files / folders of the local copy of an S3 link (a downloaded folder, or the whole bucket loaded
+    into local) go back to the same keys (<prefix>/<path>). A job bk-push:<bid>:<hash8> on the bucket lane:
+    1. one listing of S3 below each path; 2. per local file: unchanged (size / mtime as downloaded) -> skipped;
+    S3's copy changed since the download (or exists and was never downloaded) -> a conflict, skipped unless the path
+    is in `overwrite`; else uploaded (multipart from PUSH_BIG, PUSH_THREADS at a time, progress in bytes, cancel
+    between files). Each uploaded file takes S3's new LastModified as its mtime and its manifest row, so it reads
+    as fresh, and its change mark goes. Files deleted here are not deleted in S3 (reported as `deleted_here`).
+    -> {job_id, result}; the result: {uploaded, bytes, unchanged, conflicts: [{path, local_size, s3_size, s3_modified}],
+    deleted_here, failed: [{path, error}], cancelled}."""
+    import hashlib
+    r = _row(user, bid)
+    _need(user)
+    if r.link != 's3':
+        raise BucketError(f'bucket “{r.name}” is not linked to S3: use Export to… to copy it to S3')
+    rels = sorted({store.clean_rel(p) for p in (paths or []) if isinstance(p, str)})
+    if not rels:
+        raise BucketError('pick what to upload')
+    if r.kind == 's3':                                  # streamed: only what is inside a downloaded folder
+        rows = _local_rows(r.id)
+        if not rows:
+            raise BucketError(f'nothing of “{r.name}” is downloaded: there is no local copy to upload')
+        for p in rels:
+            if _cover(rows, p) is None:
+                raise _outside(r, p)
+        if _busy(f'bk-fetch:{r.id}:'):
+            raise BucketError(f'a download into “{r.name}” is running: upload once it finished', 409)
+    root = r.local_root
+    if not root or not os.path.isdir(root):
+        raise BucketError(f'the local copy of “{r.name}” is missing', 404)
+    for p in rels:
+        if not os.path.lexists(os.path.join(root, p) if p else root):
+            raise BucketError(f'{p or "/"} is not in the local copy', 404)
+    over = {store.clean_rel(p) for p in overwrite or ()}
+
+    def fn(job=None):
+        from boto3.s3.transfer import TransferConfig
+        stop = (lambda: job.cancelled.is_set()) if job is not None else (lambda: False)
+        def prog(d=None, t=None, stage=None, extra=None):
+            if job is not None:
+                job.progress(d, t, stage, extra)
+        view = _s3(r)
+        out = {'uploaded': 0, 'bytes': 0, 'unchanged': 0, 'conflicts': [], 'deleted_here': 0, 'failed': [], 'cancelled': False}
+        try:
+            man = {}
+            for p in rels:
+                man.update({k: (size, lm) for k, size, lm in cloudiff.rows_under(_manifest(r), p)})
+            prog(stage='listing S3')
+            s3 = {}
+            for p in rels:
+                one = os.path.isfile(os.path.join(root, p)) if p else False
+                pre = view.base + (p if one else (p + '/' if p else ''))
+                with closing(s3list.objects(view.client, view.bucket, pre, cancelled=stop)) as objs:
+                    for o in objs:
+                        k = o['Key'][len(view.base):]
+                        if one and k != p:
+                            continue
+                        lm = o.get('LastModified')
+                        s3[k] = (int(o.get('Size') or 0), lm.timestamp() if lm is not None else None)
+            prog(stage='comparing')
+            todo, local = [], set()
+            for p in rels:
+                a = os.path.join(root, p) if p else root
+                files = [(p, False, a)] if os.path.isfile(a) else store.walk_files(a, p)
+                for k, _, absp in files:
+                    local.add(k)
+                    m, o = man.get(k), s3.get(k)
+                    if m is not None and store._unchanged(absp, m[0], m[1]):
+                        out['unchanged'] += 1
+                        continue
+                    theirs = o is not None and (m is None or o[0] != m[0] or o[1] is None or m[1] is None
+                                                or abs(o[1] - m[1]) > 1e-3)
+                    if theirs and k not in over:
+                        try:
+                            ls = os.path.getsize(absp)
+                        except OSError:
+                            ls = None
+                        if len(out['conflicts']) < 500:
+                            out['conflicts'].append({'path': k, 'local_size': ls, 's3_size': o[0],
+                                                     's3_modified': o[1]})
+                        continue
+                    try:
+                        todo.append((k, absp, os.path.getsize(absp)))
+                    except OSError:
+                        continue
+            out['deleted_here'] = sum(1 for k in man if k not in local and k in s3)
+            total = sum(x[2] for x in todo)
+            lock = threading.Lock()
+            sent = {'b': 0, 't': 0.0}
+
+            def tick(n):
+                with lock:
+                    sent['b'] += n
+                    now = time.monotonic()
+                    if now - sent['t'] > 0.25:
+                        sent['t'] = now
+                        prog(sent['b'], total or 1, 'uploading', f'{out["uploaded"]} of {len(todo)} files')
+
+            cfg = TransferConfig(multipart_threshold=PUSH_BIG, multipart_chunksize=PUSH_BIG, max_concurrency=8,
+                                 use_threads=True)
+            done_rows, done_keys = [], []
+
+            def up(item):
+                k, absp, size = item
+                if stop():
+                    return
+                key = view.base + k
+                try:
+                    if size >= PUSH_BIG:
+                        view.client.upload_file(absp, view.bucket, key, Config=cfg, Callback=tick)
+                    else:
+                        with open(absp, 'rb') as f:
+                            view.client.put_object(Bucket=view.bucket, Key=key, Body=f)
+                        tick(size)
+                    h = view.client.head_object(Bucket=view.bucket, Key=key)
+                    lm = h['LastModified'].timestamp()
+                    os.utime(absp, (lm, lm))            # the copy is S3's version now: unchanged for the next check
+                    with lock:
+                        out['uploaded'] += 1
+                        out['bytes'] += size
+                        done_rows.append((k, int(h.get('ContentLength') or size), lm))
+                        done_keys.append(k)
+                except Exception as e:  # noqa: BLE001 - one file failing does not stop the others
+                    code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
+                    msg = (f'this connection cannot write to {view.bucket} (access denied)' if code in ('AccessDenied', '403')
+                           else f'{type(e).__name__}: {e}')
+                    with lock:
+                        out['failed'].append({'path': k, 'error': msg[:300]})
+
+            prog(0, total or 1, 'uploading', f'0 of {len(todo)} files')
+            with ThreadPoolExecutor(PUSH_THREADS) as ex:
+                list(ex.map(up, todo))
+            cloudiff.manifest_put(_manifest(r), done_rows)
+            if done_keys:
+                store._try(lambda: changes.clear_exact(r.id, done_keys))
+            out['failed'] = out['failed'][:100]
+            out['cancelled'] = stop()
+            if out['failed'] and not out['uploaded'] and len(out['failed']) == len(todo):
+                raise BucketError(out['failed'][0]['error'])
+            prog(total or 1, total or 1, 'done', f'{out["uploaded"]} uploaded · {len(out["conflicts"])} conflicts')
+            return out
+        finally:
+            view.close()
+            s3dir.invalidate(r.id)
+
+    jobs = _jobs()
+    if jobs is None:
+        return {'job_id': None, 'result': fn()}
+    h = hashlib.sha1(json.dumps([rels, sorted(over)]).encode()).hexdigest()[:8]
+    n = rels[0].rsplit('/', 1)[-1] if len(rels) == 1 else f'{len(rels)} items'
+    return {'job_id': jobs.submit(f'bk-push:{r.id}:{h}', f'upload {n or r.name} to S3 ({r.s3_bucket})', fn, lane=LANE,
+                                  public_result=True, owner=user['id']).id, 'result': None}
+
+
 def check_local(user, bid):
     """Compare every downloaded folder of a streamed S3 link with S3 now (new / changed / removed files; the
     folder turns outdated when any). A bucket-lane job bk-check:<bid> -> {job_id}."""

@@ -13,7 +13,8 @@ inspects them, cuts videos into image frames, or opens them in the visualizer / 
    formats, making a video from images (cutting a video into frames IS possible: `extract_frames`), editing pixels
    or labels, training models, anything outside the user's buckets,
    and changing a **streamed S3 bucket** outside its downloaded folders (you may list, detect, tag and send it;
-   inside a downloaded folder changes are allowed and stay local; otherwise offer `download_s3_folders` for just
+   inside a downloaded folder changes are allowed and stay local until `push_to_s3` uploads them back to the same
+   keys (S3 changed since the download: a conflict, not uploaded); otherwise offer `download_s3_folders` for just
    that folder, or copying into a managed bucket). "What did I change locally?", "what is different from S3?":
    `compare_s3_local` (file by file: added / deleted / edited here, new / changed / removed in S3; read-only), and
    tell the user the Bucket page shows the same list under Compare with cloud.

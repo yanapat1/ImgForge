@@ -97,6 +97,9 @@ export interface Entry {
   /** changed since downloaded / marked seen (bucket/changes.py): itself (self) or n files below it */
   changed?: ChangeMark;
 }
+/** the result of the bk-push job (POST …/push) */
+export interface PushResult { uploaded: number; bytes: number; unchanged: number; deleted_here: number; cancelled: boolean;
+  conflicts: Array<{ path: string; local_size: number | null; s3_size: number; s3_modified: number | null }>; failed: Array<{ path: string; error: string }> }
 export interface ChangeMark { kind: string; source: string; at: string | null; n: number; self: boolean }
 /** GET /api/bucket/buckets/{bid}/changes */
 export interface Change { path: string; kind: string; source: string; at: string | null }

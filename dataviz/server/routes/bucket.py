@@ -149,6 +149,10 @@ def router(state, ctx):
     def clear_changes(bid: str, body: dict, user=Depends(deps.current_user)):
         return _call(service.clear_changes, user, bid, body.get('paths') or (), body.get('prefix'))
 
+    @r.post('/buckets/{bid}/push')
+    def push(bid: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.push, user, bid, body.get('paths') or [], body.get('overwrite') or ())
+
     @r.post('/copy')
     def copy_to(body: dict, user=Depends(MANAGE)):
         return _call(service.copy_to, user, body.get('from_bucket') or '', body.get('paths') or [],

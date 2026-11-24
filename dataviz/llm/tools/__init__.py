@@ -193,8 +193,8 @@ GROUPS = {
            'set_s3_mode sync_from_s3 download_s3_folders check_s3_local compare_s3_local remove_local_copy',
            's3 stream streamed download downloaded local sync resync cloud mirror rustfs minio'),
     'transfer': ('import a dataset from the web, export to S3 / FTP / SFTP',
-                 'inspect_dataset_source import_dataset export_to',
-                 'import export kaggle hugging huggingface roboflow zenodo openml url ftp sftp upload fetch'),
+                 'inspect_dataset_source import_dataset export_to push_to_s3',
+                 'import export kaggle hugging huggingface roboflow zenodo openml url ftp sftp upload fetch push publish back'),
     'video': ('cut videos into image frames', 'extract_frames set_video_auto', 'video videos frame frames mp4 mov fps clip'),
     'sessions': ('make a visualize / labeling session from a folder, and check what it can do', 'session_check send_to_session reformat_folder',
                  'visualize visualizer visualise labeling labelling session sessions send open map umap tsne project '

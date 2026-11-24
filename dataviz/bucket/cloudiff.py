@@ -163,6 +163,18 @@ def rows_under(path, rel):
         return con.execute('SELECT path, size, lm FROM m').fetchall()
 
 
+def manifest_put(path, rows):
+    """Upsert (path, size, lm) rows: what S3 holds now for files just uploaded (service.push)."""
+    if not rows:
+        return
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(p, timeout=30)) as con:
+        con.execute('CREATE TABLE IF NOT EXISTS m (path TEXT PRIMARY KEY, size INTEGER, lm REAL)')
+        con.executemany('INSERT OR REPLACE INTO m VALUES (?, ?, ?)', rows)
+        con.commit()
+
+
 def forget(root, bid, rel):
     """Drop the manifest rows below `rel` (its local copy was removed)."""
     p = manifest_path(root, bid)
