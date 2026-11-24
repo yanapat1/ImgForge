@@ -20,3 +20,16 @@ findings). Issue types by group, each with a count (`issue_summary` lists them):
 - Tag… marks boxes for later (e.g. "relabel") without changing labels.
 You (the assistant) cannot fix labels yourself: point to the control, or open the view with `open_tab` /
 `show_issue`, and let the user apply the fix.
+- **After fixing: Export dataset / Send to Label** (header buttons, shown when the session reads a bucket folder and
+  the user owns it). Fixes saved here are in the label files, so both carry them.
+  - **Export dataset…**: pick a label format the system writes (YOLO, YOLO OBB, COCO, VOC, LabelMe, CreateML, CSV,
+    image folders; what the task allows) and a bucket + folder (default: the session's own bucket,
+    `<folder>/exports/<name>-<format>`; it must be new or empty). Images are hard-linked next to the labels; a
+    streamed S3 bucket gets it in S3 at that prefix (images copied inside S3, nothing downloaded). A job: the bar
+    under the header shows progress + ETA; the toast opens it in Bucket. The assistant: `export_dataset {format,
+    bucket?, path?}`. Reads YOLO detect / segment / pose and COCO folders.
+  - **Send to Label…**: a labeling project on the **same folder** (images in place, the folder's labels imported),
+    name + task; the toast opens it. The assistant: `send_to_label {name?, task_type?}`. Label edits stay in the
+    project until exported from Label. A combined session: Promote to labeling instead.
+  - The Bucket page marks every label file fixed here (an amber dot, counts on its parent folders), so the user
+    sees there what changed; Upload to S3 sends a downloaded folder's fixes back.

@@ -2964,7 +2964,7 @@ REFORMAT_FROM = {'yolo-detect': 'detect', 'yolo-seg': 'segment', 'yolo-pose': 'p
 REFORMAT_WAIT = 6 * 3600
 
 
-def reformat(user, bid, path='', to='coco'):
+def reformat(user, bid, path='', to='coco', dest_bucket=None, dest_path=None):
     """Write folder `path` again in another label format (labeling/writers key: yolo, coco, voc, labelme, createml,
     csv ...) as a new folder `<path>-<to>` of the managed bucket "<bucket> · formats"; the original is never
     changed. The folder's labels are read through a temporary labeling session (the same import a linked session
@@ -2973,7 +2973,12 @@ def reformat(user, bid, path='', to='coco'):
     A local (or downloaded) folder gets a complete dataset: its images are hard-linked next to the new labels (a
     copy when the disks differ). A streamed S3 folder gets the labels only, with images.txt (the s3:// address of
     every image) and source.json (connection, S3 bucket, prefix): nothing is downloaded, nothing is written to S3.
-    -> {job_id, bucket, path}; the job's result: {bucket, path, format, labels, images_linked, streamed}."""
+
+    dest_bucket / dest_path (Export dataset of a Visualize session): write there instead, a new or empty folder of
+    any bucket the user can write; a streamed S3 link (outside its downloaded folders) gets it in S3 itself at
+    <prefix>/<dest_path>: written in a staging folder, uploaded (put_object, 16 at a time), the staging removed; the
+    images of a streamed source on the same connection are copied inside S3 (copy_object, nothing downloaded).
+    -> {job_id, bucket, path}; the job's result: {bucket, path, format, labels, images_linked, streamed, uploaded?}."""
     from ..labeling import writers as lw
     r = _row(user, bid)
     _need(user)
@@ -2996,13 +3001,42 @@ def reformat(user, bid, path='', to='coco'):
     if hook is None or jobs is None:
         raise BucketError('re-format runs in the server (the labeling routes are not loaded here)', 501)
     streamed = r.kind == 's3' and not _writable(r) and not (folder_state(user, bid, rel) or {}).get('editable')
-    dest_name = f'{r.name} · formats'
-    dest = next((b for b in list_buckets(user, q=dest_name) if b['name'] == dest_name and b['kind'] == 'managed'), None) \
-        or create_bucket(user, dest_name)
-    out_rel = f'{(rel.replace("/", "_") or "all")}-{keys[0]}'
-    dr = _row(user, dest['id'])
-    if os.path.exists(_abs(dr, out_rel, must_exist=False)):
-        raise BucketError(f'“{dest_name}/{out_rel}” exists already: delete or rename it first')
+    to_s3, staging = None, None                         # a streamed S3 destination: staged here, then uploaded
+    if dest_bucket is None:
+        dest_name = f'{r.name} · formats'
+        dest = next((b for b in list_buckets(user, q=dest_name) if b['name'] == dest_name and b['kind'] == 'managed'), None) \
+            or create_bucket(user, dest_name)
+        out_rel = f'{(rel.replace("/", "_") or "all")}-{keys[0]}'
+        dr = _row(user, dest['id'])
+        if os.path.exists(_abs(dr, out_rel, must_exist=False)):
+            raise BucketError(f'“{dest_name}/{out_rel}” exists already: delete or rename it first')
+    else:
+        d0 = _row(user, dest_bucket)
+        out_rel = store.clean_rel(dest_path)
+        if not out_rel:
+            raise BucketError('name the folder to write the dataset into')
+        dest, dest_name = {'id': d0.id}, d0.name
+        rows = _local_rows(d0.id) if _streamed(d0) else {}
+        if _streamed(d0) and _cover(rows, out_rel) is None:
+            to_s3 = d0
+            view = _s3(d0)
+            try:
+                if view.what(out_rel) is not None:
+                    raise BucketError(f'“{d0.name}/{out_rel}” exists in S3 already: pick a new folder name')
+            except BucketError:
+                raise
+            except Exception as e:  # noqa: BLE001 - botocore: endpoint down, no access ...
+                raise BucketError(f'cannot read “{d0.name}” in S3: {e}', 502) from None
+            finally:
+                view.close()
+            staging = os.path.join(str(store.data_root(_cfg())), '.export-staging', uuid.uuid4().hex)
+            os.makedirs(staging)
+            dr = SimpleNamespace(id=d0.id, name=d0.name, kind='local', root=staging)
+        else:
+            dr = _write_view(d0, targets=(out_rel,))
+            p = _abs(dr, out_rel, must_exist=False)
+            if os.path.exists(p) and (not os.path.isdir(p) or os.listdir(p)):
+                raise BucketError(f'“{d0.name}/{out_rel}” exists and is not empty: pick a new folder name')
 
     def wait(jid, job):
         j = jobs.get(jid) if jid is not None else None
@@ -3055,18 +3089,156 @@ def reformat(user, bid, path='', to='coco'):
                     linked += 1
             job.progress(stage=f'writing {keys[0]}')
             res = _write_labels(dr, out_rel, st, task, keys)
+            uploaded = None
+            if to_s3 is not None:
+                imgs = ([(store.join(pre, k), k) for k in keys_] if streamed and r.connection_id == to_s3.connection_id
+                        and r.link == 's3' else [])
+                uploaded = _upload_staged(to_s3, os.path.join(staging, out_rel), out_rel, job,
+                                          (r.s3_bucket, imgs) if imgs else None)
+                linked = uploaded.get('copied', 0) or linked
+            elif dest_bucket is not None:
+                _changed(dr.id, [out_rel], 'created', user)
         finally:
             try:
                 _labeling().delete(pid, delete_files=True)  # the temporary session
             except Exception:  # noqa: BLE001 - it only leaves a session the user can delete
                 pass
+            if staging:
+                shutil.rmtree(staging, ignore_errors=True)
         return {'bucket': dest['id'], 'bucket_name': dest_name, 'path': out_rel, 'format': keys[0],
                 'labels': res.get('labels'), 'images_linked': linked, 'streamed': streamed,
+                **({'uploaded': uploaded} if uploaded else {}),
                 **({'warnings': res['warnings']} if res.get('warnings') else {})}
 
-    job = jobs.submit(f'bk-reformat:{r.id}:{rel}:{keys[0]}', f're-format {r.name}{"/" + rel if rel else ""} to {keys[0]}',
+    key = f'bk-reformat:{r.id}:{rel}:{keys[0]}' + (f':{dest["id"]}:{out_rel}' if dest_bucket is not None else '')
+    job = jobs.submit(key, f're-format {r.name}{"/" + rel if rel else ""} to {keys[0]}'
+                      + (f' into {dest_name}/{out_rel}' if dest_bucket is not None else ''),
                       fn, lane=LANE, public_result=True, owner=user['id'])
     return {'job_id': job.id, 'bucket': dest['id'], 'bucket_name': dest_name, 'path': out_rel}
+
+
+# ---------------------------------------------------------------------------------------------- from a Visualize session
+def _session(user, did):
+    """The saved Visualize session `did` the user owns (or any, for an admin): its dataset dict."""
+    if user is None:
+        raise BucketError('sign in first', 401)
+    try:
+        ds = _datasets().dataset(did)
+    except KeyError:
+        raise BucketError(f'no Visualize session {did!r}', 404) from None
+    if ds.get('owner_id') != user['id'] and not user.get('is_admin'):
+        raise BucketError('only the owner of this session can do that', 403)
+    return ds
+
+
+def session_folder(user, did):
+    """The bucket folder a Visualize session reads -> (bucket row, path in it, dataset), matched by `locate` (a local
+    path inside a bucket root or an S3 link's local copy, an S3 source inside an S3 link's prefix; the deepest wins).
+    BucketError when it reads none of the user's buckets."""
+    ds = _session(user, did)
+    kind = ds.get('kind')
+    if kind == 'labeling':
+        raise BucketError('this session reads a labeling project: use Label › Export there', 409)
+    if kind == 'union':
+        raise BucketError('a combined session has several folders: use Promote to labeling, or export a member', 409)
+    if kind == 's3' and ds.get('labels_dir'):           # labels here, images in S3 (a Re-format folder)
+        loc = locate(user, path=ds['labels_dir'])
+    elif kind == 's3':
+        loc = locate(user, s3_bucket=ds.get('bucket'), prefix=ds.get('prefix'))
+    else:
+        loc = locate(user, path=ds.get('path')) if ds.get('path') else None
+    if loc is None:
+        raise BucketError('this session does not read a folder of your buckets (link its folder in Bucket first)', 409)
+    return _row(user, loc['bucket']), store.clean_rel(loc['path']), ds
+
+
+def session_info(user, did):
+    """What Export dataset / Send to Label of a Visualize session start from -> {bucket, bucket_name, path, format,
+    label, formats: [{key, label}] (the writers that can hold its labels), task_type, dest: {bucket, path}, writable,
+    streamed, can_export, can_label, note}."""
+    from ..labeling import writers as lw
+    r, rel, ds = session_folder(user, did)
+    chk = session_check(user, r.id, rel)
+    tt = REFORMAT_FROM.get(chk['format'])
+    fmts = [{'key': m['key'], 'label': m['label']} for m in lw.for_task(TASK_TYPES[tt], 'image')] if tt else []
+    base = rel.rsplit('/', 1)[-1] or r.name
+    return {'bucket': r.id, 'bucket_name': r.name, 'path': rel, 'session': ds.get('name'), 'format': chk['format'],
+            'label': chk['label'], 'task_type': tt, 'formats': fmts,
+            'dest': {'bucket': r.id, 'path': store.join(rel, 'exports') if rel else 'exports', 'name': base},
+            'streamed': _streamed(r), 'can_export': bool(tt), 'can_label': bool(chk['can'].get('label', True)),
+            'note': None if tt else f'{chk["label"]}: export reads YOLO detect / segment / pose and COCO labels'}
+
+
+def export_session(user, did, fmt='coco', dest_bucket=None, dest_path=None):
+    """Export dataset of a Visualize session: its folder's labels (with every fix saved in Visualize: they are in the
+    files) written in label format `fmt` into folder `dest_path` of bucket `dest_bucket` (default: the session's own
+    bucket, <folder>/exports/<name>-<fmt>), images linked (a streamed S3 destination: uploaded / copied in S3). A job
+    (reformat) -> {job_id, bucket, bucket_name, path}."""
+    r, rel, _ = session_folder(user, did)
+    db_ = dest_bucket or r.id
+    dp = store.clean_rel(dest_path) if dest_path else \
+        store.join(store.join(rel, 'exports') if rel else 'exports', f'{rel.rsplit("/", 1)[-1] or r.name}-{fmt}')
+    return reformat(user, r.id, rel, fmt, dest_bucket=db_, dest_path=dp)
+
+
+def session_to_label(user, did, name=None, task_type=None):
+    """Send to Label from a Visualize session: a labeling project on the SAME folder (images referenced in place,
+    never copied) whose labels are imported from the folder's label files. -> {target, id, url, name, job_id,
+    import_job_id?}."""
+    r, rel, ds = session_folder(user, did)
+    chk = session_check(user, r.id, rel)
+    tt = task_type or REFORMAT_FROM.get(chk['format']) or 'detect'
+    made = send(user, r.id, [rel], 'label', name or ds.get('name') or None, tt)
+    hook = getattr(_conf['ctx'], 'label_import', None) if _conf['ctx'] is not None else None
+    if chk.get('label_import') == 'imported' and hook is not None:
+        try:
+            entry = _labeling().get(made['id'])
+            tid = _labeling().store(made['id']).tasks()[0]['id']
+            made['import_job_id'] = hook(made['id'], {'task_id': tid, 'format': 'auto', 'source': entry['source'],
+                                                      'mode': 'merge', 'add_classes': True}, user)['job_id']
+        except Exception as e:  # noqa: BLE001 - the project exists: say the labels were not brought along
+            made['import_error'] = str(getattr(e, 'detail', e))[:300]
+    return made
+
+
+def _upload_staged(d, base, out_rel, job, images=None):
+    """Upload the files of local folder `base` to S3 link `d` at <prefix>/<out_rel>/… (16 at a time, bytes progress);
+    images = (source S3 bucket, [(source key, path in the dataset)]): copied inside S3 first. -> {files, bytes, copied}."""
+    view = _s3(d)
+    files = [(k, a, os.path.getsize(a)) for k, _, a in store.walk_files(base, '')]
+    total = sum(x[2] for x in files) or 1
+    lock, sent = threading.Lock(), {'b': 0, 'n': 0, 'c': 0}
+    dst = view.base + out_rel + '/'
+    try:
+        def put(item):
+            k, a, size = item
+            if job.cancelled.is_set():
+                return
+            with open(a, 'rb') as f:
+                view.client.put_object(Bucket=view.bucket, Key=dst + k, Body=f)
+            with lock:
+                sent['b'] += size
+                sent['n'] += 1
+                job.progress(sent['b'], total, 'uploading to S3', f'{sent["n"]} of {len(files)} files')
+
+        def cp(item):
+            src_key, k = item
+            if job.cancelled.is_set():
+                return
+            view.client.copy_object(Bucket=view.bucket, Key=dst + k, CopySource={'Bucket': images[0], 'Key': src_key})
+            with lock:
+                sent['c'] += 1
+                if sent['c'] % 50 == 0 or sent['c'] == len(images[1]):
+                    job.progress(sent['c'], len(images[1]), 'copying the images in S3')
+
+        with ThreadPoolExecutor(16) as ex:
+            if images:
+                list(ex.map(cp, images[1]))
+            list(ex.map(put, files))
+    finally:
+        view.close()
+        s3dir.invalidate(d.id)
+    return {'files': sent['n'], 'bytes': sent['b'], 'copied': sent['c'], 'uri': _s3_url(d, out_rel)}
 
 
 def _s3_labels(r, rel):

@@ -143,6 +143,16 @@ write_text(user, bid, path, text, expect_mtime_ns=None, create=False) -> {path, 
 ops(user, bid, ops) -> {applied: [..], errors: [{op, error}], undo_id, retagged: {...}|None}
     op: {op:'mkdir', path} | {op:'create', path} (empty file) | {op:'move', path, to} | {op:'copy', path, to} | {op:'rename', path, name} | {op:'delete', path}
     `to` is a destination folder; delete moves into `<data_root>/.trash/<undo_id>/`, and undo restores it.
+session_info(user, did) -> {bucket, bucket_name, path, format, label, task_type, formats:[{key,label}], dest:{bucket, path, name}, streamed, can_export, can_label, note}
+    # GET /api/bucket/session-folder/{did}: the bucket folder a Visualize session reads (locate: path / S3 prefix; the
+    # owner only; 409 for a labeling / combined session or a folder outside the user's buckets)
+export_session(user, did, fmt='coco', dest_bucket=None, dest_path=None) -> {job_id, bucket, bucket_name, path}
+    # POST …/session-folder/{did}/export {format, to_bucket?, to_path?}: reformat() of that folder into any bucket
+    # (default <folder>/exports/<name>-<fmt>; a new or empty folder). A streamed S3 destination: staged under
+    # <data_root>/.export-staging, uploaded to <prefix>/<path> (images of a streamed source on the same connection:
+    # copy_object), the staging removed. Job key bk-reformat:<src>:<path>:<fmt>:<dest>:<dest path>.
+session_to_label(user, did, name=None, task_type=None) -> send(label) + the label-import job (import_job_id)
+    # POST …/session-folder/{did}/label {name, task_type}: a labeling project on the SAME folder (in place)
 push(user, bid, paths, overwrite=()) -> {job_id, result}        # POST …/push {paths, overwrite}: Upload to S3
     # the local copy of an S3 link (downloaded folders; mode local: all) back to <prefix>/<path>: job bk-push:<bid>:<hash8>.
     # One S3 listing per path, then per file: unchanged vs the manifest -> skipped; S3 changed since the download (or an

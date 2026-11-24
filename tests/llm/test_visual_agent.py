@@ -73,7 +73,7 @@ def test_tools_are_visual_ctx_tools_without_the_bucket():
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
                      'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view',
                      'list_models', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats', 'data_location',
-                     'augment_catalog', 'set_augment_recipe', 'augment_coverage'}
+                     'augment_catalog', 'set_augment_recipe', 'augment_coverage', 'export_dataset', 'send_to_label'}
     assert all(tools.REGISTRY[n].ctx for n in names)
     assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS) - set(visual.RUN_ACTIONS)
     assert {n for n in names if tools.REGISTRY[n].risk == 'run'} == set(visual.RUN_ACTIONS)

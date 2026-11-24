@@ -153,6 +153,19 @@ def router(state, ctx):
     def push(bid: str, body: dict, user=Depends(MANAGE)):
         return _call(service.push, user, bid, body.get('paths') or [], body.get('overwrite') or ())
 
+    @r.get('/session-folder/{did}')
+    def session_info(did: str, user=Depends(deps.current_user)):
+        return _call(service.session_info, user, did)
+
+    @r.post('/session-folder/{did}/export')
+    def export_session(did: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.export_session, user, did, body.get('format') or 'coco', body.get('to_bucket') or None,
+                     body.get('to_path') or None)
+
+    @r.post('/session-folder/{did}/label')
+    def session_to_label(did: str, body: dict, user=Depends(MANAGE)):
+        return _call(service.session_to_label, user, did, body.get('name') or None, body.get('task_type') or None)
+
     @r.post('/copy')
     def copy_to(body: dict, user=Depends(MANAGE)):
         return _call(service.copy_to, user, body.get('from_bucket') or '', body.get('paths') or [],

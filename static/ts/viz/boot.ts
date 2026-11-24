@@ -28,6 +28,7 @@ import { invalidateEval, renderEval } from '../views/eval.js';
 import { invalidateModel, modelsChanged, renderModel } from '../views/model.js';
 import { invalidateStats, renderClassTable, renderStats } from '../views/stats.js';
 import { startLive } from '../core/live.js';
+import { initDatasetActions } from './dataset-actions.js';
 import { initFilterBar } from '../views/filter-bar.js';
 import { bindEvents } from '../views/explore-bind.js';
 
@@ -198,6 +199,7 @@ async function init(st: Status): Promise<void> {
   renderGallery();
   void refreshTagList();
   $req('ds-switch').onclick = () => { void openSettings('datasets'); };
+  void initDatasetActions(String(ds.id ?? ''), ds.kind, st.my_role || 'owner');   // Export dataset / Send to Label
   getJSON<WorkspacePayload>('api/workspace').then((w) => {
     $req('ds-info').insertAdjacentHTML('beforeend', `<span class="pill ws opt" tabindex="0">workspace <b>${esc(w.name)}</b></span>`);
     $req('ds-info').title = `${w.path}\ncreated ${w.created || '?'} · ${w.n_features} feature spaces · ${w.n_projections} saved views · ${w.size_mb} MB` +

@@ -199,9 +199,10 @@ def resolve_local(path):
     p = os.path.realpath(str(path))
 
     def match(local, _s3):
+        q = p.rstrip(os.sep) + os.sep                # the root itself matches too ('' inside it)
         for root, bid in local:
-            if p.startswith(root):
-                return bid, p[len(root):].replace(os.sep, '/')
+            if q.startswith(root):
+                return bid, q[len(root):].rstrip(os.sep).replace(os.sep, '/')
         return None
     return _find(match)
 

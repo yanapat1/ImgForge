@@ -629,3 +629,32 @@ def test_session_check_and_a_linked_session(svc):
     assert 'Visualize s/d1/ + Label ?label=p1 (linked)' in summary and 'job 9' in summary
     with pytest.raises(tools.ToolError, match='one folder at a time'):
         tools.run(ALICE, 'send_to_session', {'bucket': 'cars', 'paths': ['a', 'b'], 'target': 'both'})
+
+
+def test_visual_export_and_send_to_label(monkeypatch):
+    from types import SimpleNamespace
+
+    from dataviz.llm.engine import react
+    calls = []
+
+    class S:
+        def export_session(self, user, did, fmt, dest, path):
+            calls.append(('export', did, fmt, dest, path))
+            return {'job_id': 1, 'bucket_name': 'cars', 'path': 'exports/cars-coco'}
+
+        def session_to_label(self, user, did, name, task_type):
+            calls.append(('label', did, name, task_type))
+            return {'name': 'n', 'url': '?label=p1'}
+
+        def list_buckets(self, user, **k):
+            return [{'id': 'b1', 'name': 'cars', 'kind': 'managed'}]
+
+    monkeypatch.setattr(tools, '_svc', lambda: S())
+    ctx = react.Ctx(user=ALICE, role='visual', scope={}, skills={}, state=SimpleNamespace(dataset_id='d1'))
+    out, summary = tools.run(ctx, 'export_dataset', {'format': 'coco'}, tools.REGISTRY)
+    assert calls[-1] == ('export', 'd1', 'coco', None, None) and 'exports/cars-coco' in summary
+    tools.run(ctx, 'send_to_label', {'name': 'x', 'task_type': 'detect'}, tools.REGISTRY)
+    assert calls[-1] == ('label', 'd1', 'x', 'detect')
+    with pytest.raises(Exception):
+        tools.run(react.Ctx(user=ALICE, role='visual', scope={}, skills={}, state=SimpleNamespace(dataset_id=None)),
+                  'export_dataset', {'format': 'coco'}, tools.REGISTRY)

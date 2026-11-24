@@ -239,7 +239,42 @@ register(Tool('consult', "Ask another page's specialist one question, read-only,
               _obj({'page': E('whose specialist (data: not by consult, navigate there)', ['bucket', 'viz', 'data']), 'question': S('the full question, with names'),
                     'session_id': S('viz: from list_sessions')}, ['page', 'question']),
               False, _consult, **_C))
+def _session_did(ctx):
+    did = getattr(ctx.state, 'dataset_id', None)
+    if not did:
+        raise ToolError('this session was not opened from a saved dataset, so it has no Bucket folder')
+    return did
+
+
+def _export_dataset(ctx, a):
+    from . import _svc
+    from .bucket import resolve_bucket
+    dest = resolve_bucket(ctx.user, a['bucket'])['id'] if a.get('bucket') else None
+    res = _svc().export_session(ctx.user, _session_did(ctx), a.get('format') or 'coco', dest, a.get('path') or None)
+    return res, f'export to {res.get("bucket_name")}/{res.get("path")} started (job {res.get("job_id")})'
+
+
+def _session_to_label(ctx, a):
+    from . import _svc
+    res = _svc().session_to_label(ctx.user, _session_did(ctx), a.get('name') or None, a.get('task_type') or None)
+    return res, f'Label session “{res.get("name")}” made on the same folder ({res.get("url")})'
+
+
+FORMATS = ['yolo', 'yolo_obb', 'coco', 'voc', 'labelme', 'createml', 'csv', 'imagefolder']
+
 # the visualizer's way back to its folder (domain visual: only the Visual specialist has it; it only reads)
 register(Tool('data_location', 'The bucket + folder of this dataset; parents[0] = "..", '
                                'parents[1] = "../..".',
               _obj({}), False, _data_location, domain='visual', ctx=True))
+register(Tool('export_dataset', 'Export this dataset (labels with saved fixes) in another format into a bucket folder '
+                                '(a job). Default: its own bucket, <folder>/exports/<name>-<format>.',
+              _obj({'format': E('label format', FORMATS), 'bucket': S('destination bucket (default: its own)'),
+                    'path': S('new or empty folder (default as above)')}, ['format']),
+              True, _export_dataset, lambda b, a: f'Export this dataset as {a.get("format")} to '
+                                                  f'{a.get("bucket") or "its bucket"}/{a.get("path") or "<folder>/exports/…"}',
+              domain='visual', ctx=True))
+register(Tool('send_to_label', 'A Label session on this same folder (images in place, labels imported).',
+              _obj({'name': S('name (default: this session\'s)'),
+                    'task_type': E('task', ['detect', 'segment', 'pose', 'obb', 'classify'])}),
+              True, _session_to_label, lambda b, a: f'Make a Label session on this folder{(" “" + a["name"] + "”") if a.get("name") else ""}',
+              domain='visual', ctx=True))
