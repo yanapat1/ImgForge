@@ -187,6 +187,13 @@ def _copy(user, a):
     return _ops(user, a, [{'op': 'copy', 'path': p, 'to': a['to']} for p in a['paths']], 'copied')
 
 
+def _copy_to(user, a):
+    b = resolve_bucket(user, a['bucket'])
+    d = resolve_bucket(user, a['to_bucket'])
+    res = _svc().copy_to(user, b['id'], a['paths'], d['id'], a.get('to', ''))
+    return res, (f'copy into {d["name"]} started' if res.get('job_id') else f'copied into {d["name"]}')
+
+
 def _rename(user, a):
     return _ops(user, a, [{'op': 'rename', 'path': a['path'], 'name': a['name']}], 'renamed')
 
@@ -481,6 +488,15 @@ _add(Tool('move', 'Move files / folders into another folder of the same bucket.'
 _add(Tool('copy', 'Copy files / folders into another folder of the same bucket.',
           _obj({'bucket': BUCKET, 'paths': PATHS, 'to': S("destination folder ('' = root)")}, ['bucket', 'paths', 'to']),
           True, _copy, lambda b, a: f'Copy {_items(a["paths"])} → {_folder(a["to"])} in {_bname(b, a)}'))
+_add(Tool('copy_to_bucket', 'Copy files / folders into a folder of ANOTHER bucket (or a big copy in the same one) as '
+                           'a background job with progress (the status bar; task_status / job_status). Any source '
+                           '(local, downloaded or streamed S3); the destination must be writable. A clashing name '
+                           'gets "(copy)"; the job result has an undo_id.',
+          _obj({'bucket': S('the source bucket (id or exact name)'), 'paths': PATHS,
+                'to_bucket': S('the destination bucket (id or exact name)'),
+                'to': S("destination folder in it ('' = root)")}, ['bucket', 'paths', 'to_bucket', 'to']),
+          True, _copy_to, lambda b, a: f'Copy {_items(a["paths"])} of {_bname(b, a)} → {a["to_bucket"]}/{_folder(a["to"])}',
+          s3_ok=True))
 _add(Tool('rename', 'Rename one file or folder (a new name, not a path).',
           _obj({'bucket': BUCKET, 'path': S('what to rename'), 'name': S('the new name')}, ['bucket', 'path', 'name']),
           True, _rename, lambda b, a: f'Rename {a["path"]} → {a["name"]} in {_bname(b, a)}'))

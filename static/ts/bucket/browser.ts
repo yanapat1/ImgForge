@@ -19,6 +19,7 @@ import type { Action } from './app.js';
 import { copySel, deleteSel, moveSel, moveTo, newFile, newFolder, renameSel, undoRetag } from './ops.js';
 import { downloadZip, openExportDialog } from './export.js';
 import { openFile, TEXTY } from './editor.js';
+import { clip, clipSel, paste } from './clip.js';
 import { openFrames } from './frames.js';
 import { localBadge, localStrip, streamed } from './localcopy.js';
 import { openSend } from './send.js';
@@ -233,6 +234,8 @@ function renderBar(): void {
     `<button type="button" class="icon-btn" data-act="mkdir" aria-label="New folder" title="New folder"${w ? '' : ' disabled'}>${icon('folder-plus')}</button>` +
     `<button type="button" class="icon-btn" data-act="mkfile" aria-label="New file" title="New file (pick its extension)"${w ? '' : ' disabled'}>${icon('file-plus')}</button>` +
     `<button type="button" class="icon-btn" data-act="upload" aria-label="Upload files here" title="Upload files here"${w ? '' : ' disabled'}>${icon('upload')}</button>` +
+    (clip() ? `<span class="bk-clip"><button type="button" class="sm" data-act="clip-paste" title="Paste here (Ctrl+V)"${w || streamed(curBucket()) ? '' : ' disabled'}>${icon('paste')}Paste ${esc(clipLabel())}</button>` +
+      `<button type="button" class="icon-btn ghost sm" data-act="clip-clear" aria-label="Clear the clipboard" title="Clear the clipboard">${icon('x')}</button></span>` : '') +
     `<button type="button" class="primary" data-act="send-menu" aria-haspopup="menu" aria-expanded="false">${icon('send')}<span class="bk-wide-txt">Send to…</span>${icon('chev-d')}</button>` +
     `<button type="button" class="icon-btn bk-only-overlay" data-act="show-details" aria-label="Details" title="Details">${icon('eye')}</button>`;
 }
@@ -604,6 +607,11 @@ function rove(to?: HTMLElement | null): void {
 // The grid is one Tab stop; inside it the arrow keys move the focus (Up / Down by a row of tiles), Shift+arrow
 // extends the selection, Space toggles the focused item, Enter opens it, the ContextMenu key opens its menu. The
 // actions go through the same click handler as the mouse (synthetic clicks), so both behave the same.
+function clipLabel(): string {
+  const c = clip();
+  return !c ? '' : `${c.paths.length === 1 ? baseName(c.paths[0] ?? '') || 'bucket' : `${c.paths.length} items`}${c.cut ? ' (cut)' : ''}`;
+}
+
 function gridKey(e: KeyboardEvent): void {
   const grid = $('bk-grid');
   if (!grid || !(e.target instanceof HTMLElement) || !grid.contains(e.target)) return;
@@ -623,6 +631,13 @@ function gridKey(e: KeyboardEvent): void {
     to.focus();
     to.scrollIntoView({ block: 'nearest' });
     if (e.shiftKey) click(to, { shiftKey: true });
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === 'c' || k === 'x' || k === 'v')) {
+    if (k === 'v') { if (clip()) { e.preventDefault(); void paste(); } return; }
+    if (!D.sel.size) return;
+    e.preventDefault();
+    clipSel(k === 'x');
     return;
   }
   const at = cur >= 0 ? items[cur] : null;

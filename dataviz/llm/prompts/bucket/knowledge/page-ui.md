@@ -3,9 +3,9 @@ title: The Data page: menus, reload, copy path, resizing
 summary: right-click menus on files, folders, empty space, tree rows and bucket cards; keyboard in the tree and grid; drag-and-drop upload; the Reload and Copy path buttons; resizing the tree and the assistant
 ---
 - **Right-click** works like a desktop file manager. On a file or folder (it becomes the selection, or joins it):
-  Open, Open in a new tab, Rename (F2), Move to, Copy to, Tags, Copy path, Send to Visualize / Label, Extract
+  Open, Open in a new tab, Rename (F2), Move to, Copy to, Copy (Ctrl+C), Cut (Ctrl+X), Paste into (a folder), Tags, Copy path, Send to Visualize / Label, Extract
   frames (videos), Export (zip), Download to local / Remove local copy (streamed S3), Delete (Del). On the empty
-  space of a folder: New folder, New file, Upload files, Refresh, Select all, Thumbnails / Names only, sort, Copy path, Edit
+  space of a folder: New folder, New file, Paste (Ctrl+V), Upload files, Refresh, Select all, Thumbnails / Names only, sort, Copy path, Edit
   tags, Export, Send this folder, Download this folder to local / Update from S3. On a tree row or bucket card:
   Open, Refresh, Copy path, Send, Edit (name, tags, load mode), Rename, Label with model, Re-detect, Delete / Unlink.
   Items that would change a read-only folder are greyed out with the reason. Keyboard: the ContextMenu key or

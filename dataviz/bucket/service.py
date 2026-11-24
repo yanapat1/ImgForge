@@ -2217,6 +2217,146 @@ def ops(user, bid, ops):
             'retagged': _revalidate(r) if steps else None}
 
 
+COPY_THREADS = 8
+COPY_CHUNK = 1 << 20
+
+
+def copy_to(user, src_bid, paths, dst_bid, dst_rel=''):
+    """Copy files / folders of one bucket into folder `dst_rel` of another bucket (or of the same one) as a job
+    bk-copy:<dst>:<hash8> (the same request twice: one job). The source may be local, downloaded or streamed from S3
+    (objects are read and written to disk, never into memory whole); the destination must be writable (a streamed
+    link: inside a downloaded folder). A clashing top-level name gets "name (copy)". Progress in bytes (an ETA);
+    cancel stops between files and keeps what was copied. One undo id removes every copy.
+    -> {job_id, result}; the result: {files, bytes, to: [paths], undo_id, cancelled}."""
+    import hashlib
+    _need(user)
+    r = _row(user, src_bid)
+    d0 = _row(user, dst_bid)
+    dst_rel = store.clean_rel(dst_rel)
+    rels = [store.clean_rel(p) for p in (paths or []) if isinstance(p, str)]
+    if not rels:
+        raise BucketError('pick what to copy')
+    if len(rels) > 5000:
+        raise BucketError('at most 5000 items at once')
+    d = _write_view(d0, targets=(dst_rel,))
+    dst_abs = _abs(d, dst_rel)
+    if not os.path.isdir(dst_abs):
+        raise BucketError(f'{dst_rel or "/"} of “{d.name}” is not a folder', 404)
+    for rel in rels:
+        if store.is_secret(rel):
+            _need_secret(user, rel)
+        if r.id == d.id and r.kind != 's3' and (dst_rel == rel or dst_rel.startswith(rel + '/')):
+            raise BucketError(f'cannot copy {rel or "the bucket"} into itself')
+
+    def fn(job=None):
+        stop = (lambda: job.cancelled.is_set()) if job is not None else (lambda: False)
+        if job is not None:
+            job.progress(stage='listing files')
+        plan, tops, total = [], [], 0                   # (item, destination file), the new top-level paths
+        for rel in rels:
+            name = rel.rsplit('/', 1)[-1] if rel else (r.name or 'bucket')
+            top = store._unique(os.path.join(dst_abs, name))
+            os.makedirs(os.path.dirname(top), exist_ok=True)
+            tops.append(top)
+            single = False
+            for it in _export_items(user, r, rel):
+                if stop():
+                    break
+                if it.rel == rel:                       # `rel` is one file
+                    single = True
+                    plan.append((it, top))
+                else:
+                    plan.append((it, os.path.join(top, it.rel[len(rel):].lstrip('/') if rel else it.rel)))
+                total += it.size
+                if job is not None and len(plan) % 2000 == 0:
+                    job.progress(len(plan), None, 'listing files', extra=f'{total / 1e6:.1f} MB')
+            if not single:
+                os.makedirs(top, exist_ok=True)         # a folder stays one, an empty one too
+        lock = threading.Lock()
+        done = {'n': 0, 'b': 0, 't': 0.0}
+
+        def tick(nbytes, files=0):
+            with lock:
+                done['b'] += nbytes
+                done['n'] += files
+                now = time.monotonic()
+                if job is not None and (now - done['t'] > 0.25 or files and done['n'] == len(plan)):
+                    done['t'] = now
+                    job.progress(done['b'], total or 1, 'copying', extra=f'{done["n"]} of {len(plan)} files')
+
+        def one(pair):
+            it, dest = pair
+            if stop():
+                return
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            tmp = dest + '.part'
+            try:
+                _copy_one(it, tmp)
+            except BaseException:
+                store._try(os.unlink, tmp)
+                raise
+            os.replace(tmp, dest)
+            tick(0, 1)
+
+        def _copy_one(it, tmp):
+            if it.path is not None:
+                with open(it.path, 'rb') as fi, open(tmp, 'wb') as fo:
+                    while chunk := fi.read(COPY_CHUNK):
+                        fo.write(chunk)
+                        tick(len(chunk))
+                shutil.copystat(it.path, tmp)
+            else:
+                body = it.open()
+                try:
+                    with open(tmp, 'wb') as fo:
+                        while chunk := body.read(COPY_CHUNK):
+                            fo.write(chunk)
+                            tick(len(chunk))
+                finally:
+                    body.close()
+                if it.mtime:
+                    os.utime(tmp, (it.mtime, it.mtime))
+
+        if job is not None:
+            job.progress(0, total or 1, 'copying', extra=f'0 of {len(plan)} files')
+        with ThreadPoolExecutor(COPY_THREADS) as ex:
+            for f in [ex.submit(one, pair) for pair in plan]:
+                f.result()                              # the first failure stops the job (its error is shown)
+        base = os.path.realpath(d.root)
+        new = [store._rel_of(base, t) for t in tops if os.path.lexists(t)]
+        undo_id = uuid.uuid4().hex
+        if new:
+            with db.begin() as c:
+                c.execute(text("""INSERT INTO app.bucket_undo(id, bucket_id, user_id, manifest)
+                                  VALUES (:id, :b, :u, :manifest)""").bindparams(_MANIFEST),
+                          {'id': undo_id, 'b': d.id, 'u': user['id'],
+                           'manifest': {'root': d.root, 'trash': '', 'steps': [{'undo': 'remove', 'path': p} for p in new]}})
+                c.execute(text('UPDATE app.buckets SET updated_at = now() WHERE id = :b'), {'b': d.id})
+            store._try(lambda: _revalidate(d))
+        _changed(d.id, new, 'copied', user)
+        if job is not None:
+            job.progress(total or 1, total or 1, 'done', extra=f'{done["n"]} files')
+        return {'files': done['n'], 'bytes': done['b'], 'to': new, 'undo_id': undo_id if new else None,
+                'bucket': d.id, 'cancelled': stop()}
+
+    jobs = _jobs()
+    if jobs is None:
+        return {'job_id': None, 'result': fn()}
+    h = hashlib.sha1(json.dumps([r.id, rels, dst_rel]).encode()).hexdigest()[:8]
+    n = rels[0].rsplit('/', 1)[-1] if len(rels) == 1 else f'{len(rels)} items'
+    return {'job_id': jobs.submit(f'bk-copy:{d.id}:{h}', f'copy {n or r.name} to {d.name}/{dst_rel}', fn, lane=LANE,
+                                  public_result=True, owner=user['id']).id, 'result': None}
+
+
+def _changed(bid, paths, kind, user, source='bucket'):
+    """Hook for the change marks (bucket/changes.py); a no-op until that module exists."""
+    try:
+        from . import changes
+    except ImportError:
+        return
+    store._try(lambda: changes.record(bid, paths, kind, source, (user or {}).get('id')))
+
+
 def undo(user, bid, undo_id):
     r = _row(user, bid)
     _need(user)

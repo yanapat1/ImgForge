@@ -42,6 +42,7 @@ tools.py). `?` marks an optional argument.
 | `create_folder` | change | bucket, path | Create a folder. |
 | `move` | change | bucket, paths, to | Move files / folders into another folder of the same bucket. |
 | `copy` | change | bucket, paths, to | Copy files / folders into another folder of the same bucket. |
+| `copy_to_bucket` | change | bucket, paths, to_bucket, to | Copy files / folders into a folder of ANOTHER bucket (or a big copy in the same one) as a background job with progress (the status bar; task_status / job_status). Any source (local, downloaded or streamed S3); the destination must be writable. A clashing name gets "(copy)"; the job result has an undo_id. |
 | `rename` | change | bucket, path, name | Rename one file or folder (a new name, not a path). |
 | `delete` | change | bucket, paths | Delete files / folders (they go to the trash and can be undone). |
 | `add_tags` | change | bucket, path?, tags | Add user tags to a bucket ('' path) or a folder / file. format:* tags are automatic. |

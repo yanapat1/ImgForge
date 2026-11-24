@@ -1,6 +1,6 @@
 ---
 title: File operations, undo and the trash
-summary: create folder, move, copy, rename, delete, write a text file, upload; undo ids; the trash and how long it keeps files
+summary: create folder, move, copy, copy / cut / paste between buckets, rename, delete, write a text file, upload; undo ids; the trash and how long it keeps files
 ---
 - Operations run as one batch per call and return an `undo_id`: `create_folder`, `move` / `copy` (into a destination
   folder of the same bucket), `rename` (a new name, not a path), `delete`, `write_text_file`. Errors are per item
@@ -14,6 +14,13 @@ summary: create folder, move, copy, rename, delete, write a text file, upload; u
 - After every change the bucket root is re-detected: a result with `retagged` means the format changed (e.g.
   yolo-detect → other because labels/ moved). Tell the user and offer `undo`.
 - The page: drag onto a folder moves (Ctrl / Alt copies), F2 renames, Delete deletes, and every action toast has Undo.
+- **Copy / Cut / Paste** (page): select, then Ctrl+C / Ctrl+X (or right-click › Copy / Cut), open any folder of any
+  bucket and Ctrl+V (or the toolbar's **Paste …** pill, right-click › Paste on the empty space, a tree row or a
+  folder). Same bucket: Cut is a move, a small Copy is instant; a folder or a big copy, and any paste into another
+  bucket, runs as a background job `bk-copy` (bytes, ETA and Cancel in the status bar). Cut across buckets deletes
+  the originals (to the trash) once all was copied. A clashing name gets "(copy)"; Undo removes the copies. The
+  source may be streamed S3 (read from S3); the destination must be writable (a streamed link: inside a downloaded
+  folder). The assistant uses `copy_to_bucket` for another bucket, `copy` inside one bucket.
 - Upload (page only): files, folders (with their sub-folders) or archives (zip / tar / tar.gz / 7z, unpacked) into the
   open folder, or a new bucket from Import data. Dropping files or folders from the desktop onto the file grid
   uploads them too (onto a folder tile: into that folder; folders keep their sub-folders). It runs in the background: the dialog closes at once and the user

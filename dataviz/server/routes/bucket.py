@@ -141,6 +141,11 @@ def router(state, ctx):
     def ops(bid: str, body: dict, user=Depends(MANAGE)):
         return _call(service.ops, user, bid, body.get('ops'))
 
+    @r.post('/copy')
+    def copy_to(body: dict, user=Depends(MANAGE)):
+        return _call(service.copy_to, user, body.get('from_bucket') or '', body.get('paths') or [],
+                     body.get('to_bucket') or '', body.get('to_path') or '')
+
     @r.post('/buckets/{bid}/undo')
     def undo(bid: str, body: dict, user=Depends(MANAGE)):
         return _call(service.undo, user, bid, body.get('undo_id'))

@@ -91,6 +91,10 @@ export const writeText = (bid: string, path: string, text: string, expectMtime: 
   sendJSON<TextSaved>('PUT', `${B(bid)}/text`, { path, text, expect_mtime_ns: expectMtime, create });
 
 export const ops = (bid: string, list: Op[]): Promise<OpsResult> => postJSON<OpsResult>(`${B(bid)}/ops`, { ops: list });
+/** Copy files / folders into a folder of any bucket: a job bk-copy (bytes, ETA); its result has the undo id */
+export const copyTo = (from: string, paths: string[], to: string, toPath: string): Promise<{ job_id: string | null; result: CopyResult | null }> =>
+  postJSON('api/bucket/copy', { from_bucket: from, paths, to_bucket: to, to_path: toPath });
+export interface CopyResult { files: number; bytes: number; to: string[]; undo_id: string | null; bucket: string; cancelled: boolean }
 export const undo = (bid: string, undoId: string): Promise<UndoResult> => postJSON<UndoResult>(`${B(bid)}/undo`, { undo_id: undoId });
 /** The upload URL (multipart field `files`); upload.ts posts it with an XHR for byte progress. */
 export const uploadUrl = (bid: string, path: string): string => `${B(bid)}/upload${qs({ path })}`;

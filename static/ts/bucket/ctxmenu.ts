@@ -12,11 +12,12 @@ import { closeFloat, floatPopover } from '../core/popover.js';
 import * as api from './api.js';
 import type { Action } from './app.js';
 import { openEntry, selChanged } from './browser.js';
+import { clip } from './clip.js';
 import { bucketMenuItems } from './details.js';
 import { fileOpen } from './editor.js';
 import { downloadZip } from './export.js';
 import { downloadPaths, streamed } from './localcopy.js';
-import { bucketOf, curBucket, D, fmtN, isImage, key, parentOf, selEntries, writable } from './state.js';
+import { baseName, bucketOf, curBucket, D, fmtN, isImage, key, parentOf, selEntries, writable } from './state.js';
 import { openTagEditor } from './tags.js';
 import type { Bucket, Entry } from '../types-bucket.js';
 
@@ -48,6 +49,10 @@ function readOnlyWhy(): string {
   return streamed(curBucket()) ? 'Streamed from S3: download this folder to local to change it' : 'This bucket is read-only';
 }
 
+const clipWhat = (): string => { const c = clip(); return !c ? '' : c.paths.length === 1 ? `“${baseName(c.paths[0] ?? '') || 'bucket'}”` : `${c.paths.length} items`; };
+/** a tree row: paste needs a writable bucket (a streamed link: inside its downloaded folders, checked by the server) */
+const pasteWhy = (b: Bucket): string => (b.writable || streamed(b) ? '' : 'This bucket is read-only');
+
 const sendItems = (bid: string, paths: string[]): string[] => {
   const data = { bid, paths: paths.join('\n') };
   return [...(zoneOn('visualizer') ? [item({ act: 'send', ico: 'scatter', label: 'Send to Visualize', data: { ...data, target: 'visualize' } })] : []),
@@ -71,8 +76,11 @@ function entryMenu(): string {
       e && e.type === 'file' && (isImage(e) || e.kind === 'video') && item({ act: 'ctx-newtab', ico: 'share', label: 'Open in a new tab', data: { path: e.path } })],
     [item({ act: 'rename', ico: 'text', label: 'Rename…', kbd: 'F2', dis: ro || (n !== 1 && 'Pick one item to rename') }),
       item({ act: 'move', ico: 'move', label: 'Move to…', dis: ro }),
-      item({ act: 'copy', ico: 'copy', label: 'Copy to…', dis: ro }),
-      item({ act: 'ctx-tag', ico: 'tag', label: 'Tags…', data: { paths: paths.join('\n') } }),
+      item({ act: 'copy', ico: 'copy', label: 'Copy to…', dis: ro })],
+    [item({ act: 'clip-copy', ico: 'copy', label: 'Copy', kbd: 'Ctrl+C' }),
+      item({ act: 'clip-cut', ico: 'scissors', label: 'Cut', kbd: 'Ctrl+X', dis: ro }),
+      e && e.type === 'dir' && clip() && item({ act: 'clip-paste', ico: 'paste', label: `Paste into ${e.name}`, data: { bid, path: e.path }, dis: ro })],
+    [item({ act: 'ctx-tag', ico: 'tag', label: 'Tags…', data: { paths: paths.join('\n') } }),
       item({ act: 'copy-path', ico: 'link', label: n > 1 ? 'Copy paths' : 'Copy path', data: { bid, paths: paths.join('\n') } })],
     [...sendItems(bid, paths),
       es.some((x) => x.kind === 'video') && item({ act: 'extract-frames', ico: 'film', label: 'Extract frames…' }),
@@ -92,6 +100,7 @@ function folderMenu(): string {
   return menuHtml([
     [item({ act: 'mkdir', ico: 'folder-plus', label: 'New folder…', dis: ro }),
       item({ act: 'mkfile', ico: 'file-plus', label: 'New file…', dis: ro }),
+      clip() && item({ act: 'clip-paste', ico: 'paste', label: `Paste ${clipWhat()}`, kbd: 'Ctrl+V', dis: ro }),
       item({ act: 'upload', ico: 'upload', label: 'Upload files…', dis: ro }),
       item({ act: 'refresh', ico: 'refresh', label: 'Refresh' })],
     [L && L.entries.length > 0 && item({ act: 'selall', ico: 'check', label: 'Select all', kbd: 'Ctrl+A' }),
@@ -134,7 +143,8 @@ function treeFolderMenu(b: Bucket, path: string): string {
     [item({ act: 'go', ico: 'folder', label: 'Open', data: { bid: b.id, path } }),
       item({ act: 'refresh', ico: 'refresh', label: 'Refresh' }),
       here && item({ act: 'mkdir', ico: 'folder-plus', label: 'New folder…', dis: ro }),
-      here && item({ act: 'mkfile', ico: 'file-plus', label: 'New file…', dis: ro })],
+      here && item({ act: 'mkfile', ico: 'file-plus', label: 'New file…', dis: ro }),
+      clip() && item({ act: 'clip-paste', ico: 'paste', label: `Paste ${clipWhat()} here`, data: { bid: b.id, path }, dis: pasteWhy(b) })],
     [item({ act: 'copy-path', ico: 'link', label: 'Copy path', data: { bid: b.id, path } }),
       item({ act: 'ctx-tag', ico: 'tag', label: 'Tags…', data: { bid: b.id, paths: path } }),
       item({ act: 'ctx-zip', ico: 'download', label: 'Export (zip)', data: { bid: b.id, path }, hint: 'download' })],

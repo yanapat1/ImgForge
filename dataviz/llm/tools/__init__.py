@@ -185,8 +185,8 @@ def for_role(domains, mode='ask', extra=()):
 GROUPS = {
     # Bucket page
     'files': ('create, move, copy, rename, delete, write or undo files and folders',
-              'create_folder move copy rename delete write_text_file undo',
-              'move copy rename delete remove trash folder mkdir create write edit undo organise organize split restore '
+              'create_folder move copy copy_to_bucket rename delete write_text_file undo',
+              'move copy paste rename delete remove trash folder mkdir create write edit undo organise organize split restore '
               'duplicate duplicates clean tidy yaml'),
     'tags': ('add or remove tags', 'add_tags remove_tags', 'tag tags tagged untag label labels'),
     's3': ('S3 links: stream / local mode, download folders, compare with S3',

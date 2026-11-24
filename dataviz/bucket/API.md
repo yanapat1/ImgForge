@@ -143,6 +143,12 @@ write_text(user, bid, path, text, expect_mtime_ns=None, create=False) -> {path, 
 ops(user, bid, ops) -> {applied: [..], errors: [{op, error}], undo_id, retagged: {...}|None}
     op: {op:'mkdir', path} | {op:'create', path} (empty file) | {op:'move', path, to} | {op:'copy', path, to} | {op:'rename', path, name} | {op:'delete', path}
     `to` is a destination folder; delete moves into `<data_root>/.trash/<undo_id>/`, and undo restores it.
+copy_to(user, src_bid, paths, dst_bid, dst_rel='') -> {job_id, result}     # POST /api/bucket/copy {from_bucket, paths, to_bucket, to_path}
+    # job bk-copy:<dst>:<hash8> (lane bucket; the same request twice: one job). Any source (local, downloaded, streamed
+    # S3: objects read in 1 MB chunks), 8 files at a time, each through <name>.part then os.replace; progress in bytes
+    # (ETA), cancel between files. A clashing top-level name -> "name (copy)". result: {files, bytes, to, undo_id,
+    # bucket, cancelled}; undo_id (on the destination) removes the copies. Into itself: 400; destination not writable
+    # (a streamed link outside its downloaded folders): 400.
 undo(user, bid, undo_id) -> {restored, errors, retagged}
 upload(user, bid, path, files: [(name, fileobj)], unzip=True) -> {added, skipped, retagged}   # zip / tar / tar.gz / tar.bz2 / tar.xz / 7z unpacked
 upload_part(user, bid, path, name, uid, offset, total, data: bytes, unzip=True) -> {received, ranges} | {added, skipped, retagged, done: True}

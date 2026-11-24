@@ -814,3 +814,7 @@ html[data-dock="open"] #bucket { container-type: inline-size; }
   .bk-cmp-head, .bk-cmp-row { grid-template-columns: 22px 120px minmax(0, 1fr); }
   .bk-cmp-head > :nth-child(n+4), .bk-cmp-row > :nth-child(n+4) { display: none; }
 }
+
+/* the clipboard (Copy / Cut, then Paste): a pill in the folder toolbar while it holds something */
+.bk-clip { display: inline-flex; align-items: center; gap: 2px; padding-left: 4px; border-left: 1px solid var(--border); }
+.bk-clip > button.sm { height: 28px; padding: 0 8px; gap: 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
