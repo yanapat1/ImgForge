@@ -103,6 +103,51 @@ export async function newFolder(): Promise<void> {
   });
 }
 
+/** extensions offered for a new file (any other can be typed); a name with its own extension keeps it */
+const NEW_EXTS = ['.txt', '.md', '.json', '.yaml', '.yml', '.csv', '.py', '.sh', '.xml', '.ini', '.toml'];
+const TEMPLATES: Record<string, string> = {
+  'data.yaml': 'path: .\ntrain: images/train\nval: images/val\n\nnames:\n  0: object\n',
+  'classes.txt': 'object\n',
+};
+const TEXT_EXT = /\.(txt|md|json|ya?ml|csv|tsv|py|sh|xml|ini|toml|cfg|conf|js|ts|html|css|log|env|gitignore)$/i;
+
+/** New file… : a name + an extension (picked or typed); created empty (data.yaml / classes.txt with a starter), then
+ *  opened in the text editor. Undo removes it. */
+export async function newFile(): Promise<void> {
+  const bid = D.bid;
+  if (!bid) return;
+  const base = D.path;
+  await openDialog({
+    title: 'New file', ok: 'Create', focus: '#bk-name',
+    body: `<div class="bk-newfile">${nameField('Name', '')}` +
+      `<label class="fld"><span>Extension</span><input type="text" class="txt" id="bk-ext" list="bk-ext-list" value=".txt" autocomplete="off" spellcheck="false"></label>` +
+      `<datalist id="bk-ext-list">${NEW_EXTS.map((x) => `<option value="${x}"></option>`).join('')}<option value="">(none)</option></datalist></div>` +
+      `<p class="hint">In <code>${esc(bucketOf(bid)?.name ?? '')}/${esc(base)}</code>. A name with its own extension (data.yaml) keeps it.</p>`,
+    onOk: async (root) => {
+      const n = root.querySelector<HTMLInputElement>('#bk-name')?.value.trim() ?? '';
+      let x = root.querySelector<HTMLInputElement>('#bk-ext')?.value.trim() ?? '';
+      if (x && !x.startsWith('.')) x = `.${x}`;
+      if (/[/\\\s]/.test(x) || x === '.') return 'An extension is one word like .yaml';
+      const bad = badName(n);
+      if (bad) return bad;
+      const name = n.includes('.') && !n.startsWith('.') ? n : `${n}${x}`;
+      if (/[\u0000-\u001f]/.test(name)) return 'Not a valid name';
+      const path = joinPath(base, name);
+      let r: OpsResult;
+      try {
+        r = await api.ops(bid, [{ op: 'create', path, text: TEMPLATES[name.toLowerCase()] ?? '' }]);
+      } catch (e) { return `Not created: ${errText(e)}`; }
+      const err = r.errors?.[0]?.error;
+      if (err) return /already exists/.test(err) ? `${name} already exists: pick another name` : `Not created: ${err}`;
+      const undo = r.undo_id;
+      actionToast({ kind: 'ok', title: `Created ${name}`, actions: undo ? [{ label: 'Undo', icon: 'undo', primary: false, run: () => undoOp(bid, undo) }] : [] });
+      await hooks.reload();
+      if (TEXT_EXT.test(name) || !name.includes('.')) void import('./editor.js').then((m) => m.openFile(bid, path));
+      return null;
+    },
+  });
+}
+
 export async function renameSel(): Promise<void> {
   const bid = D.bid;
   const e = selEntries()[0];

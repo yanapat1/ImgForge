@@ -16,7 +16,7 @@ import { closeFloat, floatPopover } from '../core/popover.js';
 import * as api from './api.js';
 import { previewStarted } from './busy.js';
 import type { Action } from './app.js';
-import { copySel, deleteSel, moveSel, moveTo, newFolder, renameSel, undoRetag } from './ops.js';
+import { copySel, deleteSel, moveSel, moveTo, newFile, newFolder, renameSel, undoRetag } from './ops.js';
 import { downloadZip, openExportDialog } from './export.js';
 import { openFile, TEXTY } from './editor.js';
 import { openFrames } from './frames.js';
@@ -231,6 +231,7 @@ function renderBar(): void {
     `<button type="button" class="icon-btn" data-act="refresh" aria-label="Reload this folder" title="Reload">${icon('refresh')}</button>` +
     '<span class="tb-sep" aria-hidden="true"></span>' +
     `<button type="button" class="icon-btn" data-act="mkdir" aria-label="New folder" title="New folder"${w ? '' : ' disabled'}>${icon('folder-plus')}</button>` +
+    `<button type="button" class="icon-btn" data-act="mkfile" aria-label="New file" title="New file (pick its extension)"${w ? '' : ' disabled'}>${icon('file-plus')}</button>` +
     `<button type="button" class="icon-btn" data-act="upload" aria-label="Upload files here" title="Upload files here"${w ? '' : ' disabled'}>${icon('upload')}</button>` +
     `<button type="button" class="primary" data-act="send-menu" aria-haspopup="menu" aria-expanded="false">${icon('send')}<span class="bk-wide-txt">Send to…</span>${icon('chev-d')}</button>` +
     `<button type="button" class="icon-btn bk-only-overlay" data-act="show-details" aria-label="Details" title="Details">${icon('eye')}</button>`;
@@ -310,7 +311,7 @@ function renderBody(): void {
   }
   if (!L.entries.length) {
     body.innerHTML = `<div class="bk-pad" data-act="desel"><div class="bk-empty">${icon(D.nameQ ? 'filter' : 'folder-o')}<b>${D.nameQ ? `Nothing named like “${esc(D.nameQ)}”` : 'This folder is empty'}</b>` +
-      (writable() && !D.nameQ ? `<span class="muted">Drop files here, or</span><div class="row"><button type="button" class="primary" data-act="upload">${icon('upload')}Upload files</button><button type="button" data-act="mkdir">${icon('folder-plus')}New folder</button></div>` : '') +
+      (writable() && !D.nameQ ? `<span class="muted">Drop files here, or</span><div class="row"><button type="button" class="primary" data-act="upload">${icon('upload')}Upload files</button><button type="button" data-act="mkdir">${icon('folder-plus')}New folder</button><button type="button" data-act="mkfile">${icon('file-plus')}New file</button></div>` : '') +
       (D.nameQ ? '<button type="button" data-act="clear-nameq">Clear the filter</button>' : '') + '</div></div>';
     return;
   }
@@ -554,6 +555,7 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
   },
   'retry-s3': () => { retryS3 = true; void loadListing(true); },
   mkdir: () => { void newFolder(); },
+  mkfile: () => { void newFile(); },
   move: () => { void moveSel(); },
   copy: () => { void copySel(); },
   rename: () => { void renameSel(); },

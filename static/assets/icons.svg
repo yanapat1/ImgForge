@@ -87,6 +87,10 @@
   <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4.5v15M3.5 16l3.5 3.5 3.5-3.5M13 6.5h8M13 12h6M13 17.5h4"/></symbol>
   <symbol id="i-filter" viewBox="0 0 24 24"><path class="f" d="M4 5h16l-6.2 7.4v5.2l-3.6 1.9v-7.1z"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle class="s" cx="6" cy="12" r="1.5"/><circle class="s" cx="12" cy="12" r="1.5"/><circle class="s" cx="18" cy="12" r="1.5"/></symbol>
+  <symbol id="i-file-plus" viewBox="0 0 24 24"><path class="f" d="M6.5 3.5h7l4.5 4.5v10.5a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M13.5 3.5V8H18M11.25 11v6M8.25 14h6"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="17.5" r="2.5"/><path d="M8.6 8 19.5 18.5M8.6 16 19.5 5.5"/></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><rect class="f" x="5" y="5" width="14" height="15.5" rx="2"/><path d="M9 5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M9 11h6M9 15h4"/></symbol>
+  <symbol id="i-cloud-up" viewBox="0 0 24 24"><path class="f" d="M7 18.5a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.6A3.8 3.8 0 0 1 17.5 18.5z"/><path d="M12 17v-5m-2 2 2-2 2 2"/></symbol>
   <symbol id="i-file" viewBox="0 0 24 24"><path class="f" d="M6.5 3.5h7l4.5 4.5v10.5a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M13.5 3.5V8H18"/></symbol>
   <symbol id="i-file-img" viewBox="0 0 24 24"><path class="f" d="M6.5 3.5h7l4.5 4.5v10.5a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2z"/><path d="M13.5 3.5V8H18M7.5 17l3-3.5 2 2 1.5-1.5 2.5 3"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>

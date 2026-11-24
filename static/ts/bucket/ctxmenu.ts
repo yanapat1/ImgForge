@@ -91,6 +91,7 @@ function folderMenu(): string {
   const here = L?.here;
   return menuHtml([
     [item({ act: 'mkdir', ico: 'folder-plus', label: 'New folder…', dis: ro }),
+      item({ act: 'mkfile', ico: 'file-plus', label: 'New file…', dis: ro }),
       item({ act: 'upload', ico: 'upload', label: 'Upload files…', dis: ro }),
       item({ act: 'refresh', ico: 'refresh', label: 'Refresh' })],
     [L && L.entries.length > 0 && item({ act: 'selall', ico: 'check', label: 'Select all', kbd: 'Ctrl+A' }),
@@ -132,7 +133,8 @@ function treeFolderMenu(b: Bucket, path: string): string {
   return menuHtml([
     [item({ act: 'go', ico: 'folder', label: 'Open', data: { bid: b.id, path } }),
       item({ act: 'refresh', ico: 'refresh', label: 'Refresh' }),
-      here && item({ act: 'mkdir', ico: 'folder-plus', label: 'New folder…', dis: ro })],
+      here && item({ act: 'mkdir', ico: 'folder-plus', label: 'New folder…', dis: ro }),
+      here && item({ act: 'mkfile', ico: 'file-plus', label: 'New file…', dis: ro })],
     [item({ act: 'copy-path', ico: 'link', label: 'Copy path', data: { bid: b.id, path } }),
       item({ act: 'ctx-tag', ico: 'tag', label: 'Tags…', data: { bid: b.id, paths: path } }),
       item({ act: 'ctx-zip', ico: 'download', label: 'Export (zip)', data: { bid: b.id, path }, hint: 'download' })],

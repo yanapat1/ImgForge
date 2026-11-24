@@ -115,7 +115,7 @@ export interface Retag { path: string; from: string; to: string; reason?: string
 
 export type Op =
   | { op: 'mkdir'; path: string }
-  | { op: 'create'; path: string }
+  | { op: 'create'; path: string; text?: string }
   | { op: 'move'; path: string; to: string }
   | { op: 'copy'; path: string; to: string }
   | { op: 'rename'; path: string; name: string }
