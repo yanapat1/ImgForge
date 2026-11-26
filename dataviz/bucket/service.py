@@ -3400,7 +3400,7 @@ def _covered(r, rel):
         return None
     c = _cover(_local_rows(r.id), rel)
     p = os.path.join(r.local_root, rel) if rel else r.local_root
-    if c is None or c['state'] in ('fetching', 'error') or _busy(f'bk-fetch:{r.id}:') or not os.path.isdir(p):
+    if c is None or c['state'] in ('fetching', 'error') or not os.path.isdir(p):     # its own row says if it downloads
         return None
     return p
 

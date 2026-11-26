@@ -17,6 +17,8 @@ import { openDialog } from '../views/dialog.js';
 import type { Job } from '../types.js';
 
 interface FolderInfo {
+  /** false: the session reads no bucket folder (then only `detail` is set) */
+  in_bucket?: boolean; detail?: string;
   bucket: string; bucket_name: string; path: string; session: string | null; format: string; label: string;
   task_type: string | null; formats: Array<{ key: string; label: string }>; dest: { bucket: string; path: string; name: string };
   streamed: boolean; can_export: boolean; can_label: boolean; note: string | null;
@@ -32,7 +34,8 @@ let DID = '';
 /** Add the buttons to the header when this session reads a bucket folder (and the user owns it). */
 export async function initDatasetActions(did: string, kind: string | undefined, role: string): Promise<void> {
   if (!did || role !== 'owner' || (kind !== 'local' && kind !== 's3') || !zoneOn('bucket')) return;
-  try { INFO = await getJSON<FolderInfo>(`api/bucket/session-folder/${encodeURIComponent(did)}`); } catch (e) { return; }   // not in a bucket
+  try { INFO = await getJSON<FolderInfo>(`api/bucket/session-folder/${encodeURIComponent(did)}`); } catch (e) { return; }
+  if (INFO.in_bucket === false) { INFO = null; return; }           // not in a bucket: no buttons
   DID = did;
   const host = document.querySelector('header.app-header.viz-only .header-actions');
   if (!host || host.querySelector('#btn-ds-export')) return;

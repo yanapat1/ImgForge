@@ -68,6 +68,14 @@ def test_session_outside_buckets(dc, tmp_path):  # noqa: F811 - the fixture
     _, c = dc
     r = c.get('/api/bucket/session-folder/nope')
     assert r.status_code == 404
+    # a session outside the buckets is an answer, not an error (no red console line on its Visualize page)
+    from conftest import make_jpeg
+    (tmp_path / 'out' / 'labels').mkdir(parents=True)
+    make_jpeg(tmp_path / 'out' / 'images' / 'a.jpg', 32, 32)
+    (tmp_path / 'out' / 'labels' / 'a.txt').write_text('0 0.5 0.5 0.2 0.2\n')
+    did = c.post('/api/datasets', json={'kind': 'local', 'path': str(tmp_path / 'out'), 'name': 'outside'}).json()['id']
+    r = c.get(f'/api/bucket/session-folder/{did}')
+    assert r.status_code == 200 and r.json()['in_bucket'] is False and 'bucket' in r.json()['detail'], r.text
 
 
 pytest_plugins = ['conftest_io']

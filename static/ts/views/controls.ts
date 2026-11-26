@@ -174,7 +174,7 @@ export async function applyRecipe(id: string): Promise<boolean> {
   if (!r) { toast(`No recipe ${id}`, 'err'); return false; }
   if (!r.available) { toast(`${r.name}: ${r.why}`, 'err'); return false; }
   const s = r.sets;
-  if (s.feature) { $req<HTMLSelectElement>('feature').value = s.feature; updateTextSearch(); }
+  if (s.feature) { $req<HTMLSelectElement>('feature').value = s.feature; updateTextSearch(); fillFuse(); }
   if (s.method) {
     $req<HTMLSelectElement>('method').value = s.method;
     for (const [k, v] of Object.entries(status().methods[s.method]?.params ?? {})) {

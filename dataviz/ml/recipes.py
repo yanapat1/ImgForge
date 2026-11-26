@@ -47,6 +47,18 @@ if len(RECIPES) != len(_DATA['recipes']):
     raise ValueError('recipes.yaml: two recipes share an id')
 
 
+KIND_WORDS = {'kind:clip': 'CLIP', 'kind:siglip': 'SigLIP', 'kind:dinov2': 'DINOv2', 'group:deep': 'a deep model',
+              'group:simple': 'a simple feature', 'yolo': 'a YOLO backbone'}
+
+
+def _feature_words(prefs):
+    """A preference list in words: 'a DINOv2, SigLIP or CLIP feature'."""
+    names = [KIND_WORDS.get(p, p) for p in prefs if p != 'group:deep']
+    if not names:
+        return 'a deep model feature'
+    return 'a ' + (names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' or ' + names[-1]) + ' feature'
+
+
 def _pick_feature(prefs, registry):
     """The first feature of a preference list this registry has (None: none of them)."""
     specs = [(k, registry[k]) for k in registry if getattr(registry[k], 'group', '') not in ('variant', 'imported')]
@@ -72,7 +84,7 @@ def resolve(r, state):
     if 'feature' in s:
         f = _pick_feature(s['feature'], state.registry)
         if f is None:
-            return s, f'needs one of: {", ".join(s["feature"])} (Settings › Models, or features.models in the config)'
+            return s, f'needs {_feature_words(s["feature"])} (add one in Settings › Models, or features.models in the config)'
         s['feature'] = f
     src = state.source
     for need in r.get('needs') or ():
@@ -100,7 +112,7 @@ def for_state(state):
             try:
                 key = projection_key(s['feature'], s['method'], normalize_params(s['method'], s.get('params')), None,
                                      s.get('dims', 2), mprep.validate(s.get('prep')))
-                instant = state.get_projection(key) is not None
+                instant = state.projection_saved(key)
             except ValueError:
                 pass
         out.append({'id': r['id'], 'name': r['name'], 'category': r['category'], 'use_for': r['use_for'],

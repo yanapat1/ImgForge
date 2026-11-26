@@ -785,6 +785,10 @@ class State:
                 return proj
         return None
 
+    def projection_saved(self, key):
+        """Whether projection `key` is computed (memory or disk), without loading it (the Recipe menu's ✓)."""
+        return key in self.projections or (self.ready and self.cache_dir is not None and self._projection_file(key).exists())
+
     def _store_projection(self, key, proj):
         self.projections[key] = proj
         while len(self.projections) > 48:
@@ -802,7 +806,7 @@ class State:
         params = normalize_params(method, params)
         prep = mprep.validate(prep)
         im, fe = prep.get('image') or {}, prep.get('feature') or {}
-        if im:
+        if im and self.ready:                          # before the index: checked in the job, once it exists
             why = self.prep_why_not(feature, im)
             if why:
                 raise ValueError(f'image preprocessing: {why}')
@@ -814,7 +818,7 @@ class State:
             ids0 = np.arange(len(self.samples)) if not classes else np.nonzero(np.isin(self.labels, list(classes)))[0]
             if not mprep.keep_mask(self.samples, ids0, fe['filter']).any():
                 raise ValueError('the filters leave no boxes: loosen them')
-        feat_key = self.register_variant(feature, im) if im else feature
+        feat_key = (self.register_variant(feature, im) if self.ready else mprep.variant_key(feature, im)) if im else feature
         key = projection_key(feature, method, params, classes, dims, prep)
         proj = self.get_projection(key) if self.ready else None
         if proj is not None and (feature in self.scores or self._scores_file(feature).exists()):
@@ -831,6 +835,11 @@ class State:
 
         def run(job):
             self.wait_index(job)
+            if im and feat_key not in self.registry:    # asked before the index existed: check and register now
+                why = self.prep_why_not(feature, im)
+                if why:
+                    raise ValueError(f'image preprocessing: {why}')
+                self.register_variant(feature, im)
             self.get_scores(feature, job)          # computes the features too if needed
             if self.get_projection(key) is not None:
                 return key

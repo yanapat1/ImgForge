@@ -24,15 +24,28 @@ export function classShown(c: number): boolean {
   return !S.hidden.has(c);
 }
 
+/** The positions of S.view shown on the map: the filter bar, compare and class checks. The boxes the projection's
+ *  own filter left out (`muted`, drawn faint) are never among them: not coloured, selected or counted. */
 export function visibleIndices(): number[] {
+  return shownIndices(false);
+}
+
+/** The left-out boxes (Preprocess › Left out: Shown faint) that pass the same checks: the faint trace of the 2D map. */
+export function mutedIndices(): number[] {
+  return S.view?.muted?.length ? shownIndices(true) : [];
+}
+
+function shownIndices(wantMuted: boolean): number[] {
   const out: number[] = [];
   if (!S.view) return out;
   const mask = S.filterMask;               // filter bar (core/filter.js): 1 = shown; also hides curation-deleted boxes
   const om = S.cmp ? S.cmp.mask : null;    // compare: A / B / both / diff only (views/compare.ts)
+  const muted = S.view.muted;
   const cls = pts().cls;
   for (let i = 0; i < S.view.id.length; i++) {
     const id = S.view.id[i];
     if (id === undefined) continue;
+    if (!!muted?.[i] !== wantMuted) continue;
     if (mask && !mask[id]) continue;
     if (om && !om[id]) continue;
     if (!classShown(cls[id] ?? -1)) continue;
@@ -76,7 +89,7 @@ let catTraces: CatTraces | null = null;
 export function applyFilterMask(): void {
   const gd = plotDiv();
   if (!S.view || !gd.data) return;
-  if (is3d()) { scheduleRender(); return; }      // 3D: one full (coalesced) render
+  if (is3d() || S.view.muted?.length) { scheduleRender(); return; }   // 3D / a faint trace too: one full render
   const view = S.view;
   const ct = catTraces;
   if (!ct || ct.colorBy !== $req<HTMLSelectElement>('color-by').value || ct.view !== S.view || S.dimSet ||
@@ -388,7 +401,7 @@ export function renderPlot(): void {
     return mc && mc.type === 'num' ? mc : null;
   })();
   const dot = +$req<HTMLInputElement>('dot-size').value;
-  let vis = visibleIndices();
+  const vis = visibleIndices();
   const Pt = pts();
   const traces: Trace[] = [];
   catTraces = null;
@@ -396,10 +409,8 @@ export function renderPlot(): void {
   if (dens) traces.push(dens);
   // boxes the projection's filter left out (Preprocess › Filtered: grey): placed by their neighbours, one faint trace
   // under the others, never coloured, selected or counted
-  const muted = view.muted;
-  if (muted?.length) {
-    const off = vis.filter((i) => muted[i]);
-    vis = vis.filter((i) => !muted[i]);
+  {
+    const off = mutedIndices();
     if (off.length) {
       const ids = off.map((i) => view.id[i] ?? -1);
       traces.push({ type: 'scattergl', mode: 'markers', name: 'filtered', showlegend: false, hoverinfo: 'text',

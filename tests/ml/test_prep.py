@@ -91,7 +91,7 @@ def test_recipes_resolve_against_a_session():
            'geometry': SimpleNamespace(group='simple', kind='', label='Geometry')}
     st = SimpleNamespace(registry=reg, source=SimpleNamespace(kind='local'), ready=True,
                          samples=[{'session': 'a'}, {'session': 'b'}], has_polygons=lambda: False,
-                         get_projection=lambda k: None)
+                         projection_saved=lambda k: False)
     out = {r['id']: r for r in recipes.for_state(st)}
     assert out['find-mislabels']['available'] and out['find-mislabels']['sets']['feature'] == 'dinov2-base'
     assert not out['object-only']['available'] and 'segmentation' in out['object-only']['why']
@@ -177,3 +177,20 @@ def test_a_mask_needs_polygons(tmp_path):
     assert not st.has_polygons()
     with pytest.raises(ValueError, match='segmentation labels'):
         st.request_projection('color-hist', 'pca', {}, None, 2, {'image': {'mask': 'polygon'}})
+
+
+def test_recipe_check_loads_no_map_and_prep_waits_for_the_index(tmp_path):
+    st = _state(_dataset(tmp_path / 'ds'), tmp_path / 'ws')
+    _, key = _project(st, 'color-hist')
+    st.projections.clear()
+    assert st.projection_saved(key) and not st.projections, 'the check does not load the map'
+    assert not st.projection_saved(key + 'x')
+    # a prep request while the index is not built: no workspace writes, the check runs in the job
+    from dataviz.state import State
+    from dataviz.image.sources import LocalSource
+    reg = {k: feats.FeatureSpec(k, v[0], 'simple', v[1], metric=v[2]) for k, v in feats.SIMPLE.items()}
+    fresh = State(LocalSource(tmp_path / 'ds'), None, reg, default_feature='color-hist')
+    assert not fresh.ready
+    proj, k2, job = fresh.request_projection('color-hist', 'pca', {}, None, 2, {'image': {'tone': 'gray'}})
+    assert proj is None and job is not None and k2.startswith('color-hist~')
+    job.cancel() if hasattr(job, 'cancel') else None

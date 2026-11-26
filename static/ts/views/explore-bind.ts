@@ -18,7 +18,7 @@ import { bubbleAt, hoverOf, requestFit, scheduleRender, updateGrid } from '../pl
 import { far2dIds, setExplainDot } from '../plot/explain.js';
 import { applyRecipe, applyView, bindFeatureImport, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshTagList, runLabelQuality, saveSettings, SETTING_IDS, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './controls.js';
 import { checkLabelsAI } from './assistant.js';
-import { PREP_IDS, writePrep } from './prep.js';
+import { fillFuse, PREP_IDS, writePrep } from './prep.js';
 import { dialogOpen, openDialog, trapTab } from './dialog.js';
 import { backToInspect, enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './gallery.js';
 import { showMissedObjects } from './model.js';
@@ -113,7 +113,7 @@ export function bindEvents(): void {
   };
   // feature / method / parameters only mark the map as changed: Generate (#btn-apply) computes it, so several
   // settings can be changed before one (possibly long) projection job
-  $req<HTMLSelectElement>('feature').onchange = () => { updateTextSearch(); updateMapDirty(); };
+  $req<HTMLSelectElement>('feature').onchange = () => { updateTextSearch(); fillFuse(); updateMapDirty(); };
   $req<HTMLFormElement>('text-search').onsubmit = async (e) => {
     e.preventDefault();
     const q = $req<HTMLInputElement>('text-q').value.trim(), feature = $req<HTMLSelectElement>('feature').value;

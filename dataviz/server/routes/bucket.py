@@ -155,7 +155,14 @@ def router(state, ctx):
 
     @r.get('/session-folder/{did}')
     def session_info(did: str, user=Depends(deps.current_user)):
-        return _call(service.session_info, user, did)
+        """The session's bucket folder; a session that reads none (a labeling, combined or outside-the-buckets one) is
+        an answer, not an error: {in_bucket: false, detail} (the Visualize page then shows no Export / Send buttons)."""
+        try:
+            return {'in_bucket': True, **service.session_info(user, did)}
+        except BucketError as e:
+            if e.status == 409:
+                return {'in_bucket': False, 'detail': e.message}
+            raise HTTPException(e.status, e.message) from None
 
     @r.post('/session-folder/{did}/export')
     def export_session(did: str, body: dict, user=Depends(MANAGE)):

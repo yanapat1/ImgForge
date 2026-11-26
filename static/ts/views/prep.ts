@@ -56,7 +56,7 @@ export function writePrep(p: PrepSpec | null | undefined): void {
   sel('prep-scale').value = fe.scale ?? 'none';
   sel('prep-pca').value = String(fe.pca ?? 50);
   sel('prep-debias').value = fe.debias ?? '';
-  if (fe.fuse && ![...sel('prep-fuse').options].some((o) => o.value === fe.fuse?.feature)) fillFuse();
+  fillFuse();                                       // the Features choice may have changed with the spec
   sel('prep-fuse').value = fe.fuse?.feature ?? '';
   inp('prep-fuse-w').value = String(fe.fuse?.weight ?? 0.3);
   inp('prep-min-px').value = fl.min_px ? String(fl.min_px) : '';
@@ -90,13 +90,16 @@ export function showSummary(): void {
   $req('prep').toggleAttribute('data-on', !!s);
 }
 
-/** The Fuse-with list: the session's feature spaces (the picked one is skipped server-side). */
+/** The Fuse-with list: the session's other feature spaces (the one picked in Features is disabled: a feature
+ *  cannot be fused with itself). Called again when Features changes. */
 export function fillFuse(): void {
   const s = sel('prep-fuse');
   const cur = s.value;
+  const self = $req<HTMLSelectElement>('feature').value;
   const feats = (status().features ?? []).filter((f) => f.group !== 'variant');
-  s.innerHTML = '<option value="">None (default)</option>' + feats.map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join('');
-  s.value = feats.some((f) => f.key === cur) ? cur : '';
+  s.innerHTML = '<option value="">None</option>' + feats.map((f) => `<option value="${esc(f.key)}"` +
+    `${f.key === self ? ' disabled title="the feature itself"' : ''}>${esc(f.label)}</option>`).join('');
+  s.value = feats.some((f) => f.key === cur && f.key !== self) ? cur : '';
 }
 
 /** Specs are compared by their canonical JSON (keys sorted). */

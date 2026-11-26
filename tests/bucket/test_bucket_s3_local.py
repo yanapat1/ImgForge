@@ -448,3 +448,20 @@ def test_a_downloaded_folder_makes_a_local_session_and_plain_streams_are_read_on
     assert not s3.label_writable
     with pytest.raises(ValueError, match='not kept locally'):
         s3.write_label('im0.txt', '0 0.5 0.5 0.1 0.1\n')
+
+
+def test_a_download_elsewhere_does_not_hide_a_downloaded_folder(dc, s3_server, s3_bucket, monkeypatch):
+    """A download running in another folder of the bucket does not make an already downloaded folder read as
+    streamed (a session made from it reads the local copy)."""
+    c = dc
+    client, bucket = s3_bucket
+    _yolo_in_s3(client, bucket, 'vans')
+    conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'}).json()
+    b = c.post('/api/bucket/buckets', json={'name': 'road', 'kind': 's3', 'connection_id': conn['id'],
+                                        's3_bucket': bucket, 'prefix': ''}).json()
+    wait_job(c, b['scan_job_id'])
+    wait_job(c, c.post(f'/api/bucket/buckets/{b["id"]}/local', json={'paths': ['vans']}).json()['job_id'])
+    from dataviz.bucket import service
+    r = service._row(c.user, b['id'])
+    monkeypatch.setattr(service, '_busy', lambda key: True)     # "a download runs" in the bucket
+    assert service._covered(r, 'vans') is not None
