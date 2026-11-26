@@ -19,9 +19,11 @@ interface Check {
   format: string; label: string | null; reason?: string | null; images: number | null; labels: number | null;
   classes: string[] | number | null; streamed: boolean; can: { visualize: boolean; label: boolean; linked: boolean };
   label_import: 'imported' | 'none'; note: string; convert_to: string[]; default: { visualize: boolean; label: boolean };
+  /** a streamed S3 folder not read yet: the scan job reading it (the check is asked again when it finished) */
+  scanning?: boolean; job_id?: number | null;
 }
 interface Made {
-  name: string; linked: boolean; visualize?: { id: string; url: string };
+  name: string; linked: boolean; visualize?: { id: string; url: string; job_id?: number | null };
   label?: { id: string; url: string; job_id?: number | null; import_job_id?: number | null; import_error?: string };
 }
 export interface CreateOpts { visualize?: boolean; label?: boolean; bucket?: string; path?: string }
@@ -35,7 +37,7 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
   const S = {
     buckets: [] as Bucket[], bid: o.bucket ?? '', path: o.path ?? '', dirs: [] as Entry[], loading: true, err: '',
     check: null as Check | null, viz: o.visualize ?? true, label: o.label ?? true, touched: o.visualize != null || o.label != null,
-    task: 'detect', busy: '',
+    task: 'detect', busy: '', scan: '',
   };
   let root: HTMLElement | null = null;
   let seq = 0;
@@ -43,16 +45,16 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
   const yes = (ok: boolean, text: string): string => `<span class="sn-can ${ok ? 'ok' : 'no'}">${icon(ok ? 'check' : 'x')}${text}</span>`;
   const formatHTML = (): string => {
     const c = S.check;
-    if (S.loading) return '<div class="sn-fmt"><span class="ct-spin"></span><span class="muted">Reading the folder…</span></div>';
+    if (S.loading) return `<div class="sn-fmt"><span class="ct-spin"></span><span class="muted">${esc(S.scan || 'Reading the folder…')}</span></div>`;
     if (S.err) return `<div class="note warn">${icon('alert')}<span>${esc(S.err)}</span></div>`;
     if (!c) return '';
     const cls = Array.isArray(c.classes) ? c.classes.length : c.classes;
     return `<div class="sn-fmt"><div class="sn-fmt-h"><b>${esc(c.label ?? c.format)}</b><span class="muted num">${fmtN(c.images)} images · ${fmtN(c.labels)} label files${cls ? ` · ${fmtN(cls)} classes` : ''}</span>` +
-      (c.streamed ? `<span class="sn-tag" title="Read from S3 on every request: nothing is copied, and nothing is written to S3">${icon('cloud')}streamed from S3</span>` : '') + '</div>' +
+      (c.streamed ? `<span class="sn-tag" title="Images are read from S3 when needed: nothing is written to S3">${icon('cloud')}streamed from S3</span>` : '') + '</div>' +
       `<div class="sn-cans">${yes(c.can.visualize, 'Visualize')}${yes(c.can.label, 'Label')}${yes(c.can.linked, 'Both, linked')}` +
       `<span class="sn-can ${c.label_import === 'imported' ? 'ok' : 'off'}">${icon(c.label_import === 'imported' ? 'check' : 'circle')}${c.label_import === 'imported' ? 'its labels are imported' : 'no labels to import'}</span></div>` +
       `<p class="muted">${esc(c.note)}</p>` +
-      (c.streamed ? '<p class="muted">Streamed data: the images stay in S3 and are read when needed (the first map reads each image once); labels made here are kept in this app, not written to S3.</p>' : '') +
+      (c.streamed ? '<p class="muted">Streamed data: the images stay in S3 and are read when needed (the first map reads each image once). Visualize alone downloads only the labels/ folder, so label fixes stay local (marked in Bucket; right-click › Cloud (S3) › Upload to S3 sends them); a Label session keeps its labels in this app. Nothing is written to S3 by itself.</p>' : '') +
       (c.convert_to.length ? `<div class="sn-other"><span class="muted">Re-format a copy to</span>${c.convert_to.map((x) => `<button type="button" class="ghost sm" data-sn="reformat" data-to="${esc(x)}" title="Writes a new folder in the bucket “… · formats”; this folder is not changed${c.streamed ? ' (labels only: the images stay in S3)' : ''}">${esc(x.toUpperCase())}</button>`).join('')}</div>` : '') + '</div>';
   };
   const crumbs = (): string => {
@@ -110,15 +112,31 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
   /** the folder's sub-folders and what a session from it can do */
   const open = async (bid: string, path: string): Promise<void> => {
     const mine = ++seq;
-    Object.assign(S, { bid, path, loading: true, err: '', check: null, dirs: [] });
+    Object.assign(S, { bid, path, loading: true, err: '', check: null, dirs: [], scan: '' });
     paint();
+    const check = (): Promise<Check> => getJSON<Check>(`api/bucket/buckets/${encodeURIComponent(bid)}/session-check?path=${encodeURIComponent(path)}`);
     try {
-      const [ls, chk] = await Promise.all([
+      const [ls, first] = await Promise.all([
         api.ls(bid, path).then((r) => r.entries.filter((e) => e.type === 'dir').slice(0, 200)).catch(() => [] as Entry[]),
-        getJSON<Check>(`api/bucket/buckets/${encodeURIComponent(bid)}/session-check?path=${encodeURIComponent(path)}`),
+        check(),
       ]);
       if (mine !== seq) return;
       S.dirs = ls;
+      let chk = first;
+      // a streamed S3 folder read for the first time: the scan job lists it, then the check is asked again
+      for (let tries = 0; chk.scanning && chk.job_id != null && tries < 3; tries++) {
+        S.scan = 'Listing the folder in S3…';
+        paint();
+        await waitJob(chk.job_id, (j) => {
+          if (mine !== seq) return;
+          S.scan = `Listing the folder in S3… ${j.done != null ? `${fmtN(j.done)} objects` : ''}`;
+          paint();
+        });
+        if (mine !== seq) return;
+        chk = await check();
+      }
+      if (mine !== seq) return;
+      if (chk.scanning) throw new Error('the S3 folder is still being read: try again in a moment');
       S.check = chk;
       if (!S.touched) { S.viz = hasViz && chk.default.visualize; S.label = hasLabel && chk.default.label; }
       S.task = FMT_TASK[chk.format] ?? 'detect';
@@ -127,6 +145,7 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
       S.err = errText(e);
     }
     S.loading = false;
+    S.scan = '';
     paint();
   };
 
@@ -175,7 +194,8 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
         paint();
         const made = await postJSON<Made>('api/bucket/session', { bucket: S.bid, path: S.path, visualize: S.viz, label: S.label, name: name || null, task_type: S.task });
         // the images, then the folder's own labels, are listed into the Label side before the map is opened on them
-        for (const [jid, what] of [[made.label?.job_id, 'Listing the images'], [made.label?.import_job_id, 'Importing the labels']] as const) {
+        for (const [jid, what] of [[made.label?.job_id, 'Listing the images'], [made.label?.import_job_id, 'Importing the labels'],
+          [made.visualize?.job_id, 'Downloading the labels']] as const) {
           if (jid == null) continue;
           S.busy = `${what}…`;
           paint();

@@ -21,8 +21,9 @@ Downloads run on a thread pool: boto3 releases the GIL while waiting on the netw
 `concurrency` requests really are in flight at once.
 
 A streamed S3 source can keep its labels in a local folder instead (`labels_dir`: labels/*.txt + classes.txt /
-data.yaml, the Bucket page's Re-format of a read-only S3 folder): the images still stream from the bucket, the
-labels, classes and curation writes are local, and nothing is written to S3.
+data.yaml: the downloaded labels/ of a streamed Bucket folder, or the Bucket page's Re-format of one): the images
+still stream from the bucket, the labels, classes and curation writes are local. A session never writes to S3: only
+an S3 source with local labels is `label_writable` (Bucket › Upload to S3 sends the fixes).
 """
 
 import io
@@ -416,8 +417,10 @@ class S3Source:
         return 'yolo' if any(k.startswith('images/') and _is_image(k) for k in self.listing()) else 'flat'
 
     @property
-    def label_writable(self):              # data curation: only a YOLO prefix has label files to write
-        return self.layout == 'yolo'
+    def label_writable(self):
+        """Data curation fixes labels only when they are kept locally (labels_dir: the folder's downloaded labels/
+        or a Re-format folder): S3 itself is never written from a session (Bucket › Upload to S3 sends the fixes)."""
+        return self._local_labels() is not None
 
     def _local_labels(self):
         """The labels_dir source when the labels are local and the images are a YOLO prefix's images/."""
@@ -523,42 +526,10 @@ class S3Source:
         return list(self.pool.map(self.read_label_bytes, names))
 
     def write_label(self, name, text, expect_sha1=None):
-        if self.labs is not None:                  # local labels: the bucket is never written
+        if self._local_labels() is not None:      # local labels: S3 is never written from here
             return self.labs.write_label(name, text, expect_sha1)
-        if '/' in name or not name:
-            raise ValueError(f'bad label name {name!r}')
-        data = _as_bytes(text)
-        if expect_sha1 is not None:
-            cur = sha1_bytes(self._remote_label_bytes(name))
-            if cur != expect_sha1:
-                raise Conflict(name, cur)
-        key = f'labels/{name}'
-        r = self.client.put_object(Bucket=self.bucket, Key=self.prefix + key, Body=bytes(data), ContentType='text/plain')
-        _wrote(connection_id=(self.conn or {}).get('id'), bucket=self.bucket, key=self.prefix + key)
-        etag = (r.get('ETag') or '').strip('"')
-        with self._lock:
-            if self._listing is not None:
-                self._listing[key] = (len(data), etag)
-        if self.local is not None:                 # cache mode: keep the mirror (and its manifest) in step
-            self.local.write_label(name, data)
-            man_path = self.mirror / '.manifest.json'
-            try:
-                man = json.loads(man_path.read_text()) if man_path.exists() else {}
-                man[key] = [len(data), etag]
-                _write_json(man_path, man)
-            except (OSError, ValueError):
-                pass
-        return sha1_bytes(data)
-
-    def _remote_label_bytes(self, name):
-        """The bucket's copy (not the mirror): the conflict check must see edits made elsewhere."""
-        try:
-            return self.get(f'labels/{name}')
-        except Exception as e:  # noqa: BLE001
-            code = getattr(e, 'response', {}).get('Error', {}).get('Code')
-            if code in ('404', 'NoSuchKey', 'NotFound'):
-                return b''
-            raise
+        raise ValueError(f'{self.uri} is streamed from S3 and its labels are not kept locally: create the session '
+                         'again from Bucket (a streamed folder\'s labels are downloaded so fixes stay local)')
 
     def read_classes(self):
         if self.labs is not None:

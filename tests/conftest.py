@@ -247,6 +247,17 @@ def client(app_ctx):
         yield c
 
 
+def scanned(client, bid, path='', timeout=30):
+    """The session check of a bucket folder once it was read: a streamed S3 folder seen for the first time answers
+    scanning + a scan job (send / create / reformat answer 409 meanwhile), so wait for that job and ask again."""
+    for _ in range(3):
+        chk = client.get(f'/api/bucket/buckets/{bid}/session-check', params={'path': path}).json()
+        if not chk.get('scanning'):
+            return chk
+        wait_job(client, chk['job_id'], timeout)
+    raise TimeoutError(f'{path} of {bid} was never scanned')
+
+
 def wait_job(client, job_id, timeout=30):
     t0 = time.time()
     while time.time() - t0 < timeout:

@@ -44,8 +44,9 @@ summary: what stream (read-only) and local (downloaded copy) allow, per-folder d
   single-part ETag; slow, it reads every file): a re-saved file with the same bytes then reads as Same. Rows can be
   ticked and **Get cloud version** downloads S3's file over the local one (streamed links); a path opens its folder.
   Read-only: it never writes S3 or the copy. The last comparison is kept; Compare again / `refresh` redoes it.
-- **Update** an outdated folder: `download_s3_folders` on it again. New and changed files are fetched (an S3 file
-  replaces a local edit of the same name; files deleted locally come back), unchanged skipped. Files S3 no longer has stay unless `mirror` (the dialog's opt-in checkbox): only when the user asks.
+- **Update** an outdated folder: `download_s3_folders` on it again. New and changed files are fetched, unchanged
+  skipped, and **files edited here are kept** (`kept`; `conflicts` = those S3 changed too: Upload to S3 lists them
+  and the user picks Overwrite or Download the S3 versions); files deleted locally come back. Files S3 no longer has stay unless `mirror` (the dialog's opt-in checkbox): only when the user asks.
   `remove_local_copy` deletes a downloaded folder's copy (S3 untouched; it streams again).
 - **Offline**: when S3 cannot be reached the bucket lists only its downloaded folders (`offline`), with a
   "Retry S3" button; other folders answer "S3 is unreachable". It is not an error of the data.

@@ -232,6 +232,8 @@ def test_routes(ds, tmp_path):
 
 
 def test_s3_write_label(monkeypatch, tmp_path):
+    """A session never writes S3: an S3 source is label_writable only with local labels (labels_dir, the folder's
+    downloaded labels/), and a fix lands there with the usual conflict check."""
     moto = pytest.importorskip('moto')
     import boto3
     from dataviz.image.sources import S3Source
@@ -243,20 +245,23 @@ def test_s3_write_label(monkeypatch, tmp_path):
         c.put_object(Bucket='bkt-test', Key='ds/labels/a.txt', Body=b'0 0.5 0.5 0.1 0.1\r\n')
         c.put_object(Bucket='bkt-test', Key='ds/images/a.jpg', Body=b'x')
         src = S3Source({'id': 'c1'}, 'bkt-test', 'ds', mode='stream')
-        assert src.label_writable
-        before = src.read_label_bytes('a.txt')
-        assert before == b'0 0.5 0.5 0.1 0.1\r\n' and src.read_label_bytes('missing.txt') == b''
-        sha = src.write_label('a.txt', b'1 0.5 0.5 0.1 0.1\r\n', sha1_bytes(before))
-        assert c.get_object(Bucket='bkt-test', Key='ds/labels/a.txt')['Body'].read() == b'1 0.5 0.5 0.1 0.1\r\n'
+        assert not src.label_writable
+        assert src.read_label_bytes('a.txt') == b'0 0.5 0.5 0.1 0.1\r\n' and src.read_label_bytes('missing.txt') == b''
+        with pytest.raises(ValueError, match='not kept locally'):
+            src.write_label('a.txt', b'1 0.5 0.5 0.1 0.1\r\n')
+        assert not S3Source({'id': 'c1'}, 'bkt-test', 'ds', mode='cache', mirror_root=tmp_path / 'm').label_writable
+        # the labels kept locally: fixes go there, S3 stays as it was
+        (tmp_path / 'local' / 'labels').mkdir(parents=True)
+        (tmp_path / 'local' / 'labels' / 'a.txt').write_bytes(b'0 0.5 0.5 0.1 0.1\r\n')
+        loc = S3Source({'id': 'c1'}, 'bkt-test', 'ds', labels_dir=tmp_path / 'local')
+        assert loc.label_writable
+        before = loc.read_label_bytes('a.txt')
+        sha = loc.write_label('a.txt', b'1 0.5 0.5 0.1 0.1\r\n', sha1_bytes(before))
         assert sha == sha1_bytes(b'1 0.5 0.5 0.1 0.1\r\n')
+        assert (tmp_path / 'local' / 'labels' / 'a.txt').read_bytes() == b'1 0.5 0.5 0.1 0.1\r\n'
+        assert c.get_object(Bucket='bkt-test', Key='ds/labels/a.txt')['Body'].read() == b'0 0.5 0.5 0.1 0.1\r\n'
         with pytest.raises(Conflict):
-            src.write_label('a.txt', 'x', sha1_bytes(before))
-        # cache mode keeps the local mirror (and its manifest) in step
-        cached = S3Source({'id': 'c1'}, 'bkt-test', 'ds', mode='cache', mirror_root=tmp_path / 'mirror')
-        cached.sync()
-        cached.write_label('a.txt', '2 0.5 0.5 0.1 0.1\n', sha)
-        assert (cached.mirror / 'labels' / 'a.txt').read_bytes() == b'2 0.5 0.5 0.1 0.1\n'
-        assert c.get_object(Bucket='bkt-test', Key='ds/labels/a.txt')['Body'].read() == b'2 0.5 0.5 0.1 0.1\n'
+            loc.write_label('a.txt', 'x', sha1_bytes(before))
 
 
 def test_scan_speed_20k_images(tmp_path):

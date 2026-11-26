@@ -55,9 +55,9 @@ SESSION_SUPPORT = {
                         'the map fill'),
     'embeddings': dict(visualize=True, label=False, labels='none', linked=False, to=(),
                        note='vector files: Visualize only'),
-    's3-labels': dict(visualize=True, label=False, labels='none', linked=False, to=(),
+    's3-labels': dict(visualize=True, label=True, labels='imported', linked=True, to=(),
                       note='YOLO labels kept here, images streamed from S3 (a Re-format of a read-only S3 folder): '
-                           'Visualize only; curation edits these local labels, never S3'),
+                           'Visualize fixes these local labels and the Label session imports them; S3 is never written'),
     'other': dict(visualize=False, label=False, labels='none', linked=False, to=(), note='no images or dataset found here'),
     'empty': dict(visualize=False, label=False, labels='none', linked=False, to=(), note='the folder is empty'),
 }

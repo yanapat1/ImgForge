@@ -78,6 +78,15 @@ def router(state, ctx):
             owner = need().get(pid)['owner_id']
         return ctx.datasets.scoped(owner)
 
+    def local_roots():
+        """storage.allowed_roots plus the managed buckets' data root (a Bucket folder's labels are imported too)."""
+        roots = connections.allowed_roots(ctx.cfg)
+        try:
+            from ...bucket import store as bstore
+            return bstore.roots(ctx.cfg)
+        except ImportError:                     # an install without the bucket zone
+            return roots
+
     def read_files(source, fmt, conns):
         """{rel: bytes} of the label files a source holds (one file when it names a file)."""
         kind = (source or {}).get('kind')
@@ -98,7 +107,7 @@ def router(state, ctx):
         single = None
         spec = dict(source)
         if kind == 'local':
-            p = Path(connections.check_local(spec.get('path'), connections.allowed_roots(ctx.cfg)))
+            p = Path(connections.check_local(spec.get('path'), local_roots()))
             spec['path'] = str(p)
             if p.is_file():
                 return {p.name: p.read_bytes()}

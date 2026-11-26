@@ -2,8 +2,10 @@
 // (new + changed files; "also remove files S3 no longer has" is opt-in), Check for updates, Remove local copy, and
 // the badge every entry of such a bucket carries (localBadge): cloud = stream only, hdd = downloaded and the same as
 // S3, amber = S3 changed it, new = only in S3 so far, gone = only here (S3 removed it). A downloaded folder is
-// listed from the copy and edited in place (changes stay local, S3 is never written); the rest of the bucket streams
-// read-only. To edit everything, load the whole bucket into local (Edit › Load mode).
+// listed from the copy and edited in place (changes stay local until right-click › Upload to S3); the rest of the
+// bucket streams read-only. A label fix in a Visualize session of a streamed folder lands in its downloaded labels/.
+// Updating keeps local edits (Upload to S3 reports a conflict when S3 changed too). To edit everything, load the
+// whole bucket into local (Edit › Load mode).
 
 import { errText } from '../core/api.js';
 import { esc, icon } from '../core/dom.js';
@@ -54,10 +56,13 @@ async function track(jobId: number | null, what: string): Promise<void> {
   if (jobId == null) return;
   try {
     const j = await waitJob(jobId);
-    const r = (j as { result?: { downloaded?: number; skipped?: number; removed?: number; cancelled?: boolean } }).result;
+    const r = (j as { result?: { downloaded?: number; skipped?: number; removed?: number; kept?: number; conflicts?: string[];
+      cancelled?: boolean } }).result;
     if (r?.cancelled) toast(`${what}: cancelled`);
     else toast(`${what}: done${r?.downloaded != null ? ` · ${fmtN(r.downloaded)} downloaded` : ''}${r?.skipped ? ` · ${fmtN(r.skipped)} unchanged` : ''}` +
-      `${r?.removed ? ` · ${fmtN(r.removed)} removed` : ''}`, 'ok');
+      `${r?.removed ? ` · ${fmtN(r.removed)} removed` : ''}${r?.kept ? ` · ${fmtN(r.kept)} local edit${r.kept === 1 ? '' : 's'} kept` : ''}` +
+      `${r?.conflicts?.length ? ` (${fmtN(r.conflicts.length)} also changed in S3: Upload to S3 lists them)` : ''}`,
+      r?.conflicts?.length ? '' : 'ok');
   } catch (e) {
     toast(`${what} failed: ${errText(e)}`, 'err');
   }
@@ -82,7 +87,7 @@ export async function openUpdate(bid: string, row: LocalRow): Promise<void> {
   await openDialog({
     title: `Update ${name} from S3`, ok: 'Update',
     body: `<p>${d && !d.error ? `S3 changed since the download${row.checked_at ? ` (checked ${esc(timeAgo(row.checked_at))})` : ''}: <b>${esc(diffText(row) || 'nothing')}</b>.` : 'Downloads what S3 has now.'}</p>` +
-      '<p class="hint">New and changed files are downloaded; unchanged ones are skipped. An S3 file replaces a local edit of the same name, and files you deleted here come back.</p>' +
+      '<p class="hint">New and changed files are downloaded; unchanged ones are skipped. Files you edited here are kept (Upload to S3 sends them; it reports a conflict when S3 changed them too), and files you deleted here come back.</p>' +
       (removed ? `<label class="check"><input type="checkbox" id="bk-upd-mirror"> Also remove the ${fmtN(removed)} local file${removed === 1 ? '' : 's'} S3 no longer has</label>` : ''),
     onOk: async (root) => {
       const mirror = !!root.querySelector<HTMLInputElement>('#bk-upd-mirror')?.checked;

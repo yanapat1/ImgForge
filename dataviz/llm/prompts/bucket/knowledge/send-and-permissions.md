@@ -10,6 +10,15 @@ summary: send_to_session targets and task types, what each permission (bucket.ma
   can.label / can.linked` with the reason, whether its labels are imported, and what it can be re-formatted to.
   A folder with only images works for both (Visualize shows whole images, Label starts empty). COCO opens in
   Visualize only through a linked session; YOLO OBB, classification folders and embeddings cannot be linked.
+  A streamed S3 folder read for the first time answers `scanning: true` + `job_id` (the folder is being listed in
+  S3): `job_status` it, then `session_check` again; a send / create / re-format meanwhile answers "still reading …
+  from S3 (job N)".
+- **Streamed S3 folders.** Nothing is ever written to S3 by a session. A downloaded folder (or one inside it) is sent
+  from its local copy, like a local bucket. Otherwise the images stream from S3: Visualize alone downloads only the
+  folder's `labels/` and data.yaml / classes.txt (a download job, `visualize.job_id`), so its label fixes land in
+  that local copy, are marked in Bucket, and go to S3 only with Upload to S3 (`push_to_s3`; a conflict when S3
+  changed the file too). A Label session (or both, linked) keeps its labels in the labeling database. Class names
+  come from the folder's data.yaml in S3.
 - Sessions are made only from data in a bucket: new data goes into Bucket first (upload, link a folder, an S3
   link, import from the web), then Image › Create session picks the bucket folder.
 - `send_to_session` also opens folders / files as a **visualize** session alone (formats yolo-detect / seg / pose / obb, images,

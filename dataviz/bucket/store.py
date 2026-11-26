@@ -1289,7 +1289,7 @@ class S3View:
         except Exception:  # noqa: BLE001
             return None
 
-    def pull(self, dest, progress=None, cancelled=None, workers=16, rel='', mirror=False, listed=None):
+    def pull(self, dest, progress=None, cancelled=None, workers=16, rel='', mirror=False, listed=None, keep=None):
         """Download every object below the prefix (below its folder `rel` only, written to dest/rel) into folder
         `dest` ("load into local"): an object replaces the local file of the same name unless that file is unchanged
         (same size, and the mtime every download sets to the object's LastModified). Local files S3 does not have
@@ -1297,6 +1297,9 @@ class S3View:
         while the (parallel) listing runs; an object of BIG bytes or more is fetched in parallel ranges.
         listed(key, size, last_modified): called for every object listed (the download's manifest,
         bucket/cloudiff.Manifest).
+        keep: {key: (size, last_modified)} of local files edited since the last download (their manifest rows):
+        they are never replaced nor removed (`kept`), and their manifest row stays the version they were edited
+        from, so Upload to S3 still sees a conflict when S3 changed meanwhile (`conflicts`: those keys).
         -> {downloaded, skipped, bytes (downloaded), size (of every object), failed, total, removed}."""
         progress = progress or (lambda *a, **k: None)
         stop = cancelled or (lambda: False)
@@ -1306,6 +1309,8 @@ class S3View:
         pre = self.base + (rel + '/' if rel else '')
         n = {'found': 0, 'done': 0, 'skipped': 0, 'bytes': 0, 'size': 0, 'listing': True, 'last': 0.0}
         failed, futs, seen = [], {}, set()
+        keep = keep or {}
+        kept, conflicts = [], []
 
         def fetch(k, size, lm):
             dst = dest / k
@@ -1368,6 +1373,16 @@ class S3View:
                     size, lm = int(o.get('Size') or 0), o.get('LastModified')
                     n['size'] += size
                     ts = lm.timestamp() if lm is not None else None
+                    base = keep.get(k)
+                    if base is not None:                    # edited here: the local file stays as it is
+                        if listed is not None:
+                            listed(k, base[0], base[1])
+                        kept.append(k)
+                        if base[0] != size or base[1] is None or ts is None or abs(base[1] - ts) > 1:
+                            conflicts.append(k)
+                        n['skipped'] += 1
+                        n['done'] += 1
+                        continue
                     if listed is not None:
                         listed(k, size, ts)
                     if _unchanged(dest / k, size, ts):
@@ -1393,12 +1408,13 @@ class S3View:
         top = dest / rel if rel else dest
         if mirror and not stop() and top.is_dir():
             for path, _isdir, absp in list(walk_files(top, rel)):
-                if path not in seen:
+                if path not in seen and path not in keep:
                     _try(os.unlink, absp)
                     removed += 1
             _prune_empty(top)
-        return {'downloaded': n['done'] - n['skipped'] - len(failed), 'skipped': n['skipped'], 'bytes': n['bytes'],
-                'size': n['size'], 'failed': failed[:50], 'total': n['found'], 'removed': removed}
+        return {'downloaded': n['done'] - n['skipped'] - len(failed), 'skipped': n['skipped'] - len(kept),
+                'bytes': n['bytes'], 'size': n['size'], 'failed': failed[:50], 'total': n['found'], 'removed': removed,
+                'kept': len(kept), 'conflicts': conflicts[:50], 'kept_paths': kept}
 
     def close(self):
         if self.shared:

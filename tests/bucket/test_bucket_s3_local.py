@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from conftest import jpeg_bytes, wait_job
+from conftest import jpeg_bytes, scanned, wait_job
 from conftest_io import free_port
 
 pytestmark = pytest.mark.usefixtures('tmp_roots')
@@ -301,14 +301,15 @@ def test_compare_the_local_copy_with_the_cloud(dc, s3_server, s3_bucket):
 
     # an S3 deletion after the download; a file re-saved with the same bytes reads as same with verify
     client.delete_object(Bucket=bucket, Key='cats/new.jpg')
-    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])   # update
+    upd = wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cats']}).json()['job_id'])   # update
+    assert upd['result']['kept'] == 1 and upd['result']['conflicts'] == []     # the local edit stays (S3 did not change it)
     time.sleep(3.2)
     client.delete_object(Bucket=bucket, Key='cats/im2.jpg')
     os.utime(os.path.join(copy, 'cats', 'im1.jpg'))                       # touched, same bytes
     got = _compare(c, bid, 'cats', verify=True)
     st = {x['path']: (x['status'], x.get('verified')) for x in got['rows']}
     assert st['cats/im2.jpg'][0] == 'removed_cloud' and st['cats/im1.jpg'] == ('same', 'match'), st
-    assert st['cats/im0.jpg'][0] == 'same'                                   # the update took S3's version
+    assert st['cats/im0.jpg'][0] == 'edited_local'                           # the update kept the local edit
     assert got['verify'] is True
     # the ◆ assistant reads the same comparison (read-only tool); refresh compares again
     from dataviz.llm import tools
@@ -343,16 +344,107 @@ def test_reformat_a_streamed_folder_keeps_the_images_in_s3(dc, s3_server, s3_buc
     wait_job(c, b['scan_job_id'])
     _ls(c, b['id'], 'cars')
     r = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'cars', 'to': 'yolo'})
+    assert r.status_code == 409 and 'still reading cars from S3' in r.json()['detail']    # not listed yet
+    assert scanned(c, b['id'], 'cars')['format'] == 'yolo-detect'
+    r = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'cars', 'to': 'yolo'})
     assert r.status_code == 200, r.text
     out = r.json()
     j = wait_job(c, out['job_id'], timeout=60)
     assert j['status'] == 'done' and j['result']['streamed'] and j['result']['images_linked'] == 0, j
     assert sorted(o['Key'] for o in client.list_objects_v2(Bucket=bucket)['Contents']) == before, 'S3 untouched'
     chk = c.get(f'/api/bucket/buckets/{out["bucket"]}/session-check', params={'path': out['path']}).json()
-    assert chk['format'] == 's3-labels' and chk['can'] == {'visualize': True, 'label': False, 'linked': False}, chk
+    assert chk['format'] == 's3-labels' and chk['can'] == {'visualize': True, 'label': True, 'linked': True}, chk
+    assert chk['label_import'] == 'imported'
     s = c.post('/api/bucket/session', json={'bucket': out['bucket'], 'path': out['path'], 'label': False})
     assert s.status_code == 200, s.text
     ds = c.ctx.datasets.dataset(s.json()['visualize']['id'])
     assert ds['kind'] == 's3' and ds['labels_dir'].endswith(out['path']) and ds['prefix'] == 'cars'
     src = c.ctx.datasets.source(ds)
     assert src.list_labels() == ['im0.txt', 'im1.txt'] and src.list_images() == ['im0.jpg', 'im1.jpg']
+    assert src.label_writable                            # its fixes go to these local labels
+    # both, linked: the Label session streams the images from S3 and imports the local labels
+    s = c.post('/api/bucket/session', json={'bucket': out['bucket'], 'path': out['path'], 'name': 'cars linked'})
+    assert s.status_code == 200, s.text
+    lab = s.json()['label']
+    assert s.json()['linked'] and lab.get('import_job_id'), s.json()
+    wait_job(c, lab['job_id'], timeout=60)
+    imp = wait_job(c, lab['import_job_id'], timeout=60)
+    assert imp['status'] == 'done' and imp['result']['images'] == 2 and imp['result']['annotations'] == 2, imp
+    entry = c.ctx.labeling.get(lab['id'])
+    assert entry['source']['kind'] == 's3' and entry['source']['prefix'] == 'cars'
+    assert sorted(o['Key'] for o in client.list_objects_v2(Bucket=bucket)['Contents']) == before, 'S3 untouched'
+
+
+def _yolo_in_s3(client, bucket, folder='cars', n=2):
+    for i in range(n):
+        client.put_object(Bucket=bucket, Key=f'{folder}/images/im{i}.jpg', Body=jpeg_bytes())
+        client.put_object(Bucket=bucket, Key=f'{folder}/labels/im{i}.txt', Body=b'0 0.5 0.5 0.2 0.2\n')
+    client.put_object(Bucket=bucket, Key=f'{folder}/data.yaml', Body=b'names:\n  0: car\n  1: bus\n')
+
+
+def test_a_streamed_visualize_session_fixes_labels_locally_and_uploads_them(dc, s3_server, s3_bucket):
+    """Visualize alone on a streamed YOLO folder: its labels/ (+ data.yaml) is downloaded as a downloaded folder and the
+    session reads its labels there, so a label fix never writes S3: it is marked in Bucket, kept by a later download,
+    and Upload to S3 sends it (a conflict when S3 changed it too). The class names come from data.yaml in S3."""
+    c = dc
+    client, bucket = s3_bucket
+    _yolo_in_s3(client, bucket)
+    conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'}).json()
+    b = c.post('/api/bucket/buckets', json={'name': 'road', 'kind': 's3', 'connection_id': conn['id'],
+                                        's3_bucket': bucket, 'prefix': ''}).json()
+    wait_job(c, b['scan_job_id'])
+    bid = b['id']
+    chk = scanned(c, bid, 'cars')
+    assert chk['format'] == 'yolo-detect' and chk['streamed'] and chk['classes'] == ['car', 'bus'], chk
+    r = c.post('/api/bucket/session', json={'bucket': bid, 'path': 'cars', 'label': False, 'name': 'Cars viz'})
+    assert r.status_code == 200, r.text
+    viz = r.json()['visualize']
+    assert wait_job(c, viz['job_id'])['status'] == 'done', 'the labels were downloaded'
+    ds = c.ctx.datasets.dataset(viz['id'])
+    assert ds['kind'] == 's3' and ds['prefix'] == 'cars' and ds['labels_dir'].endswith('cars')
+    src = c.ctx.datasets.source(ds)
+    assert src.label_writable and src.list_labels() == ['im0.txt', 'im1.txt'] and src.read_classes() == ['car', 'bus']
+    assert _states(_ls(c, bid, 'cars'))['labels'] == 'fresh'
+
+    from dataviz.bucket import changes
+    from dataviz.image import sources
+    changes.install()
+    old = src.read_label_bytes('im0.txt')
+    src.write_label('im0.txt', '1 0.5 0.5 0.3 0.3\n', sources.sha1_bytes(old))      # a fix made in Visualize
+    assert client.get_object(Bucket=bucket, Key='cars/labels/im0.txt')['Body'].read() == old, 'S3 untouched'
+    changes.flush()
+    marks = {e['name']: e.get('changed') for e in _ls(c, bid, 'cars/labels')['entries']}
+    assert marks['im0.txt'] and not marks['im1.txt'], marks
+    # a download again keeps the fix
+    j = wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cars/labels']}).json()['job_id'])
+    assert j['result']['kept'] == 1 and src.read_label('im0.txt').startswith('1 '), j['result']
+    # Upload to S3 sends it
+    r = c.post(f'/api/bucket/buckets/{bid}/push', json={'paths': ['cars/labels']})
+    assert r.status_code == 200, r.text
+    res = wait_job(c, r.json()['job_id'])['result']
+    assert res['uploaded'] == 1 and not res['conflicts'], res
+    assert client.get_object(Bucket=bucket, Key='cars/labels/im0.txt')['Body'].read().startswith(b'1 ')
+
+
+def test_a_downloaded_folder_makes_a_local_session_and_plain_streams_are_read_only(dc, s3_server, s3_bucket):
+    c = dc
+    client, bucket = s3_bucket
+    _yolo_in_s3(client, bucket)
+    conn = c.post('/api/connections', json={**{k: v for k, v in s3_server.items() if k != 'id'}, 'kind': 's3'}).json()
+    b = c.post('/api/bucket/buckets', json={'name': 'road', 'kind': 's3', 'connection_id': conn['id'],
+                                        's3_bucket': bucket, 'prefix': ''}).json()
+    wait_job(c, b['scan_job_id'])
+    bid = b['id']
+    wait_job(c, c.post(f'/api/bucket/buckets/{bid}/local', json={'paths': ['cars']}).json()['job_id'])
+    chk = scanned(c, bid, 'cars')
+    assert not chk['streamed'], 'a downloaded folder is read from its local copy'
+    r = c.post('/api/bucket/session', json={'bucket': bid, 'path': 'cars', 'label': False})
+    assert r.status_code == 200, r.text
+    ds = c.ctx.datasets.dataset(r.json()['visualize']['id'])
+    assert ds['kind'] == 'local' and ds['path'].endswith('cars') and 'job_id' not in r.json()['visualize']
+    # an S3 source without local labels never writes S3
+    from dataviz.image import sources
+    s3 = sources.S3Source(c.ctx.datasets.connection(conn['id'], owner_id=c.user['id']), bucket, 'cars')
+    assert not s3.label_writable
+    with pytest.raises(ValueError, match='not kept locally'):
+        s3.write_label('im0.txt', '0 0.5 0.5 0.1 0.1\n')

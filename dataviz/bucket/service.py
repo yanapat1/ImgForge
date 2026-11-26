@@ -378,6 +378,28 @@ def _scan_soon(user, r, rel=''):
                        public_result=True, owner=(user or {}).get('id') or r.owner_id).id
 
 
+def _scanned(user, r, rel, want_tree=False):
+    """The format cache entry of folder `rel`, or for a streamed S3 folder not read yet None + the id of the scan
+    job reading it (a full S3 listing never runs inside a request) -> (entry | None, job id | None)."""
+    if r.kind != 's3':
+        return _cached(r, rel, want_tree=want_tree), None
+    ent = _cached(r, rel, want_tree=want_tree, user=user, wait=False)
+    if ent is not None:
+        return ent, None
+    jid = _scan_soon(user, r, rel)                    # the queued one when it runs already; inline from the CLI
+    if jid is None:
+        return _cached(r, rel, want_tree=want_tree, user=user, wait=False), None
+    return None, jid
+
+
+def _need_scanned(user, r, rel, want_tree=False):
+    """_scanned, or a 409 naming the scan job when the S3 folder is still being read."""
+    ent, jid = _scanned(user, r, rel, want_tree)
+    if ent is None:
+        raise BucketError(f'still reading {rel or r.name} from S3 (job {jid}): try again when it finished', 409)
+    return ent
+
+
 def _revalidate(r):
     """Re-detect the bucket root (forced) and swap its auto tag -> retagged or None. A change in the downloaded
     folders of a streamed link only asks for a new comparison with S3 (the copy is partial: the format is S3's)."""
@@ -1702,7 +1724,8 @@ def fetch_local(user, bid, paths, mirror=False):
     def fn(job=None):
         cancelled = (lambda: job.cancelled.is_set()) if job is not None else (lambda: False)
         view = _s3(r)
-        out = {'downloaded': 0, 'skipped': 0, 'bytes': 0, 'removed': 0, 'failed': [], 'paths': rels}
+        out = {'downloaded': 0, 'skipped': 0, 'bytes': 0, 'removed': 0, 'failed': [], 'paths': rels, 'kept': 0,
+               'conflicts': []}
         try:
             for i, p in enumerate(rels):
                 if cancelled():
@@ -1711,21 +1734,25 @@ def fetch_local(user, bid, paths, mirror=False):
                 def prog(d=None, t=None, stage=None, extra=None, p=p, i=i):
                     if job is not None:
                         job.progress(d, t, f'{p or "all"} ({i + 1}/{len(rels)}): {stage}' if stage else None, extra)
+                keep = _local_edits(r, p)                    # edited here since the download: never replaced
                 try:
                     with cloudiff.Manifest(_manifest(r), p) as m:     # what S3 held: Compare with cloud reads it
                         if p and view.what(p) == 'file':
-                            res = _fetch_file(view, dest, p, m.add)
+                            res = _fetch_file(view, dest, p, m.add, keep)
                         else:
-                            res = view.pull(dest, prog, cancelled, rel=p, mirror=mirror, listed=m.add)
+                            res = view.pull(dest, prog, cancelled, rel=p, mirror=mirror, listed=m.add, keep=keep)
                         if cancelled():
                             raise _Stopped
                 except _Stopped:
                     pass
-                for k in ('downloaded', 'skipped', 'bytes', 'removed'):
-                    out[k] += res[k]
+                for k in ('downloaded', 'skipped', 'bytes', 'removed', 'kept'):
+                    out[k] += res.get(k, 0)
                 out['failed'] += res['failed']
+                out['conflicts'] += res.get('conflicts', [])
                 if not cancelled():                        # these files are S3's version again: no mark
-                    store._try(lambda p=p: changes.clear_exact(r.id, [k for k, _, _ in cloudiff.rows_under(_manifest(r), p)]))
+                    held = set(res.get('kept_paths') or ())
+                    store._try(lambda p=p, held=held: changes.clear_exact(
+                        r.id, [k for k, _, _ in cloudiff.rows_under(_manifest(r), p) if k not in held]))
                 if p in own:
                     _set_local(r.id, p, state='outdated' if cancelled() or res['failed'] else 'fresh',
                                objects=res['total'], bytes=res['size'], diff=None, fetched=True, checked=True)
@@ -1741,6 +1768,7 @@ def fetch_local(user, bid, paths, mirror=False):
             view.close()
             s3dir.invalidate(r.id)
         out['failed'] = out['failed'][:50]
+        out['conflicts'] = out['conflicts'][:50]
         out['cancelled'] = cancelled()
         return out
 
@@ -1761,10 +1789,32 @@ def _manifest(r):
     return cloudiff.manifest_path(store.data_root(_cfg()), r.id)
 
 
-def _fetch_file(view, dest, rel, listed=None):
-    """Download one object as a pull would (mtime = its LastModified, so it reads as unchanged later)."""
+def _local_edits(r, rel):
+    """{path: (size, lm)} of the manifest rows below `rel` whose local file left what the download wrote (a label
+    fix, an edit in the Bucket editor, a script): S3View.pull keeps these files."""
+    if not r.local_root:
+        return {}
+    out = {}
+    for k, size, lm in cloudiff.rows_under(_manifest(r), rel):
+        p = os.path.join(r.local_root, k)
+        if os.path.isfile(p) and not store._unchanged(p, size, lm):
+            out[k] = (size, lm)
+    return out
+
+
+def _fetch_file(view, dest, rel, listed=None, keep=None):
+    """Download one object as a pull would (mtime = its LastModified, so it reads as unchanged later); a file in
+    `keep` (edited here) stays as it is."""
     h = view.client.head_object(Bucket=view.bucket, Key=view.key(rel))
     size, lm = int(h.get('ContentLength') or 0), h.get('LastModified')
+    base = (keep or {}).get(rel)
+    if base is not None:
+        if listed is not None:
+            listed(rel, base[0], base[1])
+        ts = lm.timestamp() if lm is not None else None
+        changed = base[0] != size or base[1] is None or ts is None or abs(base[1] - ts) > 1
+        return {'downloaded': 0, 'skipped': 0, 'bytes': 0, 'size': size, 'removed': 0, 'failed': [], 'total': 1,
+                'kept': 1, 'conflicts': [rel] if changed else [], 'kept_paths': [rel]}
     if listed is not None:
         listed(rel, size, lm.timestamp() if lm is not None else None)
     dst = os.path.join(dest, rel)
@@ -1858,8 +1908,7 @@ def _check_job(user, r):
 def _mark_local_edits(r, rel):
     """Files of downloaded folder `rel` whose size / mtime left what the download wrote (the manifest): edited outside
     the app (a script, another tool). Marked `external` unless the app already marked them."""
-    edited = [k for k, size, lm in cloudiff.rows_under(_manifest(r), rel)
-              if os.path.isfile(os.path.join(r.local_root, k)) and not store._unchanged(os.path.join(r.local_root, k), size, lm)]
+    edited = list(_local_edits(r, rel))
     if edited:
         changes.record(r.id, edited, 'external', 'external', None, keep=True)
     return len(edited)
@@ -2855,7 +2904,7 @@ def send(user, bid, paths, target='visualize', name=None, task_type='detect'):
     rel = store.clean_rel(paths[0])
     if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
         raise BucketError(f'{rel} is a file: send the folder that holds it')
-    fmt = _cached(r, rel)['format']
+    fmt = _need_scanned(user, r, rel)['format']
     base = r.name + (f' · {rel}' if rel else '')
     if target == 'visualize':
         return _send_visualize(user, r, rel, fmt, (name or '').strip())
@@ -2896,7 +2945,9 @@ def session_check(user, bid, path=''):
     rel = store.clean_rel(path)
     if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
         raise BucketError(f'{rel} is a file: pick the folder that holds it')
-    ent = _cached(r, rel, want_tree=True)
+    ent, jid = _scanned(user, r, rel, want_tree=True)
+    if ent is None:                     # a streamed folder not read yet: the dialog waits for the scan, then asks again
+        return {'bucket': r.id, 'path': rel, 'scanning': True, 'job_id': jid, 'streamed': True}
     fmt, tree = ent['format'], ent.get('tree') or {}
     f = fmt.get('format') or 'other'
     s3l = _s3_labels(r, rel)
@@ -2913,9 +2964,27 @@ def session_check(user, bid, path=''):
     both = can['linked']
     return {'bucket': r.id, 'path': rel, 'format': f, 'label': fmt.get('label'), 'confidence': fmt.get('confidence'),
             'reason': fmt.get('reason'), 'images': tree.get('images'), 'labels': tree.get('labels'),
-            'classes': names[:200] or fmt.get('classes'), 'streamed': r.kind == 's3' and not _writable(r),
+            'classes': names[:200] or fmt.get('classes'), 'streamed': _streamed(r) and _covered(r, rel) is None,
             'can': can, 'label_import': sup['labels'], 'note': sup['note'], 'convert_to': list(sup['to']),
             'default': {'visualize': both or can['visualize'], 'label': both or (can['label'] and not can['visualize'])}}
+
+
+def _checked(user, bid, rel):
+    """session_check, or a 409 naming the scan job while a streamed S3 folder is still being read."""
+    chk = session_check(user, bid, rel)
+    if chk.get('scanning'):
+        raise BucketError(f'still reading {rel or "the bucket"} from S3 (job {chk["job_id"]}): try again when it '
+                          'finished', 409)
+    return chk
+
+
+def _label_import(r, rel, chk, entry, tid):
+    """The label import body of a new Label session of folder `rel`: from the project's own source, or for a
+    Re-format folder of a streamed one (its images stream from S3) its local YOLO labels (format named: the folder's
+    source.json is not a COCO file)."""
+    s3l = chk['format'] == 's3-labels'
+    return {'task_id': tid, 'format': 'yolo' if s3l else 'auto', 'mode': 'merge', 'add_classes': True,
+            'source': {'kind': 'local', 'path': _abs(r, rel)} if s3l else entry['source']}
 
 
 def create_session(user, bid, path='', visualize=True, label=True, name=None, task_type='detect'):
@@ -2927,7 +2996,7 @@ def create_session(user, bid, path='', visualize=True, label=True, name=None, ta
         raise BucketError('choose Visualize, Label or both')
     r = _row(user, bid)
     rel = store.clean_rel(path)
-    chk = session_check(user, bid, rel)
+    chk = _checked(user, bid, rel)
     name = (name or '').strip()
     if not (visualize and label):
         out = send(user, bid, [rel], 'visualize' if visualize else 'label', name or None, task_type)
@@ -2944,8 +3013,7 @@ def create_session(user, bid, path='', visualize=True, label=True, name=None, ta
     hook = getattr(_conf['ctx'], 'label_import', None) if _conf['ctx'] is not None else None
     if chk['label_import'] == 'imported' and hook is not None:     # the folder's own labels become the project's
         try:
-            lab['import_job_id'] = hook(pid, {'task_id': tid, 'format': 'auto', 'source': entry['source'], 'mode': 'merge',
-                                              'add_classes': True}, user)['job_id']
+            lab['import_job_id'] = hook(pid, _label_import(r, rel, chk, entry, tid), user)['job_id']
         except Exception as e:  # noqa: BLE001 - the session exists: say the labels were not brought along
             lab['import_error'] = str(getattr(e, 'detail', e))[:300]
     from ..core.names import unique_name
@@ -2988,7 +3056,7 @@ def reformat(user, bid, path='', to='coco', dest_bucket=None, dest_path=None):
         keys = lw.check([to])
     except ValueError as e:
         raise BucketError(str(e)) from None
-    chk = session_check(user, bid, rel)
+    chk = _checked(user, bid, rel)
     task_type = REFORMAT_FROM.get(chk['format'])
     if task_type is None:
         raise BucketError(f'{rel or r.name} is “{chk["label"]}”: re-format reads YOLO detect / segment / pose and COCO '
@@ -3158,7 +3226,7 @@ def session_info(user, did):
     streamed, can_export, can_label, note}."""
     from ..labeling import writers as lw
     r, rel, ds = session_folder(user, did)
-    chk = session_check(user, r.id, rel)
+    chk = _checked(user, r.id, rel)
     tt = REFORMAT_FROM.get(chk['format'])
     fmts = [{'key': m['key'], 'label': m['label']} for m in lw.for_task(TASK_TYPES[tt], 'image')] if tt else []
     base = rel.rsplit('/', 1)[-1] or r.name
@@ -3186,7 +3254,7 @@ def session_to_label(user, did, name=None, task_type=None):
     never copied) whose labels are imported from the folder's label files. -> {target, id, url, name, job_id,
     import_job_id?}."""
     r, rel, ds = session_folder(user, did)
-    chk = session_check(user, r.id, rel)
+    chk = _checked(user, r.id, rel)
     tt = task_type or REFORMAT_FROM.get(chk['format']) or 'detect'
     made = send(user, r.id, [rel], 'label', name or ds.get('name') or None, tt)
     hook = getattr(_conf['ctx'], 'label_import', None) if _conf['ctx'] is not None else None
@@ -3194,8 +3262,7 @@ def session_to_label(user, did, name=None, task_type=None):
         try:
             entry = _labeling().get(made['id'])
             tid = _labeling().store(made['id']).tasks()[0]['id']
-            made['import_job_id'] = hook(made['id'], {'task_id': tid, 'format': 'auto', 'source': entry['source'],
-                                                      'mode': 'merge', 'add_classes': True}, user)['job_id']
+            made['import_job_id'] = hook(made['id'], _label_import(r, rel, chk, entry, tid), user)['job_id']
         except Exception as e:  # noqa: BLE001 - the project exists: say the labels were not brought along
             made['import_error'] = str(getattr(e, 'detail', e))[:300]
     return made
@@ -3275,9 +3342,15 @@ def _send_visualize(user, r, rel, fmt, name):
                       'plain image folders, classification folders and embeddings (.npy + meta.csv). '
                       + ('Convert it to YOLO first.' if f in ('coco', 'voc') else ''))
     body = {'name': name or None}
-    if r.kind == 's3':
+    job_id = None
+    local = _covered(r, rel)
+    if local is not None:               # a downloaded folder: the session reads (and fixes) the local copy
+        body.update(kind='embeddings' if f == 'embeddings' else 'local', path=local)
+    elif r.kind == 's3':
         body.update(kind='s3', connection_id=r.connection_id, bucket=r.s3_bucket,
                     prefix='/'.join(p for p in (r.prefix.strip('/'), rel) if p), mode='stream')
+        if f.startswith('yolo-'):       # its labels/ is downloaded, so label fixes stay local (never written to S3)
+            body['labels_dir'], job_id = _fetch_labels(user, r, rel)
     else:
         body.update(kind='embeddings' if f == 'embeddings' else 'local', path=_abs(r, rel))
     if f == 'images':
@@ -3289,10 +3362,47 @@ def _send_visualize(user, r, rel, fmt, name):
         from ..image.embedding_source import EmbeddingSource
         check = lambda ds: EmbeddingSource(ds['path']).check()  # noqa: E731
     try:
-        ds = _datasets().upsert_dataset(body, user['id'], check, _allowed() if r.kind != 's3' else None)
+        ds = _datasets().upsert_dataset(body, user['id'], check,
+                                        _allowed() if r.kind != 's3' or body['kind'] != 's3' or job_id else None)
     except (ValueError, KeyError) as e:
         raise BucketError(str(e).strip("'\"")) from None
-    return {'target': 'visualize', 'id': ds['id'], 'url': f's/{ds["id"]}/', 'name': ds['name']}
+    out = {'target': 'visualize', 'id': ds['id'], 'url': f's/{ds["id"]}/', 'name': ds['name']}
+    if job_id is not None:
+        out['job_id'] = job_id
+    return out
+
+
+def _covered(r, rel):
+    """The local copy of folder `rel` of a streamed S3 link when it lies in a downloaded folder (not downloading
+    now, present on disk), else None: a session made from it reads that copy, like a local bucket."""
+    if not _streamed(r) or not r.local_root:
+        return None
+    c = _cover(_local_rows(r.id), rel)
+    p = os.path.join(r.local_root, rel) if rel else r.local_root
+    if c is None or c['state'] in ('fetching', 'error') or _busy(f'bk-fetch:{r.id}:') or not os.path.isdir(p):
+        return None
+    return p
+
+
+LABEL_FILES = ('classes.txt', 'data.yaml', 'data.yml', 'dataset.yaml')
+
+
+def _fetch_labels(user, r, rel):
+    """Download labels/ (+ the class files) of streamed YOLO folder `rel` into the link's local copy, as downloaded
+    folders: a Visualize session keeps its labels there, so its label fixes are marked in Bucket and go to S3 only
+    with Upload to S3. A download again keeps fixes made since. -> (the labels_dir, the download job id)."""
+    view = _s3(r, rel, shared=True)
+    try:
+        if view.what('labels') != 'dir':
+            raise BucketError(f'{rel or r.name} has no labels/ folder in S3')
+        want = [store.join(rel, 'labels')] + [store.join(rel, n) for n in LABEL_FILES if view.what(n) == 'file']
+    except store.Offline as e:
+        raise BucketError(f'cannot reach S3 to download the labels: {e.message}', 503) from None
+    root = _local_root(r)
+    labels_dir = os.path.join(root, rel) if rel else root
+    os.makedirs(os.path.join(labels_dir, 'labels'), exist_ok=True)    # the dataset check wants labels/ at once
+    job = fetch_local(user, r.id, want)
+    return labels_dir, job['job_id']
 
 
 def _send_label(user, r, rel, fmt, name, task_type):
@@ -3318,23 +3428,42 @@ def _send_label(user, r, rel, fmt, name, task_type):
             'job_id': job_id}
 
 
+YAML_MAX = 64 << 10                 # bytes of a data YAML read from S3 for its class names
+
+
 def _yaml_names(r, rel):
-    """(class names, kpt_shape) from the data YAML of a local folder; ([], None) for S3 or without one."""
-    if r.kind == 's3':
-        return [], None
+    """(class names, kpt_shape) from the data YAML of a folder (its local copy when downloaded; a streamed one reads
+    only the YAML files at its top from S3); ([], None) without one or when S3 cannot be reached."""
+    local = _covered(r, rel)
     try:
-        tree = formats.LocalTree(_abs(r, rel))
-        names, kpt, _ = formats._yaml_info(tree, '', [n for n, d in tree.scan() if not d])
+        if r.kind != 's3' or local is not None:
+            tree = formats.LocalTree(local or _abs(r, rel))
+            files = [n for n, d in tree.scan() if not d]
+        else:
+            view = _s3(r, rel, shared=True)
+            files = [n for n in LABEL_FILES if view.what(n) == 'file']
+            if not files:
+                return [], None
+            tree = formats.KeyTree({n: 0 for n in files}, lambda p, n: view.read(p, min(n or YAML_MAX, YAML_MAX))[0])
+        names, kpt, _ = formats._yaml_info(tree, '', files)
         return list(names or []), kpt
-    except BucketError:
+    except (BucketError, OSError, ValueError):
         return [], None
 
 
 def _label_source(r, rel):
-    """The labeling-project source of folder `rel` (images are referenced in place, never copied)."""
+    """The labeling-project source of folder `rel` (images are referenced in place, never copied): a downloaded
+    folder's local copy, the S3 images of a Re-format folder of a streamed one, else the folder itself."""
+    local = _covered(r, rel)
+    if local is not None:
+        return {'kind': 'local', 'path': local}
     if r.kind == 's3':
         return {'kind': 's3', 'connection_id': r.connection_id, 'bucket': r.s3_bucket,
                 'prefix': '/'.join(p for p in (r.prefix.strip('/'), rel) if p)}
+    s3l = _s3_labels(r, rel)
+    if s3l is not None:
+        return {'kind': 's3', 'connection_id': s3l['connection_id'], 'bucket': s3l['s3_bucket'],
+                'prefix': str(s3l.get('prefix') or '')}
     return {'kind': 'local', 'path': _abs(r, rel)}
 
 
@@ -3345,7 +3474,7 @@ def source(user, bid, path=''):
     rel = store.clean_rel(path)
     if r.kind != 's3' and not os.path.isdir(_abs(r, rel)):
         raise BucketError(f'{rel} is a file: pick the folder that holds it')
-    fmt = _cached(r, rel)['format']
+    fmt = _need_scanned(user, r, rel)['format']
     names, _ = _yaml_names(r, rel)
     return {'source': _label_source(r, rel), 'format': fmt, 'classes': names[:500], 'bucket': r.id, 'path': rel,
             'name': r.name + (f' · {rel}' if rel else '')}

@@ -251,6 +251,9 @@ def _reformat(user, a):
 def _session_check(user, a):
     b = resolve_bucket(user, a['bucket'])
     res = _svc().session_check(user, b['id'], a.get('path') or '')
+    if res.get('scanning'):
+        return res, (f'→ still reading the folder from S3 (job {res["job_id"]}): job_status it, then call '
+                     'session_check again')
     can = [k for k in ('visualize', 'label', 'linked') if res['can'][k]]
     return res, f'→ {res.get("label") or res["format"]}: ' + (', '.join(can) if can else 'no session can read it')
 
@@ -552,13 +555,15 @@ _add(Tool('remove_tags', 'Remove user tags (automatic format:* tags cannot be re
           lambda b, a: f'Untag {a.get("path") or "the bucket"} in {_bname(b, a)}: − {", ".join(a["tags"])}', s3_ok=True))
 _add(Tool('session_check', 'Before a session is made from a folder: its detected format, image / label counts, and '
                            'whether Visualize, Label and the linked pair work on it (and why not), whether its labels '
-                           'are imported into the Label session, and the formats it can be re-formatted to.',
+                           'are imported into the Label session, and the formats it can be re-formatted to. A '
+                           'streamed S3 folder read for the first time answers scanning + job_id: job_status it, '
+                           'then call session_check again.',
           _obj({'bucket': BUCKET, 'path': PATH}, ['bucket']), False, _session_check, s3_ok=True))
 _add(Tool('reformat_folder', 'Write a folder again in another label format (yolo, coco, voc, labelme, createml, csv) as '
                              'a NEW folder of the bucket "<bucket> · formats"; the original is not changed. Reads YOLO '
                              'detect / segment / pose and COCO labels. A local folder gets its images linked beside '
                              'the new labels; a streamed S3 folder gets the labels only, with images.txt and '
-                             'source.json (the images stay in S3; to yolo it opens in Visualize, images streamed). '
+                             'source.json (the images stay in S3; to yolo it opens in Visualize and Label, images streamed). '
                              'A background job: job_status says when it is done.',
           _obj({'bucket': BUCKET, 'path': PATH,
                 'to': {'type': 'string', 'enum': ['yolo', 'coco', 'voc', 'labelme', 'createml', 'csv'], 'description': 'the format to write'}},
@@ -597,7 +602,8 @@ _add(Tool('download_s3_folders', 'Download folders (or files) of a STREAMED S3 b
                                  'open, readable while S3 is unreachable, and EDITABLE (create_folder / move / rename '
                                  '/ delete / upload inside it change only the local copy, never S3); the rest keeps '
                                  'streaming and stays read-only. Run it '
-                                 'again on a downloaded folder to update it (new + changed files; unchanged skipped). '
+                                 'again on a downloaded folder to update it (new + changed files; unchanged skipped; '
+                                 'files edited here are kept, see the result\'s kept / conflicts). '
                                  'mirror also deletes local files S3 no longer has: only when the user asks.',
           _obj({'bucket': BUCKET, 'paths': A('folders / files to download'),
                 'mirror': {'type': 'boolean', 'description': 'also remove local files S3 no longer has'}},

@@ -176,7 +176,7 @@ def test_pull_streams_skips_unchanged_and_fetches_big_objects_in_ranges(s3_serve
     try:
         res = view.pull(tmp_path, lambda *a, **k: seen.append(a or k))
         assert res == {'downloaded': 4, 'skipped': 0, 'bytes': 300 + 3 * len('p/a/1.jpg'), 'failed': [], 'total': 4, 'removed': 0,
-                       'size': 300 + 3 * len('p/a/1.jpg')}
+                       'size': 300 + 3 * len('p/a/1.jpg'), 'kept': 0, 'conflicts': [], 'kept_paths': []}
         assert (tmp_path / 'big.mp4').read_bytes() == b'v' * 300 and (tmp_path / 'b' / '3.txt').read_bytes() == b'p/b/3.txt'
         assert not (tmp_path / '.hidden').exists() and not list(tmp_path.rglob('*.part'))
         assert seen[-1] == (4, 4, 'downloading', '0.0 MB')

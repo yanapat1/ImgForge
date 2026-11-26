@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from conftest import wait_job
+from conftest import scanned, wait_job
 from test_bucket_routes import dc, new_bucket, upload_zip  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.usefixtures('tmp_roots')
@@ -88,6 +88,7 @@ def test_export_a_streamed_session_into_s3(client_as, tmp_path, s3_server, s3_bu
     b = c.post('/api/bucket/buckets', json={'name': 'cloud', 'kind': 's3', 'connection_id': conn['id'],
                                           's3_bucket': bucket, 'prefix': ''}).json()
     wait_job(c, b['scan_job_id'])
+    scanned(c, b['id'], 'ds')
     did = _viz(c, b['id'], 'ds')
     info = c.get(f'/api/bucket/session-folder/{did}').json()
     assert info['path'] == 'ds' and info['streamed'] and info['dest']['path'] == 'ds/exports'
