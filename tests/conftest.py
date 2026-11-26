@@ -54,6 +54,7 @@ for _d in [_TESTS, *sorted(p for p in _TESTS.iterdir() if p.is_dir() and not p.n
         sys.path.insert(1, str(_d))
 
 
+@pytest.hookimpl(optionalhook=True)              # pytest-xdist's hook: ignored when xdist is not installed (CI)
 def pytest_xdist_auto_num_workers(config):
     """-n auto. xdist's default is one worker per core (128 here) at ~2 GiB each, which OOM-kills a 64 GiB container.
     Measured on 128 cores / 64 GiB: -n 8 89 s (22 GiB peak), 12 75 s (30 GiB), 16 70 s (32 GiB, a timing test flaked);
