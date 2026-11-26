@@ -65,6 +65,7 @@ def _make(tmp):
         'models': {'split_source': str(split)},
         'logging': {'http': False},
         'storage': {'allowed_roots': [str(tmp)]},
+        'image': {'bucket_only': False},              # these pages make sessions from temp folders, not buckets
     }))
     return ds, cfg
 
