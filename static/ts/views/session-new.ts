@@ -42,6 +42,9 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
   let root: HTMLElement | null = null;
   let seq = 0;
 
+  /** sessions made from other sessions (no bucket data): offered with or without buckets */
+  const fromSessions = (): string => (hasViz ? `<p class="hint sn-other">From sessions you already have: <button type="button" class="ghost sm" data-act="new-union">${icon('layers')}Combine sessions…</button>` +
+    `<button type="button" class="ghost sm" data-act="new-labeling">${icon('tag')}Visualize a labeling task…</button></p>` : '');
   const yes = (ok: boolean, text: string): string => `<span class="sn-can ${ok ? 'ok' : 'no'}">${icon(ok ? 'check' : 'x')}${text}</span>`;
   const formatHTML = (): string => {
     const c = S.check;
@@ -74,7 +77,7 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
   const body = (): string => {
     if (!S.buckets.length && !S.loading) {
       return `<div class="sn"><div class="note info">${icon('alert')}<span>You have no bucket yet. Sessions are made from data in Bucket: add your data there first.</span></div>` +
-        `<p><a href="${esc(bucketUrl(null, null))}">Add data in Bucket</a></p></div>`;
+        `<p><a href="${esc(bucketUrl(null, null))}">Add data in Bucket</a></p>${fromSessions()}</div>`;   // combining needs no bucket
     }
     const kind = (on: boolean, k: string, ico: string, title: string, txt: string, ok: boolean): string =>
       `<label class="dest-o sn-kind${on ? ' on' : ''}${ok ? '' : ' off'}"><input type="checkbox" data-sn="kind" value="${k}"${on ? ' checked' : ''}>` +
@@ -95,8 +98,7 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
       `<div class="f2"><label class="fld"><span>Session name</span><input type="text" class="txt" id="sn-name" autocomplete="off" placeholder="from the folder"></label>` +
       (S.label ? `<label class="fld"><span>Label task</span><select data-sn="task">${TASKS.map(([k, t]) => `<option value="${k}"${k === S.task ? ' selected' : ''}>${t}</option>`).join('')}</select></label>` : '') + '</div>' +
       (S.busy ? `<div class="sn-fmt"><span class="ct-spin"></span><span>${esc(S.busy)}</span></div>` : '') +
-      (hasViz ? `<p class="hint sn-other">From sessions you already have: <button type="button" class="ghost sm" data-act="new-union">${icon('layers')}Combine sessions…</button>` +
-        `<button type="button" class="ghost sm" data-act="new-labeling">${icon('tag')}Visualize a labeling task…</button></p>` : '') + '</div>';
+      fromSessions() + '</div>';
   };
   const paint = (): void => {
     if (!root) return;

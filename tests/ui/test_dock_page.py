@@ -99,7 +99,10 @@ def test_dock_on_home(server):  # noqa: F811 - the fixture
             })""")
             page.wait_for_selector('#ai-dock .dock-tasks:not(.hidden) .dock-drive:has-text("Model tab")')
             assert page.locator('#ai-dock .dock-steps li').count() == 2
-            assert page.inner_text('#ai-dock .dock-ring b').strip() == '50'
+            # the ring shows the chat's own measured context (its last answer), not the meta estimate
+            ring = page.locator('#ai-dock .dock-ring').first
+            assert page.inner_text('#ai-dock .dock-ring b').strip().isdigit()
+            assert (ring.get_attribute('title') or '').startswith('Context used:')
             _shot(page, 'dock-tasks')
 
             # the Agents strip folds to one line (the chat keeps the room), remembers it, and opens a waiting agent
