@@ -16,8 +16,9 @@ import { clickOutsideLasso, enableLasso, enableLasso3d, enableMiddleDrag, enable
 import { clearPicked, hoverDotId, OVERLAY, pickCard, showHoverDot, updateMarks } from '../plot/marks.js';
 import { bubbleAt, hoverOf, requestFit, scheduleRender, updateGrid } from '../plot/render.js';
 import { far2dIds, setExplainDot } from '../plot/explain.js';
-import { applyView, bindFeatureImport, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshTagList, runLabelQuality, saveSettings, SETTING_IDS, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './controls.js';
+import { applyRecipe, applyView, bindFeatureImport, clView, odView, exportCSV, loadView, openConfusion, reapplyInspect, markMethods, onGroupControls, refreshTagList, runLabelQuality, saveSettings, SETTING_IDS, toggleOff, topBy, updateMapDirty, updateMethodControls, updateTextSearch, updateModeControls, viewIdsVisible } from './controls.js';
 import { checkLabelsAI } from './assistant.js';
+import { PREP_IDS, writePrep } from './prep.js';
 import { dialogOpen, openDialog, trapTab } from './dialog.js';
 import { backToInspect, enableGalleryMarquee, marqueeEndedAt, narrowSelection, popSelection, renderGallery, setSelection } from './gallery.js';
 import { showMissedObjects } from './model.js';
@@ -132,6 +133,12 @@ export function bindEvents(): void {
   };
   $req<HTMLSelectElement>('method').onchange = () => { updateMethodControls(); updateMapDirty(); };
   $req<HTMLSelectElement>('proj-dims').onchange = () => { updateMapDirty(); };
+  // Preprocess: like the method, a change only marks the map; Default puts every control back
+  for (const id of PREP_IDS) $req(id).addEventListener(id.startsWith('prep-min') || id.startsWith('prep-br') || id === 'prep-fuse-w' ? 'input' : 'change', updateMapDirty);
+  $req('prep-reset').onclick = () => { writePrep(null); updateMapDirty(); };
+  // a recipe fills the fields it names and generates the map (the menu goes back to its placeholder)
+  const recipe = $req<HTMLSelectElement>('recipe');
+  recipe.onchange = () => { const id = recipe.value; recipe.value = ''; if (id) void applyRecipe(id); };
   $req('btn-apply').onclick = () => { void loadView(); };
   $req<HTMLSelectElement>('mode').onchange = () => { updateModeControls(); requestFit(); scheduleRender(); reapplyInspect(); };
   $req<HTMLSelectElement>('class-a').onchange = () => { if ($req<HTMLSelectElement>('mode').value !== 'all') { requestFit(); scheduleRender(); reapplyInspect(); } };

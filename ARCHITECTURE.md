@@ -54,6 +54,7 @@ The product is being split into zones, so an analyst can install Bucket + Data w
 | Create session (one dialog: a bucket folder → Visualize, Label or both linked; format check) | `bucket/service.py` `create_session`, `session_check`, `bucket/formats.py` `SESSION_SUPPORT` | `ts/views/session-new.ts` |
 | Where datasets are read from (local / S3 / FTP) | `image/sources.py`, `image/connections.py`, `labeling/media.py` | `ts/settings/forms.ts` |
 | The plot, projections, features | `ml/`, `state.py`, `server/routes/projections.py` | `ts/plot/`, `ts/views/controls.ts` |
+| Projection preprocessing and recommended projections (Recipe menu) | `ml/prep.py`, `ml/recipes.yaml` + `recipes.py`, `image/prepcrops.py`, `state.request_projection` | `ts/views/prep.ts`, `ts/views/controls.ts` |
 | Curation scans and fixes | `image/curation.py`, `server/routes/curation.py` | `ts/views/curation.ts` |
 | Models, predictions, evaluation | `models/`, `server/routes/models.py` | `ts/views/model.ts`, `ts/views/eval.ts` |
 | Labeling tool | `labeling/`, `server/routes/labeling.py` | `ts/label/` |

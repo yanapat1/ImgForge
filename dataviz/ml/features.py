@@ -100,7 +100,11 @@ def crop_cache(paths, size=224, progress=None):
         return np.zeros((0, size, size, 3), np.uint8)
     fdir = Path(paths[0]).parent.parent / 'features'
     fp = _crops_fingerprint(paths, size)
-    target = fdir / f'_crops{size}_{fp}.npy'
+    # the index's crops/ keep their name; a preprocessed variant (crops~<tag>/, image/prepcrops.py) gets its own, so
+    # building one never deletes the other's cache
+    var = Path(paths[0]).parent.name
+    var = '' if var == 'crops' else '~' + (var[len('crops~'):] if var.startswith('crops~') else var)
+    target = fdir / f'_crops{size}{var}_{fp}.npy'
     with _CROP_LOCK:
         if target.exists():
             try:
@@ -130,7 +134,7 @@ def crop_cache(paths, size=224, progress=None):
         finally:
             if tmp.exists():
                 tmp.unlink()
-        for old in fdir.glob(f'_crops{size}_*.npy'):
+        for old in fdir.glob(f'_crops{size}{var}_*.npy'):
             if old != target:
                 try:
                     old.unlink()

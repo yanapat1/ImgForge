@@ -30,3 +30,7 @@ when: new camera / lighting, will the old model fit, a stress test
    check-augmentation-coverage skill): it says how much of them a recipe covers and which steps would close the gap.
 8. Few images (< 30 per side) or EXIF missing: say the result is indicative only. You cannot run the analysis or
    change files yourself.
+- Inside one session (several cameras, no combined dataset): the recipe `camera-shift` (`apply_recipe`) shows whether
+  clusters are cameras (colour by session); `without-camera-bias` removes each camera's mean (prep debias session +
+  even lighting) so the objects line up across cameras. If the classes only separate with the bias removed, the model
+  will need data from the new camera.

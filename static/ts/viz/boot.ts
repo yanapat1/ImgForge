@@ -16,6 +16,7 @@ import { plotAxes } from '../plot/interactions.js';
 import { invalidateHover, renderPlot } from '../plot/render.js';
 import { updateMarks } from '../plot/marks.js';
 import { openSettings } from '../settings/dialog.js';
+import { loadRecipes } from '../views/prep.js';
 import { applySettings, applyUiDefaults, buildParamInputs, loadView, refreshSavedViews, refreshStatus, refreshTagList, renderFeatureSelect, saveSettings, syncLqControls, updateMethodControls, updateTextSearch, updateModeControls } from '../views/controls.js';
 import { renderGallery } from '../views/gallery.js';
 import { bindControlsToggle, buildClassFilter, curTab, switchTab, syncClassFilter, updateBarSummary, updateGroupsBadge } from '../views/layout.js';
@@ -172,6 +173,7 @@ async function init(st: Status): Promise<void> {
   $req('method').innerHTML = [...byCat].map(([cat, opts]) => `<optgroup label="${esc(cat)}">${opts.join('')}</optgroup>`).join('');
   buildParamInputs();
   renderFeatureSelect(st.default_feature);
+  void loadRecipes();
   // always start on the one startup view (config startup.feature + startup.method, all classes, default params)
   const start = st.startup || { feature: st.default_feature, method: 'umap' };
   $req<HTMLSelectElement>('feature').value = start.feature ?? '';

@@ -37,11 +37,31 @@ def _noop(*_, **__):
 
 # ---------------------------------------------------------------- pure functions (run in a worker)
 
-def do_project(emb, method, params, metric, n_components=2, progress=_noop):
-    xy, info = analysis.project(emb, method, params, metric, progress, n_components=n_components)
+def do_project(emb, method, params, metric, n_components=2, prep=None, groups=None, extra=None, keep=None,
+               progress=_noop):
+    """One projection. prep: the feature part of a ml/prep spec (fuse with `extra`, debias by `groups`, scale, pca);
+    keep: bool per row, the rows the filter keeps: only they are projected, the others are placed by their neighbours
+    (show grey) -> (xy of every row, info); without grey the caller drops them."""
+    from ..ml import prep as mprep
+    fe = prep or {}
+    x = emb
+    if fe:
+        progress(stage='preprocessing the features')
+        x, notes = mprep.apply_features(emb, fe, metric, groups, extra)
+        info_prep = {'notes': notes} if notes else {}
+    else:
+        info_prep = {}
+    pre = 0 if fe.get('scale') == 'whiten' else fe.get('pca', analysis.PRE_PCA)
+    rows = x if keep is None else x[keep]
+    xy, info = analysis.project(rows, method, params, metric, progress, n_components=n_components, pre_pca=pre)
+    if keep is not None and not keep.all():
+        progress(stage='placing the filtered boxes by their neighbours')
+        xy = analysis._place_by_neighbours(x, np.nonzero(keep)[0], xy)
+    if info_prep:
+        info = {**info, 'prep': info_prep}
     progress(stage='measuring how well the map keeps neighbours')
     try:
-        info = {**info, 'quality': analysis.projection_quality(emb, xy)}
+        info = {**info, 'quality': analysis.projection_quality(rows, xy if keep is None else xy[keep])}
     except Exception:  # noqa: BLE001 - a metric must never cost the projection itself
         logging.getLogger('dataviz').warning('projection quality failed', exc_info=True)
     return xy, info

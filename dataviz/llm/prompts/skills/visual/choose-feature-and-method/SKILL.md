@@ -3,7 +3,9 @@ name: choose-feature-and-method
 description: pick the feature space and projection method (with parameters) for what the user wants to see
 when: which features / method, the map is one blob or confetti, a new dataset
 ---
-1. `view_state` (what is on screen) and `list_features` (what exists, computed ✓, text search).
+1. `view_state` (what is on screen) and `list_features` (what exists, computed ✓, text search). When the user states a
+   purpose (mislabels, duplicates, camera shift, small objects, orientation, background, shape), check
+   `list_projection_recipes` first: a matching recipe that works here → `apply_recipe {id}` and say what it set.
 2. Match the goal to a feature:
    - label errors, class confusion, text search → a CLIP / SigLIP one (`openclip-h14`, else `siglip2-so400m`).
    - near-duplicates, look-alike sub-types, viewpoint → DINOv2 (`dinov2reg-large`, or `dinov2-base` if lighter).
@@ -18,6 +20,9 @@ when: which features / method, the map is one blob or confetti, a new dataset
    - is this structure real? `pca` (honest, linear; read its explained variance).
    - classes pile on top of each other on the 2D map (low trustworthiness / continuity, or PCA's 2 axes explain
      little): the same method with `set_projection {dims: 3}` (a 3D cloud: they often separate in depth; the user rotates it).
-4. Propose it with `set_projection` (feature, method, params, dims) and one line of why; add `set_color_by` if colour helps
+4. Propose it with `set_projection` (feature, method, params, dims, and `prep` when it helps: `{feature: {debias:
+   'session'}}` for camera bias, `{image: {context: 'pad25'}}` for tiny boxes, `{image: {mask: 'polygon'}}` for
+   background bias on segmentation data, `{feature: {filter: {min_px: 12}, show: 'grey'}}` to calm a map full of
+   specks) and one line of why; add `set_color_by` if colour helps
    (e.g. `suggested` for confusion).
 5. After it is applied, `projection_quality`: below ~0.9 trustworthiness / continuity, suggest the next variant.

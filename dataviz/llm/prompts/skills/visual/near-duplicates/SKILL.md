@@ -5,7 +5,8 @@ when: duplicates, copies, split leakage, a suspiciously high val score
 ---
 1. `issue_summary`: Curation counts for `dup_image` (same file bytes), `dup_box`, `split_leak` and `near_dup` if
    scanned. Not scanned → `open_tab` `curation` and ask the user to Scan dataset.
-2. Visual copies: a DINOv2 feature finds them best (`dinov2reg-large` or `dinov2-base`); propose `set_projection`
+2. Visual copies: a DINOv2 feature finds them best (`dinov2reg-large` or `dinov2-base`; the recipe
+   `apply_recipe {id: 'near-duplicates'}` sets it with the box-only crop and tight UMAP); propose `set_projection`
    when another feature is on, then `show_issue` `dups` (pairs from different images, cosine ≥ 0.97).
 3. On the map, `umap` with a small `min_dist` (0.0-0.05) makes duplicate pairs sit on top of each other.
 4. Leakage: `split_leak` lists val / test images copied from train. Those inflate validation scores: the fix is to

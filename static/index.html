@@ -434,6 +434,9 @@
                   <button type="button" data-layer="" aria-pressed="true" title="One dot per labelled box (object)">Objects</button>
                   <button type="button" data-layer="images" aria-pressed="false" title="One dot per whole image, coloured by its most frequent box class">Full images</button>
                 </div></div>
+              <label class="field stack" title="Recommended settings for one purpose: they fill the features, the method and the preprocessing (or some of them); Generate runs it">Recipe
+                <select id="recipe"><option value="">Recommended projections…</option></select></label>
+              <span id="recipe-hint" class="muted hint"></span>
               <label class="field stack" title="What each box is turned into before projecting (your own models: Settings › Models)">Features
                 <select id="feature"></select></label>
               <label class="field stack">Method <select id="method"></select></label>
@@ -443,6 +446,28 @@
                   <option value="3">3D cloud</option>
                 </select></label>
               <span id="params"></span>
+              <details id="prep" class="prep">
+                <summary>Preprocess <span id="prep-sum" class="muted">Default</span></summary>
+                <div class="prep-body">
+                  <span class="prep-h" title="Applied to each box's crop before the feature extractor: a new feature variant, computed once">Image · before the features</span>
+                  <label class="field stack" title="The region around the box">Context <select id="prep-context"><option value="box">Box only</option><option value="pad5">Box + 5%</option><option value="square10">Box + 10% (default)</option><option value="pad25">Box + 25% (reads the images)</option><option value="pad50">Box + 50% (reads the images)</option><option value="image">Whole image (reads the images)</option></select></label>
+                  <label class="field stack" title="How the region becomes a square">Fit <select id="prep-fit"><option value="square">Square (default)</option><option value="letterbox">Letterbox (grey bars)</option><option value="stretch">Stretch</option><option value="center">Centre crop</option></select></label>
+                  <label class="field stack" title="Even out colour or lighting">Tone <select id="prep-tone"><option value="none">As is (default)</option><option value="gray">Grayscale</option><option value="clahe">Even lighting (CLAHE)</option></select></label>
+                  <label class="check" title="Grey out everything outside the segmentation polygon (segmentation labels only)"><input type="checkbox" id="prep-mask"> Object only (polygon mask)</label>
+                  <label class="check" title="Average the features of the crop and its mirror image: left / right stop mattering"><input type="checkbox" id="prep-tta"> Average with the mirror image</label>
+                  <span class="prep-h" title="Applied to the feature vectors before the method: no new extraction">Features · before the method</span>
+                  <label class="field stack">Scale <select id="prep-scale"><option value="none">As is (default)</option><option value="standardize">Standardize</option><option value="whiten">PCA whiten</option></select></label>
+                  <label class="field stack" title="Dimensions the method works on (t-SNE and most non-linear methods reduce to 50 by default)">PCA first <select id="prep-pca"><option value="50">50 dims (default)</option><option value="0">Off</option><option value="20">20 dims</option><option value="100">100 dims</option><option value="200">200 dims</option></select></label>
+                  <label class="field stack" title="Subtract each group's mean vector: clusters stop being cameras or folders">Remove bias <select id="prep-debias"><option value="">None (default)</option><option value="session">per session / camera</option><option value="folder">per folder</option></select></label>
+                  <label class="field stack" title="Combine with a second feature space (weight = its share)">Fuse with <select id="prep-fuse"><option value="">None (default)</option></select></label>
+                  <label class="field stack">Weight <input id="prep-fuse-w" type="number" min="0.05" max="0.95" step="0.05" value="0.3"></label>
+                  <label class="field stack" title="Leave out boxes whose shorter side is smaller (px)">Min box side <input id="prep-min-px" type="number" min="0" step="1" placeholder="off"></label>
+                  <label class="field stack" title="Leave out blurrier boxes (the sharpness score: Color › sharpness)">Min sharpness <input id="prep-min-blur" type="number" min="0" step="1" placeholder="off"></label>
+                  <label class="field stack" title="Leave out boxes darker / brighter than this (0-255)">Brightness <span class="prep-pair"><input id="prep-br-lo" type="number" min="0" max="255" step="1" placeholder="0"><input id="prep-br-hi" type="number" min="0" max="255" step="1" placeholder="255"></span></label>
+                  <label class="field stack" title="What the map does with the boxes the filters leave out">Left out <select id="prep-show"><option value="hide">Hidden (default)</option><option value="grey">Shown faint</option></select></label>
+                  <button id="prep-reset" type="button" class="ghost sm" title="Back to no preprocessing">Default</button>
+                </div>
+              </details>
               <span id="pca-info" class="muted num hint"></span>
               <button id="btn-apply" class="primary block"><svg class="ico" aria-hidden="true"><use href="static/assets/icons.svg#i-refresh"/></svg>Generate</button>
               <label class="field stack">Saved views

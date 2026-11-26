@@ -213,17 +213,32 @@ export interface ProjectionRequest {
   feature: string; method: string; params: Record<string, number>; classes: number[] | null;
   /** 2 = flat map (default), 3 = 3D cloud */
   dims?: 2 | 3;
+  /** preprocessing (dataviz/ml/prep.py): absent = Default */
+  prep?: PrepSpec;
+}
+/** dataviz/ml/prep.py: image prep (a cached feature variant) and feature prep (before the method). */
+export interface PrepSpec {
+  image?: { context?: string; fit?: string; mask?: string; tone?: string; tta?: string };
+  feature?: { fuse?: { feature: string; weight: number }; debias?: string; scale?: string; pca?: number;
+    filter?: { min_px?: number; min_blur?: number; brightness?: [number, number] }; show?: string };
+}
+/** GET api/projection/recipes: a recommended projection, resolved for this session. */
+export interface Recipe {
+  id: string; name: string; category: string; use_for: string; needs: string[]; available: boolean; why: string; instant: boolean;
+  sets: { feature?: string; method?: string; params?: Record<string, number>; dims?: 2 | 3; prep?: PrepSpec; color?: string };
 }
 /** `quality`: see dataviz/ml/analysis.py `projection_quality` (absent on projections saved before it existed). */
 export interface ProjectionQuality { trustworthiness: number; continuity: number; knn_preserved: number; k: number; n: number }
 export interface ProjectionInfo { explained_variance?: number[]; quality?: ProjectionQuality; [k: string]: unknown }
 /** POST api/projection (ready): a 2D layout of the boxes `id` (a 3D cloud also has `z`). */
-export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; z?: number[]; info: ProjectionInfo | null }
+export interface ProjectionReady { ready: true; key: string; id: number[]; x: number[]; y: number[]; z?: number[]; info: ProjectionInfo | null;
+  /** 1 = a box the filter left out, placed by its neighbours (drawn faint) */
+  muted?: number[] }
 export type ProjectionResult = ProjectionReady | NotReady;
 /** GET api/projections → views[] (saved projections). */
 export interface SavedView {
   key?: string; feature: string; method: string; params: Record<string, number>; classes?: number[] | null;
-  label: string; created?: string; last_used?: string; dims?: 2 | 3; [k: string]: unknown;
+  label: string; created?: string; last_used?: string; dims?: 2 | 3; prep?: PrepSpec; [k: string]: unknown;
 }
 
 /** POST api/groups response. */

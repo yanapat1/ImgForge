@@ -23,7 +23,9 @@ import type { UiAction, UiResult } from '../types-chat.js';
 import { canRecord, cancelRecording, startRecording, stopRecording } from '../core/voice.js';
 import { fitToVisible } from '../plot/interactions.js';
 import { openSettings } from '../settings/dialog.js';
-import { loadView, onGroupControls, refreshTagList, runLabelQuality, saveSettings, takeViewError, updateMethodControls, updateTextSearch } from './controls.js';
+import { applyRecipe, loadView, onGroupControls, refreshTagList, runLabelQuality, saveSettings, takeViewError, updateMethodControls, updateTextSearch } from './controls.js';
+import { writePrep } from './prep.js';
+import type { PrepSpec } from '../types.js';
 import { scan as curationScan } from './curation.js';
 import { runAllNotRun } from './eval.js';
 import { runModelOnDataset } from './model.js';
@@ -200,11 +202,17 @@ async function applyUi(a: UiAction): Promise<boolean | UiResult> {
       if (isRec(g['params'])) for (const [k, v] of Object.entries(g['params'])) { const inp = $<HTMLInputElement>(`p-${m}-${k}`); if (inp && v != null) inp.value = String(v); }
       const dims = g['dims'], dEl = $<HTMLSelectElement>('proj-dims');
       if ((dims === 2 || dims === 3) && dEl) dEl.value = String(dims);
+      if (isRec(g['prep'])) writePrep(g['prep'] as PrepSpec);     // validated on the server ({} = Default)
       updateMethodControls();
       saveSettings();
       if (curTab !== 'explore') switchTab('explore');
       touch($('map-btn'));
       return await loadView() ? { ok: true, detail: mapDetail() } : viewFailed();
+    }
+    case 'apply_recipe': {
+      if (curTab !== 'explore') switchTab('explore');
+      touch($('map-btn'));
+      return await applyRecipe(s('id')) ? { ok: true, detail: mapDetail() } : viewFailed();
     }
     case 'set_color_by': {
       const el = $<HTMLSelectElement>('color-by'), by = s('by');

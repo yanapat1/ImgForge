@@ -36,6 +36,7 @@ from .image.indexer import build_index
 from .ml import analysis
 from .ml import features as feats
 from .ml import label_quality as lqual
+from .ml import prep as mprep
 from .workspace import resolve_workspace, find_workspace, _now
 
 # Defaults; the real values come from config.yaml in this folder (State.cfg).
@@ -52,11 +53,27 @@ def normalize_params(method, params):
     return {k: PARAM_TYPES.get(k, float)(v) for k, v in out.items()}   # same key whether value came as 30 or 30.0
 
 
-def projection_key(feature, method, params, classes, dims=2):
-    """Cache key of a projection. 2D keys keep their old form (saved maps stay valid); 3D adds a '|3d' suffix."""
+def projection_key(feature, method, params, classes, dims=2, prep=None):
+    """Cache key of a projection. 2D keys keep their old form (saved maps stay valid); 3D adds a '|3d' suffix.
+    prep (a ml/prep spec): its image part is in the feature key (`<feature>~<tag>`), its feature part adds '|f:<tag>'
+    before '|3d'; the Default ({}) keeps the old key."""
+    prep = prep or {}
+    feature = mprep.variant_key(mprep.base_feature(feature), prep.get('image')) if prep.get('image') else feature
     cls = 'all' if not classes else ','.join(str(c) for c in sorted(set(classes)))
     key = f'{feature}|{method}|{json.dumps(params, sort_keys=True)}|{cls}'
+    if prep.get('feature'):
+        key += f'|f:{mprep.tag(prep["feature"])}'
     return key + '|3d' if int(dims) == 3 else key
+
+
+def parse_projection_key(key):
+    """(feature, method, params, classes, dims) of a projection key (feature: the variant key, if any)."""
+    dims = projection_dims(key)
+    k = key[:-3] if dims == 3 else key
+    if re.search(r'\|f:[0-9a-f]{8}$', k):
+        k = k[:k.rindex('|f:')]
+    feature, method, params, cls = k.split('|', 3)
+    return feature, method, json.loads(params), None if cls == 'all' else [int(c) for c in cls.split(',')], dims
 
 
 def projection_dims(key):
@@ -94,7 +111,10 @@ class State:
         # the config's features (+ the owner's models, cli.py) + the embeddings imported into this session
         self.registry = registry if isinstance(registry, feats.FeatureRegistry) else feats.FeatureRegistry(registry)
         self.registry.add(self.imported_features)
+        self.registry.add(self.variant_features)
         self._imports = None                            # (fingerprint, {key: FeatureSpec}) of features/imports.json
+        self._variants = None                           # (mtime, {key: FeatureSpec}) of features/variants.json
+        self._polygons = None                           # (fingerprint, bool): the labels are segmentation polygons
         self.default_feature = default_feature if default_feature in registry else next(iter(registry))
         self.jobs = jobs or JobManager()
         self.pools = pools or compute.InlinePools()      # main() passes worker-process pools
@@ -403,6 +423,97 @@ class State:
     def _imports_path(self):
         return self.features_dir / 'imports.json'
 
+    # ------------------------------------------------------------ image-prep variants (ml/prep.py, image/prepcrops.py)
+    def _variants_path(self):
+        return self.features_dir / 'variants.json'
+
+    def prep_why_not(self, feature, image_part=None):
+        """Why image prep cannot run on feature `feature` here ('' when it can)."""
+        if hasattr(self.source, 'assemble_features'):
+            return 'a combined session reads its members\' features: preprocess the images in a member session'
+        if getattr(self.source, 'kind', '') == 'embeddings' or getattr(self.source, 'unit', None) == 'image':
+            return 'whole-image and vector sessions have no box crops to preprocess'
+        if feature.startswith('import:'):
+            return 'imported embeddings were computed elsewhere: only the feature prep applies'
+        if feature not in self.registry or getattr(self.registry[feature], 'group', '') == 'variant':
+            return f'unknown feature {feature!r}'
+        if (image_part or {}).get('mask') and not self.has_polygons():
+            return 'a polygon mask needs segmentation labels (YOLO polygons)'
+        return ''
+
+    def has_polygons(self):
+        if not self.ready:
+            return False
+        if self._polygons is None or self._polygons[0] != self.fingerprint:
+            from .image import prepcrops
+            self._polygons = (self.fingerprint, prepcrops.has_polygons(self.source, self.samples))
+        return self._polygons[1]
+
+    def register_variant(self, feature, image_part):
+        """The feature key of `feature` with image prep `image_part` (features/variants.json keeps it across a restart)."""
+        key = mprep.variant_key(feature, image_part)
+        path = self._variants_path()
+        with self.index_lock:
+            try:
+                entries = json.loads(path.read_text())
+            except (OSError, ValueError):
+                entries = []
+            if not any(e.get('key') == key for e in entries):
+                entries.append({'key': key, 'base': feature, 'image': image_part, 'created': _now()})
+                self.features_dir.mkdir(parents=True, exist_ok=True)
+                self._write_json(path, entries)
+                self._variants = None
+        return key
+
+    def variant_features(self):
+        """{key: FeatureSpec} of the image-prep variants of this session: the base feature run on the variant crops
+        (flip-averaged with tta). Group 'variant': the Features dropdown leaves them out (Preprocess picks them)."""
+        if self.cache_dir is None:
+            return {}
+        path = self._variants_path()
+        try:
+            mt = path.stat().st_mtime_ns
+        except OSError:
+            return {}
+        if self._variants is not None and self._variants[0] == mt:
+            return self._variants[1]
+        try:
+            entries = json.loads(path.read_text())
+        except (OSError, ValueError):
+            entries = []
+        others = None                                   # the other providers' features (not this one: no recursion)
+        specs = {}
+        for e in entries:
+            base = self.registry.base.get(e.get('base'))
+            if base is None:
+                if others is None:
+                    others = {}
+                    for p in self.registry.extras:
+                        if p != self.variant_features:
+                            for k, v in p().items():
+                                others.setdefault(k, v)
+                base = others.get(e.get('base'))
+            if base is None or base.group == 'variant':
+                continue
+            specs[e['key']] = feats.FeatureSpec(e['key'], f'{base.label} · {mprep.summary({"image": e["image"]})}', 'variant',
+                                                self._variant_fn(base, e['image']), metric=base.metric, kind=base.kind,
+                                                note=f'{base.label} on preprocessed crops')
+        self._variants = (mt, specs)
+        return specs
+
+    def _variant_fn(self, base, image_part):
+        def fn(_paths, samples, progress):
+            from .image import prepcrops
+            paths, flips = prepcrops.build(self, image_part, progress)
+            emb = np.asarray(base.fn(paths, samples, progress), np.float32)
+            if flips:
+                progress(stage='features of the mirror images')
+                emb = (emb + np.asarray(base.fn(flips, samples, progress), np.float32)) / 2
+                if base.metric == 'cosine':
+                    emb = feats.l2_normalize(emb)
+            return emb
+        return fn
+
     def imported_features(self):
         """{key: FeatureSpec} of the embeddings imported into this dataset version (features/imports.json)."""
         if not self.ready or self.cache_dir is None:
@@ -638,11 +749,9 @@ class State:
             idx = self.saved_projections()
             entry = idx.get(key)
             if entry is None:
-                dims = projection_dims(key)
-                feature, method, params, cls = (key[:-3] if dims == 3 else key).split('|', 3)
-                entry = {'key': key, 'feature': feature, 'method': method, 'params': json.loads(params),
-                         'classes': None if cls == 'all' else [int(c) for c in cls.split(',')],
-                         'dims': dims, 'created': _now()}
+                feature, method, params, classes, dims = parse_projection_key(key)
+                entry = {'key': key, 'feature': mprep.base_feature(feature), 'method': method, 'params': params,
+                         'classes': classes, 'dims': dims, 'created': _now()}
             entry.update(fields)
             idx[key] = entry
             self.proj_dir.mkdir(exist_ok=True)
@@ -670,6 +779,8 @@ class State:
             if path.exists():
                 z = np.load(path)
                 proj = {'id': z['id'], 'xy': z['xy'], 'info': json.loads(str(z['info']))}
+                if 'muted' in z.files:
+                    proj['muted'] = z['muted']
                 self._store_projection(key, proj)
                 return proj
         return None
@@ -679,15 +790,32 @@ class State:
         while len(self.projections) > 48:
             self.projections.popitem(last=False)
 
-    def request_projection(self, feature, method, params, classes, dims=2):
-        """Returns (projection, key, None) if cached, else (None, key, job). dims: 2 or 3 components."""
+    def request_projection(self, feature, method, params, classes, dims=2, prep=None):
+        """Returns (projection, key, None) if cached, else (None, key, job). dims: 2 or 3 components. prep: a ml/prep
+        spec (validated here; {} = Default): image prep runs the feature on preprocessed crops (a cached variant
+        feature), feature prep reshapes the vectors before the method, its filter leaves boxes out (or greys them)."""
         if feature not in self.registry:
             raise KeyError(feature)
         dims = int(dims)
         if dims not in (2, 3):
             raise ValueError(f'dims must be 2 or 3, not {dims}')
         params = normalize_params(method, params)
-        key = projection_key(feature, method, params, classes, dims)
+        prep = mprep.validate(prep)
+        im, fe = prep.get('image') or {}, prep.get('feature') or {}
+        if im:
+            why = self.prep_why_not(feature, im)
+            if why:
+                raise ValueError(f'image preprocessing: {why}')
+        fuse = (fe.get('fuse') or {}).get('feature')
+        if fuse:
+            if fuse not in self.registry or fuse == feature:
+                raise ValueError(f'fuse with another feature of this session, not {fuse!r}')
+        if fe.get('filter') and self.ready:            # say it at once rather than from a failed job
+            ids0 = np.arange(len(self.samples)) if not classes else np.nonzero(np.isin(self.labels, list(classes)))[0]
+            if not mprep.keep_mask(self.samples, ids0, fe['filter']).any():
+                raise ValueError('the filters leave no boxes: loosen them')
+        feat_key = self.register_variant(feature, im) if im else feature
+        key = projection_key(feature, method, params, classes, dims, prep)
         proj = self.get_projection(key) if self.ready else None
         if proj is not None and (feature in self.scores or self._scores_file(feature).exists()):
             self.get_scores(feature)
@@ -698,23 +826,42 @@ class State:
             label += f' · {len(set(classes))} class(es)'
         if dims == 3:
             label += ' · 3D'
+        if prep:
+            label += f' · {mprep.summary(prep)}'
 
         def run(job):
             self.wait_index(job)
             self.get_scores(feature, job)          # computes the features too if needed
             if self.get_projection(key) is not None:
                 return key
-            emb = self.get_features(feature, job)   # scores may have come from disk without the features
+            emb = self.get_features(feat_key, job)  # scores may have come from disk without the features
             ids = np.arange(len(self.samples)) if not classes else np.nonzero(np.isin(self.labels, list(classes)))[0]
+            keep = mprep.keep_mask(self.samples, ids, fe.get('filter'))
+            if not keep.any():
+                raise ValueError('the filters leave no boxes: loosen them')
+            grey = fe.get('show') == 'grey' and not keep.all()
+            if not grey and not keep.all():
+                ids = ids[keep]
+            extra = self.get_features(fuse, job)[ids] if fuse else None
+            if extra is not None and extra.nbytes + emb[ids].nbytes > mprep.FUSE_MAX_BYTES:
+                raise ValueError('fusing these two feature spaces needs too much memory: pick fewer classes')
             t0 = time.time()
             xy, info = self.pools.run('heavy', compute.do_project, emb[ids], method, params, self.registry[feature].metric,
-                                      dims, progress=job.progress)
+                                      dims, fe or None, mprep.group_codes(self.samples, ids, fe.get('debias')), extra,
+                                      keep if grey else None, progress=job.progress)
+            if prep:
+                info = {**info, 'prep': {**(info.get('prep') or {}), 'spec': prep, 'summary': mprep.summary(prep),
+                                         'excluded': int((~keep).sum())}}
             proj = {'id': ids, 'xy': xy, 'info': info}
+            if grey:
+                proj['muted'] = ~keep
             self._store_projection(key, proj)
             self._rebuilt.add(key)
             self.proj_dir.mkdir(exist_ok=True)
-            np.savez(self._projection_file(key), id=ids, xy=xy, info=json.dumps(info))
-            self._index_update(key, n=int(len(ids)), compute_s=round(time.time() - t0, 1), last_used=_now())
+            np.savez(self._projection_file(key), id=ids, xy=xy, info=json.dumps(info),
+                     **({'muted': proj['muted']} if grey else {}))
+            self._index_update(key, n=int(len(ids)), compute_s=round(time.time() - t0, 1), last_used=_now(),
+                               **({'prep': prep} if prep else {}))
             return key
 
         return None, key, self.submit(f'proj:{self.tag}:{key}', label, run)

@@ -17,6 +17,7 @@ import { setCollapsed, setLeftWidth, setMapDirty, syncClassFilter, syncIssuesBtn
 import { invalidateStats, renderClassTable, renderStats, showConfusion } from './stats.js';
 import { promptDialog } from './dialog.js';
 import { saveFile } from '../core/format.js';
+import { fillFuse, loadRecipes, mergePrep, prepSummary, readPrep, recipeById, samePrep, showSummary, writePrep } from './prep.js';
 
 /** [label, hint, step] of a method parameter's number input. */
 const PARAM_INFO: Record<string, [string, string, number]> = {
@@ -125,7 +126,7 @@ export function markMethods(): void {
     const params: Record<string, number> = {};
     for (const k of Object.keys(S.status.methods[m]?.params ?? {})) params[k] = +$req<HTMLInputElement>(`p-${m}-${k}`).value;
     const saved = S.views.some((v) => v.feature === req.feature && v.method === m && (v.dims ?? 2) === (req.dims ?? 2) &&
-      sameClasses(v.classes, req.classes) && sameParams(v.params, params));
+      sameClasses(v.classes, req.classes) && sameParams(v.params, params) && samePrep(v.prep, req.prep));
     opt.textContent = `${saved ? '✓ ' : ''}${S.status.methods[m]?.label}`;
   }
 }
@@ -139,6 +140,7 @@ export function applyView(v: SavedView): void {
     const inp = $<HTMLInputElement>(`p-${v.method}-${k}`);
     if (inp) inp.value = String(val);
   }
+  writePrep(v.prep);
   const cls = v.classes || [];
   if (cls.length === 1) { $req<HTMLSelectElement>('mode').value = 'single'; $req<HTMLSelectElement>('class-a').value = String(cls[0]); }
   else if (cls.length === 2) { $req<HTMLSelectElement>('mode').value = 'compare'; $req<HTMLSelectElement>('class-a').value = String(cls[0]); $req<HTMLSelectElement>('class-b').value = String(cls[1]); }
@@ -160,7 +162,35 @@ function currentRequest(): ProjectionRequest {
   const params: Record<string, number> = {};
   for (const k of Object.keys(status().methods[method]?.params ?? {})) params[k] = +$req<HTMLInputElement>(`p-${method}-${k}`).value;
   const dims = $req<HTMLSelectElement>('proj-dims').value === '3' ? 3 : 2;
-  return { feature: $req<HTMLSelectElement>('feature').value, method, params, classes: null, dims };   // always all classes; display filter is client-side
+  const prep = readPrep();
+  return { feature: $req<HTMLSelectElement>('feature').value, method, params, classes: null, dims,   // always all classes; display filter is client-side
+    ...(prep.image || prep.feature ? { prep } : {}) };
+}
+
+/** Apply a recommended projection (Recipe menu, the assistant's apply_recipe): it fills the fields it names (feature,
+ *  method + params, dimensions, preprocessing, colour), keeps the rest, and generates the map. */
+export async function applyRecipe(id: string): Promise<boolean> {
+  const r = recipeById(id);
+  if (!r) { toast(`No recipe ${id}`, 'err'); return false; }
+  if (!r.available) { toast(`${r.name}: ${r.why}`, 'err'); return false; }
+  const s = r.sets;
+  if (s.feature) { $req<HTMLSelectElement>('feature').value = s.feature; updateTextSearch(); }
+  if (s.method) {
+    $req<HTMLSelectElement>('method').value = s.method;
+    for (const [k, v] of Object.entries(status().methods[s.method]?.params ?? {})) {
+      const el = $<HTMLInputElement>(`p-${s.method}-${k}`);
+      if (el) el.value = String(s.params?.[k] ?? v);
+    }
+  }
+  if (s.dims) $req<HTMLSelectElement>('proj-dims').value = String(s.dims);
+  if (s.prep) writePrep(mergePrep(readPrep(), s.prep));
+  const color = $req<HTMLSelectElement>('color-by');
+  if (s.color && [...color.options].some((o) => o.value === s.color)) { color.value = s.color; color.dispatchEvent(new Event('change')); }
+  $req('recipe-hint').textContent = `${r.name}: ${r.use_for}`;
+  updateModeControls();
+  updateMethodControls();
+  saveSettings();
+  return loadView();
 }
 
 /** Generate the map the controls ask for -> true when it is on screen (false: failed, or a newer request won). */
@@ -191,7 +221,10 @@ export async function loadView(): Promise<boolean> {
     invalidateHover();
     const ev = r.info?.explained_variance, q = r.info?.quality;
     const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
+    const pi = r.info?.['prep'] as { excluded?: number; notes?: string[] } | undefined;
     $req('pca-info').textContent = [
+      req.prep ? `preprocessed: ${prepSummary(req.prep)}${pi?.excluded ? ` · ${pi.excluded.toLocaleString()} boxes left out` : ''}` +
+        (pi?.notes?.length ? ` (${pi.notes.join('; ')})` : '') : '',
       ev ? `explained variance: PC1 ${pct(ev[0] ?? 0)}, PC2 ${pct(ev[1] ?? 0)}` + (ev.length > 2 ? `, PC3 ${pct(ev[2] ?? 0)}` : '') : '',
       q ? `map quality (${q.n.toLocaleString()} pts, k=${q.k}): trustworthiness ${q.trustworthiness.toFixed(3)} · ` +
         `continuity ${q.continuity.toFixed(3)} · neighbours kept ${pct(q.knn_preserved)}` : '',
@@ -203,6 +236,7 @@ export async function loadView(): Promise<boolean> {
     renderGallery();
     void refreshStatus();
     void refreshSavedViews();
+    void loadRecipes();                         // ✓ on the recipes whose map is computed now
     return true;
   } catch (e) {
     if (seq !== viewSeq) return false;
@@ -314,7 +348,9 @@ export function updateMapDirty(): void {
   const r = S.viewReq;
   if (!r) { setMapDirty(false); return; }
   const cur = currentRequest();
-  setMapDirty(cur.method !== r.method || cur.feature !== r.feature || (cur.dims ?? 2) !== (r.dims ?? 2) || !sameParams(cur.params, r.params));
+  showSummary();
+  setMapDirty(cur.method !== r.method || cur.feature !== r.feature || (cur.dims ?? 2) !== (r.dims ?? 2) || !sameParams(cur.params, r.params)
+    || !samePrep(cur.prep, r.prep));
 }
 
 // ---- cleanlab label quality: k-fold out-of-fold class probabilities of the current feature, then cleanlab
@@ -507,6 +543,7 @@ export function renderFeatureSelect(selected?: string): void {
       `<option value="${esc(f.key)}" title="${esc(f.note || '')}">${f.cached ? '✓ ' : '  '}${esc(f.label)}</option>`
     ).join('') + '</optgroup>').join('');
   sel.value = cur;
+  fillFuse();
   updateTextSearch();
   updateBarSummary();
 }

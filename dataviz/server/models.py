@@ -13,6 +13,7 @@ class ProjectionRequest(BaseModel):
     params: dict = {}
     classes: list[int] | None = None
     dims: Literal[2, 3] = 2               # 2D map or 3D cloud
+    prep: dict | None = None              # ml/prep spec {image?, feature?}: preprocessing (None / {} = Default)
 
 
 class LabelQualityRequest(BaseModel):

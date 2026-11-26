@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from ...auth import deps
 from ...ml import analysis
+from ...ml import prep as mprep
 from ...state import normalize_params, projection_key
 from ..deps import guards, json_bytes
 from ..models import ProjectionRequest, GroupsRequest, LabelQualityRequest
@@ -122,6 +123,13 @@ def router(state, ctx):
             raise HTTPException(404, f'no imported feature {key!r}')
         return {'ok': True}
 
+    @r.get('/api/projection/recipes')
+    def projection_recipes():
+        """The recommended projections (ml/recipes.yaml) by category, each with whether it works on this session and
+        why not, and whether its map is computed already (instant)."""
+        from ...ml import recipes
+        return {'categories': list(recipes.CATEGORIES), 'recipes': recipes.for_state(state)}
+
     @r.post('/api/projection')
     def projection(req: ProjectionRequest):
         feature_or_400(req.feature)
@@ -129,7 +137,7 @@ def router(state, ctx):
             raise HTTPException(400, f'invalid classes: {req.classes}')
         try:
             proj, key, job = state.request_projection(req.feature, req.method, req.params, req.classes or None,
-                                                      req.dims)
+                                                      req.dims, req.prep)
         except ValueError as e:
             raise HTTPException(400, str(e))
         if proj is None:
@@ -140,6 +148,8 @@ def router(state, ctx):
                    'y': np.round(xy[:, 1], 4), 'info': proj['info']}
             if xy.shape[1] == 3:                     # a 3D cloud: the client draws scatter3d
                 out['z'] = np.round(xy[:, 2], 4)
+            if proj.get('muted') is not None:        # boxes the filter left out, placed by their neighbours (drawn faint)
+                out['muted'] = proj['muted'].astype(np.uint8)
             return out
         return json_bytes(state.payload(f'proj|{key}', build))
 
@@ -151,7 +161,10 @@ def router(state, ctx):
             raise HTTPException(400, str(e))
         if req.dims != 2:
             raise HTTPException(409, 'density groups are drawn on 2D maps only')
-        key = projection_key(req.feature, req.method, params, req.classes or None)
+        try:
+            key = projection_key(req.feature, req.method, params, req.classes or None, 2, mprep.validate(req.prep))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         res = await state.groups_async(key, req.min_cluster_size, req.per_class)
         if res is None:
             raise HTTPException(409, 'projection not computed yet')

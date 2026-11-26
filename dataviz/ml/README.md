@@ -89,6 +89,24 @@ To add one: an entry in `METHODS` (label, category, params, note) and a branch i
 `_sklearn_estimator()`; a new parameter also needs a hint in `PARAM_INFO` (`static/ts/views/controls.ts`)
 and its type in `PARAM_TYPES` (`dataviz/state.py`).
 
+## Preprocessing and recommended projections
+
+`prep.py` is the spec of the Map's **Preprocess** section, `recipes.yaml` / `recipes.py` the **Recipe** menu.
+
+- **Image prep** (`image` part: context, fit, mask, tone, tta) makes a cached *feature variant* `<feature>~<tag>`
+  (`State.register_variant`, `features/variants.json`, group `variant`, left out of the Features dropdown).
+  `image/prepcrops.py` writes its crops to `crops~<tag>/`: cut from the index crops when the region fits in them
+  (box, +5 %, +10 %), else from each source image decoded once; `tta` hflip also writes `crops~<tag>/f/` and the two
+  feature matrices are averaged. `features.crop_cache` names each variant's decoded cache apart, so one never deletes
+  another's.
+- **Feature prep** (`feature` part: fuse, debias, scale, pca, filter, show) runs in the heavy worker
+  (`core/workers.do_project`: fuse → debias → scale, then `analysis.project(pre_pca=…)`); the filter is a keep mask
+  over the boxes (`prep.keep_mask`): left out, or (`show: grey`) placed by their neighbours and returned as `muted`.
+- Keys: the image part is in the feature key, the feature part adds `|f:<tag>` to the projection key; the Default
+  (`{}`) keeps every earlier key (`state.projection_key` / `parse_projection_key`).
+- Recipes set any of feature (a preference list: a key, `kind:clip`, `group:deep`…), method, params, dims, prep and
+  colour; `recipes.for_state` says which work on a session (needs: polygons, sessions, crops) and which are computed.
+
 ## How the code is written
 
 - Functions take arrays and return arrays (or `(xy, info)`); every long one accepts a

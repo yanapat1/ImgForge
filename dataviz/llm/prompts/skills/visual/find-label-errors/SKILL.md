@@ -5,7 +5,8 @@ when: find mislabelled boxes or wrong classes, clean the labels
 ---
 1. `issue_summary` and `class_stats`: which classes have the most suspicious boxes and with which class they are
    confused; is cleanlab run; is the dataset scanned.
-2. Make sure a strong feature is on (`openclip-h14` or `siglip2-so400m`); else propose `set_projection`.
+2. Make sure a strong feature is on (`openclip-h14` or `siglip2-so400m`); else propose `set_projection`, or the
+   recipe `apply_recipe {id: 'find-mislabels'}` (a strong feature, UMAP, standardized, coloured by suspicion).
 3. Start with the neighbour check: `show_issue` `suspicious` (boxes whose 10 nearest neighbours mostly have another
    class). Tell the user the lines on the map show those neighbours.
 4. For a ranked, calibrated list: Find issues › Run label-quality check (cleanlab, logistic by default), then

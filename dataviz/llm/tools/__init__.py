@@ -227,6 +227,10 @@ GROUPS = {
                 'compare comparison shift camera cameras stress drift quality trust trustworthiness'),
     'augment': ('augmentation recipes and coverage', 'augment_catalog set_augment_recipe augment_coverage',
                 'augment augmentation augmentations albumentations recipe coverage flip blur noise'),
+    'projection': ('recommended projections (recipes) for a purpose, preprocessing',
+                   'list_projection_recipes apply_recipe',
+                   'recipe recipes recommend recommended suggest best which projection preprocess preprocessing '
+                   'mask background crop context lighting camera bias debias whiten standardize fuse filter tiny'),
 }
 _GROUP_OF = {n: g for g, (_, names, _) in GROUPS.items() for n in names.split()}
 _GROUP_WORDS = {g: frozenset(words.split()) for g, (_, _, words) in GROUPS.items()}

@@ -388,12 +388,26 @@ export function renderPlot(): void {
     return mc && mc.type === 'num' ? mc : null;
   })();
   const dot = +$req<HTMLInputElement>('dot-size').value;
-  const vis = visibleIndices();
+  let vis = visibleIndices();
   const Pt = pts();
   const traces: Trace[] = [];
   catTraces = null;
   const dens = densityTrace(view);           // first, under everything: catTraces indices count from after it
   if (dens) traces.push(dens);
+  // boxes the projection's filter left out (Preprocess › Filtered: grey): placed by their neighbours, one faint trace
+  // under the others, never coloured, selected or counted
+  const muted = view.muted;
+  if (muted?.length) {
+    const off = vis.filter((i) => muted[i]);
+    vis = vis.filter((i) => !muted[i]);
+    if (off.length) {
+      const ids = off.map((i) => view.id[i] ?? -1);
+      traces.push({ type: 'scattergl', mode: 'markers', name: 'filtered', showlegend: false, hoverinfo: 'text',
+        x: off.map((i) => view.x[i] ?? NaN), y: off.map((i) => view.y[i] ?? NaN), customdata: ids,
+        text: ids.map((id) => `${hoverOf(id)}<br><i>left out by the filter</i>`),
+        marker: { size: Math.max(2, dot - 2), color: THEME.ungrouped, opacity: 0.35 } });
+    }
+  }
   const showGroups = S.groups && $req<HTMLInputElement>('g-bubbles').checked;
   const dim = S.groups && $req<HTMLInputElement>('g-dim').checked;
   const idAt = (i: number): number => view.id[i] ?? -1;

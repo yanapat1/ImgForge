@@ -257,13 +257,16 @@ def _sklearn_estimator(method, params, n, nc=2):
     raise ValueError(f'unknown projection method {method!r}')
 
 
-def _project_sklearn(emb, method, params, progress, nc=2):
+PRE_PCA = 50                # dims the neighbourhood methods (and t-SNE) reduce to first; prep.pca can change it
+
+
+def _project_sklearn(emb, method, params, progress, nc=2, pre_pca=PRE_PCA):
     label = METHODS[method]['label']
     n = len(emb)
     x = np.asarray(emb, np.float32)
-    if method not in ('pca', 'svd', 'ica', 'random') and x.shape[1] > 50 and n > 50:
-        progress(stage=f'{label}: PCA to 50 dims')
-        x = np.ascontiguousarray(pca_reduce(x, 50)[0], np.float32)
+    if pre_pca and method not in ('pca', 'svd', 'ica', 'random') and x.shape[1] > pre_pca and n > pre_pca:
+        progress(stage=f'{label}: PCA to {pre_pca} dims')
+        x = np.ascontiguousarray(pca_reduce(x, pre_pca)[0], np.float32)
     if method == 'trees':
         from sklearn.decomposition import TruncatedSVD
         from sklearn.ensemble import RandomTreesEmbedding
@@ -289,9 +292,10 @@ def _project_sklearn(emb, method, params, progress, nc=2):
     return _place_by_neighbours(x, fit_idx, fit_xy)
 
 
-def project(emb, method='umap', params=None, metric='cosine', progress=_noop, n_components=2):
+def project(emb, method='umap', params=None, metric='cosine', progress=_noop, n_components=2, pre_pca=PRE_PCA):
     """2D (n_components=2) or 3D (3) projection. Returns (xy, info) where info holds e.g. PCA explained variance;
-    xy has one column per component."""
+    xy has one column per component. pre_pca: the dims t-SNE and the sklearn neighbourhood methods reduce to first
+    (0 = none); UMAP / PaCMAP get them reduced here when it is not the default."""
     nc = int(n_components)
     if nc not in (2, 3):
         raise ValueError(f'n_components must be 2 or 3, not {n_components!r}')
@@ -302,6 +306,10 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop, n_
     if n < 5:
         return (_pca_fallback(emb, nc) if n else np.zeros((0, nc), np.float32)), {}
     d3 = ' (3D)' if nc == 3 else ''
+    pre_pca = PRE_PCA if pre_pca is None else int(pre_pca)
+    if pre_pca and pre_pca != PRE_PCA and method in ('umap', 'pacmap', 'localmap') and emb.shape[1] > pre_pca and n > pre_pca:
+        progress(stage=f'PCA to {pre_pca} dims')
+        emb = np.ascontiguousarray(pca_reduce(np.asarray(emb, np.float32), pre_pca)[0], np.float32)
     if method == 'umap':
         progress(stage=f'UMAP{d3} on {n} points (n_neighbors={params["n_neighbors"]}, min_dist={params["min_dist"]})')
         return run_umap(emb, params['n_neighbors'], params['min_dist'], metric=metric, progress=progress,
@@ -345,9 +353,9 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop, n_
         return np.asarray(xy, np.float32), {}
     if method == 'tsne':
         x = emb
-        if x.shape[1] > 50 and n > 50:
-            progress(stage='t-SNE: PCA to 50 dims')
-            x = pca_reduce(x, 50)[0]
+        if pre_pca and x.shape[1] > pre_pca and n > pre_pca:
+            progress(stage=f't-SNE: PCA to {pre_pca} dims')
+            x = pca_reduce(x, pre_pca)[0]
         perplexity = float(min(params['perplexity'], max(2.0, (n - 1) / 3)))
         cu = _cuml('manifold') if n >= 10000 else None
         if cu is not None:
@@ -380,7 +388,7 @@ def project(emb, method='umap', params=None, metric='cosine', progress=_noop, n_
                       n_jobs=TSNE_THREADS).fit_transform(x)
         return xy.astype(np.float32), {}
     if method in METHODS:
-        return _project_sklearn(emb, method, params, progress, nc), {}
+        return _project_sklearn(emb, method, params, progress, nc, pre_pca), {}
     raise ValueError(f'unknown projection method {method!r}')
 
 

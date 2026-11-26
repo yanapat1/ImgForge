@@ -1,0 +1,93 @@
+# Recommended projections (the Map's Recipe menu, the assistant's list_projection_recipes / apply_recipe).
+# Each recipe sets only the fields it names; the rest stay as the user has them.
+#   feature  a preference list: a feature key (dinov2-base, hog), kind:<clip|siglip|dinov2>, group:<deep|simple|model>,
+#            or yolo (your YOLO backbone): the first one this session has wins
+#   method / params / dims   as on the Map
+#   prep     an ml/prep.py spec {image, feature}; its keys replace the current ones, a filter replaces the filter
+#   color    the Color-by to switch to (optional)
+#   needs    polygons (segmentation labels) | session (a session / camera per image) | crops (box crops: not a
+#            whole-image or vector session)
+categories: [Label errors, Duplicates, Domain shift, Overview, Small objects, Orientation, Background bias, Segmentation shape]
+recipes:
+  - id: find-mislabels
+    name: Find mislabels
+    category: Label errors
+    use_for: "boxes whose class disagrees with their look-alikes (red dots in another colour's cluster)"
+    sets: {feature: [kind:dinov2, kind:siglip, kind:clip, group:deep], method: umap, params: {n_neighbors: 15, min_dist: 0.1},
+           prep: {feature: {scale: standardize}}, color: suspicion}
+  - id: class-overlap
+    name: Classes that overlap
+    category: Label errors
+    use_for: "pairs of classes the annotators confuse (mixed clusters), with a global layout"
+    sets: {feature: [kind:clip, kind:siglip, kind:dinov2, group:deep], method: pacmap, params: {n_neighbors: 10}}
+  - id: near-duplicates
+    name: Near-duplicates
+    category: Duplicates
+    use_for: "the same object labelled twice or copied frames (tight little clumps)"
+    sets: {feature: [kind:dinov2, group:deep], method: umap, params: {n_neighbors: 10, min_dist: 0.0},
+           prep: {image: {context: box}}}
+  - id: camera-shift
+    name: Camera / lighting shift
+    category: Domain shift
+    use_for: "clusters that are cameras or lighting, not objects (colour the map by session)"
+    sets: {feature: [kind:clip, kind:siglip, group:deep], method: umap, params: {n_neighbors: 30, min_dist: 0.3}, color: session}
+    needs: [session]
+  - id: without-camera-bias
+    name: Objects without the camera bias
+    category: Domain shift
+    use_for: "compare objects across cameras: each camera's mean is removed and the light evened out first"
+    sets: {feature: [kind:clip, kind:siglip, kind:dinov2, group:deep], method: umap,
+           prep: {image: {tone: clahe}, feature: {debias: session}}, color: class}
+    needs: [session, crops]
+  - id: class-separation
+    name: Class separation overview
+    category: Overview
+    use_for: "how well the classes separate, distances between clusters kept (PaCMAP, whitened)"
+    sets: {feature: [kind:clip, kind:siglip, kind:dinov2, group:deep], method: pacmap, params: {n_neighbors: 10},
+           prep: {feature: {scale: whiten, pca: 50}}, color: class}
+  - id: quick-linear
+    name: Quick linear look
+    category: Overview
+    use_for: "a fast, honest first look (PCA: distances along the axes are real)"
+    sets: {method: pca}
+  - id: small-objects
+    name: Small-object issues
+    category: Small objects
+    use_for: "tiny boxes with more context around them, and their size fused in"
+    sets: {feature: [kind:dinov2, group:deep], method: umap, prep: {image: {context: pad25, fit: letterbox},
+           feature: {fuse: {feature: geometry, weight: 0.3}}}, color: area}
+    needs: [crops]
+  - id: hide-tiny-blurry
+    name: Leave out tiny or blurry boxes
+    category: Small objects
+    use_for: "a cleaner map: boxes under 12 px or very blurry are greyed out, placed by their neighbours"
+    sets: {prep: {feature: {filter: {min_px: 12, min_blur: 20}, show: grey}}}
+  - id: orientation
+    name: Orientation and pose
+    category: Orientation
+    use_for: "the same object facing different ways (shape features; mirror images kept apart)"
+    sets: {feature: [hog], method: umap, params: {n_neighbors: 15, min_dist: 0.1}, prep: {feature: {scale: standardize, pca: 20}}}
+  - id: orientation-free
+    name: Ignore left / right
+    category: Orientation
+    use_for: "group an object with its mirror image (features of the crop and its flip averaged)"
+    sets: {feature: [kind:dinov2, group:deep], method: umap, prep: {image: {tta: hflip}}}
+    needs: [crops]
+  - id: background-bias
+    name: Background bias
+    category: Background bias
+    use_for: "does the background decide the cluster? compare with Object only below"
+    sets: {feature: [kind:clip, kind:dinov2, group:deep], method: umap, prep: {image: {context: pad50}}}
+    needs: [crops]
+  - id: object-only
+    name: Object only (masked)
+    category: Background bias
+    use_for: "the object without its background (outside the polygon greyed)"
+    sets: {feature: [kind:dinov2, kind:clip, group:deep], method: umap, prep: {image: {context: box, mask: polygon}}}
+    needs: [polygons, crops]
+  - id: shape
+    name: Segmentation shape
+    category: Segmentation shape
+    use_for: "outlines that look wrong for their class (masked, grey, edge features)"
+    sets: {feature: [hog], method: umap, prep: {image: {context: box, mask: polygon, tone: gray}, feature: {scale: standardize}}}
+    needs: [polygons, crops]

@@ -39,6 +39,19 @@
 .bar-pop .field.stack select { width: 100%; max-width: none; }
 .bar-pop #params .params { flex-wrap: wrap; }
 .bar-pop .hint { white-space: normal; }
+/* the projection's Preprocess section (views/controls.ts): collapsed by default, two columns of small fields */
+.map-pop { max-height: min(80vh, 760px); overflow-y: auto; }
+.map-pop .prep { border: 1px solid var(--border); border-radius: var(--r-md); padding: 4px 8px; }
+.map-pop .prep > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.map-pop .prep > summary .muted { font-weight: 400; margin-left: 6px; font-size: var(--fs-xs); }
+.map-pop .prep[data-on] > summary .muted { color: var(--accent); }
+.map-pop .prep-body { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; padding: 4px 0 6px; }
+.map-pop .prep-body > .prep-h, .map-pop .prep-body > .check, .map-pop .prep-body > button { grid-column: 1 / -1; }
+.map-pop .prep-h { font-size: var(--fs-2xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); margin-top: 4px; }
+.map-pop .prep-body input[type=number] { width: 100%; }
+.map-pop .prep-pair { display: flex; gap: 4px; }
+.map-pop .prep-body > button { justify-self: start; }
+.map-pop #recipe-hint:empty { display: none; }
 .pop-sep { margin-top: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--border); }
 .pop-title .muted { font-weight: 400; font-size: var(--fs-xs); }
 .popover.issues-pop { width: min(340px, calc(100vw - 16px)); gap: 0; }

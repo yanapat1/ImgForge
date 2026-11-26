@@ -73,7 +73,8 @@ def test_tools_are_visual_ctx_tools_without_the_bucket():
                      'projection_quality', 'issue_summary', 'selection_view', 'search_boxes_by_text',
                      'set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view',
                      'list_models', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats', 'data_location',
-                     'augment_catalog', 'set_augment_recipe', 'augment_coverage', 'export_dataset', 'send_to_label'}
+                     'augment_catalog', 'set_augment_recipe', 'augment_coverage', 'export_dataset', 'send_to_label',
+                     'list_projection_recipes', 'apply_recipe'}
     assert all(tools.REGISTRY[n].ctx for n in names)
     assert {n for n in names if tools.REGISTRY[n].risk == 'ui'} == set(visual.UI_ACTIONS) - set(visual.RUN_ACTIONS)
     assert {n for n in names if tools.REGISTRY[n].risk == 'run'} == set(visual.RUN_ACTIONS)
@@ -205,6 +206,32 @@ def test_ui_actions_validate(session):
         run(ctx, 'set_projection', {'params': {'min_dist': 0.2}})
     clean, label = tools.prepare(ctx, 'set_projection', {'method': 'tsne', 'params': {'perplexity': 20}}, tools.REGISTRY)
     assert clean['method'] == 'tsne' and label == 'Projection: t-SNE · perplexity=20.0'
+
+
+def test_projection_recipes_and_prep(session):
+    """list_projection_recipes says which recipes work on this session (its only feature is geometry, no polygons),
+    apply_recipe refuses an unknown / impossible one, set_projection prep is validated and summarised."""
+    ctx = ctx_of(session, VIEW)
+    out, line = run(ctx, 'list_projection_recipes')
+    by = {r['id']: r for r in out['recipes']}
+    assert 'Label errors' in out['categories'] and by['quick-linear']['available'] and 'of' in line
+    assert not by['object-only']['available'] and by['object-only']['why_not']
+    assert all(r['category'] == 'Duplicates' for r in run(ctx, 'list_projection_recipes', {'category': 'duplicates'})[0]['recipes'])
+    with pytest.raises(tools.ToolError, match='no recipe'):
+        tools.prepare(ctx, 'apply_recipe', {'id': 'magic'}, tools.REGISTRY)
+    with pytest.raises(tools.ToolError, match='does not work on this session'):
+        tools.prepare(ctx, 'apply_recipe', {'id': 'object-only'}, tools.REGISTRY)
+    clean, label = tools.prepare(ctx, 'apply_recipe', {'id': 'quick-linear'}, tools.REGISTRY)
+    assert clean == {'id': 'quick-linear'} and label == 'Recipe: Quick linear look'
+    assert tools.REGISTRY['apply_recipe'].risk == 'run'
+    clean, label = tools.prepare(ctx, 'set_projection', {'prep': {'feature': {'debias': 'session', 'pca': 20}}},
+                                 tools.REGISTRY)
+    assert clean['prep'] == {'feature': {'debias': 'session', 'pca': 20}} and 'session bias' in label
+    with pytest.raises(tools.ToolError, match='prep: feature.scale'):
+        tools.prepare(ctx, 'set_projection', {'prep': {'feature': {'scale': 'log'}}}, tools.REGISTRY)
+    with pytest.raises(tools.ToolError, match='segmentation'):
+        tools.prepare(ctx, 'set_projection', {'prep': {'image': {'mask': 'polygon'}}}, tools.REGISTRY)
+    assert not any(f['id'].count('~') for f in run(ctx, 'list_features')[0]['features']), 'variants stay hidden'
 
 
 def test_apply_filter_is_cleaned(session):

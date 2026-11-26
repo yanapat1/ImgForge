@@ -48,6 +48,8 @@ views/assistant.ts, applies `args` through its existing controls). Names, args a
         params:  only the method's own (umap: n_neighbors, min_dist · pacmap / localmap / isomap / lle / spectral:
                  n_neighbors · tsne: perplexity · kpca: gamma)           -> #p-<method>-<param>, then Generate
         dims:    2 = flat map, 3 = 3D cloud (every method)                       -> #proj-dims
+        prep:    an ml/prep.py spec {image?, feature?} ({} = Default)            -> the Preprocess section
+    apply_recipe {id}   a recommended projection (ml/recipes.yaml)            -> the Recipe menu (views/controls.applyRecipe)
         At least one of feature / method / params / dims. Omitted keys keep the page's current value.
     set_color_by {by: str}                                                                       -> #color-by
         class | group | suggested | session | suspicion | outlier | area | aspect | brightness | blur |
@@ -87,8 +89,9 @@ PARAM_INFO = {
 }
 PARAM_RANGE = {'n_neighbors': (2, 200), 'min_dist': (0.0, 1.0), 'perplexity': (2.0, 100.0), 'gamma': (0.0, 100.0)}
 
-UI_ACTIONS = ('set_projection', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view', 'set_augment_recipe')
-RUN_ACTIONS = ('set_projection', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats')
+UI_ACTIONS = ('set_projection', 'apply_recipe', 'set_color_by', 'apply_filter', 'open_tab', 'show_issue', 'fit_view',
+              'set_augment_recipe')
+RUN_ACTIONS = ('set_projection', 'apply_recipe', 'run_model', 'run_eval_all', 'run_scan', 'compute_stats')
 SCAN_KINDS = ('curation', 'cleanlab')
 COLOR_BY = ('class', 'group', 'suggested', 'session', 'suspicion', 'outlier', 'area', 'aspect', 'brightness', 'blur',
             'cl_issue', 'cl_quality', 'cl_suggested', 'cl_given_prob', 'cl_ood_feat', 'cl_ood_prob',
@@ -440,6 +443,8 @@ def _list_features(ctx, a):
             spec = st.registry[k]
         except Exception:  # noqa: BLE001
             continue
+        if getattr(spec, 'group', '') == 'variant':     # an image-prep variant: set_projection prep picks it
+            continue
         kind = getattr(spec, 'kind', '') or ('yolo' if str(k).startswith('yolo:') else '')
         rows.append({'id': k, 'label': getattr(spec, 'label', k) if spec is not None else k,
                      'group': getattr(spec, 'group', None), 'kind': kind or None, 'dims': _dims(st, k, spec),
@@ -617,11 +622,24 @@ def _method_id(m):
 
 
 def _check_projection(ctx, a):
-    if not any(k in a for k in ('feature', 'method', 'params', 'dims')):
-        raise ToolError('give at least one of feature, method, params, dims')
+    if not any(k in a for k in ('feature', 'method', 'params', 'dims', 'prep')):
+        raise ToolError('give at least one of feature, method, params, dims, prep')
     v = _view(ctx)
     st = getattr(ctx, 'state', None)
     out = {}
+    if 'prep' in a:
+        from ...ml import prep as mprep
+        try:
+            out['prep'] = mprep.validate(a['prep'])
+        except mprep.PrepError as e:
+            raise ToolError(f'prep: {e}') from None
+        feat = a.get('feature') or v.get('feature')
+        why = st.prep_why_not(feat, out['prep'].get('image')) if st is not None and feat and out['prep'].get('image') else ''
+        if why:
+            raise ToolError(f'image preprocessing: {why}')
+        fu = (out['prep'].get('feature') or {}).get('fuse')
+        if fu and st is not None and fu['feature'] not in st.registry:
+            raise ToolError(f'fuse: no feature {fu["feature"]!r} (list_features)')
     if 'feature' in a:
         if st is not None and a['feature'] not in st.registry:
             raise ToolError(f'no feature {a["feature"]!r}; the features are: {", ".join(list(st.registry)[:30])}')
@@ -691,7 +709,47 @@ def _proj_label(b, a):
         parts.append(', '.join(f'{k}={v}' for k, v in a['params'].items()))
     if a.get('dims') in (2, 3):
         parts.append(f'{a["dims"]}D')
+    if isinstance(a.get('prep'), dict):
+        from ...ml import prep as mprep
+        try:
+            parts.append(f'preprocessed: {mprep.summary(mprep.validate(a["prep"])) or "Default"}')
+        except mprep.PrepError:
+            parts.append('preprocessed')
     return 'Projection: ' + ' · '.join(parts) if parts else 'Generate projection'
+
+
+def _list_recipes(ctx, a):
+    from ...ml import recipes
+    st = _state(ctx)
+    rows = recipes.for_state(st)
+    cat = a.get('category')
+    if cat:
+        rows = [r for r in rows if r['category'].lower() == str(cat).lower()]
+    out = [{'id': r['id'], 'name': r['name'], 'category': r['category'], 'use_for': r['use_for'],
+            'available': r['available'], **({'why_not': r['why']} if r['why'] else {}), 'sets': r['sets'],
+            **({'computed': True} if r['instant'] else {})} for r in rows]
+    return {'recipes': out, 'categories': list(recipes.CATEGORIES),
+            'apply': 'apply_recipe {id} fills the fields a recipe names and generates the map'}, \
+        f'→ {sum(r["available"] for r in out)} of {len(out)} recipes work here'
+
+
+def _check_recipe(ctx, a):
+    from ...ml import recipes
+    r = recipes.RECIPES.get(str(a.get('id') or ''))
+    if r is None:
+        raise ToolError(f'no recipe {a.get("id")!r}; the recipes are: {", ".join(recipes.RECIPES)}')
+    st = getattr(ctx, 'state', None)
+    if st is not None:
+        _, why = recipes.resolve(r, st)
+        if why:
+            raise ToolError(f'{r["name"]} does not work on this session: {why}')
+    return {'id': r['id']}, None
+
+
+def _recipe_label(b, a):
+    from ...ml import recipes
+    r = recipes.RECIPES.get(str(a.get('id') or ''))
+    return f'Recipe: {r["name"]}' if r else 'Apply a recommended projection'
 
 
 def _filter_label(b, a):
@@ -769,11 +827,29 @@ register(Tool('search_boxes_by_text', 'Boxes whose crops best match a text (e.g.
 
 _U = dict(domain='visual', ctx=True, risk='ui')
 _RUN = dict(domain='visual', ctx=True, risk='run')
-register(Tool('set_projection', 'Run: generate the map / 3D cloud with these features, method and parameters.',
+PREP_SCHEMA = {'type': 'object', 'description': (
+    'preprocessing ({} = Default). image (before the features, a feature variant computed once): context box | pad5 | '
+    'square10 (default) | pad25 | pad50 | image, fit square | letterbox | stretch | center, mask polygon (segmentation '
+    'only), tone none | gray | clahe, tta hflip. feature (before the method): scale none | standardize | whiten, pca 50 '
+    '(default) | 0 | 20 | 100 | 200, debias session | folder, fuse {feature, weight 0.05-0.95}, filter {min_px, '
+    'min_blur, brightness [lo, hi]}, show hide | grey (the filtered boxes)'),
+    'properties': {'image': {'type': 'object'}, 'feature': {'type': 'object'}}}
+register(Tool('set_projection', 'Run: generate the map / 3D cloud with these features, method, parameters and '
+                                'preprocessing (prep).',
               _obj({'feature': S('a feature id from list_features'),
                     'method': E('a method id from list_methods', list(_methods())), 'params': PARAMS_SCHEMA,
-                    'dims': {'type': 'integer', 'enum': [2, 3], 'description': '2 = flat map, 3 = 3D cloud (rotate, camera presets, wall shadows)'}}),
+                    'dims': {'type': 'integer', 'enum': [2, 3], 'description': '2 = flat map, 3 = 3D cloud (rotate, camera presets, wall shadows)'},
+                    'prep': PREP_SCHEMA}),
               False, _ui_run(_check_projection), _proj_label, check=_check_projection, **_RUN))
+register(Tool('list_projection_recipes', 'The recommended projections (recipes) by purpose: Label errors, Duplicates, '
+                                         'Domain shift, Overview, Small objects, Orientation, Background bias, '
+                                         'Segmentation shape. Each: what it is for, the feature / method / '
+                                         'preprocessing it sets, whether it works on this session (why not).',
+              _obj({'category': S('one category only (optional)')}), False, _list_recipes, domain='visual', ctx=True))
+register(Tool('apply_recipe', 'Run: apply a recommended projection (an id of list_projection_recipes): it fills the '
+                              'fields the recipe names, keeps the rest and generates the map.',
+              _obj({'id': S('the recipe id')}, ['id']), False, _ui_run(_check_recipe), _recipe_label,
+              check=_check_recipe, **_RUN))
 register(Tool('set_color_by', 'Page action: colour the dots by something else (Color dropdown).',
               _obj({'by': E('what colours the dots', COLOR_BY)}, ['by']), False, _ui_run(_ok),
               lambda b, a: f'Colour by {COLOR_LABEL.get(a.get("by"), a.get("by"))}', check=_ok, **_U))
