@@ -20,7 +20,9 @@ summary: send_to_session targets and task types, what each permission (bucket.ma
   changed the file too). A Label session (or both, linked) keeps its labels in the labeling database. Class names
   come from the folder's data.yaml in S3.
 - Sessions are made only from data in a bucket: new data goes into Bucket first (upload, link a folder, an S3
-  link, import from the web), then Image › Create session picks the bucket folder.
+  link, import from the web), then Image › Create session picks the bucket folder. The same holds when a session's
+  source is edited, when a Label session switches its images, and for an S3 source (it must match an S3 link through
+  the same connection; its local labels folder must lie in a bucket too).
 - `send_to_session` also opens folders / files as a **visualize** session alone (formats yolo-detect / seg / pose / obb, images,
   classification, embeddings) or a **label** project (target label; task_type detect (default), segment, pose, obb or
   classify; classes come from its data.yaml). The result has the new session's id and url. Each send makes a NEW

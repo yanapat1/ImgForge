@@ -201,6 +201,8 @@ def router(state, ctx):
                     raise ValueError(f'no dataset {p["id"]!r} to combine')
         return check
 
+    SOURCE_KEYS = ('kind', 'path', 'connection_id', 'bucket', 'prefix', 'labels_dir')   # where its data is read
+
     @r.post('/api/datasets')
     async def save_dataset(body: dict, user=Depends(deps.current_user)):
         """A new session owned by the caller, or (body.id) an edit of the caller's own session's source / name."""
@@ -213,10 +215,15 @@ def router(state, ctx):
                 raise HTTPException(403, 'only the owner of this session can do that')
         if not body.get('id') and body.get('kind') != 'union':     # combining what they can already open: no tier
             tiers.check(user, 'dataset.create')
-        if not body.get('id') and zones.on('bucket'):     # a new session's data lies in a bucket (image.bucket_only)
+        if zones.on('bucket'):     # a session's data lies in a bucket (image.bucket_only): new, or its source edited
             from ...bucket import service as bucket_service
+            src = body
+            if body.get('id'):
+                old = await run_io(reg.dataset, body['id'])
+                src = {**old, **body} if any(k in body and body[k] != old.get(k) for k in SOURCE_KEYS) else None
             try:
-                await run_io(bucket_service.need_bucket_source, user, body)
+                if src is not None:
+                    await run_io(bucket_service.need_bucket_source, user, src)
             except bucket_service.BucketError as e:
                 raise HTTPException(400, str(e))
         if body.get('kind') == 'union' and not body.get('id') and body.get('reuse'):

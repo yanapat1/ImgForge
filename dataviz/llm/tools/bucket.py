@@ -561,7 +561,9 @@ _add(Tool('session_check', 'Before a session is made from a folder: its detected
           _obj({'bucket': BUCKET, 'path': PATH}, ['bucket']), False, _session_check, s3_ok=True))
 _add(Tool('reformat_folder', 'Write a folder again in another label format (yolo, coco, voc, labelme, createml, csv) as '
                              'a NEW folder of the bucket "<bucket> · formats"; the original is not changed. Reads YOLO '
-                             'detect / segment / pose and COCO labels. A local folder gets its images linked beside '
+                             'detect / segment / pose and COCO labels; a folder of images only goes to yolo as an '
+                             'empty dataset to label (images/ + empty labels/ + data.yaml; a streamed one is '
+                             'downloaded first). A local folder gets its images linked beside '
                              'the new labels; a streamed S3 folder gets the labels only, with images.txt and '
                              'source.json (the images stay in S3; to yolo it opens in Visualize and Label, images streamed). '
                              'A background job: job_status says when it is done.',

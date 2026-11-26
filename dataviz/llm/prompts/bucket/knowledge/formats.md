@@ -17,7 +17,10 @@ core: true
 - **Re-format** (`reformat_folder` bucket, path, to: yolo | coco | voc | labelme | createml | csv; the Bucket and Create
   session pages offer it too): writes the folder again in another label format as a new folder `<path>-<to>` of the
   managed bucket "<bucket> · formats"; the original is never changed. It reads YOLO detect / segment / pose and COCO
-  labels (images only, VOC, OBB, classification: nothing to convert). A local or downloaded folder gets a complete
+  labels (VOC, OBB, classification: nothing to convert). A folder of **images only** re-formats to `yolo` only, as
+  an empty dataset to label: images/ (hard-linked; a sub-folder's image as `sub__name.jpg`), an empty labels/,
+  data.yaml + classes.txt; it is then `yolo-detect` ("no label lines yet") and makes a linked session. A streamed
+  images-only folder must be downloaded first. A local or downloaded folder gets a complete
   dataset (images hard-linked, no extra disk). A **streamed S3** folder gets the labels only plus `images.txt` (the
   s3:// address of each image) and `source.json`: nothing is downloaded and nothing is written to S3, so a training
   tool needs the images downloaded first (`download_s3_folders`). Re-formatted to YOLO, that folder opens in

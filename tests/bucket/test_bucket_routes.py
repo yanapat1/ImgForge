@@ -394,8 +394,60 @@ def test_new_sessions_only_from_bucket_data(dc, tmp_path):
         r = c.post('/api/label/projects', json={'name': 'L2', 'tasks': [task], 'source': {'kind': 'local', 'path': b['root']}})
         assert r.status_code == 200, r.text
         assert c.post('/api/bucket/session', json={'bucket': b['id'], 'name': 'Both'}).status_code == 200
+        # editing a session: a rename is fine, moving its source out of the buckets is not
+        did = c.post('/api/datasets', json={'kind': 'local', 'path': b['root'], 'name': 'to edit'}).json()['id']
+        r = c.post('/api/datasets', json={'id': did, 'kind': 'local', 'path': b['root'], 'name': 'renamed'})
+        assert r.status_code == 200, r.text
+        r = c.post('/api/datasets', json={'id': did, 'kind': 'local', 'path': str(outside.parent)})
+        assert r.status_code == 400 and 'data in Bucket' in r.json()['detail'], r.text
+        # a Label session switching its images to a folder outside the buckets
+        pid = c.post('/api/label/projects', json={'name': 'L3', 'tasks': [task], 'source': {'kind': 'upload'}})
+        assert pid.status_code == 400                                       # an upload is not bucket data either
+        made = c.post('/api/bucket/session', json={'bucket': b['id'], 'visualize': False, 'name': 'L4'}).json()
+        wait_job(c, made['label']['job_id'])
+        r = c.post(f'/api/label/projects/{made["label"]["id"]}/import', json={'source': {'kind': 'local', 'path': str(outside.parent)}})
+        assert r.status_code in (400, 409), r.text
+        # an S3 source matches an S3 link only through the same connection; its local labels_dir lies in a bucket
+        r = c.post('/api/datasets', json={'kind': 's3', 'connection_id': 'other', 'bucket': 'nope', 'prefix': '',
+                                          'name': 's3 outside'})
+        assert r.status_code == 400 and 'data in Bucket' in r.json()['detail'], r.text
     finally:
         c.ctx.cfg['image'] = {'bucket_only': False}
+
+
+def test_reformat_images_only_to_yolo(dc):
+    """Re-format of a folder of images only: an empty YOLO dataset (images/ hard-linked, sub-folders flattened, an
+    empty labels/, data.yaml + classes.txt) detected as yolo-detect, which makes a linked session; other formats and
+    an Export of it are refused."""
+    _, c = dc
+    b = new_bucket(c, name='shots')
+    for sub, n in (('', 2), ('day2', 1)):
+        r = c.post(f'/api/bucket/buckets/{b["id"]}/upload', params={'path': f'raw/{sub}' if sub else 'raw'},
+                   files=[('files', (f'{sub or "top"}{i}.jpg', jpeg_bytes(), 'image/jpeg')) for i in range(n)])
+        assert r.status_code == 200, r.text
+    chk = c.get(f'/api/bucket/buckets/{b["id"]}/session-check', params={'path': 'raw'}).json()
+    assert chk['format'] == 'images' and chk['convert_to'] == ['yolo'], chk
+    r = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'raw', 'to': 'coco'})
+    assert r.status_code == 400 and 'yolo' in r.json()['detail']
+    r = c.post('/api/bucket/reformat', json={'bucket': b['id'], 'path': 'raw', 'to': 'yolo'})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    j = wait_job(c, out['job_id'], timeout=60)
+    assert j['status'] == 'done' and j['result']['images_linked'] == 3, j
+    dest = c.get(f'/api/bucket/buckets/{out["bucket"]}').json()
+    root = os.path.join(dest['root'], out['path'])
+    assert sorted(os.listdir(os.path.join(root, 'images'))) == ['day2__day20.jpg', 'top0.jpg', 'top1.jpg']
+    assert os.path.isdir(os.path.join(root, 'labels')) and not os.listdir(os.path.join(root, 'labels'))
+    assert os.path.isfile(os.path.join(root, 'data.yaml'))
+    chk = c.get(f'/api/bucket/buckets/{out["bucket"]}/session-check', params={'path': out['path']}).json()
+    assert chk['format'] == 'yolo-detect' and chk['can']['linked'] and chk['images'] == 3, chk
+    s = c.post('/api/bucket/session', json={'bucket': out['bucket'], 'path': out['path'], 'name': 'to label'})
+    assert s.status_code == 200 and s.json()['linked'], s.text
+    lab = s.json()['label']
+    for k in ('job_id', 'import_job_id'):
+        if lab.get(k):
+            j = wait_job(c, lab[k], timeout=60)
+            assert j['status'] == 'done', j
 
 
 def test_the_shipped_config_has_only_known_keys():

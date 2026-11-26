@@ -469,7 +469,7 @@ def router(state, ctx):
         return {'saved': saved, 'skipped': skipped}
 
     @r.post('/api/label/projects/{pid}/import', dependencies=O)
-    def start_import(pid: str, body: LabelImportIn | None = None):
+    def start_import(pid: str, body: LabelImportIn | None = None, user=Depends(deps.current_user)):
         need()
         with _errors():
             entry = reg.get(pid)
@@ -477,6 +477,12 @@ def router(state, ctx):
             if body is not None and body.source:
                 from ...labeling.projects import clean_source
                 new = clean_source(check_source(body.source, entry['owner_id']))
+                if new != source and zones.on('bucket'):    # its images switch: they come from a bucket too
+                    from ...bucket import service as bucket_service
+                    try:
+                        bucket_service.need_bucket_source(user, new)
+                    except bucket_service.BucketError as e:
+                        raise HTTPException(400, str(e))
                 if new != source:
                     if reg.store(pid).media_count():
                         raise HTTPException(409, 'this session already has images from another source; '

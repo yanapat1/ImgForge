@@ -2843,11 +2843,12 @@ def _parents(rel):
     return ['/'.join(parts[:k]) for k in range(len(parts) - 1, -1, -1)]
 
 
-def locate(user, path=None, s3_bucket=None, prefix=None):
+def locate(user, path=None, s3_bucket=None, prefix=None, connection_id=None):
     """The Bucket page folder that holds a dataset (a visualize session's source) -> {bucket, bucket_name, path,
     parents} or None when no bucket the user sees contains it. A local `path` matches a bucket whose folder (or
     the local copy of a downloaded S3 link) contains it; an S3 source (s3_bucket, prefix) an S3 link of that
-    bucket whose prefix contains it. The deepest bucket wins (a bucket inside another bucket's folder)."""
+    bucket whose prefix contains it (and, with connection_id, through that connection: the same bucket name on
+    another endpoint is another bucket). The deepest bucket wins (a bucket inside another bucket's folder)."""
     with db.connect() as c:
         rows = _visible_rows(user, c)
     want = os.path.realpath(path) if path else None
@@ -2862,7 +2863,8 @@ def locate(user, path=None, s3_bucket=None, prefix=None):
                 if want == root or want.startswith(root.rstrip(os.sep) + os.sep):
                     rel = os.path.relpath(want, root).replace(os.sep, '/')
                     break
-        elif s3_bucket and r._r.kind == 's3' and r._r.s3_bucket == s3_bucket:
+        elif (s3_bucket and r._r.kind == 's3' and r._r.s3_bucket == s3_bucket
+              and (not connection_id or r._r.connection_id == connection_id)):
             bp, px = (r._r.prefix or '').strip('/'), (prefix or '').strip('/')
             if not bp or px == bp or px.startswith(bp + '/'):
                 rel = px[len(bp):].strip('/')
@@ -2920,9 +2922,12 @@ def bucket_only():
 
 
 def need_bucket_source(user, source):
-    """A new session's source ({kind: local | embeddings, path} / {kind: s3, bucket, prefix} / an upload ...) must
-    lie in a bucket the user sees when image.bucket_only is on -> None, or BucketError saying where to add it.
-    Sessions made from other sessions (kind labeling, union) are not data imports."""
+    """A session's source ({kind: local | embeddings, path} / {kind: s3, connection_id, bucket, prefix, labels_dir?}
+    / an upload ...) must lie in a bucket the user sees when image.bucket_only is on (a new session, an edit of its
+    source, a Label session switching its images) -> None, or BucketError saying where to add it. An S3 source must
+    match an S3 link through the same connection, and its local labels_dir lie in a bucket too.
+    Not checked: sessions made from other sessions (kind labeling, union; promote) and the admin CLI's --dataset
+    bootstrap, which are not data imports."""
     kind = (source or {}).get('kind')
     if not bucket_only() or kind in ('labeling', 'union', None):
         return
@@ -2930,7 +2935,10 @@ def need_bucket_source(user, source):
     if kind in ('local', 'embeddings') and source.get('path'):
         where = locate(user, path=source['path'])
     elif kind == 's3' and source.get('bucket'):
-        where = locate(user, s3_bucket=source['bucket'], prefix=source.get('prefix') or '')
+        where = locate(user, s3_bucket=source['bucket'], prefix=source.get('prefix') or '',
+                       connection_id=source.get('connection_id'))
+        if where is not None and source.get('labels_dir') and locate(user, path=source['labels_dir']) is None:
+            where = None
     if where is None:
         raise BucketError('sessions are made from data in Bucket: add this data to a bucket first (the Bucket page: '
                           'upload, link a folder or an S3 bucket, import from the web), then Image › Create session')
@@ -3057,18 +3065,25 @@ def reformat(user, bid, path='', to='coco', dest_bucket=None, dest_path=None):
     except ValueError as e:
         raise BucketError(str(e)) from None
     chk = _checked(user, bid, rel)
-    task_type = REFORMAT_FROM.get(chk['format'])
+    only_images = chk['format'] == 'images' and dest_bucket is None
+    task_type = 'detect' if only_images else REFORMAT_FROM.get(chk['format'])
     if task_type is None:
         raise BucketError(f'{rel or r.name} is “{chk["label"]}”: re-format reads YOLO detect / segment / pose and COCO '
-                          'labels (a folder of images only has no labels to write: label it first)')
+                          'labels, and turns a folder of images only into an empty YOLO dataset')
     keys = [k for k in keys if lw.supports(k, TASK_TYPES[task_type])]
     if not keys:
         raise BucketError(f'{to} cannot hold {task_type} labels')
+    if only_images and keys[0] != 'yolo':
+        raise BucketError('a folder of images only re-formats to yolo (images/ + empty labels/ + data.yaml): label it '
+                          'first for any other format')
     hook = getattr(_conf['ctx'], 'label_import', None) if _conf['ctx'] is not None else None
     jobs = _jobs()
     if hook is None or jobs is None:
         raise BucketError('re-format runs in the server (the labeling routes are not loaded here)', 501)
     streamed = r.kind == 's3' and not _writable(r) and not (folder_state(user, bid, rel) or {}).get('editable')
+    if only_images and streamed:
+        raise BucketError(f'{rel or r.name} streams from S3 and holds images only: download it first (right-click › '
+                          'Cloud (S3) › Download to local), then re-format it to YOLO')
     to_s3, staging = None, None                         # a streamed S3 destination: staged here, then uploaded
     if dest_bucket is None:
         dest_name = f'{r.name} · formats'
@@ -3124,12 +3139,15 @@ def reformat(user, bid, path='', to='coco', dest_bucket=None, dest_path=None):
             wait(made.get('job_id'), job)
             st = _labeling().store(pid)
             task = st.task(st.tasks()[0]['id'])
-            job.progress(stage='reading the labels')
-            wait(hook(pid, {'task_id': task['id'], 'format': 'auto', 'source': _labeling().get(pid)['source'],
-                            'mode': 'merge', 'add_classes': True}, user)['job_id'], job)
-            task = st.task(task['id'])                      # with the classes the import added
+            if not only_images:                             # images only: nothing to import
+                job.progress(stage='reading the labels')
+                wait(hook(pid, {'task_id': task['id'], 'format': 'auto', 'source': _labeling().get(pid)['source'],
+                                'mode': 'merge', 'add_classes': True}, user)['job_id'], job)
+                task = st.task(task['id'])                  # with the classes the import added
             base = _abs(dr, out_rel, must_exist=False)
             os.makedirs(base, exist_ok=True)
+            if only_images:                                 # a YOLO dataset still to label: images/ + empty labels/
+                os.makedirs(os.path.join(base, 'labels'), exist_ok=True)
             linked = 0
             if streamed:
                 import json
@@ -3146,7 +3164,10 @@ def reformat(user, bid, path='', to='coco', dest_bucket=None, dest_path=None):
                 src_root = _abs(_write_view(r) if r.kind == 's3' else r, rel)
                 for m, _ in st.iter_task_export(task['id']):
                     k = (m.get('meta') or {}).get('rel_path') or m.get('uri')
-                    a, b = os.path.join(src_root, k or ''), os.path.join(base, k or '')
+                    # images only: all in images/ (a sub-folder's image as sub__name: YOLO reads images/ itself)
+                    b = os.path.join(base, 'images', (k or '').replace('/', '__')) if only_images else \
+                        os.path.join(base, k or '')
+                    a = os.path.join(src_root, k or '')
                     if not k or not os.path.isfile(a):
                         continue
                     os.makedirs(os.path.dirname(b), exist_ok=True)
