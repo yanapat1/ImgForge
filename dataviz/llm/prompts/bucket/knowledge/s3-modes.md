@@ -14,7 +14,7 @@ summary: what stream (read-only) and local (downloaded copy) allow, per-folder d
   same name (local edits to it are lost); files left unchanged since the last pull (same size and time) are skipped,
   so a re-sync is fast; files only the copy has are kept; nothing is deleted. Dangerous: always confirmed.
 - A pull starts downloading while it is still listing ("listing… n found" in the status bar, then n/total).
-- **Download only some folders** (stream mode; selection bar or right-click › Download to local, tool
+- **Download only some folders** (stream mode; selection bar or right-click › Cloud (S3) › Download to local, tool
   `download_s3_folders`): a local copy of just those folders (only that prefix is downloaded, never the whole
   bucket), in the same place as a full load. Downloaded files open from disk (fast, video previews work).
 - **A downloaded folder is editable in place**: it lists from the local copy, and create folder / move / copy /
@@ -23,8 +23,8 @@ summary: what stream (read-only) and local (downloaded copy) allow, per-folder d
   copy), any change while a download into the bucket runs (409). The rest of the bucket keeps streaming, read-only.
   To change a folder that is not downloaded: `download_s3_folders` it first, then the changes. Export and Send to
   read S3. To send local edits back to S3: **Upload to S3** (below).
-- **Upload to S3** (right-click a file / folder of a downloaded folder, or the folder's empty space › Upload this
-  folder to S3; tool `push_to_s3`): the local files go back to the **same keys** (`<prefix>/<path>`) as a job
+- **Upload to S3** (right-click a file / folder of a downloaded folder › Cloud (S3) › Upload to S3, or the folder's
+  empty space › Cloud (S3) › Upload this folder to S3; tool `push_to_s3`): the local files go back to the **same keys** (`<prefix>/<path>`) as a job
   `bk-push` (bytes, ETA, Cancel in the status bar). Unchanged files are skipped. A file **S3 changed since the
   download** (someone else updated it) is a **conflict**: not uploaded, listed in a toast with **Overwrite these N**
   (uploads them anyway) and **Download the S3 versions** (takes S3's copy; the local edit is lost). Files deleted
@@ -36,7 +36,7 @@ summary: what stream (read-only) and local (downloaded copy) allow, per-folder d
   automatically every 10 minutes while browsing, or with `check_s3_local`; `list_folder` gives its
   `local_copy` (state, diff {new, changed, removed}).
 - **Compare with cloud** (strip button "Compare with cloud" on a downloaded folder or a bucket loaded into local,
-  right-click › Compare with cloud…, tool `compare_s3_local`): every file of the local copy against S3, in a list the
+  right-click › Cloud (S3) › Compare with cloud…, tool `compare_s3_local`): every file of the local copy against S3, in a list the
   user can filter and search. Statuses: **Added in local**, **Deleted in local**, **Edited in local** (what the user
   did in the copy), **New in cloud**, **Changed in cloud**, **Removed from cloud** (what S3 did since the download),
   **Changed on both sides**, **Same**. Each download keeps a manifest of what S3 held, so added vs. removed is exact;

@@ -538,7 +538,7 @@ export const BROWSER_ACTIONS: Record<string, Action> = {
       `<button type="button" role="menuitem" data-act="export-zip">${icon('download')}Export (zip)<span class="faint">download this folder</span></button>` +
       `<button type="button" role="menuitem" data-act="export-to">${icon('upload')}Export to…<span class="faint">S3 · RustFS, FTP, SFTP</span></button>`)),
   'export-zip': () => { closeFloat(); if (D.bid) void downloadZip(D.bid, D.path); },
-  'export-to': () => { closeFloat(); if (D.bid) void openExportDialog(D.bid, D.path); },
+  'export-to': (el) => { closeFloat(); if (D.bid) void openExportDialog(D.bid, el.dataset['path'] ?? D.path); },
   send: (el) => {
     closeFloat();
     const bid = el.dataset['bid'] || D.bid || D.focus;

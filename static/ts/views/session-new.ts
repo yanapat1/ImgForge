@@ -9,8 +9,8 @@ import { zoneOn } from '../core/auth.js';
 import { esc, icon } from '../core/dom.js';
 import { waitJob } from '../core/jobs.js';
 import { bucketUrl, labelUrl, vizUrl } from '../core/nav.js';
-import { toast } from '../core/toast.js';
 import * as api from '../bucket/api.js';
+import { startReformat } from '../bucket/reformat.js';
 import type { Bucket, Entry } from '../types-bucket.js';
 import { openSettings } from '../settings/dialog.js';
 import { openDialog } from './dialog.js';
@@ -157,11 +157,7 @@ export async function openCreateSession(o: CreateOpts = {}): Promise<void> {
         const go = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-sn="go"]') : null;
         if (go && !S.busy) void open(S.bid, go.dataset['path'] ?? '');
         const rf = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-sn="reformat"]') : null;
-        if (rf && !S.busy) {
-          postJSON<{ bucket_name: string; path: string }>('api/bucket/reformat', { bucket: S.bid, path: S.path, to: rf.dataset['to'] })
-            .then((x) => toast(`Re-format started: it will be in ${x.bucket_name}/${x.path} (the Bucket page shows the job)`, 'ok'))
-            .catch((err: unknown) => toast(`Could not re-format: ${errText(err)}`, 'err'));
-        }
+        if (rf && !S.busy) void startReformat(S.bid, S.path, rf.dataset['to'] ?? '');
         // a session made from other sessions: the Settings form of that kind (closing this dialog)
         const other = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-act="new-union"], [data-act="new-labeling"]') : null;
         if (other && !S.busy) {

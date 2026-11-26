@@ -143,6 +143,33 @@ def test_bucket_tree_cards_and_view_toggle(server, tmp_path):
         page.wait_for_selector('#bk-menu:not(.hidden)')
         page.mouse.click(box['x'] + box['width'] - 40, box['y'] + box['height'] - 40)
         page.wait_for_selector('#bk-menu.hidden', state='attached')
+        # sub-menus (core/menu.ts): hovering Organize opens it beside its row; Escape closes the sub-menu first, then
+        # the menu; the keyboard opens one with ArrowRight and goes back with ArrowLeft
+        tile.click(button='right')
+        page.wait_for_selector('#bk-menu:not(.hidden)')
+        org = page.locator('#bk-menu > .mi-sub > button[data-sub]', has_text='Organize')
+        org.hover()
+        page.wait_for_selector('#bk-menu .menu-sub:not(.hidden) >> text=Move to…')
+        assert org.get_attribute('aria-expanded') == 'true'
+        sub_box = page.locator('#bk-menu .menu-sub:not(.hidden)').bounding_box()
+        assert sub_box['x'] >= org.bounding_box()['x'] + org.bounding_box()['width'] - 8 or \
+            sub_box['x'] + sub_box['width'] <= org.bounding_box()['x'] + 8, 'beside its row'
+        page.keyboard.press('Escape')
+        page.wait_for_function("!document.querySelector('#bk-menu .menu-sub:not(.hidden)')")
+        assert page.locator('#bk-menu:not(.hidden)').count() == 1, 'the first Escape closed only the sub-menu'
+        page.keyboard.press('Escape')
+        page.wait_for_selector('#bk-menu.hidden', state='attached')
+        tile.click(button='right')
+        page.wait_for_selector('#bk-menu:not(.hidden)')
+        send = page.locator('#bk-menu > .mi-sub > button[data-sub]', has_text='Send to')
+        send.focus()
+        page.keyboard.press('ArrowRight')
+        page.wait_for_function("document.activeElement && document.activeElement.closest('.menu-sub')")
+        page.keyboard.press('ArrowLeft')
+        page.wait_for_function("document.activeElement && document.activeElement.hasAttribute('data-sub')")
+        assert send.get_attribute('aria-expanded') == 'false'
+        page.keyboard.press('Escape')
+        page.wait_for_selector('#bk-menu.hidden', state='attached')
         # the browser's back button returns to All buckets
         page.go_back()
         page.wait_for_selector(f'#bk-body .bk-bcard[data-bid="{bid}"]')

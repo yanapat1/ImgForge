@@ -53,9 +53,10 @@ export function arrowNav(popId: string, selector = 'button:not([disabled]):not(.
 
 /** Show `pop` (position: fixed, appended to the body by the caller) under `from`, right-aligned, flipped up when there is
  *  no room; `at` (a context menu) opens it at that point instead, flipped left / up near the edges. A mousedown outside
- *  both, Escape, or calling the returned function closes it (onClose runs once; Escape puts the focus back on `from`). */
+ *  both, Escape, or calling the returned function closes it (onClose runs once; Escape puts the focus back on `from`).
+ *  escape: asked first on Escape; true = it handled it (a menu closed its open sub-menu), the popover stays. */
 export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () => void, align: 'left' | 'right' = 'right',
-  at?: { x: number; y: number }): () => void {
+  at?: { x: number; y: number }, escape?: () => boolean): () => void {
   for (const p of all) p.close();
   floatClose?.();
   const place = (): void => {
@@ -82,6 +83,7 @@ export function floatPopover(pop: HTMLElement, from: HTMLElement, onClose?: () =
   const key = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || (!at && !pop.contains(document.activeElement))) return;
     e.stopPropagation();
+    if (escape?.()) { e.preventDefault(); return; }
     close();
     if (document.contains(from)) from.focus();
   };

@@ -34,5 +34,5 @@ You (the assistant) cannot fix labels yourself: point to the control, or open th
   - The Bucket page marks every label file fixed here (an amber dot, counts on its parent folders), so the user
     sees there what changed; Upload to S3 sends a downloaded folder's fixes back.
   - A session on a **streamed S3** folder never writes S3: its labels/ was downloaded when the session was made, so
-    fixes land in that local copy (Bucket marks them; right-click › Upload to S3 sends them). An older S3 session
+    fixes land in that local copy (Bucket marks them; right-click › Cloud (S3) › Upload to S3 sends them). An older S3 session
     without local labels cannot be fixed (Curation is hidden): create it again from Bucket.

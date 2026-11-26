@@ -3,7 +3,7 @@ title: Video → frames (Extract frames, auto-extract)
 summary: cut videos into images: fps / bursts / every Nth / count / keyframes / scene / smart, range, near-duplicates, layouts, frames.csv, auto-extract on upload
 ---
 - Videos (mp4, mov, avi, mkv, webm, m4v, wmv, mpg) are files of kind `video`. On the page they show a poster;
-  double-click (or details › Extract frames…, or Send to… › Extract frames…) opens the dialog: a player with
+  double-click (or details › Extract frames…, or right-click › Tools › Extract frames…) opens the dialog: a player with
   Set start / Set end, a live frame count and a film strip of the planned frames.
 - While a Bucket job (import, frames, sync, export, …) runs, sessions still open at once (their own job
   lane). Each account's Bucket jobs run one after another; other accounts' jobs do not wait for them.

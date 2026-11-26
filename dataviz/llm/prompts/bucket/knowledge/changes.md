@@ -11,7 +11,7 @@ summary: the amber dots on changed files and the counts on their parent folders 
   the label file, local or in S3, of a session that reads a bucket folder); in a downloaded S3 folder, the background
   check (every 10 min while browsing, or Check for updates) also marks files whose size / time left what was
   downloaded (edited by another tool).
-- What clears: **Mark as seen** (right-click a marked item, or the folder toolbar's **N changed** › Mark all as
+- What clears: **Mark as seen** (right-click a marked item › Organize, or the folder toolbar's **N changed** › Mark all as
   seen), Undo of that change, **Update from S3** (those files are S3's version again), **Upload to S3** (once uploaded).
 - The folder toolbar's **N changed** button lists the changed paths under the open folder, newest first; a click
   opens that file's folder.

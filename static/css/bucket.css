@@ -440,13 +440,19 @@ button.bk-edit-act:hover:not(:disabled) { border-color: var(--accent-line); back
 .bk-pop { position: fixed; z-index: var(--z-popover); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3); }
 .bk-menu { min-width: 220px; padding: 4px; display: flex; flex-direction: column; gap: 1px; }
 .bk-menu.hidden, .bk-pop.hidden { display: none; }
-.bk-menu > button { justify-content: flex-start; background: none; border-color: transparent; height: 32px; font-weight: 500; }
-.bk-menu > button .faint { margin-left: auto; font-size: var(--fs-xs); font-weight: 400; padding-left: 12px; }
+.bk-menu > button, .bk-menu > .mi-sub > button { justify-content: flex-start; background: none; border-color: transparent; height: 32px; font-weight: 500; }
+.bk-menu > button .faint, .bk-menu > .mi-sub > button .faint { margin-left: auto; font-size: var(--fs-xs); font-weight: 400; padding-left: 12px; }
 .bk-menu > button.danger { color: var(--danger-text); }
 .bk-menu > button.danger .ico { color: var(--danger); }
 .bk-menu .sep { height: 1px; background: var(--border); margin: 4px 2px; flex: none; }
 .bk-menu > button .kbd { margin-left: auto; padding-left: 16px; font: var(--fs-2xs) var(--mono); color: var(--text-faint); }
 .bk-menu > button[disabled] { opacity: .45; }
+/* sub-menus (core/menu.ts): a row with a chevron opens a nested menu beside it, placed by script (fixed) */
+.bk-menu > .mi-sub { display: contents; }
+.bk-menu .mi-chev { margin-left: auto; padding-left: 12px; display: inline-flex; color: var(--text-faint); }
+.bk-menu .mi-sub > button .faint + .mi-chev { margin-left: 0; }
+.bk-menu .mi-sub > button[aria-expanded="true"] { background: var(--surface-3); border-color: var(--border-hover); }
+.bk-menu.menu-sub { position: fixed; z-index: calc(var(--z-popover) + 1); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-3); }
 .bk-menu-h { font-size: var(--fs-2xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); padding: 6px 8px 4px; }
 .bk-menu-note { padding: 6px 8px; font-size: var(--fs-sm); }
 .bk-menu .check { margin: 0; padding: 5px 8px; }
@@ -586,7 +592,7 @@ button.icon-btn.sm { width: 26px; padding: 0; }
 .spin.sm { width: 12px; height: 12px; border-width: 2px; }
 
 /* chrome-less buttons stay flat in every look (brutalist gives buttons hard offset shadows) */
-.t-row .tw, .crumb, .bk-cbbtn, .te-x, .pk-row, .bc-name, .bk-lrow .hcol, .linkish, .bk-ways button, .bk-menu > button, .te-sugg .it {
+.t-row .tw, .crumb, .bk-cbbtn, .te-x, .pk-row, .bc-name, .bk-lrow .hcol, .linkish, .bk-ways button, .bk-menu > button, .bk-menu > .mi-sub > button, .te-sugg .it {
   box-shadow: none; transform: none; }
 
 /* ---------------------------------------------------------------- narrow screens */
