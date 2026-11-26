@@ -2,6 +2,7 @@
    Colours of members and diff kinds come from core/theme.ts (ORIGIN_COLORS, DIFF_STYLE) as an inline --c. */
 
 /* ---- side panel */
+#cmp-side { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
 .cmp-side { display: flex; flex-direction: column; gap: var(--s2); padding-bottom: var(--s5); }
 .cmp-h { font-size: var(--fs-sm); font-weight: 600; margin: var(--s3) 0 0; color: var(--text); }
 .cmp-h .muted { font-weight: 400; font-size: var(--fs-xs); margin-left: 4px; }
